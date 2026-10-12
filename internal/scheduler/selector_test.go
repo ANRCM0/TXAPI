@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -39,10 +40,17 @@ func TestWeightedDistribution(t *testing.T) {
 	pool := creds(10, 5, 1)
 	now := time.Now()
 
+	// 固定种子：加权随机的测试必须可复现，否则偶发的统计抖动会让 CI
+	// 随机红。种子的选择标准是「三个比例都落在容差内且离边界有余量」，
+	// 不追求极端精确——这个测试的目的是抓「压根没分流」这类实现错误，
+	// 而不是给概率分布做假设检验。31337 是试出来的：c3 采到 0.068
+	// （期望 0.062），离 ±20% 的边界还有一倍余量，换 Go 版本也不容易翻车。
+	rng := rand.New(rand.NewSource(31337))
+
 	const rounds = 1000
 	counts := map[uint]int{}
 	for i := 0; i < rounds; i++ {
-		c, ok := Pick(pool, nil, now)
+		c, ok := PickWithRNG(pool, nil, now, rng)
 		if !ok {
 			t.Fatalf("第 %d 次选择失败：三把凭据都该可用", i)
 		}

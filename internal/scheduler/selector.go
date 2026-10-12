@@ -35,7 +35,24 @@ func Pick(creds []dbmodel.Credential, exclude map[uint]bool, now time.Time) (*db
 	if len(usable) == 0 {
 		return nil, false
 	}
-	return weightedFrom(usable)
+	return weightedFrom(usable, rand.Intn)
+}
+
+// PickWithRNG 与 Pick 等价，但随机源由调用方提供。
+//
+// 存在的唯一理由是让测试可复现：加权随机用全局 rand 时，同一份测试在
+// 不同次运行里会采到不同的样本，1000 次采样下偶发越出 ±20% 容差，CI
+// 就变成「随机红」——这种失败没人会认真查，最终只会把容差越放越松，
+// 测试也就抓不住「压根没分流」这类真 bug 了。
+//
+// 生产代码一律走 Pick：全局 rand 在多 goroutine 下本就并发安全，而每次
+// 选择都新建一个 *rand.Rand 反而要付构造开销，还会丢掉全局种子的好处。
+func PickWithRNG(creds []dbmodel.Credential, exclude map[uint]bool, now time.Time, rng *rand.Rand) (*dbmodel.Credential, bool) {
+	usable := filterUsable(creds, exclude, now)
+	if len(usable) == 0 {
+		return nil, false
+	}
+	return weightedFrom(usable, func(n int) int { return rng.Intn(n) })
 }
 
 // filterUsable 挑出「当前可用」的凭据，返回副本。
@@ -62,7 +79,10 @@ func filterUsable(creds []dbmodel.Credential, exclude map[uint]bool, now time.Ti
 }
 
 // weightedFrom 在已过滤的凭据里按权重随机挑一个。
-func weightedFrom(usable []dbmodel.Credential) (*dbmodel.Credential, bool) {
+//
+// randIntn 是 [0, n) 上的随机数函数，注入而不是直接用 rand.Intn：
+// 这样测试能传固定种子的随机源（见 PickWithRNG），生产传 rand.Intn。
+func weightedFrom(usable []dbmodel.Credential, randIntn func(n int) int) (*dbmodel.Credential, bool) {
 	if len(usable) == 0 {
 		return nil, false
 	}
@@ -78,7 +98,7 @@ func weightedFrom(usable []dbmodel.Credential) (*dbmodel.Credential, bool) {
 	//
 	// 具体做法：把 Σweight 看成一条数轴，每把凭据占一段等长的区间，
 	// 在 [0, Σweight) 里掷一个点，落在谁区间就是谁。
-	n := rand.Intn(total)
+	n := randIntn(total)
 	for i := range usable {
 		n -= effectiveWeight(usable[i].Weight)
 		if n < 0 {
