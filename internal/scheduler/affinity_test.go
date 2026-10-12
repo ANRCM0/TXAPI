@@ -174,6 +174,88 @@ func TestAffinityEmptySession(t *testing.T) {
 	}
 }
 
+// TestAffinityWeightedDistribution 验证亲和环的分流比例贴近权重。
+//
+// 这是之前缺失的一环：TestWeightedDistribution 只测了 Pick（纯加权随机），
+// 但生产路径走的是 PickWithAffinity——main.go 注入的是它。少了这个测试，
+// 环偏斜（虚拟节点数太小 + FNV 对短串雪崩性差）在单测里完全看不见，
+// 只有在真实流量下按权重分流才会失真。
+//
+// 会话 ID 用真随机的 UUID 形态：亲和的分流取决于会话在环上的落点分布，
+// 用 "session-0"、"session-1" 这类递增串会让落点扎堆，测出来的是
+// 测试数据的性质而不是实现的性质。
+func TestAffinityWeightedDistribution(t *testing.T) {
+	now := time.Now()
+	// 权重 5:1:1 —— 刻意让两把低权重凭据权重相同，这样「分得准不准」
+	// 不会和「两把低权重凭据之间怎么分」纠缠在一起。
+	pool := creds(5, 1, 1)
+	weights := map[uint]int{}
+	total := 0
+	for _, c := range pool {
+		weights[c.ID] = c.Weight
+		total += c.Weight
+	}
+
+	const rounds = 20000
+	counts := map[uint]int{}
+	for i := 0; i < rounds; i++ {
+		c, ok := PickWithAffinity(pool, randomSession(i), nil, now)
+		if !ok {
+			t.Fatalf("第 %d 次选择失败", i)
+		}
+		counts[c.ID]++
+	}
+
+	for id, w := range weights {
+		got := float64(counts[id]) / float64(rounds)
+		want := float64(w) / float64(total)
+		// 容差 15%：环上分流不是精确概率，节点撒得够碎时偏差应在个位数
+		// 百分点以内；15% 能抓住「偏斜到失真」（修之前权重 1 的凭据
+		// 少了近 40% 流量），又不会被环的固有抖动打红。
+		if rel := (got - want) / want; rel > 0.15 || rel < -0.15 {
+			t.Errorf("凭据 %d 分流 %.2f%% 偏离期望 %.2f%% 超过 15%%（相对偏差 %.1f%%）",
+				id, got*100, want*100, rel*100)
+		} else {
+			t.Logf("凭据 %d (权重 %d): %.2f%% (期望 %.2f%%)", id, w, got*100, want*100)
+		}
+	}
+}
+
+// TestAffinityRingCached 验证同一凭据池复用同一张环（不是每请求重建）。
+//
+// 环构建要排序上万个节点，每请求重建会把一致性哈希的固定开销摊在每个
+// 请求上。这里用「同一池的两次选择返回相同指针指向的环」来间接验证——
+// 直接比较环指针更直白，但 getRing 是内部函数，测试同包可直接调。
+func TestAffinityRingCached(t *testing.T) {
+	now := time.Now()
+	pool := creds(3, 2, 1)
+	usable := filterUsable(pool, nil, now)
+	if len(usable) == 0 {
+		t.Fatal("没有可用凭据")
+	}
+	key := poolKey(usable)
+	r1 := getRing(usable, key)
+	r2 := getRing(usable, key)
+	if r1 != r2 {
+		t.Fatal("同一凭据池应复用同一张环，实际每次都在重建")
+	}
+}
+
+// randomSession 生成第 i 个随机形态的会话 ID。
+//
+// 用 splitmix64 之类的确定性 PRNG 而不是 math/rand 的全局源：
+// 测试要可复现（失败时能重跑出同样的分布），又不能像 "session-%d"
+// 那样让落点扎堆。这里用整数 i 做雪崩，得到统计上均匀又确定性的串。
+func randomSession(i int) string {
+	x := uint64(i)*0x9e3779b97f4a7c15 + 0xbf58476d1ce4e5b9
+	x ^= x >> 30
+	x *= 0xbf58476d1ce4e5b9
+	x ^= x >> 27
+	x *= 0x94d049bb133111eb
+	x ^= x >> 31
+	return "sess-" + strconv.FormatUint(x, 36)
+}
+
 // sessionName 生成第 i 个测试会话 ID。
 //
 // 用确定性名字而不是随机串：亲和测试要能在不同次运行里构造出同一个
