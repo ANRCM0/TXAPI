@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/billing"
 	"minigateway/internal/config"
 	"minigateway/internal/relay"
 	"minigateway/internal/server/api"
@@ -26,6 +27,9 @@ type Deps struct {
 	// AdminAuth 是管理 API 的鉴权中间件，nil 表示暂不鉴权（P2 现状）。
 	// 留这个字段就是留挂载点：P3 实现管理员鉴权后，在 main 里塞进来即可。
 	AdminAuth gin.HandlerFunc
+	// Billing 是计费引擎，nil 表示不启用计费（测试场景）。
+	// main 在 store 打开后创建它，这里注入给 relay 用。
+	Billing *billing.Engine
 }
 
 // NewEngine 组装中间件链和路由。
@@ -47,6 +51,9 @@ func NewEngine(deps Deps) *gin.Engine {
 	// 令牌鉴权：查 store 的内存缓存，改令牌不用重启
 	auth := middleware.NewAuth(deps.Store)
 
+	// 计费引擎注入转发层：额度检查/预扣/结算都发生在请求路径上
+	relay.SetBilling(deps.Billing)
+
 	// 健康检查不需要鉴权，方便 Docker healthcheck 和负载均衡探活
 	engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -58,7 +65,7 @@ func NewEngine(deps Deps) *gin.Engine {
 	// 转发主入口：对话补全
 	engine.POST("/v1/chat/completions", auth.Handle(), relay.HandleChatCompletions)
 
-	// 管理 API：渠道/令牌/日志 CRUD。
+	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。
 	apiHandler := api.New(deps.Store, func() {
 		// 渠道变更后热刷新转发层渠道池：这就是「不重启网关就生效」的那一环
@@ -66,6 +73,15 @@ func NewEngine(deps Deps) *gin.Engine {
 			// 刷新失败不能影响 API 的返回值（数据已经落库了），
 			// 但必须响亮的告警——否则会出现「库里改了、转发还用旧的」的静默故障
 			gin.DefaultErrorWriter.Write([]byte("[热更新] 刷新渠道池失败: " + err.Error() + "\n"))
+		}
+	}, func() {
+		// 价格/倍率变更后让计费引擎重读价格表
+		if deps.Billing != nil && deps.Billing.Prices() != nil {
+			if err := deps.Billing.Prices().ReloadPrices(); err != nil {
+				// 重读失败保留旧缓存（见 PriceTable.ReloadPrices），
+				// 但同样要告警：价格表静默用旧值等于悄悄算错账
+				gin.DefaultErrorWriter.Write([]byte("[热更新] 重读价格表失败: " + err.Error() + "\n"))
+			}
 		}
 	})
 	apiHandler.Register(engine.Group(""), deps.AdminAuth)

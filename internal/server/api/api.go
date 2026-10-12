@@ -1,4 +1,4 @@
-// Package api 提供管理 REST API：渠道 / 令牌 / 日志的 CRUD。
+// Package api 提供管理 REST API：渠道 / 令牌 / 日志 / 统计 / 价格的 CRUD。
 //
 // 设计约定：
 //   - 所有路由挂在 /api 前缀下，与客户端转发入口 /v1 完全分开，
@@ -19,18 +19,23 @@ import (
 
 // Handler 持有管理 API 需要的一切依赖。
 //
-// 为什么把 store 和 reload 函数都塞进来：渠道变更后必须同步刷新转发层的
-// 渠道池，否则「API 显示改成功了但转发还用旧数据」。把 reload 作为依赖注入，
-// api 包就不需要反向 import relay（那会形成 server → api → relay → server 的环）。
+// 为什么把 store 和回调函数都塞进来：渠道变更后必须同步刷新转发层的
+// 渠道池，价格变更后必须让计费引擎失效价格缓存——否则会出现
+// 「API 显示改成功了但转发/计费还用旧数据」的静默故障。
+// 把回调作为依赖注入，api 包就不需要反向 import relay/billing
+// （那会形成 server → api → relay → server 的环）。
 type Handler struct {
 	store *store.Store
 	// onChannelsChanged 在渠道发生任何写操作后调用，用于刷新 relay 渠道池。
 	onChannelsChanged func()
+	// onPricesChanged 在价格/倍率发生任何写操作后调用，用于让计费引擎
+	// 重读价格表。nil 表示计费未启用。
+	onPricesChanged func()
 }
 
 // New 创建管理 API handler。
-func New(st *store.Store, onChannelsChanged func()) *Handler {
-	return &Handler{store: st, onChannelsChanged: onChannelsChanged}
+func New(st *store.Store, onChannelsChanged, onPricesChanged func()) *Handler {
+	return &Handler{store: st, onChannelsChanged: onChannelsChanged, onPricesChanged: onPricesChanged}
 }
 
 // Register 把管理路由挂到引擎上。
@@ -53,14 +58,26 @@ func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
 	group.PUT("/channels/:id", h.UpdateChannel)
 	group.DELETE("/channels/:id", h.DeleteChannel)
 
-	// 令牌（只做增删查，修改走 PUT 但 key 不可变，见 store.UpdateToken）
+	// 令牌（增删查 + 单独的额度设置端点）
 	group.GET("/tokens", h.ListTokens)
 	group.POST("/tokens", h.CreateToken)
 	group.PUT("/tokens/:id", h.UpdateToken)
 	group.DELETE("/tokens/:id", h.DeleteToken)
+	group.POST("/tokens/:id/quota", h.SetTokenQuota)
 
 	// 日志查询
 	group.GET("/logs", h.ListLogs)
+
+	// 用量统计
+	group.GET("/stats/summary", h.StatsSummary)
+	group.GET("/stats/by-model", h.StatsByModel)
+	group.GET("/stats/by-channel", h.StatsByChannel)
+
+	// 价格表与分组倍率
+	group.GET("/prices", h.ListPrices)
+	group.PUT("/prices/:model", h.UpsertPrice)
+	group.DELETE("/prices/:model", h.DeletePrice)
+	group.PUT("/group-rates", h.SetGroupRates)
 
 	// 能力表：路由加速器的可视化，排查「为什么这个模型路由不到某渠道」时看它
 	group.GET("/abilities", h.ListAbilities)

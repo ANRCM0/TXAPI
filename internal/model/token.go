@@ -43,8 +43,8 @@ type User struct {
 // 和 Channel 的 APIKey 是两个完全不同的东西：Token 是「客户端 → 网关」的钥匙，
 // APIKey 是「网关 → 上游」的钥匙。混淆这两个是网关新手最常见的 bug。
 type Token struct {
-	ID     uint `gorm:"primaryKey" json:"id"`
-	UserID uint `gorm:"index;not null;default:0" json:"user_id"`
+	ID     uint   `gorm:"primaryKey" json:"id"`
+	UserID uint   `gorm:"index;not null;default:0" json:"user_id"`
 	Name   string `gorm:"size:128;not null;default:''" json:"name"`
 	// Key 是客户端实际使用的 Bearer 值，全局唯一。
 	Key string `gorm:"uniqueIndex;size:255;not null" json:"key"`
@@ -72,11 +72,15 @@ const (
 
 // TokenView 是「鉴权时需要的令牌信息」的投影。
 //
-// 为什么不直接传 *Token：中间件只需要 id/name/models 三个字段，
+// 为什么不直接传 *Token：中间件只需要 id/name/models 几个字段，
 // 传整个实体会把 quota、used_quota、时间戳这些敏感内部状态暴露给 HTTP 层。
 // 用投影做边界，以后给令牌加字段也不用改中间件。
+//
+// UserID 必须带上：P5 的额度是「先扣令牌、再扣用户」的双层结构，
+// 没有它结算时找不到要扣哪个用户。
 type TokenView struct {
 	ID     uint
+	UserID uint
 	Name   string
 	Models []string
 }
@@ -91,5 +95,5 @@ func (t *Token) IsActive(now time.Time) bool {
 
 // View 生成鉴权用的投影。
 func (t *Token) View() TokenView {
-	return TokenView{ID: t.ID, Name: t.Name, Models: []string(t.Models)}
+	return TokenView{ID: t.ID, UserID: t.UserID, Name: t.Name, Models: []string(t.Models)}
 }

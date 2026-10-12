@@ -81,6 +81,11 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 			c.Set(relayCredentialKey, credID)
 		}
 		c.Set(relayActualModelKey, m.ActualModel)
+		// 记账用：命中的渠道分组。重试会不断覆盖它，最终值是
+		// 「最后一次尝试的渠道」——和 status/channel_id 一样，
+		// 账本只该记录实际服务了这次请求的那个渠道。
+		// 分组决定计费倍率，必须等选完渠道才有意义。
+		c.Set(relayChannelGroupKey, ch.groupName)
 
 		usage, err := doRelay(c, m, body, timeout)
 		if err == nil {
@@ -266,16 +271,16 @@ func buildMeta(ch *channel, req *model.ModelRequest) *meta.Meta {
 		actual = mapped
 	}
 	return &meta.Meta{
-		ChannelID:          ch.id,
-		ChannelName:        ch.name,
-		ChannelType:        ch.typ,
-		BaseURL:            ch.baseURL,
-		APIKey:             ch.key,
-		OriginModel:        req.Model,
-		ActualModel:        actual,
-		IsStream:           req.Stream,
-		Mode:               meta.ModeChatCompletions,
-		CredentialIDValue:  ch.credentialID,
+		ChannelID:         ch.id,
+		ChannelName:       ch.name,
+		ChannelType:       ch.typ,
+		BaseURL:           ch.baseURL,
+		APIKey:            ch.key,
+		OriginModel:       req.Model,
+		ActualModel:       actual,
+		IsStream:          req.Stream,
+		Mode:              meta.ModeChatCompletions,
+		CredentialIDValue: ch.credentialID,
 	}
 }
 
@@ -362,11 +367,11 @@ func selectWeighted(candidates []*channel, tried map[int]bool) *channel {
 func shouldRetry(statusCode int) bool {
 	switch statusCode {
 	case http.StatusTooManyRequests, // 429
-		http.StatusRequestTimeout,                  // 408
-		http.StatusInternalServerError,             // 500
-		http.StatusBadGateway,                      // 502
-		http.StatusServiceUnavailable,              // 503
-		http.StatusGatewayTimeout:                  // 504
+		http.StatusRequestTimeout,      // 408
+		http.StatusInternalServerError, // 500
+		http.StatusBadGateway,          // 502
+		http.StatusServiceUnavailable,  // 503
+		http.StatusGatewayTimeout:      // 504
 		return true
 	}
 	// 其余 5xx 也重试
@@ -388,12 +393,13 @@ func writeError(c *gin.Context, statusCode int, message, errType string) {
 // 尝试的结果」才对账本有意义。写在 context 上，handler 收尾时读到的
 // 天然就是最终值，不需要 Relay 再包一个结果结构体往外传。
 const (
-	relayStatusKey      = "relay_status"
-	relayChannelKey     = "relay_channel_id"
-	relayCredentialKey  = "relay_credential_id"
-	relayActualModelKey = "relay_actual_model"
-	relayUsageKey       = "relay_usage"
-	relayErrorKey       = "relay_error"
+	relayStatusKey       = "relay_status"
+	relayChannelKey      = "relay_channel_id"
+	relayCredentialKey   = "relay_credential_id"
+	relayActualModelKey  = "relay_actual_model"
+	relayUsageKey        = "relay_usage"
+	relayErrorKey        = "relay_error"
+	relayChannelGroupKey = "relay_channel_group"
 )
 
 // cfgRetryTimes 由 Init 从配置写入。

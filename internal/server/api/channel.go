@@ -115,6 +115,15 @@ func (h *Handler) notifyChanged() {
 	}
 }
 
+// notifyPricesChanged 让计费引擎重读价格表和分组倍率。
+//
+// 判空同理：计费未启用（billingEngine 为 nil）时管理接口照常工作。
+func (h *Handler) notifyPricesChanged() {
+	if h.onPricesChanged != nil {
+		h.onPricesChanged()
+	}
+}
+
 // parseID 从路径参数解析 uint ID。
 //
 // 单独抽出来是因为每个 handler 都要做同一件事，抄五遍容易漏掉错误分支。

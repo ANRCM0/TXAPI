@@ -40,6 +40,9 @@ type channel struct {
 	// credentialID 是当前使用的那把 Key 的 ID，记账时要写进日志，
 	// 否则事后查不出「哪个 Key 出的问题」。
 	credentialID uint
+	// groupName 是渠道分组，P5 计费时用它查分组倍率
+	// （同一模型在不同分组成本不同，用倍率折算成标准计价单位）。
+	groupName string
 }
 
 // supports 判断这个渠道能否服务指定模型。
@@ -183,6 +186,7 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 			weight:       ch.Weight,
 			priority:     ch.Priority,
 			credentialID: credID,
+			groupName:    ch.GroupName,
 		}
 	}
 	if skipped > 0 {

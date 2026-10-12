@@ -11,6 +11,9 @@
 //
 // P2 的变化：配置来源从 YAML 换成数据库。渠道和令牌此后只能通过
 // 管理 API 变更，YAML 里的 channels/tokens 只在首次启动导入一次。
+//
+// P5 的变化：组装计费引擎（价格表缓存 + 额度扣减）注入转发层；
+// 优雅关闭时先 srv.Shutdown 等在途请求，再由 Store.Close flush 异步日志。
 package main
 
 import (
@@ -25,7 +28,9 @@ import (
 	"syscall"
 	"time"
 
+	"minigateway/internal/billing"
 	"minigateway/internal/config"
+	"minigateway/internal/model"
 	"minigateway/internal/relay"
 	"minigateway/internal/server"
 	"minigateway/internal/store"
@@ -51,6 +56,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化数据库失败: %v", err)
 	}
+	// defer 保证任何退出路径都 flush 异步日志：Close 先排空日志队列
+	// 再关连接，进程退出不丢日志（SPEC 2.4）
 	defer st.Close()
 
 	// 3. 空库时从 YAML 导入种子数据（幂等：非空库直接跳过）
@@ -69,21 +76,39 @@ func main() {
 	// 把运行参数注入转发层
 	relay.SetRetryTimes(cfg.Server.RetryTimes)
 	relay.SetTimeout(time.Duration(cfg.Server.TimeoutSeconds) * time.Second)
-	// 记账：转发结束后把请求日志写进 logs 表。
-	// 注入而不是 relay 直接依赖 store，是为了让转发层保持纯粹——
-	// 它不该知道数据存在哪，换存储甚至改成外发日志都不用改 relay。
+	// 记账：转发结束后把请求日志写进 logs 表（store 内部是异步批量
+	// 写入，不阻塞响应）。注入而不是 relay 直接依赖 store，是为了让
+	// 转发层保持纯粹——它不该知道数据存在哪，换存储甚至改成外发
+	// 日志都不用改 relay。
 	relay.SetLogRecorder(st.WriteLog)
 
-	// 5. 创建引擎并注册路由
-	engine := server.NewEngine(server.Deps{Cfg: cfg, Store: st})
+	// 5. 组装计费引擎：价格表缓存从 store 加载，管理接口改价后主动
+	// ReloadPrices 失效；额度扣减走 gorm 的原子 UPDATE（并发不丢）。
+	priceTable := billing.NewPriceTable(func() ([]model.ModelPrice, map[string]float64, error) {
+		prices, err := st.ModelPrices()
+		if err != nil {
+			return nil, nil, err
+		}
+		rates, err := st.GroupRates()
+		if err != nil {
+			return nil, nil, err
+		}
+		return prices, rates, nil
+	}, billing.DefaultPriceTTL)
+	engine := billing.New(st.DB(), priceTable)
+
+	// 6. 创建引擎并注册路由
+	httpEngine := server.NewEngine(server.Deps{Cfg: cfg, Store: st, Billing: engine})
 
 	srv := &http.Server{
 		Addr:    cfg.Server.Addr,
-		Handler: engine,
+		Handler: httpEngine,
 	}
 
-	// 4. 优雅关闭：收到信号后先停止接收新请求，给在途请求 10 秒收尾时间。
+	// 7. 优雅关闭：收到信号后先停止接收新请求，给在途请求 10 秒收尾时间。
 	//    网关持有上游连接，硬杀会导致客户端拿到半截响应。
+	//    在途请求全部结束后 main 返回，defer 依次执行：st.Close() 先
+	//    flush 异步日志（此时已无新日志入队）再关数据库——日志一条不丢。
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("HTTP 服务异常退出: %v", err)

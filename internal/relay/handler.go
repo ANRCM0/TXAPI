@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/billing"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/relay/model"
 	"minigateway/internal/server/middleware"
@@ -20,14 +23,34 @@ var relayTimeout = 120 * time.Second
 // SetTimeout 让 main 把配置里的超时注入进来。
 func SetTimeout(d time.Duration) { relayTimeout = d }
 
+// billingEngine 是计费引擎（额度检查/预扣/结算/查价），由 main 注入。
+//
+// 为什么用包级变量而不是参数透传：Relay 的调用链已经很长
+// （Relay → doRelay → adaptor），把引擎逐层传下去会让每个函数签名
+// 都变。转发层本来就是有状态的（渠道池、重试次数都是包级），
+// 计费引擎是同一类依赖；测试里不注入就是 nil（不启用计费）。
+var billingEngine *billing.Engine
+
+// SetBilling 注入计费引擎。传 nil 关闭计费（测试场景）。
+func SetBilling(e *billing.Engine) { billingEngine = e }
+
+// captureLimit 是响应捕获缓冲的上限（64KB）。
+//
+// 只在「上游没返回 usage」时用来估算 completion tokens，不需要
+// 完整响应；设上限是为了防止一个超大响应把内存吃光——
+// 估算本来就允许不准。
+const captureLimit = 64 * 1024
+
 // HandleChatCompletions 处理 POST /v1/chat/completions。
 //
-// 关键设计：请求体只解析 model 和 stream 两个字段，然后**原样透传**给上游。
+// 关键设计：请求体只解析 model/stream/max_tokens 三个字段，然后**原样
+// 透传**给上游。
 //
 // 为什么不完整建模请求体：LLM 请求的参数在快速演进（新出的 reasoning、
 // tools、response_format…）。如果网关用结构体反序列化再序列化，
-// 任何未声明的字段都会被静默丢掉，用户会遇到「某个参数在网关后面失效了」
-// 这种极难排查的问题。透明代理是网关的基本素养。
+// 任何未声明的字段都会被静默丢掉，用户会遇到「某个参数在网关后面
+// 失效了」这种极难排查的问题。透明代理是网关的基本素养。
+// max_tokens 是唯一例外——预扣额度需要它算费用上限。
 func HandleChatCompletions(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -39,7 +62,7 @@ func HandleChatCompletions(c *gin.Context) {
 		return
 	}
 
-	// 只解析路由必需的字段
+	// 只解析路由/计费必需的字段
 	var req model.ModelRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(c, http.StatusBadRequest, "请求体不是合法 JSON: "+err.Error(), "invalid_request_error")
@@ -61,19 +84,169 @@ func HandleChatCompletions(c *gin.Context) {
 	// 记录开始时间，用于算整条链路耗时（含重试）
 	startedAt := time.Now()
 
+	// 包一层 writer 记录回写给客户端的字节：只有「上游没返回 usage」
+	// 时才需要它估算 completion tokens。成本接近零（一次内存拷贝，
+	// 且封顶 64KB），比在每条响应路径上判断「这次要不要捕获」省事。
+	cw := &captureWriter{ResponseWriter: c.Writer, limit: captureLimit}
+	c.Writer = cw
+
+	// 请求前额度处理：检查 + 预扣。
+	//
+	// 必须在转发之前：超额时直接回 403，一个字节都不发给上游——
+	// 上游的 Key 是按量收费的，转发注定被拒的请求等于白烧钱（SPEC 4.2）。
+	pre, err := preRequest(c, &req)
+	if errors.Is(err, billing.ErrQuotaExceeded) {
+		// 记账先行：403 也是请求，日志里要能看到「被额度拦下」，
+		// 否则排查「为什么突然全部 403」时账本一片空白。
+		// 状态码和错误信息先写进 context，finishRequest 才能
+		// 按 403（而不是默认的 500）记账。
+		c.Set(relayStatusKey, http.StatusForbidden)
+		c.Set(relayErrorKey, err.Error())
+		finishRequest(c, &req, startedAt, pre, body)
+		writeError(c, http.StatusForbidden, err.Error(), "quota_exceeded")
+		return
+	}
+	if err != nil {
+		// 额度子系统自身故障（读库失败等）：放行，不拦请求。
+		// 计费挂了不该让转发也挂——服务可用性优先，与
+		// 「价格缺失不报错」是同一条原则。但必须响亮的告警。
+		log.Printf("[额度] 预检失败，放行本次请求: %v", err)
+		pre = nil
+	}
+
+	// 用 flag + defer 保证「无论 Relay 正常返回还是 panic，都要结算」：
+	// 预扣了钱不结账，令牌额度会被永久占用（表现为「没用几次就 403」）。
+	// panic 会被 Recovery 中间件吞掉，不走 return 之后的代码，
+	// 只有 defer 能在展开过程中执行到。
+	finished := false
+	defer func() {
+		if !finished {
+			finishRequest(c, &req, startedAt, pre, body)
+		}
+	}()
+
 	Relay(c, &req, body, allowedModels, relayTimeout)
 
-	// 记账：转发结束后（无论成败）落一条请求日志。
-	// 放在 Relay 之后而不是用 defer：流式响应是在 Relay 内部边收边发的，
-	// 函数返回时响应早已写完，此时记账不会影响客户端拿到的任何字节。
-	writeRequestLog(c, &req, startedAt)
+	finished = true
+	// 收尾放在 Relay 之后而不是用 defer 直接包：流式响应是在 Relay
+	// 内部边收边发的，函数返回时响应早已写完；非流式的 c.Data 也在
+	// Relay 内部完成。此时结算和记账不会影响客户端拿到的任何字节。
+	finishRequest(c, &req, startedAt, pre, body)
+}
+
+// preRequest 做请求前的额度检查与预扣。返回的快照要传给 finishRequest。
+//
+// tokenID/userID 为 0 时跳过对应目标（未登录/无主令牌不该让请求失败）。
+func preRequest(c *gin.Context, req *model.ModelRequest) (*billing.PreDeduct, error) {
+	if billingEngine == nil {
+		return nil, nil
+	}
+	tokenID := ctxUint(c, middleware.CtxTokenID)
+	userID := ctxUint(c, middleware.CtxUserID)
+	if tokenID == 0 && userID == 0 {
+		return nil, nil
+	}
+	// 预扣上限按「客户端请求的模型名」估：选渠道（和模型映射）发生在
+	// Relay 内部，请求前还知道不——这只是个保守上限，结算时用
+	// 实际模型的真实价格修正。
+	return billingEngine.PreRequest(tokenID, userID, req.MaxTokens, req.Model)
+}
+
+// finishRequest 收尾：估算用量 → 算费 → 结算额度差额 → 写日志。
+//
+// 无论 Relay 成功、失败还是 panic 都会走到这里。
+func finishRequest(c *gin.Context, req *model.ModelRequest, startedAt time.Time, pre *billing.PreDeduct, reqBody []byte) {
+	status := relayStatus(c)
+	tokenID := ctxUint(c, middleware.CtxTokenID)
+	userID := ctxUint(c, middleware.CtxUserID)
+
+	usage := relayUsage(c)
+	isEstimated := false
+	cost := 0.0
+	priceMissing := false
+
+	// 只有成功响应才计费：失败请求 cost=0（结算时全额退回预扣），
+	// price_missing 也只在真的查过价时才有意义——给一次 403 打
+	// 「缺价」标记会让统计数字虚高。
+	if status == http.StatusOK {
+		if usage == nil {
+			// 上游没返回 usage（或没配 stream_options.include_usage）：
+			// 按字符数估算并标记。prompt 从请求体抽文本，
+			// completion 从回写给客户端的内容抽文本。
+			est := billing.EstimateUsage(
+				billing.PromptTextFromBody(reqBody),
+				billing.CompletionTextFromResponse(captureBytes(c)),
+			)
+			usage = &est
+			isEstimated = true
+		}
+		if billingEngine != nil {
+			// PriceOf 的第二个返回值是「是否找到价格」——取反才是
+			// price_missing 标记。曾经直接把「找到」赋值给「缺失」，
+			// 导致有价格的模型全被打上缺价标记（集成测试抓到的）。
+			priceFound := false
+			cost, priceFound = billingEngine.PriceOf(usage, relayActualModel(c, req.Model), req.Model, relayChannelGroup(c))
+			priceMissing = !priceFound
+		}
+	}
+	// 失败请求不计费：cost 保持 0，结算时全额退回预扣。
+	// 上游返回错误时 token 通常也没被计费，网关跟着免费是合理对齐。
+
+	// 结算：把预扣和实际的差额调整掉
+	if billingEngine != nil && pre != nil {
+		if err := billingEngine.Settle(tokenID, userID, pre, cost); err != nil {
+			log.Printf("[结算] token=%d user=%d 结算失败: %v", tokenID, userID, err)
+		}
+	}
+
+	writeRequestLog(c, req, startedAt, cost, usage, isEstimated, priceMissing)
+}
+
+// captureWriter 把回写给客户端的字节复制一份（封顶），供估算用。
+//
+// 内嵌 gin.ResponseWriter 而不是重新实现：Flusher/Hijacker 等能力
+// 全部原样透传——流式转发依赖 Flush，少实现一个方法流式就废了。
+type captureWriter struct {
+	gin.ResponseWriter
+	buf   bytes.Buffer
+	limit int
+}
+
+func (w *captureWriter) Write(p []byte) (int, error) {
+	w.capture(p)
+	return w.ResponseWriter.Write(p)
+}
+
+// WriteString 必须一起重写：内嵌接口的同名方法不会走到我们重写的
+// Write，而流式转发（SSE）走的正是 WriteString。
+func (w *captureWriter) WriteString(s string) (int, error) {
+	w.capture([]byte(s))
+	return w.ResponseWriter.WriteString(s)
+}
+
+func (w *captureWriter) capture(p []byte) {
+	if room := w.limit - w.buf.Len(); room > 0 {
+		if len(p) > room {
+			p = p[:room]
+		}
+		w.buf.Write(p)
+	}
+}
+
+// captureBytes 从上下文取本次请求捕获到的响应字节。
+// 类型断言失败（没包过 writer，比如直接构造 context 的测试）时返回 nil。
+func captureBytes(c *gin.Context) []byte {
+	if cw, ok := c.Writer.(*captureWriter); ok {
+		return cw.buf.Bytes()
+	}
+	return nil
 }
 
 // logRecorder 是日志落库的注入点。
 //
 // 用函数变量而不是直接依赖 store：relay 是纯转发层，不该知道存储层的存在。
-// main 在启动时把 store.WriteLog 注入进来，测试时不注入就是空操作。
-// 这也是将来把日志改成异步队列或外发到日志系统的唯一改动点。
+// main 在启动时把 store.WriteLog（内部是异步批量写入）注入进来，
+// 测试时不注入就是空操作。
 var logRecorder func(entry *dbmodel.RequestLog)
 
 // SetLogRecorder 注入日志落库函数。
@@ -83,49 +256,33 @@ func SetLogRecorder(fn func(entry *dbmodel.RequestLog)) { logRecorder = fn }
 //
 // 刻意不阻塞主流程：记账失败只打日志，不影响已经发给客户端的响应。
 // 用户请求已经成功了，网关因为自己的账本坏了就报错是不讲道理的。
-func writeRequestLog(c *gin.Context, req *model.ModelRequest, startedAt time.Time) {
+func writeRequestLog(c *gin.Context, req *model.ModelRequest, startedAt time.Time,
+	cost float64, usage *model.Usage, isEstimated, priceMissing bool) {
 	if logRecorder == nil {
 		return
 	}
-	// 从 context 取 Relay 写入的结果；没拿到说明中途 panic 被 Recovery 吞了
-	status := http.StatusOK
-	if v, ok := c.Get(relayStatusKey); ok {
-		if code, ok := v.(int); ok {
-			status = code
-		}
-	}
-	channelID := uint(0)
-	if v, ok := c.Get(relayChannelKey); ok {
-		if id, ok := v.(uint); ok {
-			channelID = id
-		}
-	}
-	credentialID := uint(0)
-	if v, ok := c.Get(relayCredentialKey); ok {
-		if id, ok := v.(uint); ok {
-			credentialID = id
-		}
-	}
+	// 从 context 取 Relay 写入的结果；没拿到说明中途 panic 被 Recovery
+	// 吞了——那种情况状态码无从得知，按 500 记（绝不能默认 200，
+	// 否则一次彻底失败的请求会被记成成功，账本失去意义）。
+	status := relayStatus(c)
+	channelID := ctxUint(c, relayChannelKey)
+	credentialID := ctxUint(c, relayCredentialKey)
+	tokenID := ctxUint(c, middleware.CtxTokenID)
+	userID := ctxUint(c, middleware.CtxUserID)
+
 	actualModel := req.Model
 	if v, ok := c.Get(relayActualModelKey); ok {
 		if m, ok := v.(string); ok && m != "" {
 			actualModel = m
 		}
 	}
-	var usage *model.Usage
-	if v, ok := c.Get(relayUsageKey); ok {
-		if u, ok := v.(*model.Usage); ok {
-			usage = u
+
+	rid := ""
+	if v, ok := c.Get(middleware.CtxRequestID); ok {
+		if s, ok := v.(string); ok {
+			rid = s
 		}
 	}
-	tokenID := uint(0)
-	if v, ok := c.Get(middleware.CtxTokenID); ok {
-		if id, ok := v.(uint); ok {
-			tokenID = id
-		}
-	}
-	requestID, _ := c.Get(middleware.CtxRequestID)
-	rid, _ := requestID.(string)
 	errMsg := ""
 	if v, ok := c.Get(relayErrorKey); ok {
 		if m, ok := v.(string); ok {
@@ -135,6 +292,7 @@ func writeRequestLog(c *gin.Context, req *model.ModelRequest, startedAt time.Tim
 
 	entry := &dbmodel.RequestLog{
 		RequestID:    rid,
+		UserID:       userID,
 		TokenID:      tokenID,
 		ChannelID:    channelID,
 		CredentialID: credentialID,
@@ -144,6 +302,9 @@ func writeRequestLog(c *gin.Context, req *model.ModelRequest, startedAt time.Tim
 		Status:       status,
 		ErrorMessage: errMsg,
 		LatencyMs:    time.Since(startedAt).Milliseconds(),
+		Cost:         cost,
+		IsEstimated:  isEstimated,
+		PriceMissing: priceMissing,
 	}
 	if usage != nil {
 		entry.PromptTokens = usage.PromptTokens
@@ -151,6 +312,66 @@ func writeRequestLog(c *gin.Context, req *model.ModelRequest, startedAt time.Tim
 		entry.TotalTokens = usage.TotalTokens
 	}
 	logRecorder(entry)
+}
+
+// relayStatus 取本次请求的最终状态码，默认 500。
+//
+// 默认值选 500 而不是 200：拿不到状态码只有一种情况——Relay 还没
+// 设置就被 panic 打断了（Recovery 中间件会吞掉 panic），
+// 那是服务器故障，不是成功。
+func relayStatus(c *gin.Context) int {
+	if v, ok := c.Get(relayStatusKey); ok {
+		if code, ok := v.(int); ok {
+			return code
+		}
+	}
+	return http.StatusInternalServerError
+}
+
+// relayUsage 取 Relay 写入的用量。上游没给（或 Relay 没跑到）时为 nil。
+func relayUsage(c *gin.Context) *model.Usage {
+	if v, ok := c.Get(relayUsageKey); ok {
+		if u, ok := v.(*model.Usage); ok && u != nil {
+			// 有的上游只给 prompt/completion 不给 total，补齐
+			if u.TotalTokens == 0 {
+				u.TotalTokens = u.PromptTokens + u.CompletionTokens
+			}
+			return u
+		}
+	}
+	return nil
+}
+
+// relayActualModel 取映射后的上游模型名，用于查价。
+// 价格表按「上游真实模型名」匹配（它才是真正产生 token 的东西）。
+func relayActualModel(c *gin.Context, fallback string) string {
+	if v, ok := c.Get(relayActualModelKey); ok {
+		if m, ok := v.(string); ok && m != "" {
+			return m
+		}
+	}
+	return fallback
+}
+
+// relayChannelGroup 取命中的渠道分组（计费倍率的依据）。
+// 没走到选渠道（如 403 提前返回）时用 default 分组。
+func relayChannelGroup(c *gin.Context) string {
+	if v, ok := c.Get(relayChannelGroupKey); ok {
+		if g, ok := v.(string); ok && g != "" {
+			return g
+		}
+	}
+	return "default"
+}
+
+// ctxUint 从上下文取一个 uint 值，取不到返回 0。
+func ctxUint(c *gin.Context, key string) uint {
+	if v, ok := c.Get(key); ok {
+		if n, ok := v.(uint); ok {
+			return n
+		}
+	}
+	return 0
 }
 
 // ListModels 处理 GET /v1/models，返回该令牌可访问的模型清单。

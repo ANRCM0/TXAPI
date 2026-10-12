@@ -21,6 +21,10 @@ const (
 	// CtxTokenID 是令牌在数据库里的 ID，写日志时要带上它，
 	// 否则「哪个令牌打的」只能靠 key 反查
 	CtxTokenID = "token_id"
+	// CtxUserID 是令牌所属用户的 ID。P5 的额度是双层结构
+	// （先扣令牌、再扣用户），结算时要扣用户额度；
+	// 日志的 user_id 字段也用它填。
+	CtxUserID = "user_id"
 )
 
 // Recovery 捕获 panic，避免一个请求的异常打挂整个网关进程。
@@ -122,10 +126,12 @@ func (a *Auth) Handle() gin.HandlerFunc {
 			abortUnauthorized(c, "无效的 API Key")
 			return
 		}
-		// 把令牌信息放进上下文，后续 handler 用来做模型权限校验和日志
+		// 把令牌信息放进上下文，后续 handler 用来做模型权限校验、
+		// 额度扣减和日志
 		c.Set(CtxTokenName, view.Name)
 		c.Set(CtxAllowedModel, view.Models)
 		c.Set(CtxTokenID, view.ID)
+		c.Set(CtxUserID, view.UserID)
 		c.Next()
 	}
 }
