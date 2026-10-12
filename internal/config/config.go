@@ -14,6 +14,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -62,8 +63,8 @@ func (c *ChannelConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled
 
 // TokenConfig 是客户端访问网关的凭证，同样是种子数据格式。
 type TokenConfig struct {
-	Key  string   `yaml:"key"`
-	Name string   `yaml:"name"`
+	Key  string `yaml:"key"`
+	Name string `yaml:"name"`
 	// Models 限制这个令牌能访问哪些模型，空表示不限制。
 	Models []string `yaml:"models"`
 	// Quota 预留给 P5 计费，0 表示不限额度。
@@ -72,11 +73,22 @@ type TokenConfig struct {
 
 // Config 是整份配置的根结构。
 type Config struct {
-	Server   ServerConfig    `yaml:"server"`
+	Server ServerConfig `yaml:"server"`
+	// AdminKey 是管理 API（/api/*）的访问密钥。
+	// 环境变量 GATEWAY_ADMIN_KEY 优先于这里的值——密钥不该写进
+	// 会进 git 的配置文件，环境变量是生产部署的标准做法。
+	// 两者都为空时 Load 直接报错拒绝启动（见 validate）。
+	AdminKey string          `yaml:"admin_key"`
 	Database DatabaseConfig  `yaml:"database"`
 	Channels []ChannelConfig `yaml:"channels"`
 	Tokens   []TokenConfig   `yaml:"tokens"`
 }
+
+// EnvAdminKey 是管理密钥的环境变量名。
+//
+// 用常量而不是散落的字符串：拼错的环境变量名会让「以为配了其实没配」，
+// 而这里的设计恰恰是「没配就拒绝启动」，拼错会被立刻发现。
+const EnvAdminKey = "GATEWAY_ADMIN_KEY"
 
 // Load 读取并校验配置文件。
 func Load(path string) (*Config, error) {
@@ -89,6 +101,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析 YAML 失败: %w", err)
 	}
 	cfg.applyDefaults()
+	// 环境变量覆盖配置文件：部署时改配置要重新打镜像/改文件，
+	// 改环境变量不用。密钥尤其应该走环境变量（不进 git）。
+	if v := strings.TrimSpace(os.Getenv(EnvAdminKey)); v != "" {
+		cfg.AdminKey = v
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -131,7 +148,15 @@ func (c *Config) applyDefaults() {
 // 数据库里已经有渠道时，YAML 完全可以只有 server + database 两段；
 // 反之数据库为空但 YAML 有种子数据时，导入逻辑会接管。
 // 只有「两边都没有渠道」才是真正的启动失败。
+//
+// P6 批次 1 的变化：admin_key 变成**必须有**。管理 API 能改渠道、
+// 看上游 Key，裸奔的代价是「谁连上 localhost 就能拿走全部凭据」。
+// 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
+// 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	if strings.TrimSpace(c.AdminKey) == "" {
+		return fmt.Errorf("缺少管理密钥：请设置环境变量 %s，或在配置文件的 admin_key 字段里配置", EnvAdminKey)
+	}
 	seenChannel := map[int]bool{}
 	for _, ch := range c.Channels {
 		if seenChannel[ch.ID] {

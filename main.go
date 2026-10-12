@@ -33,6 +33,7 @@ import (
 	"minigateway/internal/model"
 	"minigateway/internal/relay"
 	"minigateway/internal/server"
+	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
 )
 
@@ -98,7 +99,15 @@ func main() {
 	engine := billing.New(st.DB(), priceTable)
 
 	// 6. 创建引擎并注册路由
-	httpEngine := server.NewEngine(server.Deps{Cfg: cfg, Store: st, Billing: engine})
+	// 管理 API 鉴权中间件在这里装配：密钥已由 config.Load 保证非空
+	// （缺失时 Load 直接拒绝启动），中间件内部用常量时间比较校验
+	// X-Admin-Key 头。/v1 转发面和 /healthz 不走这个中间件
+	httpEngine := server.NewEngine(server.Deps{
+		Cfg:       cfg,
+		Store:     st,
+		Billing:   engine,
+		AdminAuth: middleware.AdminAuth(cfg.AdminKey),
+	})
 
 	srv := &http.Server{
 		Addr:    cfg.Server.Addr,

@@ -1,10 +1,11 @@
-// Package api 提供管理 REST API：渠道 / 令牌 / 日志 / 统计 / 价格的 CRUD。
+// Package api 提供管理 REST API：渠道 / 凭据 / 令牌 / 日志 / 统计 / 价格的 CRUD。
 //
 // 设计约定：
 //   - 所有路由挂在 /api 前缀下，与客户端转发入口 /v1 完全分开，
-//     这样将来给 /api 加管理员鉴权时不会影响转发链路
-//   - 目前不做鉴权（PLAN 的 P2 阶段明确「先做无鉴权或简单鉴权」），
-//     但挂载点已经留好：见 Register 的 adminAuth 参数，P3 传入真正的中间件即可
+//     两个面用不同的密钥体系（/api 用管理密钥，/v1 用客户端令牌），
+//     互不影响
+//   - 整个 /api 分组强制鉴权（见 Register 的 adminAuth 参数，必填）：
+//     管理接口能改渠道、看上游 Key，裸奔的代价是凭据池整体泄露
 //   - 错误格式统一成 OpenAI 风格 {"error": {...}}，和 /v1 保持一致
 package api
 
@@ -43,13 +44,16 @@ func New(st *store.Store, onChannelsChanged, onPricesChanged func()) *Handler {
 // 用 *gin.RouterGroup 而不是 gin.IRoutes：IRoutes 没有 Group 方法，
 // 而这里需要建一个 /api 分组来统一挂中间件。
 //
-// adminAuth 是管理员鉴权中间件的挂载点。传 nil 表示暂不鉴权（P2 现状）；
-// P3 要加鉴权时，在这里传一个 gin.HandlerFunc 即可，路由代码不用动。
+// adminAuth 从 P6 批次 1 起是**必填**。管理接口能改渠道、看 Key 明文，
+// 漏挂鉴权的后果是「连上 localhost 就能拿走全部凭据」。所以这里传 nil
+// 直接 panic：装配错误要在启动时炸出来，而不是留一个裸奔的管理面。
+// （client token 的 /v1 路由不走这个分组，不受影响。）
 func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
-	group := r.Group("/api")
-	if adminAuth != nil {
-		group.Use(adminAuth)
+	if adminAuth == nil {
+		panic("api.Register: adminAuth 不能为 nil，管理 API 必须鉴权")
 	}
+	group := r.Group("/api")
+	group.Use(adminAuth)
 
 	// 渠道 CRUD
 	group.GET("/channels", h.ListChannels)
@@ -57,6 +61,16 @@ func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
 	group.GET("/channels/:id", h.GetChannel)
 	group.PUT("/channels/:id", h.UpdateChannel)
 	group.DELETE("/channels/:id", h.DeleteChannel)
+
+	// 凭据 CRUD（渠道下的上游 Key）
+	// 路由分两种形态：挂在 /channels/:id 下的走「渠道视角」（列、增），
+	// 凭据自身的改删状态走 /credentials/:id——凭据 ID 全局唯一，
+	// 不需要再带一层渠道 ID
+	group.GET("/channels/:id/credentials", h.ListCredentials)
+	group.POST("/channels/:id/credentials", h.CreateCredential)
+	group.PUT("/credentials/:id", h.UpdateCredential)
+	group.DELETE("/credentials/:id", h.DeleteCredential)
+	group.POST("/credentials/:id/status", h.SetCredentialStatus)
 
 	// 令牌（增删查 + 单独的额度设置端点）
 	group.GET("/tokens", h.ListTokens)

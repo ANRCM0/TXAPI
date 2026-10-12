@@ -24,8 +24,11 @@ import (
 type Deps struct {
 	Cfg   *config.Config
 	Store *store.Store
-	// AdminAuth 是管理 API 的鉴权中间件，nil 表示暂不鉴权（P2 现状）。
-	// 留这个字段就是留挂载点：P3 实现管理员鉴权后，在 main 里塞进来即可。
+	// AdminAuth 是管理 API 的鉴权中间件，**必填**。
+	// 管理接口能改渠道、看上游 Key 明文，nil 意味着整个 /api 裸奔，
+	// 所以漏传时 NewEngine 直接 panic——装配错误要在启动时炸出来，
+	// 而不是上线一个「以为有鉴权其实没有」的网关。
+	// 密钥来源见 config.EnvAdminKey（环境变量优先于配置文件）。
 	AdminAuth gin.HandlerFunc
 	// Billing 是计费引擎，nil 表示不启用计费（测试场景）。
 	// main 在 store 打开后创建它，这里注入给 relay 用。
@@ -41,6 +44,11 @@ type Deps struct {
 //	Auth      → 校验令牌，把令牌信息放进上下文
 //	Relay     → 真正的转发
 func NewEngine(deps Deps) *gin.Engine {
+	// 管理 API 鉴权是安全底线，没有「忘了传也凑合能跑」这个选项：
+	// nil 时裸奔的 /api 等于把凭据池敞开，所以这里硬失败
+	if deps.AdminAuth == nil {
+		panic("server.NewEngine: Deps.AdminAuth 不能为 nil（管理 API 必须鉴权）")
+	}
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 
