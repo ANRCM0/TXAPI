@@ -3,7 +3,9 @@ package relay
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/relay/adaptor"
 	"minigateway/internal/relay/meta"
 	"minigateway/internal/relay/model"
 )
@@ -131,8 +134,12 @@ func doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout time.Duration) (
 		}
 	}
 
-	// 协议转换：把客户端请求体变成上游能懂的格式
-	converted, err := a.ConvertRequest(body, m)
+	// 协议转换：客户端协议 → 规范格式 → 上游协议
+	//
+	// 客户端协议当前固定是 OpenAI（网关只暴露 /v1/chat/completions 入口）。
+	// 如果渠道类型也是 openai，走适配器自己的 ConvertRequest（纯模型名映射，
+	// 不碰 body，保持 P1 的透明代理行为）；否则走规范格式两段转换。
+	converted, err := convertRequestBody(a, body, m)
 	if err != nil {
 		return nil, &model.ErrorWithStatusCode{
 			StatusCode: http.StatusBadRequest,
@@ -172,7 +179,84 @@ func doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout time.Duration) (
 	}
 	defer resp.Body.Close()
 
+	// 响应方向：上游协议 → 规范 → 客户端协议(OpenAI)
+	//
+	// openai 渠道走适配器原生的 DoResponse（P1 行为，非流式直接透传）；
+	// 其他渠道类型在这里分流：
+	//   - 非流式：整体读 body → 转换 → 回写
+	//   - 流式：逐行翻译（relayStream），保持打字机效果
+	if resp.StatusCode != http.StatusOK {
+		return handleUpstreamError(a, resp)
+	}
+	if needsProtocolConversion(a) {
+		if m.IsStream {
+			usage, err := relayStream(c, a, resp, m)
+			if err != nil {
+				// 流已开始，无法改状态码；记日志后按「已发出的流」处理
+				log.Printf("[流式转发] 渠道=%s 流结束异常: %v", m.ChannelName, err)
+			}
+			return usage, nil
+		}
+		return relayNormal(c, a, resp, m)
+	}
 	return a.DoResponse(c, resp, m)
+}
+
+// needsProtocolConversion 判断这个渠道是否需要走协议枢纽。
+// openai 渠道不需要（客户端也是 openai，透传即可）。
+func needsProtocolConversion(a adaptor.Adaptor) bool {
+	pa, ok := a.(adaptor.ProtocolAdaptor)
+	if !ok {
+		return false
+	}
+	return pa.Name() != "openai"
+}
+
+// relayNormal 处理非流式的协议转换响应。
+func relayNormal(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta.Meta) (*model.Usage, *model.ErrorWithStatusCode) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &model.ErrorWithStatusCode{
+			StatusCode: http.StatusBadGateway,
+			Error:      model.ErrorDetail{Message: "读取上游响应失败: " + err.Error(), Type: "upstream_error"},
+		}
+	}
+	out, usage, err := convertResponseBody(a, body, m)
+	if err != nil {
+		return nil, &model.ErrorWithStatusCode{
+			StatusCode: http.StatusBadGateway,
+			Error:      model.ErrorDetail{Message: "响应转换失败: " + err.Error(), Type: "convert_error"},
+		}
+	}
+	c.Data(http.StatusOK, "application/json", out)
+	return usage, nil
+}
+
+// handleUpstreamError 把上游的错误响应转成网关统一的错误体。
+//
+// 为什么要统一：上游错误格式各家不同（OpenAI/Claude/Gemini 结构都不一样），
+// 而且可能泄露渠道信息（比如 key 的提示）。网关对外只暴露 OpenAI 风格错误。
+func handleUpstreamError(a adaptor.Adaptor, resp *http.Response) (*model.Usage, *model.ErrorWithStatusCode) {
+	body, _ := io.ReadAll(resp.Body)
+
+	detail := model.ErrorDetail{
+		Message: string(body),
+		Type:    "upstream_error",
+	}
+	// 各协议错误体都有 error.message 字段，结构接近，先按通用形状解析
+	var parsed struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    any    `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &parsed) == nil && parsed.Error.Message != "" {
+		detail.Message = parsed.Error.Message
+		detail.Type = parsed.Error.Type
+		detail.Code = parsed.Error.Code
+	}
+	return nil, &model.ErrorWithStatusCode{StatusCode: resp.StatusCode, Error: detail}
 }
 
 // buildMeta 把渠道配置和请求特征组装成一次转发的上下文。

@@ -5,6 +5,13 @@
 // 只需要在配置里改 base_url 和模型名。
 // 这是比 one-api 更省事的地方：它有 40 个适配器目录，其中一半
 // 只是 base_url 不同，没必要各写一份。
+//
+// P4 起，这个包同时承担两个角色：
+//  1. 实现 adaptor.Adaptor（HTTP 层转发），行为与 P1 完全一致
+//  2. 实现 adaptor.ProtocolAdaptor（协议层转换），作为规范格式的
+//     「本家实现」——规范格式就是以 OpenAI 格式为基准定义的，
+//     所以这里的转换基本是直通，主要价值是让 anthropic/gemini
+//     客户端也能用上同一套枢纽逻辑。
 package openai
 
 import (
@@ -23,6 +30,12 @@ import (
 
 // Adaptor 是 OpenAI 兼容协议的适配器实现。
 type Adaptor struct{}
+
+// 编译期断言：同时满足两个接口。
+var (
+	_ adaptor.Adaptor         = (*Adaptor)(nil)
+	_ adaptor.ProtocolAdaptor = (*Adaptor)(nil)
+)
 
 // GetRequestURL 拼出上游地址。
 func (a *Adaptor) GetRequestURL(m *meta.Meta) (string, error) {
@@ -191,6 +204,3 @@ func handleErrorResponse(resp *http.Response) (*model.Usage, *model.ErrorWithSta
 	}
 	return nil, &model.ErrorWithStatusCode{StatusCode: resp.StatusCode, Error: detail}
 }
-
-// 确保 Adaptor 实现了接口，编译期就能发现漏方法。
-var _ adaptor.Adaptor = (*Adaptor)(nil)

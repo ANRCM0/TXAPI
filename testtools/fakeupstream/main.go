@@ -64,6 +64,10 @@ func main() {
 				flusher.Flush()
 				time.Sleep(50 * time.Millisecond)
 			}
+			// 结束帧：真实 OpenAI 会发 finish_reason，然后才是 usage 帧。
+			// 少了这一帧，客户端拿不到「为什么停」，SDK 的 finish_reason 会是 None。
+			fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+			flusher.Flush()
 			// 最后一个 chunk 带 usage
 			fmt.Fprintf(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\n")
 			flusher.Flush()

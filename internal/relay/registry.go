@@ -3,6 +3,8 @@
 // 包内分工：
 //   - registry.go  渠道池 + 适配器表（P2 起数据来自 store，支持热更新）
 //   - relay.go     单次转发流程 + 失败重试
+//   - convert.go   协议枢纽（P4：客户端协议 → 规范 → 上游协议）
+//   - stream.go    流式公共工具
 //   - adaptor/     各厂商适配器实现
 package relay
 
@@ -14,6 +16,8 @@ import (
 
 	"minigateway/internal/model"
 	"minigateway/internal/relay/adaptor"
+	"minigateway/internal/relay/adaptor/anthropic"
+	"minigateway/internal/relay/adaptor/gemini"
 	"minigateway/internal/relay/adaptor/openai"
 )
 
@@ -96,8 +100,12 @@ var reg *registry
 func Init(channels []model.Channel) error {
 	r := &registry{
 		channels: make(map[int]*channel, len(channels)),
+		// 适配器表：协议名 → 适配器实例。
+		// 新增协议只要在这里加一行 + 建个包，核心代码零改动（PLAN 3.2 的 N+M）。
 		adaptors: map[string]adaptor.Adaptor{
-			"openai": &openai.Adaptor{},
+			"openai":    &openai.Adaptor{},
+			"anthropic": &anthropic.Adaptor{},
+			"gemini":    &gemini.Adaptor{},
 		},
 	}
 	if err := r.apply(channels); err != nil {
@@ -152,7 +160,9 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 		if _, ok := r.adaptors[ch.Type]; !ok {
 			// 不直接返回错误：一个渠道类型写错不该让整个网关起不来。
 			// 跳掉它并告警，其余渠道照常服务；运维看到日志再去改。
-			log.Printf("[渠道装载] 渠道 %d(%s) 使用了未知类型 %q，已跳过（可用: openai）", ch.ID, ch.Name, ch.Type)
+			// 报错信息里列出所有可用类型，运维配错时能直接抄正确答案。
+			log.Printf("[渠道装载] 渠道 %d(%s) 使用了未知类型 %q，已跳过（可用: %v）",
+				ch.ID, ch.Name, ch.Type, r.adaptorTypes())
 			skipped++
 			continue
 		}
@@ -182,6 +192,16 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 	// P2 起渠道可以全部通过 API 动态增删，空渠道池是合法状态
 	// （表现为所有请求返回「没有可用渠道」），不该阻止网关启动。
 	return nil
+}
+
+// adaptorTypes 返回已注册的协议类型（排序后），用于日志和错误提示。
+func (r *registry) adaptorTypes() []string {
+	types := make([]string, 0, len(r.adaptors))
+	for k := range r.adaptors {
+		types = append(types, k)
+	}
+	sort.Strings(types)
+	return types
 }
 
 // getAdaptor 按渠道类型取适配器实例。
@@ -221,7 +241,11 @@ func ensureInit() {
 	if reg == nil {
 		reg = &registry{
 			channels: map[int]*channel{},
-			adaptors: map[string]adaptor.Adaptor{"openai": &openai.Adaptor{}},
+			adaptors: map[string]adaptor.Adaptor{
+				"openai":    &openai.Adaptor{},
+				"anthropic": &anthropic.Adaptor{},
+				"gemini":    &gemini.Adaptor{},
+			},
 		}
 	}
 }

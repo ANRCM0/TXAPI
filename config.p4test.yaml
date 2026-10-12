@@ -1,0 +1,48 @@
+# P4 多协议互转测试配置
+# 三个假上游都在本地跑（见 testtools/）：
+#   9911 = 假 OpenAI 上游（fakeupstream）
+#   9912 = 假 Claude 上游（fakeclaude）
+#   9913 = 假 Gemini 上游（fakegemini）
+
+server:
+  addr: "127.0.0.1:8090"
+  retry_times: 1
+  timeout_seconds: 30
+
+channels:
+  # OpenAI 渠道（P1 已有链路，回归验证用）
+  - id: 1
+    name: "fake-openai"
+    type: "openai"
+    base_url: "http://127.0.0.1:9911"
+    key: "sk-fake-openai"
+    models:
+      - "gpt-4o-mini"
+    weight: 1
+
+  # Anthropic 渠道（P4 新增）：
+  # 客户端说 OpenAI 协议，上游说 Claude 协议
+  - id: 2
+    name: "fake-claude"
+    type: "anthropic"
+    base_url: "http://127.0.0.1:9912"
+    key: "sk-ant-fake-claude"
+    models:
+      - "claude-3-5-sonnet-20241022"
+    weight: 1
+
+  # Gemini 渠道（P4 新增）：
+  # 客户端说 OpenAI 协议，上游说 Gemini 协议
+  - id: 3
+    name: "fake-gemini"
+    type: "gemini"
+    base_url: "http://127.0.0.1:9913"
+    key: "fake-gemini-key-12345"
+    models:
+      - "gemini-1.5-pro"
+    weight: 1
+
+tokens:
+  - key: "sk-test-p4"
+    name: "P4 测试令牌"
+    # models 为空 = 不限制，可以访问三个渠道的模型
