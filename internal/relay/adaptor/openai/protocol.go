@@ -34,14 +34,14 @@ func (a *Adaptor) AuthHeader(apiKey string) (string, string) {
 // 这里统一折叠成 []ContentPart，让下游所有适配器只面对一种形态。
 func (a *Adaptor) ParseRequest(body []byte) (*canonical.ChatRequest, error) {
 	var raw struct {
-		Model       string            `json:"model"`
-		Messages    []rawMessage      `json:"messages"`
-		MaxTokens   int               `json:"max_tokens"`
-		Temperature *float64          `json:"temperature"`
-		TopP        *float64          `json:"top_p"`
-		Stop        json.RawMessage   `json:"stop"` // 可能是字符串也可能是数组
-		Stream      bool              `json:"stream"`
-		Tools       []rawTool         `json:"tools"`
+		Model       string          `json:"model"`
+		Messages    []rawMessage    `json:"messages"`
+		MaxTokens   int             `json:"max_tokens"`
+		Temperature *float64        `json:"temperature"`
+		TopP        *float64        `json:"top_p"`
+		Stop        json.RawMessage `json:"stop"` // 可能是字符串也可能是数组
+		Stream      bool            `json:"stream"`
+		Tools       []rawTool       `json:"tools"`
 		Extra       map[string]json.RawMessage
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {

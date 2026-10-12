@@ -15,15 +15,15 @@ import (
 // 软删除字段，直接暴露会让调用方能改 created_at 这种不该改的东西。
 // 用一个独立的入参结构体，边界更干净。
 type ChannelInput struct {
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	BaseURL     string            `json:"base_url"`
-	Models      []string          `json:"models"`
+	Name         string            `json:"name"`
+	Type         string            `json:"type"`
+	BaseURL      string            `json:"base_url"`
+	Models       []string          `json:"models"`
 	ModelMapping map[string]string `json:"model_mapping"`
-	GroupName   string            `json:"group_name"`
-	Priority    int               `json:"priority"`
-	Weight      int               `json:"weight"`
-	Status      string            `json:"status"`
+	GroupName    string            `json:"group_name"`
+	Priority     int               `json:"priority"`
+	Weight       int               `json:"weight"`
+	Status       string            `json:"status"`
 	// APIKey 是该渠道的第一个凭据。创建渠道时至少给一个 Key，
 	// 否则这个渠道建出来也没法用（P3 会提供单独的凭据 CRUD）。
 	APIKey string `json:"api_key"`

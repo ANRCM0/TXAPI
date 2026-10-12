@@ -38,10 +38,10 @@ var ErrUnsupported = errors.New("gemini: 不支持的参数")
 
 // geminiRequest 是 Gemini 的请求体。
 type geminiRequest struct {
-	Contents          []geminiContent    `json:"contents"`
-	SystemInstruction *geminiContent     `json:"systemInstruction,omitempty"`
-	GenerationConfig  *geminiGenConfig   `json:"generationConfig,omitempty"`
-	Tools             []geminiToolSet    `json:"tools,omitempty"`
+	Contents          []geminiContent  `json:"contents"`
+	SystemInstruction *geminiContent   `json:"systemInstruction,omitempty"`
+	GenerationConfig  *geminiGenConfig `json:"generationConfig,omitempty"`
+	Tools             []geminiToolSet  `json:"tools,omitempty"`
 }
 
 // geminiContent 是 Gemini 的内容块。parts 是分片数组。
@@ -80,12 +80,12 @@ type geminiFunctionResponse struct {
 
 // geminiGenConfig 是生成配置。
 type geminiGenConfig struct {
-	Temperature      *float64  `json:"temperature,omitempty"`
-	TopP             *float64  `json:"topP,omitempty"`
-	MaxOutputTokens  int       `json:"maxOutputTokens,omitempty"`
-	StopSequences    []string  `json:"stopSequences,omitempty"`
-	CandidateCount   int       `json:"candidateCount,omitempty"`
-	Seed             *int64    `json:"seed,omitempty"`
+	Temperature     *float64 `json:"temperature,omitempty"`
+	TopP            *float64 `json:"topP,omitempty"`
+	MaxOutputTokens int      `json:"maxOutputTokens,omitempty"`
+	StopSequences   []string `json:"stopSequences,omitempty"`
+	CandidateCount  int      `json:"candidateCount,omitempty"`
+	Seed            *int64   `json:"seed,omitempty"`
 }
 
 // geminiToolSet 是 Gemini 的工具集合。
@@ -197,9 +197,9 @@ func ParseRequest(body []byte) (*canonical.ChatRequest, error) {
 				})
 			case p.FunctionCall != nil:
 				msg.Content = append(msg.Content, canonical.ContentPart{
-					Type:      canonical.PartToolUse,
-					Name:      p.FunctionCall.Name,
-					Input:     p.FunctionCall.Args,
+					Type:  canonical.PartToolUse,
+					Name:  p.FunctionCall.Name,
+					Input: p.FunctionCall.Args,
 					// Gemini 没有调用 ID，用函数名兜底（出站时映射回 name）
 					ToolUseID: p.FunctionCall.Name,
 				})
@@ -532,11 +532,11 @@ func unmapFinishReason(reason string) string {
 
 // geminiSupportedExtra 是 Gemini 能表达、规范未建模的字段白名单。
 var geminiSupportedExtra = map[string]bool{
-	"candidateCount":    true, // 候选数量 → generationConfig.candidateCount
-	"seed":              true, // 随机种子
-	"topK":              true, // 采样参数
-	"safetySettings":    true, // 安全设置
-	"generationConfig":  true, // 整个生成配置（客户端直接传时）
+	"candidateCount":   true, // 候选数量 → generationConfig.candidateCount
+	"seed":             true, // 随机种子
+	"topK":             true, // 采样参数
+	"safetySettings":   true, // 安全设置
+	"generationConfig": true, // 整个生成配置（客户端直接传时）
 }
 
 // geminiExtraFields 从 Gemini 请求体里摘出未建模字段。

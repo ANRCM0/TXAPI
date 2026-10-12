@@ -45,7 +45,7 @@ type Channel struct {
 	// 这就是「主备渠道」的表达方式——备份渠道不该抢主力渠道的流量。
 	Priority int `gorm:"not null;default:0;index" json:"priority"`
 	// Weight 是同级渠道之间的权重，越大被选中概率越高。
-	Weight int `gorm:"not null;default:1" json:"weight"`
+	Weight int    `gorm:"not null;default:1" json:"weight"`
 	Status string `gorm:"size:16;not null;default:enabled" json:"status"`
 
 	CreatedAt time.Time      `json:"created_at"`
@@ -65,13 +65,13 @@ func (c *Channel) IsEnabled() bool { return c.Status == StatusEnabled }
 // P2 阶段转发链路只用「挑一个可用的 Key」；P3 会在这个表上做加权随机、
 // 失败指数退避冷却、连续失败拉黑、会话亲和。
 type Credential struct {
-	ID        uint `gorm:"primaryKey" json:"id"`
-	ChannelID uint `gorm:"index;not null" json:"channel_id"`
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	ChannelID uint   `gorm:"index;not null" json:"channel_id"`
 	Name      string `gorm:"size:128;not null;default:''" json:"name"`
 	// APIKey 是上游渠道的 key，注意与 tokens 表的客户端 key 完全不同。
 	APIKey string `gorm:"size:512;not null" json:"api_key"`
 	// Weight 是凭据级权重，调度器在渠道内部的多个 Key 之间分流时使用。
-	Weight int `gorm:"not null;default:1" json:"weight"`
+	Weight int    `gorm:"not null;default:1" json:"weight"`
 	Status string `gorm:"size:16;not null;default:active" json:"status"`
 	// FailCount 是连续失败次数，驱动指数退避和自动拉黑。
 	FailCount int `gorm:"not null;default:0" json:"fail_count"`

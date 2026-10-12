@@ -21,11 +21,11 @@ var ErrNoChoices = errors.New("上游响应缺少 choices")
 // rawMessage 是 OpenAI 协议里的入站消息。
 // content 用 rawContent 兼容「字符串 / 分片数组」两种写法。
 type rawMessage struct {
-	Role       string          `json:"role"`
-	Content    rawContent      `json:"content"`
-	ToolCallID string          `json:"tool_call_id"`
-	Name       string          `json:"name"`
-	ToolCalls  []rawToolCall   `json:"tool_calls"`
+	Role       string        `json:"role"`
+	Content    rawContent    `json:"content"`
+	ToolCallID string        `json:"tool_call_id"`
+	Name       string        `json:"name"`
+	ToolCalls  []rawToolCall `json:"tool_calls"`
 }
 
 // rawToolCall 是 assistant 消息里的工具调用。
@@ -175,11 +175,11 @@ type openAIRequest struct {
 
 // openAIResponse 是 OpenAI 非流式响应体。
 type openAIResponse struct {
-	ID      string        `json:"id"`
-	Object  string        `json:"object"`
-	Model   string        `json:"model"`
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Model   string         `json:"model"`
 	Choices []openAIChoice `json:"choices"`
-	Usage   *usageJSON    `json:"usage,omitempty"`
+	Usage   *usageJSON     `json:"usage,omitempty"`
 }
 
 // openAIChoice 是 OpenAI 响应选项。

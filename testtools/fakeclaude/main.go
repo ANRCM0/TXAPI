@@ -34,7 +34,7 @@ func main() {
 		if apiKey == "" {
 			w.WriteHeader(401)
 			json.NewEncoder(w).Encode(map[string]any{
-				"type": "error",
+				"type":  "error",
 				"error": map[string]any{"type": "authentication_error", "message": "missing x-api-key"},
 			})
 			return
@@ -43,7 +43,7 @@ func main() {
 			// Claude 强制要求版本头，缺了直接 400——用来验证网关有没有补这个头
 			w.WriteHeader(400)
 			json.NewEncoder(w).Encode(map[string]any{
-				"type": "error",
+				"type":  "error",
 				"error": map[string]any{"type": "invalid_request_error", "message": "missing anthropic-version header"},
 			})
 			return
@@ -66,7 +66,7 @@ func main() {
 		if err := json.Unmarshal(body, &req); err != nil {
 			w.WriteHeader(400)
 			json.NewEncoder(w).Encode(map[string]any{
-				"type": "error",
+				"type":  "error",
 				"error": map[string]any{"type": "invalid_request_error", "message": "bad json: " + err.Error()},
 			})
 			return
