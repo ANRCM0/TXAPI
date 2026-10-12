@@ -23,23 +23,24 @@ import (
 
 // channel 是运行期的渠道对象，由 model.Channel + 凭据池构建。
 //
-// key 字段现在是「本次转发实际使用的上游 key」：
-// P2 阶段从凭据池里挑第一个可用的，P3 会换成完整的加权随机/冷却/拉黑调度。
-// 保留单 key 字段是为了不改动 relay.go 的转发主流程。
+// credentials 持有该渠道下的**全部**凭据，装载时原样搬进来、不做任何预选：
+// 「哪把 Key 可用」是每请求时才需要回答的问题（冷却/拉黑随时在变），
+// 装载时选死一把存进 key 字段，等于让网关在下次热更新之前一直用那把
+// 可能已经被拉黑的 Key——这正是 credentials 表的健康字段变成死数据的原因。
 type channel struct {
 	id      int
 	name    string
 	typ     string
 	baseURL string
-	key     string
-	models  []string
-	mapping map[string]string
-	weight  int
+	// credentials 是凭据池快照。存副本而不是共享 store 的切片：
+	// store 的 Channels() 返回的是共享底层数组的快照，转发层持有它会
+	// 让「谁改了元素」这件事无法从代码上看出来；副本把所有权划清楚。
+	credentials []model.Credential
+	models      []string
+	mapping     map[string]string
+	weight      int
 	// priority 是渠道优先级，数值越大越先被选中（主备渠道的表达方式）。
 	priority int
-	// credentialID 是当前使用的那把 Key 的 ID，记账时要写进日志，
-	// 否则事后查不出「哪个 Key 出的问题」。
-	credentialID uint
 	// groupName 是渠道分组，P5 计费时用它查分组倍率
 	// （同一模型在不同分组成本不同，用倍率折算成标准计价单位）。
 	groupName string
@@ -57,30 +58,18 @@ func (c *channel) supports(modelName string) bool {
 	return false
 }
 
-// pickKey 从渠道的凭据池里挑一个可用的上游 key。
+// hasUsableCredential 判断凭据池里是否至少有一把能立刻用的 Key。
 //
-// P2 的最小实现：取权重最高、且当前可用的第一个凭据。
-// P3 会把这里换成 scheduler.SelectCredential()，做加权随机 + 失败冷却 + 自动拉黑。
-// 之所以现在就按「可用」过滤：渠道配了 Key 但状态是 disabled 时，
-// 继续拿它去请求只会拿到上游的 401，不如直接当成没有可用渠道。
-func pickKey(creds []model.Credential, now time.Time) (string, uint, bool) {
-	usable := make([]model.Credential, 0, len(creds))
-	for _, c := range creds {
-		if c.IsUsable(now) && c.APIKey != "" {
-			usable = append(usable, c)
+// 与旧的 pickKey 判断条件保持一致（IsUsable && APIKey 非空）：渠道配了
+// Key 但状态是 disabled 时，继续拿它去请求只会拿到上游的 401，不如直接
+// 当成没有可用渠道。
+func hasUsableCredential(creds []model.Credential, now time.Time) bool {
+	for i := range creds {
+		if creds[i].IsUsable(now) && creds[i].APIKey != "" {
+			return true
 		}
 	}
-	if len(usable) == 0 {
-		return "", 0, false
-	}
-	// 按权重降序，权重相同按 ID 升序，保证选择结果稳定可复现
-	sort.SliceStable(usable, func(i, j int) bool {
-		if usable[i].Weight != usable[j].Weight {
-			return usable[i].Weight > usable[j].Weight
-		}
-		return usable[i].ID < usable[j].ID
-	})
-	return usable[0].APIKey, usable[0].ID, true
+	return false
 }
 
 // registry 是运行期的渠道池 + 适配器表。
@@ -169,24 +158,28 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 			skipped++
 			continue
 		}
-		key, credID, ok := pickKey(ch.Credentials, now)
-		if !ok {
+		// 一把可用凭据都没有的渠道仍然跳过：路由还会命中它，但每请求
+		// 都选不出 Key，转出去必然失败，而且这种故障在渠道列表里看不出
+		// 异常（渠道状态还是 enabled）。和「没有 Key 的渠道是空壳」同理。
+		//
+		// 注意这里只做**装载时**的快照判断：冷却/拉黑在运行期会变，
+		// 一个此刻全冷却的渠道下次热更新就能回来，所以不做永久剔除。
+		if !hasUsableCredential(ch.Credentials, now) {
 			log.Printf("[渠道装载] 渠道 %d(%s) 没有可用凭据，已跳过", ch.ID, ch.Name)
 			skipped++
 			continue
 		}
 		r.channels[int(ch.ID)] = &channel{
-			id:           int(ch.ID),
-			name:         ch.Name,
-			typ:          ch.Type,
-			baseURL:      ch.BaseURL,
-			key:          key,
-			models:       []string(ch.Models),
-			mapping:      map[string]string(ch.ModelMapping),
-			weight:       ch.Weight,
-			priority:     ch.Priority,
-			credentialID: credID,
-			groupName:    ch.GroupName,
+			id:          int(ch.ID),
+			name:        ch.Name,
+			typ:         ch.Type,
+			baseURL:     ch.BaseURL,
+			credentials: append([]model.Credential(nil), ch.Credentials...),
+			models:      []string(ch.Models),
+			mapping:     map[string]string(ch.ModelMapping),
+			weight:      ch.Weight,
+			priority:    ch.Priority,
+			groupName:   ch.GroupName,
 		}
 	}
 	if skipped > 0 {

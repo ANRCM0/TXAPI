@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	dbmodel "minigateway/internal/model"
 	"minigateway/internal/relay/adaptor"
 	"minigateway/internal/relay/meta"
 	"minigateway/internal/relay/model"
@@ -50,26 +51,32 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 	}
 
 	retryTimes := cfgRetryTimes
-	// 候选渠道数 - 1 是重试次数的上限：不能把同一个渠道试两遍
-	if maxRetry := len(candidates) - 1; retryTimes > maxRetry {
+	// 重试预算的上限跟着「重试单元」一起变了：以前单元是渠道，所以拿
+	// 渠道数 - 1 当上限；现在单元是 (渠道, 凭据) 对，就该拿「可用凭据
+	// 总数 - 1」当上限。否则一个渠道挂 3 把 Key 仍然只允许试 1 次，
+	// 多配的 Key 在故障时完全用不上——那是白配。
+	if maxRetry := countAvailableCredentials(candidates, time.Now()) - 1; retryTimes > maxRetry {
 		retryTimes = maxRetry
 	}
 
 	var lastErr *model.ErrorWithStatusCode
-	// 记录已失败的渠道 ID，重试时跳过。
-	// 不跳过的后果：一个坏渠道会被反复选中，重试全部浪费在它身上。
-	tried := make(map[int]bool, len(candidates))
+	// 重试单元是「(渠道, 凭据) 对」，不是渠道本身：单渠道多 Key 时，
+	// 第一把 Key 失败后必须能在同一把渠道内换一把 Key 重试，否则一个
+	// 渠道挂 3 把 Key 也只等于挂 1 把。用**凭据 ID** 记已试而不是渠道
+	// ID——凭据 ID 全局唯一，渠道 ID 会把同渠道的其他 Key 一起误判成
+	// 「已试过」，那正是这次重构要修掉的毛病。
+	triedCred := make(map[uint]bool)
 	// 已用过但还有备用的渠道，留到最后兜底（避免「所有渠道都试过一遍就放弃」）
 	remaining := candidates
 
 	for attempt := 0; attempt <= retryTimes; attempt++ {
-		ch := selectWeighted(remaining, tried)
+		ch, cred := selectTarget(remaining, triedCred, time.Now())
 		if ch == nil {
 			break
 		}
-		tried[ch.id] = true
+		triedCred[cred.ID] = true
 
-		m := buildMeta(ch, req)
+		m := buildMeta(ch, cred, req)
 		// 记账用：把命中的渠道/凭据写进 context，handler 收尾时取用。
 		// 用 context 而不是返回值传递，是因为 Relay 的签名已经很长了，
 		// 再加几个返回值会让调用处难读；context 是这次请求的作用域，正合适。
@@ -264,8 +271,12 @@ func handleUpstreamError(a adaptor.Adaptor, resp *http.Response) (*model.Usage, 
 	return nil, &model.ErrorWithStatusCode{StatusCode: resp.StatusCode, Error: detail}
 }
 
-// buildMeta 把渠道配置和请求特征组装成一次转发的上下文。
-func buildMeta(ch *channel, req *model.ModelRequest) *meta.Meta {
+// buildMeta 把渠道配置和选中的凭据组装成一次转发的上下文。
+//
+// cred 由调用方选好再传进来（而不是 buildMeta 自己去渠道里挑）：选择
+// 时机必须在每次转发尝试时，因为凭据的冷却/拉黑状态随时在变（见
+// selectTarget 的注释）。
+func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest) *meta.Meta {
 	actual := req.Model
 	if mapped, ok := ch.mapping[req.Model]; ok && mapped != "" {
 		actual = mapped
@@ -275,13 +286,119 @@ func buildMeta(ch *channel, req *model.ModelRequest) *meta.Meta {
 		ChannelName:       ch.name,
 		ChannelType:       ch.typ,
 		BaseURL:           ch.baseURL,
-		APIKey:            ch.key,
+		APIKey:            cred.APIKey,
 		OriginModel:       req.Model,
 		ActualModel:       actual,
 		IsStream:          req.Stream,
 		Mode:              meta.ModeChatCompletions,
-		CredentialIDValue: ch.credentialID,
+		CredentialIDValue: cred.ID,
 	}
+}
+
+// selectTarget 选一个「渠道 + 一把未试过的可用凭据」。
+//
+// 与旧版 selectWeighted 的两处关键区别：
+//  1. 渠道筛选条件从「没试过」变成「还有未试过的可用凭据」——一个渠道
+//     被试过一把 Key 不等于整个渠道废了，剩下的 Key 仍然值得试；
+//  2. 选中渠道后再在渠道内选凭据，两级选择各自独立。
+//
+// 返回 (nil, nil) 表示没有可试的目标了（所有凭据都试过或都不可用）。
+func selectTarget(candidates []*channel, triedCred map[uint]bool, now time.Time) (*channel, *dbmodel.Credential) {
+	pool := make([]*channel, 0, len(candidates))
+	total := 0
+	// 未试过的候选里的最高优先级。只在这一层里选，低优先级渠道留作兜底。
+	maxPriority := 0
+	first := true
+	for _, ch := range candidates {
+		if !hasUntriedCredential(ch, triedCred, now) {
+			continue
+		}
+		if first || ch.priority > maxPriority {
+			maxPriority = ch.priority
+			first = false
+		}
+	}
+	for _, ch := range candidates {
+		if !hasUntriedCredential(ch, triedCred, now) || ch.priority != maxPriority {
+			continue
+		}
+		pool = append(pool, ch)
+		total += ch.weight
+	}
+	if len(pool) == 0 {
+		return nil, nil
+	}
+	// 加权随机：在 [0, total) 里掷一个点，落在谁的区间就是谁
+	n := rand.Intn(total)
+	ch := pool[len(pool)-1]
+	for _, c := range pool {
+		n -= c.weight
+		if n < 0 {
+			ch = c
+			break
+		}
+	}
+	cred := pickCredential(ch, triedCred, now)
+	if cred == nil {
+		// hasUntriedCredential 已经保证有，防御性返回：真出现说明两个
+		// 判断条件不一致，宁可放弃这次尝试也不要发出一个没有 Key 的请求
+		return nil, nil
+	}
+	return ch, cred
+}
+
+// hasUntriedCredential 判断渠道里是否还有「没试过且当前可用」的凭据。
+func hasUntriedCredential(ch *channel, triedCred map[uint]bool, now time.Time) bool {
+	for i := range ch.credentials {
+		c := &ch.credentials[i]
+		if triedCred[c.ID] {
+			continue
+		}
+		if c.IsUsable(now) && c.APIKey != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// countAvailableCredentials 统计候选渠道里一共有多少把可用凭据。
+//
+// 用作重试预算的上限（见 Relay）。按凭据统计而不是按渠道统计，
+// 因为重试单元已经是 (渠道, 凭据) 对。
+func countAvailableCredentials(candidates []*channel, now time.Time) int {
+	n := 0
+	for _, ch := range candidates {
+		for i := range ch.credentials {
+			c := &ch.credentials[i]
+			if c.IsUsable(now) && c.APIKey != "" {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// pickCredential 在渠道的凭据池里挑一把本次请求要用的 Key。
+//
+// 本步骤（结构性重构）刻意保持与旧 pickKey **行为等价**：按权重降序、
+// 同权重按 ID 升序取第一个可用的，只是执行时机从装载时搬到了每请求时。
+// 下一步才换成加权随机 + 冷却 + 拉黑 + 亲和的完整调度器。
+//
+// 为什么先做等价重构再换策略：一次性改「选择时机 + 选择算法」两件事，
+// 出问题时无法判断是结构坏了还是算法错了。分开两步，每步都有独立的
+// 回归网（本步骤的回归网就是 P5 的 6 个验收场景）。
+func pickCredential(ch *channel, triedCred map[uint]bool, now time.Time) *dbmodel.Credential {
+	var best *dbmodel.Credential
+	for i := range ch.credentials {
+		c := &ch.credentials[i]
+		if triedCred[c.ID] || !c.IsUsable(now) || c.APIKey == "" {
+			continue
+		}
+		if best == nil || c.Weight > best.Weight || (c.Weight == best.Weight && c.ID < best.ID) {
+			best = c
+		}
+	}
+	return best
 }
 
 // pickChannels 从渠道池里筛出能服务该模型、且令牌有权限的渠道。
@@ -310,51 +427,6 @@ func modelAllowed(modelName string, allowedModels []string) bool {
 		}
 	}
 	return false
-}
-
-// selectWeighted 在候选渠道里挑一个，跳过已试过的。
-//
-// 两级选择（对应 PLAN 的 priority + weight 语义）：
-//  1. 先按 priority 分层，只在高优先级层里选——「主备渠道」就是这个语义，
-//     备份渠道不该抢主力渠道的流量
-//  2. 同一层内按 weight 加权随机，让运维可以把流量按比例压到不同渠道
-//     （比如新渠道先给 10% 流量试水），轮询做不到这一点
-//
-// 为什么用加权随机而不是纯轮询：权重让「试水比例」可表达；轮询是权重全相等的特例。
-func selectWeighted(candidates []*channel, tried map[int]bool) *channel {
-	pool := make([]*channel, 0, len(candidates))
-	total := 0
-	// 未试过的候选里的最高优先级。只在这一层里选，低优先级渠道留作兜底。
-	maxPriority := 0
-	first := true
-	for _, ch := range candidates {
-		if tried[ch.id] {
-			continue
-		}
-		if first || ch.priority > maxPriority {
-			maxPriority = ch.priority
-			first = false
-		}
-	}
-	for _, ch := range candidates {
-		if tried[ch.id] || ch.priority != maxPriority {
-			continue
-		}
-		pool = append(pool, ch)
-		total += ch.weight
-	}
-	if len(pool) == 0 {
-		return nil
-	}
-	// 加权随机：在 [0, total) 里掷一个点，落在谁的区间就是谁
-	n := rand.Intn(total)
-	for _, ch := range pool {
-		n -= ch.weight
-		if n < 0 {
-			return ch
-		}
-	}
-	return pool[len(pool)-1]
 }
 
 // shouldRetry 判断这个状态码是否值得换渠道重试。
