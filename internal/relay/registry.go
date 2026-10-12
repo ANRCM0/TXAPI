@@ -3,15 +3,20 @@
 // 包内分工：
 //   - registry.go  渠道选择 + 适配器查找
 //   - relay.go     单次转发流程 + 失败重试
+//   - convert.go   协议枢纽（P4：客户端协议 → 规范 → 上游协议）
+//   - stream.go    流式公共工具
 //   - adaptor/     各厂商适配器实现
 package relay
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"minigateway/internal/config"
 	"minigateway/internal/relay/adaptor"
+	"minigateway/internal/relay/adaptor/anthropic"
+	"minigateway/internal/relay/adaptor/gemini"
 	"minigateway/internal/relay/adaptor/openai"
 )
 
@@ -58,8 +63,12 @@ var reg *registry
 func Init(cfg *config.Config) error {
 	r := &registry{
 		channels: make(map[int]*channel, len(cfg.Channels)),
+		// 适配器表：协议名 → 适配器实例。
+		// 新增协议只要在这里加一行 + 建个包，核心代码零改动（PLAN 3.2 的 N+M）。
 		adaptors: map[string]adaptor.Adaptor{
-			"openai": &openai.Adaptor{},
+			"openai":    &openai.Adaptor{},
+			"anthropic": &anthropic.Adaptor{},
+			"gemini":    &gemini.Adaptor{},
 		},
 	}
 	for _, cc := range cfg.Channels {
@@ -67,8 +76,14 @@ func Init(cfg *config.Config) error {
 			continue
 		}
 		if _, ok := r.adaptors[cc.Type]; !ok {
-			return fmt.Errorf("渠道 %d(%s) 使用了未知类型 %q，可用类型: openai",
-				cc.ID, cc.Name, cc.Type)
+			// 报错信息里列出所有可用类型，运维配错时能直接抄正确答案
+			types := make([]string, 0, len(r.adaptors))
+			for k := range r.adaptors {
+				types = append(types, k)
+			}
+			sort.Strings(types)
+			return fmt.Errorf("渠道 %d(%s) 使用了未知类型 %q，可用类型: %v",
+				cc.ID, cc.Name, cc.Type, types)
 		}
 		r.channels[cc.ID] = &channel{
 			id:      cc.ID,
