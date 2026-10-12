@@ -87,12 +87,25 @@ type Credential struct {
 
 // IsUsable 判断这个凭据当前能否被调度器选中。
 //
-// 判断条件与 PLAN「3.3 选择算法」一致：状态为 active 且不在冷却期内。
-// P3 会把这个方法换成完整的调度器过滤，这里先给出可用的最小实现。
+// 判断条件与 PLAN「3.3 选择算法」一致：不在冷却期内、且没有被人工停用。
+//
+// 为什么 cooldown 状态在冷却到期后算可用，而不是死等 status 变回 active：
+// 状态从 cooldown 改回 active 是**后台恢复任务**的活（见
+// scheduler.StartRecovery），那个任务最坏要晚一个扫描周期（默认 30s）
+// 才跑。如果这里死等 status，就会出现「冷却时间早就过了、凭据却还选不中」
+// 的空窗；更糟的是恢复任务万一没启动（漏接线、进程刚起还没到第一个
+// tick），凭据会**永久**卡在 cooldown——凭据池单向枯竭，网关表现为
+// 「没有可用渠道」，而运维看到的是「Key 都是好的」。
+//
+// 所以可用性由**时间**说了算，status 只用来表达「被人工/自动拉黑」这类
+// 不可自愈的状态。恢复任务仍然要跑，它的职责是把 DB 里的状态收拾干净
+// （管理界面看得见、重启后不留陈旧状态），不再是可用性的前提。
 func (c *Credential) IsUsable(now time.Time) bool {
-	if c.Status != CredentialActive {
+	// disabled / banned 是「不可自愈」的标记，一律不可用
+	if c.Status == CredentialDisabled || c.Status == CredentialBanned {
 		return false
 	}
+	// active 直接可用；cooldown 看冷却时间是否已过
 	return c.CooldownUntil == 0 || c.CooldownUntil <= now.Unix()
 }
 

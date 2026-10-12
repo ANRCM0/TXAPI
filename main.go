@@ -32,6 +32,7 @@ import (
 	"minigateway/internal/config"
 	"minigateway/internal/model"
 	"minigateway/internal/relay"
+	"minigateway/internal/scheduler"
 	"minigateway/internal/server"
 	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
@@ -97,6 +98,54 @@ func main() {
 		return prices, rates, nil
 	}, billing.DefaultPriceTTL)
 	engine := billing.New(st.DB(), priceTable)
+
+	// 5.5 接线凭据池调度器：加权随机分流 + 失败冷却 + 自动拉黑 + 会话亲和。
+	//
+	// 三个注入点各自解决一个依赖方向问题：
+	//   - SetCredentialPicker：relay 的选择调用 scheduler，反向不成立，
+	//     所以用函数变量把选择算法递过去（scheduler 保持叶子包）；
+	//   - SetHealthPersister：scheduler 算出状态变更后要落库，但它不该
+	//     知道 store 存在——这里把 store 的方法递过去；
+	//   - SetPoolReloader：状态落库后必须让转发层看到，否则会出现
+	//     「库里已经 cooldown、转发还在用它」的窗口。
+	relay.SetCredentialPicker(func(creds []model.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*model.Credential, bool) {
+		return scheduler.PickWithAffinity(creds, sessionID, exclude, now)
+	})
+	relay.SetHealthReporter(func(cred *model.Credential, statusCode int, errMsg string) {
+		// 成功/失败都走这里：scheduler 内部按状态码决定是清零还是退避，
+		// 并在状态真的变化时才落库（见 scheduler.HealthUpdate.Changed）。
+		now := time.Now()
+		if statusCode == http.StatusOK {
+			scheduler.RecordSuccess(cred, now)
+			return
+		}
+		scheduler.RecordFailure(cred, statusCode, errMsg, now)
+	})
+	scheduler.SetHealthPersister(scheduler.HealthPersister(func(u scheduler.HealthUpdate) error {
+		return st.UpdateCredentialHealth(store.HealthUpdate{
+			CredentialID:  u.CredentialID,
+			FailCount:     u.FailCount,
+			CooldownUntil: u.CooldownUntil,
+			Status:        u.Status,
+			LastError:     u.LastError,
+			LastUsedAt:    u.LastUsedAt,
+		})
+	}))
+	scheduler.SetPoolReloader(func() {
+		if err := relay.Reload(st.Channels()); err != nil {
+			// 重载失败必须告警：状态改了但转发层没看到，等于这次健康
+			// 反馈白做，坏 Key 还会继续被选中
+			log.Printf("[调度] 凭据状态变更后刷新渠道池失败: %v", err)
+		}
+	})
+	// 后台恢复任务：定时把冷却到期的凭据放回 active（banned 不自动恢复）。
+	// 停止函数接在优雅关闭链路上——顺序是 srv.Shutdown → stopRecovery →
+	// scheduler.Stop → st.Close，保证恢复任务不再读库之后才关库。
+	stopRecovery := scheduler.StartRecovery(func() (int, error) {
+		return st.RecoverCooledDownCredentials()
+	}, scheduler.RecoveryInterval)
+	defer stopRecovery()
+	defer scheduler.Stop()
 
 	// 6. 创建引擎并注册路由
 	// 管理 API 鉴权中间件在这里装配：密钥已由 config.Load 保证非空

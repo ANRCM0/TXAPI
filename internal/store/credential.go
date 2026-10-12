@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -164,6 +165,103 @@ func (s *Store) GetCredential(id uint) (*model.Credential, error) {
 		return nil, fmt.Errorf("读取凭据 %d 失败: %w", id, err)
 	}
 	return &cred, nil
+}
+
+// HealthUpdate 是调度器算好、交给 store 落库的凭据健康状态。
+//
+// 与 model.Credential 的区别：只带调度器负责的那几个字段。用独立结构体
+// 而不是直接收 *model.Credential，是为了让「调度器不拥有整条记录」
+// 这件事在类型上就成立——它改不了 name/api_key/weight，那三个是管理
+// 接口的地盘。
+type HealthUpdate struct {
+	CredentialID uint
+	FailCount    int
+	// CooldownUntil 是冷却截止时间，Unix 秒；0 表示不在冷却中。
+	CooldownUntil int64
+	Status        string
+	LastError     string
+	LastUsedAt    int64
+}
+
+// UpdateCredentialHealth 写入调度器算出的凭据健康状态，并刷新缓存。
+//
+// 这是 credentials 表 fail_count / cooldown_until / last_error 三个字段
+// 的第一个（也是唯一一个）写入点——在 P6 批次 2 之前它们是死数据，
+// 表建了、字段定义了、IsUsable 也读它们，但没有任何代码写过。
+//
+// 为什么保留 fail_count 而不是每次覆盖式写入：调度器传什么就写什么，
+// 退避的连续性由调度器负责（见 scheduler.backoff），这里不做额外判断。
+//
+// 写后即刷缓存（与其它写方法同一纪律）：漏了这一步会出现「库里已经
+// cooldown、转发还在用它」的窗口，那个窗口里每个请求都会重复踩同一个
+// 坏 Key。调用方（scheduler 的 worker goroutine）随后会再调一次 Reload
+// 把新状态发布到转发层。
+func (s *Store) UpdateCredentialHealth(u HealthUpdate) error {
+	if u.Status != model.CredentialActive &&
+		u.Status != model.CredentialCooldown &&
+		u.Status != model.CredentialBanned {
+		return fmt.Errorf("凭据 %d: 非法的调度状态 %q（可选: %s/%s/%s）",
+			u.CredentialID, u.Status,
+			model.CredentialActive, model.CredentialCooldown, model.CredentialBanned)
+	}
+	updates := map[string]any{
+		"fail_count":     u.FailCount,
+		"cooldown_until": u.CooldownUntil,
+		"status":         u.Status,
+		"last_error":     u.LastError,
+	}
+	// last_used_at 只在真有时才写：调度器对「状态没变」的更新会跳过它
+	// （见 scheduler.HealthUpdate.Changed），传 0 意味着「这次不动它」，
+	// 而不是「把它清成 1970」——后者会让排查时看到一把从未用过的 Key。
+	if u.LastUsedAt > 0 {
+		updates["last_used_at"] = u.LastUsedAt
+	}
+	res := s.db.Model(&model.Credential{}).Where("id = ?", u.CredentialID).Updates(updates)
+	if res.Error != nil {
+		return fmt.Errorf("更新凭据 %d 健康状态失败: %w", u.CredentialID, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		// 凭据被删了（管理接口删 Key 和调度器写状态并发时会发生）。
+		// 不算错误：记录没了，状态无处可写，本来就没有可做的。
+		return nil
+	}
+	if err := s.reloadCache(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RecoverCooledDownCredentials 把冷却已到期的凭据恢复成 active，返回恢复了几把。
+//
+// 查询条件刻意写成「status = cooldown 且 cooldown_until 已过」，三个条件
+// 缺一不可：
+//   - 只判 cooldown_until 会把 banned 的一起放行（拉黑后 cooldown_until
+//     被清成 0，但 status 还是 banned）——那是自动解封，本方案明确禁止；
+//   - 只判 status 会把设了未来冷却时间的凭据提前放行，退避失去意义；
+//   - cooldown_until > 0 是防御：0 表示「不在冷却中」，一条 status 已经是
+//     cooldown 但时间为 0 的记录是脏数据，交给它不如留给下次人工排查。
+//
+// 保留 fail_count：退避曲线要连续，见 scheduler.StartRecovery 的说明。
+// 不返回被恢复的 ID 列表而是返回条数：调用方（后台任务）只需要知道
+// 「有没有事发生」来决定要不要打日志。
+func (s *Store) RecoverCooledDownCredentials() (int, error) {
+	now := time.Now().Unix()
+	res := s.db.Model(&model.Credential{}).
+		Where("status = ? AND cooldown_until > 0 AND cooldown_until <= ?", model.CredentialCooldown, now).
+		Updates(map[string]any{
+			"status":         model.CredentialActive,
+			"cooldown_until": 0,
+		})
+	if res.Error != nil {
+		return 0, fmt.Errorf("恢复冷却到期的凭据失败: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return 0, nil
+	}
+	if err := s.reloadCache(); err != nil {
+		return int(res.RowsAffected), err
+	}
+	return int(res.RowsAffected), nil
 }
 
 // validateCredentialInput 在落库前拦住不合理的凭据入参。

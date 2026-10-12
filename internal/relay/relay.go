@@ -17,6 +17,8 @@ import (
 	"minigateway/internal/relay/adaptor"
 	"minigateway/internal/relay/meta"
 	"minigateway/internal/relay/model"
+	"minigateway/internal/scheduler"
+	"minigateway/internal/server/middleware"
 )
 
 // httpClient 是所有上游请求共用的客户端。
@@ -68,9 +70,12 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 	triedCred := make(map[uint]bool)
 	// 已用过但还有备用的渠道，留到最后兜底（避免「所有渠道都试过一遍就放弃」）
 	remaining := candidates
+	// 会话 ID 只算一次：整个请求（含重试）必须落在同一个会话上，
+	// 否则亲和会把重试打到另一把 Key 上，上游的 prompt 缓存白白作废。
+	sessionID := requestSessionID(c, ctxUint(c, middleware.CtxTokenID), body)
 
 	for attempt := 0; attempt <= retryTimes; attempt++ {
-		ch, cred := selectTarget(remaining, triedCred, time.Now())
+		ch, cred := selectTarget(remaining, triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}
@@ -101,12 +106,20 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 				log.Printf("[用量] 渠道=%s 模型=%s 输入=%d 输出=%d 合计=%d",
 					ch.name, m.ActualModel, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 			}
+			// 健康反馈：成功即清零。让这把 Key 的冷却/拉黑状态立刻回到
+			// 全绿，下一次选择就不会再跳过它。
+			reportCredentialHealth(cred, http.StatusOK, "")
 			c.Set(relayStatusKey, http.StatusOK)
 			return
 		}
 		lastErr = err
 		c.Set(relayStatusKey, err.StatusCode)
 		c.Set(relayErrorKey, err.Error.Message)
+		// 健康反馈：按状态码决定是否惩罚这把凭据（400/404/422 不罚，
+		// 见 scheduler.ShouldPenalizeCredential）。必须在 shouldRetry
+		// 判断**之后**：400 这类错误本来就不会重试，但反馈还是要做——
+		// 「不重试」和「不惩罚」是两件独立的事。
+		reportCredentialHealth(cred, err.StatusCode, err.Error.Message)
 
 		// 只有「可重试的错误」才换渠道。
 		// 比如 400 参数错误，换渠道也没用，反而浪费一次请求。
@@ -302,8 +315,10 @@ func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest) *
 //     被试过一把 Key 不等于整个渠道废了，剩下的 Key 仍然值得试；
 //  2. 选中渠道后再在渠道内选凭据，两级选择各自独立。
 //
+// sessionID 非空时凭据选择走会话亲和（见 pickCredentialWithSession）。
+//
 // 返回 (nil, nil) 表示没有可试的目标了（所有凭据都试过或都不可用）。
-func selectTarget(candidates []*channel, triedCred map[uint]bool, now time.Time) (*channel, *dbmodel.Credential) {
+func selectTarget(candidates []*channel, triedCred map[uint]bool, sessionID string, now time.Time) (*channel, *dbmodel.Credential) {
 	pool := make([]*channel, 0, len(candidates))
 	total := 0
 	// 未试过的候选里的最高优先级。只在这一层里选，低优先级渠道留作兜底。
@@ -338,7 +353,7 @@ func selectTarget(candidates []*channel, triedCred map[uint]bool, now time.Time)
 			break
 		}
 	}
-	cred := pickCredential(ch, triedCred, now)
+	cred := pickCredentialWithSession(ch, triedCred, sessionID, now)
 	if cred == nil {
 		// hasUntriedCredential 已经保证有，防御性返回：真出现说明两个
 		// 判断条件不一致，宁可放弃这次尝试也不要发出一个没有 Key 的请求
@@ -378,16 +393,25 @@ func countAvailableCredentials(candidates []*channel, now time.Time) int {
 	return n
 }
 
-// pickCredential 在渠道的凭据池里挑一把本次请求要用的 Key。
+// pickCredentialWithSession 在渠道的凭据池里挑一把本次请求要用的 Key。
 //
-// 本步骤（结构性重构）刻意保持与旧 pickKey **行为等价**：按权重降序、
-// 同权重按 ID 升序取第一个可用的，只是执行时机从装载时搬到了每请求时。
-// 下一步才换成加权随机 + 冷却 + 拉黑 + 亲和的完整调度器。
+// 默认实现（未注入调度器时）与旧 pickKey **行为等价**：按权重降序、
+// 同权重按 ID 升序取第一个可用的。
 //
-// 为什么先做等价重构再换策略：一次性改「选择时机 + 选择算法」两件事，
-// 出问题时无法判断是结构坏了还是算法错了。分开两步，每步都有独立的
-// 回归网（本步骤的回归网就是 P5 的 6 个验收场景）。
-func pickCredential(ch *channel, triedCred map[uint]bool, now time.Time) *dbmodel.Credential {
+// 注入调度器后（SetCredentialPicker）换成加权随机 + 会话亲和：
+// 旧实现会让权重低的凭据永远拿不到流量，权重退化成优先级——运维配
+// weight=5 的意图是「这把 Key 分 5 份流量」而不是「这把 Key 优先」。
+//
+// 亲和只在「首次选择」时起作用：重试时 exclude 里已经有了失败的那把，
+// 亲和目标若正是它，调度器会在剩余可用凭据里重新定位——行为上等于降级
+// 到加权随机，不会把请求卡死（见 scheduler.PickWithAffinity 的说明）。
+func pickCredentialWithSession(ch *channel, triedCred map[uint]bool, sessionID string, now time.Time) *dbmodel.Credential {
+	if pickCredentialFn != nil {
+		if cred, ok := pickCredentialFn(ch.credentials, triedCred, sessionID, now); ok {
+			return cred
+		}
+		return nil
+	}
 	var best *dbmodel.Credential
 	for i := range ch.credentials {
 		c := &ch.credentials[i]
@@ -479,3 +503,72 @@ var cfgRetryTimes = 2
 
 // SetRetryTimes 让 main 把配置里的重试次数注入进来。
 func SetRetryTimes(n int) { cfgRetryTimes = n }
+
+// credentialPicker 是凭据选择函数，由 main 注入调度器的实现。
+//
+// 签名与 relay 内部旧逻辑保持一致（返回渠道快照里的元素指针），
+// 这样注入与否对调用点完全透明。默认（不注入）走 pickCredentialSort：
+// 按权重降序取第一个可用的，与 P6 批次 2 之前行为一致。
+//
+// 为什么用函数变量而不是让 relay 直接 import scheduler：scheduler 是叶子
+// 包，它不能反过来依赖 relay；而 relay 依赖 scheduler 会让「调度器可替换」
+// 变成空话（换个实现要改 relay 代码）。函数变量 + SetCredentialPicker 是
+// 本项目既有的解耦套路（见 handler.go 的 SetLogRecorder），保持一致。
+type credentialPicker func(creds []dbmodel.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*dbmodel.Credential, bool)
+
+var pickCredentialFn credentialPicker
+
+// SetCredentialPicker 注入凭据选择实现。传 nil 恢复默认（按权重降序取第一个）。
+func SetCredentialPicker(fn credentialPicker) { pickCredentialFn = fn }
+
+// credentialHealthReporter 是凭据健康状态的反馈函数，由 main 注入。
+//
+// 与 SetCredentialPicker 同一套路：relay 只负责「把结果告诉调度器」，
+// 具体怎么算状态、怎么落库是 scheduler 的事。不注入时（单元测试）
+// 反馈是空操作，转发行为与 P6 批次 2 之前完全一致。
+type credentialHealthReporter func(cred *dbmodel.Credential, statusCode int, errMsg string)
+
+var reportHealthFn credentialHealthReporter
+
+// SetHealthReporter 注入凭据健康反馈实现。传 nil 关闭反馈。
+func SetHealthReporter(fn credentialHealthReporter) { reportHealthFn = fn }
+
+// reportCredentialHealth 把一次转发结果反馈给调度器。
+//
+// 放在 Relay 里而不是 handler 里：只有 Relay 知道「这次用的是哪把
+// 凭据、结果如何」，handler 那层只看到最终状态码（重试后的），会把
+// 中间失败的那把 Key 漏掉——而那把恰恰是最该被冷却的。
+func reportCredentialHealth(cred *dbmodel.Credential, statusCode int, errMsg string) {
+	if reportHealthFn == nil || cred == nil {
+		return
+	}
+	reportHealthFn(cred, statusCode, errMsg)
+}
+
+// SessionIDHeader 是客户端声明会话 ID 的请求头。
+//
+// 与 CORS 中间件允许的头保持一致（见 middleware.CORS）：浏览器直连
+// 网关时这个头要能过预检，否则亲和在前端场景下永远不生效。
+const SessionIDHeader = "X-Session-Id"
+
+// requestSessionID 算出本次请求的会话标识，供凭据亲和用。
+//
+// 在 relay 里算而不是在 handler 里算：请求体在这里已经是解析好的
+// []byte，而首条 user 消息的抽取要看 messages 数组。handler 为了保持
+// 「透明代理」只解析了 model/stream/max_tokens 三个字段，再为会话亲和
+// 多解析一个 messages 会让那个刻意的边界变模糊（见 handler.go 的说明）。
+//
+// 取值优先级：X-Session-Id 请求头 > 令牌 ID + 首条 user 消息哈希。
+// 都取不到时返回空串，选择逻辑据此降级到纯加权随机。
+func requestSessionID(c *gin.Context, tokenID uint, body []byte) string {
+	if h := c.GetHeader(SessionIDHeader); h != "" {
+		return scheduler.SessionID(h, tokenID, nil)
+	}
+	var envelope struct {
+		Messages []scheduler.Message `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil || len(envelope.Messages) == 0 {
+		return ""
+	}
+	return scheduler.SessionID("", tokenID, envelope.Messages)
+}
