@@ -28,6 +28,18 @@ type ServerConfig struct {
 	// TimeoutSeconds 是单次上游请求的超时时间。
 	// 流式响应会长时间挂着连接，所以这个值不能太小。
 	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// IPRPMLimit 是 IP 级限流的每分钟请求数上限，0 表示不限。
+	//
+	// 为什么和令牌级限流分开：令牌级限流挂在鉴权之后，管得住
+	// 「有令牌的滥用」，管不住「拿一堆随机 key 试」的探测请求
+	// ——那种请求根本过不了鉴权，也就走不到令牌级限流那一步，
+	// 但每一次都实打实打了网关（查库、比对）。IP 级限流挂在
+	// 鉴权之前，是这条路上唯一的闸门。
+	//
+	// 默认 0（不限）：自用场景下访问来源就是本机或内网，没有
+	// 探测流量，开了反而可能挡掉正常的并发压测。暴露到公网时
+	// 一定要配上（比如 120，即平均每秒 2 次）。
+	IPRPMLimit int `yaml:"ip_rpm_limit"`
 }
 
 // DatabaseConfig 是存储层配置。
@@ -69,6 +81,10 @@ type TokenConfig struct {
 	Models []string `yaml:"models"`
 	// Quota 预留给 P5 计费，0 表示不限额度。
 	Quota float64 `yaml:"quota"`
+	// RPMLimit/TPMLimit 是限流阈值，0 表示不限。
+	// 只在种子导入时生效（和 quota 一样），之后通过管理 API 改。
+	RPMLimit int `yaml:"rpm_limit"`
+	TPMLimit int `yaml:"tpm_limit"`
 }
 
 // Config 是整份配置的根结构。

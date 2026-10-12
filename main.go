@@ -147,15 +147,35 @@ func main() {
 	defer stopRecovery()
 	defer scheduler.Stop()
 
-	// 6. 创建引擎并注册路由
+	// 6. 限流器：单机内存版滑动窗口，令牌级（RPM/TPM）+ IP 级兜底。
+	// 阈值来自数据库里每个令牌的 rpm_limit/tpm_limit 字段，管理 API
+	// 改完即生效（限流中间件每次请求都从上下文读投影，不缓存阈值）。
+	// 多机部署时把这一行换成 Redis 实现即可，中间件不用改。
+	limiter := middleware.NewMemoryLimiter()
+	// 优雅关闭时先停限流：在途请求收尾期间不该再有新请求挤进来
+	// 重新计数（见 middleware.Limiter.Close 的注释）。
+	defer func() {
+		if closer, ok := limiter.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}()
+
+	// 7. 创建引擎并注册路由
 	// 管理 API 鉴权中间件在这里装配：密钥已由 config.Load 保证非空
 	// （缺失时 Load 直接拒绝启动），中间件内部用常量时间比较校验
 	// X-Admin-Key 头。/v1 转发面和 /healthz 不走这个中间件
 	httpEngine := server.NewEngine(server.Deps{
-		Cfg:       cfg,
-		Store:     st,
-		Billing:   engine,
-		AdminAuth: middleware.AdminAuth(cfg.AdminKey),
+		Cfg:         cfg,
+		Store:       st,
+		Billing:     engine,
+		RateLimiter: limiter,
+		// IP 级兜底限流：防「拿随机 key 试」的探测请求（那种请求
+		// 过不了鉴权，令牌级限流根本轮不到它）。阈值取自配置，
+		// 0 = 不限。默认 0——自用场景（本机/内网单客户端）没有
+		// 探测流量，开了反而可能挡掉正常的并发压测；有暴露面时
+		// 在 config.yaml 的 server 段配上即可。
+		IPRPMLimit: cfg.Server.IPRPMLimit,
+		AdminAuth:  middleware.AdminAuth(cfg.AdminKey),
 	})
 
 	srv := &http.Server{

@@ -25,6 +25,12 @@ const (
 	// （先扣令牌、再扣用户），结算时要扣用户额度；
 	// 日志的 user_id 字段也用它填。
 	CtxUserID = "user_id"
+	// CtxTokenView 是完整的令牌投影（含限流阈值）。
+	// 单独存一份而不是让下游拼：限流中间件要按令牌 ID 分桶、
+	// 读 RPM/TPM 阈值，逐个取 key 会漏字段（加一个字段就要记得
+	// 在这里再加一行）。投影是「鉴权结果的完整表达」，
+	// 一个 key 存一个结构体，以后加字段不用动这里。
+	CtxTokenView = "token_view"
 )
 
 // Recovery 捕获 panic，避免一个请求的异常打挂整个网关进程。
@@ -127,11 +133,14 @@ func (a *Auth) Handle() gin.HandlerFunc {
 			return
 		}
 		// 把令牌信息放进上下文，后续 handler 用来做模型权限校验、
-		// 额度扣减和日志
+		// 额度扣减、限流分桶和日志
 		c.Set(CtxTokenName, view.Name)
 		c.Set(CtxAllowedModel, view.Models)
 		c.Set(CtxTokenID, view.ID)
 		c.Set(CtxUserID, view.UserID)
+		// 整个投影也存一份：限流中间件要按令牌 ID 分桶并读 RPM/TPM
+		// 阈值，只给它散落的字段会让「加一个令牌字段」变成三处改动。
+		c.Set(CtxTokenView, view)
 		c.Next()
 	}
 }

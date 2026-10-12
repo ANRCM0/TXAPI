@@ -33,16 +33,26 @@ type Deps struct {
 	// Billing 是计费引擎，nil 表示不启用计费（测试场景）。
 	// main 在 store 打开后创建它，这里注入给 relay 用。
 	Billing *billing.Engine
+	// RateLimiter 是限流器，nil 表示不启用限流（测试场景）。
+	// 令牌级和 IP 级共用同一个实例：同一个内存表、同一份配置，
+	// 两边的 key 前缀不同（tok:/ip:）所以不会互相串账。
+	RateLimiter middleware.Limiter
+	// IPRPMLimit 是 IP 级限流的每分钟请求数上限，0 表示不限
+	// （与令牌级阈值的 0=不限 语义一致）。
+	IPRPMLimit int
 }
 
 // NewEngine 组装中间件链和路由。
 //
 // 中间件顺序很重要，从上到下依次执行：
 //
-//	Recovery  → 最外层兜底，防止 panic 打挂整个进程
-//	RequestID → 给每个请求一个 ID，后面所有日志都带上它
-//	Auth      → 校验令牌，把令牌信息放进上下文
-//	Relay     → 真正的转发
+//	Recovery   → 最外层兜底，防止 panic 打挂整个进程
+//	RequestID  → 给每个请求一个 ID，后面所有日志都带上它
+//	IPRateLimit → IP 级兜底闸门（防无令牌的暴力探测）
+//	CORS       → 预检请求不带令牌，必须在鉴权之前
+//	Auth       → 校验令牌，把令牌信息（含限流阈值）放进上下文
+//	TokenRateLimit → 令牌级限流，必须在 Auth 之后（要按令牌 ID 分桶）
+//	Relay      → 真正的转发
 func NewEngine(deps Deps) *gin.Engine {
 	// 管理 API 鉴权是安全底线，没有「忘了传也凑合能跑」这个选项：
 	// nil 时裸奔的 /api 等于把凭据池敞开，所以这里硬失败
@@ -54,6 +64,21 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	engine.Use(middleware.Recovery())
 	engine.Use(middleware.RequestID())
+
+	// 健康检查不需要鉴权，方便 Docker healthcheck 和负载均衡探活。
+	//
+	// 特意注册在 IP 级限流（下面的 engine.Use）**之前**：gin 的 Use
+	// 只对之后注册的路由生效，先注册就天然绕过了限流。这是故意的——
+	// 探活被限流打挂会让负载均衡把健康的网关摘掉，那是自伤；
+	// 探活的调用方是基础设施，本来也不该被算进业务配额。
+	// 注意 Recovery/RequestID 在上面已经挂上了，探活仍然享受这两层。
+	engine.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// IP 级限流：兜底防「拿随机 key 试」的探测请求。它不依赖令牌信息，
+	// 所以挂在最前面，越早拦住越省（详见 middleware.IPRateLimit）。
+	engine.Use(middleware.IPRateLimit(deps.RateLimiter, deps.IPRPMLimit))
 	engine.Use(middleware.CORS())
 
 	// 令牌鉴权：查 store 的内存缓存，改令牌不用重启
@@ -61,17 +86,28 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	// 计费引擎注入转发层：额度检查/预扣/结算都发生在请求路径上
 	relay.SetBilling(deps.Billing)
-
-	// 健康检查不需要鉴权，方便 Docker healthcheck 和负载均衡探活
-	engine.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	// 限流器注入转发层：TPM 是「请求前预估、响应后按真实用量修正」的
+	// 两段式，真实 usage 只有 relay 的收尾逻辑拿得到（见 handler.go）。
+	relay.SetRateLimiter(deps.RateLimiter)
 
 	// 模型列表：让客户端知道这个令牌能用哪些模型
 	engine.GET("/v1/models", auth.Handle(), relay.ListModels)
 
-	// 转发主入口：对话补全
-	engine.POST("/v1/chat/completions", auth.Handle(), relay.HandleChatCompletions)
+	// 转发主入口：对话补全。
+	// 鉴权 → 令牌限流 → 转发：限流必须挂在 Auth **之后**，
+	// 它要按令牌 ID 分桶、读该令牌的 RPM/TPM 阈值；挂在前面拿不到
+	// 令牌，只能退化成 IP 级，「每个客户端一把钥匙」的粒度就丢了。
+	// 它也必须是**请求前**的闸门——P5 的额度是响应后结算，
+	// 防不住 1000 个并发在结算前全打到上游（见 ratelimit.go 头注）。
+	engine.POST("/v1/chat/completions", auth.Handle(),
+		middleware.TokenRateLimit(deps.RateLimiter),
+		relay.HandleChatCompletions)
+
+	// embeddings：与对话共用整条转发链路，区别只有 Mode 一个值。
+	// 限流同样按令牌生效——embedding 请求同样在烧上游 Key。
+	engine.POST("/v1/embeddings", auth.Handle(),
+		middleware.TokenRateLimit(deps.RateLimiter),
+		relay.HandleEmbeddings)
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。

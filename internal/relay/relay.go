@@ -39,7 +39,12 @@ var httpClient = &http.Client{
 //
 // 这是网关的主流程，对应 one-api 的 controller/relay.go。
 // 流程：选渠道 → 转换请求 → 发请求 → 解析响应 → 失败换渠道重试。
-func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels []string, timeout time.Duration) {
+//
+// mode 是本次请求的转发模式（对话 / 向量）。由 handler 按路由传入并
+// 一路透传到 buildMeta：适配器要靠它决定上游路径（openai 适配器的
+// /v1/embeddings 就是靠 Mode 分的支）。以前这里写死对话模式，
+// 新增端点时每个调用方都得记得改，透传让「加端点」只动 handler。
+func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels []string, mode int, timeout time.Duration) {
 	// 1. 筛选出能服务这个模型的渠道
 	candidates := pickChannels(req.Model, allowedModels)
 	if len(candidates) == 0 {
@@ -81,7 +86,7 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 		}
 		triedCred[cred.ID] = true
 
-		m := buildMeta(ch, cred, req)
+		m := buildMeta(ch, cred, req, mode)
 		// 记账用：把命中的渠道/凭据写进 context，handler 收尾时取用。
 		// 用 context 而不是返回值传递，是因为 Relay 的签名已经很长了，
 		// 再加几个返回值会让调用处难读；context 是这次请求的作用域，正合适。
@@ -289,7 +294,10 @@ func handleUpstreamError(a adaptor.Adaptor, resp *http.Response) (*model.Usage, 
 // cred 由调用方选好再传进来（而不是 buildMeta 自己去渠道里挑）：选择
 // 时机必须在每次转发尝试时，因为凭据的冷却/拉黑状态随时在变（见
 // selectTarget 的注释）。
-func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest) *meta.Meta {
+//
+// mode 由 Relay 透传进来，不再在这里写死对话模式：embeddings 端点
+// 要的是 /v1/embeddings 路径和只按输入计费，适配器靠 Mode 区分。
+func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest, mode int) *meta.Meta {
 	actual := req.Model
 	if mapped, ok := ch.mapping[req.Model]; ok && mapped != "" {
 		actual = mapped
@@ -303,7 +311,7 @@ func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest) *
 		OriginModel:       req.Model,
 		ActualModel:       actual,
 		IsStream:          req.Stream,
-		Mode:              meta.ModeChatCompletions,
+		Mode:              mode,
 		CredentialIDValue: cred.ID,
 	}
 }
@@ -426,16 +434,45 @@ func pickCredentialWithSession(ch *channel, triedCred map[uint]bool, sessionID s
 }
 
 // pickChannels 从渠道池里筛出能服务该模型、且令牌有权限的渠道。
+//
+// P6 批次 3 起走 modelIndex 而不是全表扫描：一次 map 命中拿到候选
+// 渠道 ID 列表，再按 ID 取渠道对象。渠道多的时候省掉的是
+// 「遍历全部渠道 × 逐个解析 JSON models」这份每请求都付的开销。
+//
+// 通配渠道（models 里配了 "*"）在索引里存在 "*" 这个 key 下，
+// 查询时与精确命中的结果合并——和 abilities 表的语义一致
+// （表里也是存 model="*" 一行，不展开）。
 func pickChannels(modelName string, allowedModels []string) []*channel {
 	if !modelAllowed(modelName, allowedModels) {
 		return nil
 	}
-	all := reg.allChannels()
-	out := make([]*channel, 0, len(all))
-	for _, ch := range all {
-		if ch.supports(modelName) {
-			out = append(out, ch)
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	// 两个来源合并：精确命中的渠道 + 通配渠道。
+	// 用 seen 去重：一个渠道同时配了具体模型和 "*" 时，
+	// 它会在两个 key 下各出现一次，不去重会让它在候选列表里
+	// 出现两次——权重随机选中它两次的概率翻倍，等于偷偷改了权重。
+	ids := reg.modelIndex[modelName]
+	wild := reg.modelIndex["*"]
+	seen := make(map[int]bool, len(ids)+len(wild))
+	out := make([]*channel, 0, len(ids)+len(wild))
+	appendCh := func(list []int) {
+		for _, id := range list {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			// 索引与渠道池同生命周期重建，正常情况下一定命中；
+			// 防御一下：真取不到说明两者不同步，跳过比 panic 好
+			// （一次路由失败只是一个请求 503，panic 会打挂进程）。
+			if ch, ok := reg.channels[id]; ok {
+				out = append(out, ch)
+			}
 		}
+	}
+	appendCh(ids)
+	if modelName != "*" {
+		appendCh(wild)
 	}
 	return out
 }

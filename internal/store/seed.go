@@ -78,11 +78,13 @@ func (s *Store) SeedFromConfig(cfg *config.Config) (imported bool, err error) {
 
 		for _, tc := range cfg.Tokens {
 			tk := &model.Token{
-				Name:   tc.Name,
-				Key:    tc.Key,
-				Models: model.StringList(tc.Models),
-				Quota:  tc.Quota,
-				Status: model.TokenStatusActive,
+				Name:     tc.Name,
+				Key:      tc.Key,
+				Models:   model.StringList(tc.Models),
+				Quota:    tc.Quota,
+				RPMLimit: tc.RPMLimit,
+				TPMLimit: tc.TPMLimit,
+				Status:   model.TokenStatusActive,
 			}
 			if err := tx.Create(tk).Error; err != nil {
 				return fmt.Errorf("导入令牌 %s 失败: %w", tc.Name, err)

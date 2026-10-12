@@ -80,6 +80,26 @@ type registry struct {
 	mu       sync.RWMutex
 	channels map[int]*channel
 	adaptors map[string]adaptor.Adaptor
+	// modelIndex 是「模型名 → 渠道 ID 列表」的内存索引，
+	// 与渠道池同生命周期（Init/Reload 时一起重建）。
+	//
+	// 为什么建它：abilities 表在 store 层被 syncAbilities 认真维护着，
+	// 但路由层一直在全表扫描 + 逐个解析渠道的 JSON models 列表
+	// （见 pickChannels 的旧实现）。一张维护得很仔细的表没人用，
+	// 数据和用法脱节，等于白维护。索引让路由直接命中候选渠道，
+	// 不用每请求遍历全部渠道。
+	//
+	// 关于 abilities 表的 group_name 维度：表里有这个列，但当前
+	// **没有真正的多分组路由需求**——分组只在 P5 计费里用来查倍率
+	// （同一模型在不同分组成本不同），路由层面还没有「按分组选渠道」
+	// 的入口（没有客户端能声明自己要哪个分组）。所以这里先只按
+	// model 建索引，**不假装实现了分组路由**；等真有需求时再把
+	// key 换成 (group, model) 即可，数据结构已经留好了位置。
+	//
+	// 通配符 "*" 作为普通 key 存进来（与 syncAbilities 的处理一致：
+	// 「支持所有模型」只有 "*" 能表达，展开成具体模型名会在新增
+	// 模型时漏掉），查询时把精确命中和 "*" 命中合并。
+	modelIndex map[string][]int
 }
 
 var reg *registry
@@ -99,6 +119,7 @@ func Init(channels []model.Channel) error {
 			"anthropic": &anthropic.Adaptor{},
 			"gemini":    &gemini.Adaptor{},
 		},
+		modelIndex: make(map[string][]int),
 	}
 	if err := r.apply(channels); err != nil {
 		return err
@@ -112,19 +133,27 @@ func Init(channels []model.Channel) error {
 // 关键设计：适配器表不重建。适配器是无状态的，重建纯属浪费；
 // 而且万一某个适配器的构造函数变重（比如要读证书文件），
 // 热更新一次就付一次代价。只换 channels，锁的持有时间也最短。
+//
+// modelIndex 与渠道池一起换：索引描述的就是「哪个模型有哪些渠道」，
+// 换渠道不换索引会出现「渠道删了、路由还能选中它」的静默故障
+// ——选中的渠道在 map 里已经不存在，转发时拿到 nil 直接 panic。
+// 整表替换（而不是增量 diff）让「读到的索引」永远是替换前或
+// 替换后的完整快照，没有中间态。
 func Reload(channels []model.Channel) error {
 	if reg == nil {
 		return Init(channels)
 	}
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
-	// 整表替换而不是逐个 diff：替换期间读到的是「替换前」或「替换后」的
-	// 完整快照，不会出现「一半新一半旧」的中间态
 	next := make(map[int]*channel, len(channels))
+	nextIndex := make(map[string][]int)
 	saved := reg.channels
+	savedIndex := reg.modelIndex
 	reg.channels = next
+	reg.modelIndex = nextIndex
 	if err := reg.applyLocked(channels); err != nil {
 		reg.channels = saved // 失败回滚，别把好数据换成坏数据
+		reg.modelIndex = savedIndex
 		return err
 	}
 	return nil
@@ -180,6 +209,13 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 			weight:      ch.Weight,
 			priority:    ch.Priority,
 			groupName:   ch.GroupName,
+		}
+		// 建索引：这个渠道支持的每个模型都指向它。
+		// 与 abilities 表的写入规则保持一致（syncAbilities 也是
+		// 「渠道的每个 models 条目一行」），所以路由选中的渠道
+		// 与 /api/abilities 看到的数据一致——这正是「接入」要保证的。
+		for _, m := range ch.Models {
+			r.modelIndex[m] = append(r.modelIndex[m], int(ch.ID))
 		}
 	}
 	if skipped > 0 {
@@ -243,6 +279,7 @@ func ensureInit() {
 				"anthropic": &anthropic.Adaptor{},
 				"gemini":    &gemini.Adaptor{},
 			},
+			modelIndex: map[string][]int{},
 		}
 	}
 }

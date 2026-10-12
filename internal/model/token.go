@@ -54,6 +54,17 @@ type Token struct {
 	// Quota/UsedQuota 与 User 上的同名额度配合使用：先扣令牌，再扣用户（P5 计费）。
 	Quota     float64 `gorm:"not null;default:0" json:"quota"`
 	UsedQuota float64 `gorm:"not null;default:0" json:"used_quota"`
+	// RPMLimit/TPMLimit 是限流阈值（每分钟请求数 / 每分钟 token 数）。
+	//
+	// 0 表示不限——和 Quota 的 0=不限 保持同一套语义，免得调用方
+	// 要在两种「没配」之间做区分。
+	//
+	// 为什么限流和额度是两套东西：额度是「响应后结算」的，防不住
+	// 「1000 个并发在结算前全部打到上游」——结算发生在响应之后，
+	// 那之前的上游调用已经烧掉了真实的 Key。限流是**请求前**的闸门，
+	// 两者互补，谁也替代不了谁。
+	RPMLimit int `gorm:"not null;default:0" json:"rpm_limit"`
+	TPMLimit int `gorm:"not null;default:0" json:"tpm_limit"`
 	// ExpiresAt 是过期时间，Unix 秒；0 表示永不过期。
 	// 用 int64 而不是 time.Time：NULL 时间在 Go 里是零值，和「1970 年」无法区分。
 	ExpiresAt int64  `gorm:"not null;default:0" json:"expires_at"`
@@ -83,6 +94,11 @@ type TokenView struct {
 	UserID uint
 	Name   string
 	Models []string
+	// RPMLimit/TPMLimit 是限流阈值，0 表示不限。
+	// 限流中间件挂在 Auth 之后、只看上下文，所以阈值必须随投影一起
+	// 带过来——让它自己回库查会把一次请求变成两次查库。
+	RPMLimit int
+	TPMLimit int
 }
 
 // IsActive 判断令牌当前是否可用（启用且未过期）。
@@ -95,5 +111,8 @@ func (t *Token) IsActive(now time.Time) bool {
 
 // View 生成鉴权用的投影。
 func (t *Token) View() TokenView {
-	return TokenView{ID: t.ID, UserID: t.UserID, Name: t.Name, Models: []string(t.Models)}
+	return TokenView{
+		ID: t.ID, UserID: t.UserID, Name: t.Name, Models: []string(t.Models),
+		RPMLimit: t.RPMLimit, TPMLimit: t.TPMLimit,
+	}
 }

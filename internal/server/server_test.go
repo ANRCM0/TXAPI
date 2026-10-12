@@ -106,3 +106,59 @@ func TestHealthzAndAdminAuthSplit(t *testing.T) {
 		t.Fatalf("/v1/models 只带管理密钥应 401（需客户端令牌）, 实际 %d", code)
 	}
 }
+
+// TestHealthzNotRateLimited：探活不能被限流打挂（P6 批次 3 验收项）。
+//
+// 回归保护。这条坑过一次：gin 的 Use 只对**之后**注册的路由生效，
+// 所以 /healthz 必须注册在 IP 级限流之前。写反了的表现很隐蔽——
+// 业务测试全绿（它们都走 /v1），只有探活连续打才会 429，
+// 而那时负载均衡已经把健康的网关摘掉了。
+func TestHealthzNotRateLimited(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	st, err := store.Open(config.DatabaseConfig{
+		Driver: "sqlite",
+		Path:   filepath.Join(t.TempDir(), "rl.db"),
+	})
+	if err != nil {
+		t.Fatalf("开库失败: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	e := NewEngine(Deps{
+		Cfg:       &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
+		Store:     st,
+		AdminAuth: middleware.AdminAuth(testSecret),
+		// IP 级限流故意设成极小（1 次/分钟）：/v1 请求会立刻打满它。
+		// 此时如果 /healthz 也被限流，就会 429——这正是要防的。
+		RateLimiter: middleware.NewMemoryLimiter(),
+		IPRPMLimit:  1,
+	})
+
+	hit := func(path string) int {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if path == "/healthz" {
+			// 探活不带任何凭据
+		} else {
+			req.Header.Set("Authorization", "Bearer nope")
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// 把 IP 配额打满：前两次过 IP 限流后撞上令牌鉴权（401）
+	if code := hit("/v1/models"); code != http.StatusUnauthorized {
+		t.Fatalf("第 1 次应被令牌鉴权拒（401），实际 %d", code)
+	}
+	if code := hit("/v1/models"); code != http.StatusTooManyRequests {
+		t.Fatalf("IP 配额应已打满（期望 429），实际 %d——限流没生效？", code)
+	}
+
+	// 关键断言：同一个 IP、配额已满，探活必须仍然 200
+	for i := 0; i < 5; i++ {
+		if code := hit("/healthz"); code != http.StatusOK {
+			t.Fatalf("IP 限流打满后 /healthz 仍应为 200，实际 %d（第 %d 次）", code, i+1)
+		}
+	}
+}

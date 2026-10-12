@@ -13,6 +13,7 @@ import (
 
 	"minigateway/internal/billing"
 	dbmodel "minigateway/internal/model"
+	"minigateway/internal/relay/meta"
 	"minigateway/internal/relay/model"
 	"minigateway/internal/server/middleware"
 )
@@ -34,6 +35,20 @@ var billingEngine *billing.Engine
 // SetBilling 注入计费引擎。传 nil 关闭计费（测试场景）。
 func SetBilling(e *billing.Engine) { billingEngine = e }
 
+// rateLimiter 是限流器，由 main 注入。
+//
+// 为什么 relay 需要它：TPM 是「请求前预估、响应后修正」的两段式
+// （见 middleware.TokenRateLimit）。请求前的预估值由限流中间件记，
+// 真实 usage 只有 relay 的收尾逻辑拿得到——差额必须由这一侧补记，
+// 否则 TPM 会一直按预估值漂移。注入点放在 relay 而不是中间件，
+// 是因为「真实用量」这个信息只在 relay 里产生。
+//
+// 不注入时（测试场景）TPM 修正整体跳过，RPM 仍然生效。
+var rateLimiter middleware.Limiter
+
+// SetRateLimiter 注入限流器。传 nil 关闭 TPM 的事后修正。
+func SetRateLimiter(l middleware.Limiter) { rateLimiter = l }
+
 // captureLimit 是响应捕获缓冲的上限（64KB）。
 //
 // 只在「上游没返回 usage」时用来估算 completion tokens，不需要
@@ -52,6 +67,33 @@ const captureLimit = 64 * 1024
 // 失效了」这种极难排查的问题。透明代理是网关的基本素养。
 // max_tokens 是唯一例外——预扣额度需要它算费用上限。
 func HandleChatCompletions(c *gin.Context) {
+	handleRelay(c, meta.ModeChatCompletions)
+}
+
+// HandleEmbeddings 处理 POST /v1/embeddings（文本转向量）。
+//
+// 与对话入口共用同一条转发链路（选渠道 → 预扣 → 转发 → 结算 → 记账），
+// 唯一的区别是 Mode：适配器靠它决定打 /v1/embeddings 而不是
+// /v1/chat/completions（见 openai 适配器的 GetRequestURL）。
+//
+// 计费上的差别不是特判出来的，而是数据自然决定的：embeddings 响应
+// 的 usage 只有 {prompt_tokens, total_tokens}，没有 completion_tokens，
+// 反序列化后 CompletionTokens 天然是 0，计费公式里输出项自动为 0
+// ——「只按输入计价」是结构的结果，不需要在计费里加分支。
+//
+// 注意：embedding 模型名通常与对话模型不同（text-embedding-3-small
+// 之类），渠道必须把该模型配进 models 列表，否则路由选不到渠道。
+func HandleEmbeddings(c *gin.Context) {
+	handleRelay(c, meta.ModeEmbeddings)
+}
+
+// handleRelay 是 /v1 各转发入口的公共实现，mode 区分端点。
+//
+// 为什么抽出来而不是两份拷贝：两个入口的差异只有 Mode 一个值，
+// 而鉴权、额度预扣、结算、记账这些环节必须**完全一致**——
+// 拷贝一份就意味着以后改计费逻辑要记得改两处，漏一处就是
+// 「embeddings 请求不记账」这种极难发现的账目漏洞。
+func handleRelay(c *gin.Context, mode int) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "读取请求体失败: "+err.Error(), "invalid_request_error")
@@ -79,7 +121,8 @@ func HandleChatCompletions(c *gin.Context) {
 	tokenName, _ := c.Get(middleware.CtxTokenName)
 	requestID, _ := c.Get(middleware.CtxRequestID)
 
-	log.Printf("[请求] id=%s 令牌=%v 模型=%s 流式=%v", requestID, tokenName, req.Model, req.Stream)
+	log.Printf("[请求] id=%s 令牌=%v 模型=%s 端点=%s 流式=%v",
+		requestID, tokenName, req.Model, modeName(mode), req.Stream)
 
 	// 记录开始时间，用于算整条链路耗时（含重试）
 	startedAt := time.Now()
@@ -125,13 +168,21 @@ func HandleChatCompletions(c *gin.Context) {
 		}
 	}()
 
-	Relay(c, &req, body, allowedModels, relayTimeout)
+	Relay(c, &req, body, allowedModels, mode, relayTimeout)
 
 	finished = true
 	// 收尾放在 Relay 之后而不是用 defer 直接包：流式响应是在 Relay
 	// 内部边收边发的，函数返回时响应早已写完；非流式的 c.Data 也在
 	// Relay 内部完成。此时结算和记账不会影响客户端拿到的任何字节。
 	finishRequest(c, &req, startedAt, pre, body)
+}
+
+// modeName 把转发模式转成日志里看的名字。
+func modeName(mode int) string {
+	if mode == meta.ModeEmbeddings {
+		return "embeddings"
+	}
+	return "chat"
 }
 
 // preRequest 做请求前的额度检查与预扣。返回的快照要传给 finishRequest。
@@ -197,6 +248,16 @@ func finishRequest(c *gin.Context, req *model.ModelRequest, startedAt time.Time,
 		if err := billingEngine.Settle(tokenID, userID, pre, cost); err != nil {
 			log.Printf("[结算] token=%d user=%d 结算失败: %v", tokenID, userID, err)
 		}
+	}
+
+	// TPM 事后修正：把限流窗口里的「预估值」换成真实用量。
+	//
+	// 放在这里而不是中间件里：真实 usage 只有这一侧拿得到（流式响应
+	// 的 usage 要等流结束才知道，中间件的 defer 在 c.Next() 返回时就
+	// 跑了，拿不到）。失败请求也补——预估值已经占了窗口的位置，
+	// 不退回去等于失败请求白扣 TPM 配额。
+	if usage != nil {
+		middleware.FinishTokens(c, rateLimiter, usage.TotalTokens)
 	}
 
 	writeRequestLog(c, req, startedAt, cost, usage, isEstimated, priceMissing)
