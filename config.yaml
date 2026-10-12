@@ -1,0 +1,50 @@
+# 极简网关配置文件
+#
+# 设计说明：这个阶段刻意不用数据库，所有配置都写在这里。
+# 好处是启动即可用，坏处是改配置要重启——等核心链路跑通后再引入 SQLite。
+
+server:
+  addr: "127.0.0.1:8080"
+  # 首次失败后最多再换渠道重试几次
+  retry_times: 2
+  # 单次上游请求超时（秒），流式响应会长时间挂连接，不要设太小
+  timeout_seconds: 120
+
+# 渠道 = 一个上游 API 配置（一个 base_url + 一个 key）
+# 这里的 key 是「网关访问上游」用的，不是给客户端用的
+channels:
+  # 渠道 1：假装是 OpenAI 官方
+  # 注意：这个 key 是假的，真实使用时换成你的 key
+  - id: 1
+    name: "openai-primary"
+    type: "openai"
+    base_url: "https://api.openai.com"
+    key: "sk-REPLACE-WITH-YOUR-REAL-OPENAI-KEY"
+    models:
+      - "gpt-4o-mini"
+      - "gpt-4o"
+    # 把客户端请求的 gpt-4o 锁定到具体版本，客户端无感知
+    model_mapping:
+      gpt-4o: "gpt-4o-2024-08-06"
+    weight: 10
+
+  # 渠道 2：同一个模型的备用渠道（模拟第三方中转）
+  # 演示负载均衡：两个渠道都支持 gpt-4o-mini，按权重分流
+  - id: 2
+    name: "openai-backup"
+    type: "openai"
+    base_url: "https://api.deepseek.com"
+    key: "sk-REPLACE-WITH-YOUR-DEEPSEEK-KEY"
+    models:
+      - "deepseek-chat"
+    weight: 5
+
+# 令牌 = 客户端访问网关用的凭证
+tokens:
+  - key: "sk-test-123"
+    name: "本地测试令牌"
+    # models 为空表示不限制模型访问
+  - key: "sk-limited-456"
+    name: "受限令牌（只能访问 gpt-4o-mini）"
+    models:
+      - "gpt-4o-mini"

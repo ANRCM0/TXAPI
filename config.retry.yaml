@@ -1,0 +1,39 @@
+# 重试测试配置：三个渠道都支持 fail429-model
+# 渠道 1、2 的名字里带 fail429，会被假上游返回 429
+# 渠道 3 正常，网关应该在重试后最终落到它上面
+server:
+  addr: "127.0.0.1:8081"
+  retry_times: 3
+  timeout_seconds: 30
+
+channels:
+  - id: 1
+    name: "bad-1"
+    type: "openai"
+    base_url: "http://127.0.0.1:9911"
+    key: "sk-bad-1"
+    models:
+      - "fail429-model"
+    weight: 100
+
+  - id: 2
+    name: "bad-2"
+    type: "openai"
+    base_url: "http://127.0.0.1:9911"
+    key: "sk-bad-2"
+    models:
+      - "fail429-model"
+    weight: 100
+
+  - id: 3
+    name: "good-3"
+    type: "openai"
+    base_url: "http://127.0.0.1:9911"
+    key: "sk-good-3"
+    models:
+      - "fail429-model"
+    weight: 1
+
+tokens:
+  - key: "sk-test-123"
+    name: "测试令牌"
