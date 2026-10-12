@@ -37,6 +37,10 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 	// 1. 筛选出能服务这个模型的渠道
 	candidates := pickChannels(req.Model, allowedModels)
 	if len(candidates) == 0 {
+		// 记账先行：这个提前返回的分支最容易漏掉状态码记录，
+		// 漏了就会把一次彻底失败的请求记成 status=200，账本失去意义
+		c.Set(relayStatusKey, http.StatusServiceUnavailable)
+		c.Set(relayErrorKey, fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model))
 		writeError(c, http.StatusServiceUnavailable,
 			fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model), "no_channel")
 		return
@@ -63,15 +67,31 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 		tried[ch.id] = true
 
 		m := buildMeta(ch, req)
+		// 记账用：把命中的渠道/凭据写进 context，handler 收尾时取用。
+		// 用 context 而不是返回值传递，是因为 Relay 的签名已经很长了，
+		// 再加几个返回值会让调用处难读；context 是这次请求的作用域，正合适。
+		//
+		// 存 uint 而不是 int：RequestLog.ChannelID 是 uint，类型不匹配会让
+		// 类型断言静默失败，日志里 channel_id 全是 0，事后查不出走了哪条渠道。
+		c.Set(relayChannelKey, uint(ch.id))
+		if credID, ok := m.CredentialID(); ok {
+			c.Set(relayCredentialKey, credID)
+		}
+		c.Set(relayActualModelKey, m.ActualModel)
+
 		usage, err := doRelay(c, m, body, timeout)
 		if err == nil {
 			if usage != nil {
+				c.Set(relayUsageKey, usage)
 				log.Printf("[用量] 渠道=%s 模型=%s 输入=%d 输出=%d 合计=%d",
 					ch.name, m.ActualModel, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 			}
+			c.Set(relayStatusKey, http.StatusOK)
 			return
 		}
 		lastErr = err
+		c.Set(relayStatusKey, err.StatusCode)
+		c.Set(relayErrorKey, err.Error.Message)
 
 		// 只有「可重试的错误」才换渠道。
 		// 比如 400 参数错误，换渠道也没用，反而浪费一次请求。
@@ -88,6 +108,8 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 			Error:      model.ErrorDetail{Message: "所有可用渠道均不可用", Type: "all_channels_failed"},
 		}
 	}
+	c.Set(relayStatusKey, lastErr.StatusCode)
+	c.Set(relayErrorKey, lastErr.Error.Message)
 	writeError(c, lastErr.StatusCode, lastErr.Error.Message, lastErr.Error.Type)
 }
 
@@ -160,15 +182,16 @@ func buildMeta(ch *channel, req *model.ModelRequest) *meta.Meta {
 		actual = mapped
 	}
 	return &meta.Meta{
-		ChannelID:   ch.id,
-		ChannelName: ch.name,
-		ChannelType: ch.typ,
-		BaseURL:     ch.baseURL,
-		APIKey:      ch.key,
-		OriginModel: req.Model,
-		ActualModel: actual,
-		IsStream:    req.Stream,
-		Mode:        meta.ModeChatCompletions,
+		ChannelID:          ch.id,
+		ChannelName:        ch.name,
+		ChannelType:        ch.typ,
+		BaseURL:            ch.baseURL,
+		APIKey:             ch.key,
+		OriginModel:        req.Model,
+		ActualModel:        actual,
+		IsStream:           req.Stream,
+		Mode:               meta.ModeChatCompletions,
+		CredentialIDValue:  ch.credentialID,
 	}
 }
 
@@ -200,16 +223,32 @@ func modelAllowed(modelName string, allowedModels []string) bool {
 	return false
 }
 
-// selectWeighted 在候选渠道里按权重随机挑一个，跳过已试过的。
+// selectWeighted 在候选渠道里挑一个，跳过已试过的。
 //
-// 为什么用加权随机而不是轮询：
-// 权重让运维可以把流量按比例压到不同渠道（比如新渠道先给 10% 流量试水），
-// 轮询做不到这一点。
+// 两级选择（对应 PLAN 的 priority + weight 语义）：
+//  1. 先按 priority 分层，只在高优先级层里选——「主备渠道」就是这个语义，
+//     备份渠道不该抢主力渠道的流量
+//  2. 同一层内按 weight 加权随机，让运维可以把流量按比例压到不同渠道
+//     （比如新渠道先给 10% 流量试水），轮询做不到这一点
+//
+// 为什么用加权随机而不是纯轮询：权重让「试水比例」可表达；轮询是权重全相等的特例。
 func selectWeighted(candidates []*channel, tried map[int]bool) *channel {
 	pool := make([]*channel, 0, len(candidates))
 	total := 0
+	// 未试过的候选里的最高优先级。只在这一层里选，低优先级渠道留作兜底。
+	maxPriority := 0
+	first := true
 	for _, ch := range candidates {
 		if tried[ch.id] {
+			continue
+		}
+		if first || ch.priority > maxPriority {
+			maxPriority = ch.priority
+			first = false
+		}
+	}
+	for _, ch := range candidates {
+		if tried[ch.id] || ch.priority != maxPriority {
 			continue
 		}
 		pool = append(pool, ch)
@@ -257,6 +296,21 @@ func writeError(c *gin.Context, statusCode int, message, errType string) {
 	}
 	c.JSON(statusCode, gin.H{"error": gin.H{"message": message, "type": errType}})
 }
+
+// 记账用的 context key。
+//
+// 为什么 Relay 把结果写进 context 而不是返回：记账信息（命中的渠道、
+// 实际模型名、用量、状态码）在重试过程中会不断被覆盖，只有「最后一次
+// 尝试的结果」才对账本有意义。写在 context 上，handler 收尾时读到的
+// 天然就是最终值，不需要 Relay 再包一个结果结构体往外传。
+const (
+	relayStatusKey      = "relay_status"
+	relayChannelKey     = "relay_channel_id"
+	relayCredentialKey  = "relay_credential_id"
+	relayActualModelKey = "relay_actual_model"
+	relayUsageKey       = "relay_usage"
+	relayErrorKey       = "relay_error"
+)
 
 // cfgRetryTimes 由 Init 从配置写入。
 var cfgRetryTimes = 2

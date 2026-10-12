@@ -22,6 +22,15 @@ type Meta struct {
 	IsStream    bool
 	// Mode 是转发模式（对话/向量/图片…），决定请求路径和响应解析方式。
 	Mode int
+	// CredentialID 是本次实际使用的凭据 ID，记账时要带上它——
+	// 否则「哪个 Key 出的问题」在日志里查不出来。
+	// P2 由 registry 在选 Key 时确定，P3 换成调度器后由调度器回填。
+	CredentialIDValue uint
+}
+
+// CredentialID 返回本次使用的凭据 ID；未设置时返回 (0, false)。
+func (m *Meta) CredentialID() (uint, bool) {
+	return m.CredentialIDValue, m.CredentialIDValue != 0
 }
 
 // 转发模式。目前只实现对话，留出常量方便后续扩展。

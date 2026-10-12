@@ -11,8 +11,22 @@ import (
 
 	"minigateway/internal/config"
 	"minigateway/internal/relay"
+	"minigateway/internal/server/api"
 	"minigateway/internal/server/middleware"
+	"minigateway/internal/store"
 )
+
+// Deps 是组装引擎所需的全部依赖。
+//
+// 为什么用结构体而不是一长串参数：参数已经多到容易传错位（cfg 和 store 都是指针），
+// 具名字段让调用处自解释。
+type Deps struct {
+	Cfg   *config.Config
+	Store *store.Store
+	// AdminAuth 是管理 API 的鉴权中间件，nil 表示暂不鉴权（P2 现状）。
+	// 留这个字段就是留挂载点：P3 实现管理员鉴权后，在 main 里塞进来即可。
+	AdminAuth gin.HandlerFunc
+}
 
 // NewEngine 组装中间件链和路由。
 //
@@ -22,7 +36,7 @@ import (
 //	RequestID → 给每个请求一个 ID，后面所有日志都带上它
 //	Auth      → 校验令牌，把令牌信息放进上下文
 //	Relay     → 真正的转发
-func NewEngine(cfg *config.Config) *gin.Engine {
+func NewEngine(deps Deps) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 
@@ -30,8 +44,8 @@ func NewEngine(cfg *config.Config) *gin.Engine {
 	engine.Use(middleware.RequestID())
 	engine.Use(middleware.CORS())
 
-	// 令牌鉴权：把配置里的令牌表交给中间件
-	auth := middleware.NewAuth(cfg.Tokens)
+	// 令牌鉴权：查 store 的内存缓存，改令牌不用重启
+	auth := middleware.NewAuth(deps.Store)
 
 	// 健康检查不需要鉴权，方便 Docker healthcheck 和负载均衡探活
 	engine.GET("/healthz", func(c *gin.Context) {
@@ -43,6 +57,18 @@ func NewEngine(cfg *config.Config) *gin.Engine {
 
 	// 转发主入口：对话补全
 	engine.POST("/v1/chat/completions", auth.Handle(), relay.HandleChatCompletions)
+
+	// 管理 API：渠道/令牌/日志 CRUD。
+	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。
+	apiHandler := api.New(deps.Store, func() {
+		// 渠道变更后热刷新转发层渠道池：这就是「不重启网关就生效」的那一环
+		if err := relay.Reload(deps.Store.Channels()); err != nil {
+			// 刷新失败不能影响 API 的返回值（数据已经落库了），
+			// 但必须响亮的告警——否则会出现「库里改了、转发还用旧的」的静默故障
+			gin.DefaultErrorWriter.Write([]byte("[热更新] 刷新渠道池失败: " + err.Error() + "\n"))
+		}
+	})
+	apiHandler.Register(engine.Group(""), deps.AdminAuth)
 
 	// 兜底：其他路径统一返回 404，格式保持 OpenAI 风格，
 	// 避免客户端因为拿到 HTML 404 页面而解析失败
