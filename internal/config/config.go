@@ -2,6 +2,13 @@
 //
 // 设计原则：配置在启动时一次性加载完，运行期不再读盘。
 // 这样转发路径上没有任何文件 IO，也不会因为配置文件被改动导致行为漂移。
+//
+// P2 起职责收窄：YAML 只剩两件事——
+//  1. server 段：网关自身运行参数（监听地址/重试/超时）
+//  2. database 段：数据库位置
+//  3. channels / tokens 段降级为「首次启动的种子数据」，只在数据库为空时导入一次
+//
+// 理由：渠道和令牌要能通过 REST API 热更新，就不能再把它们当成静态配置。
 package config
 
 import (
@@ -22,21 +29,30 @@ type ServerConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds"`
 }
 
-// ChannelConfig 描述一个上游渠道（一个 API Key + 一个地址）。
+// DatabaseConfig 是存储层配置。
+type DatabaseConfig struct {
+	// Driver 目前只支持 "sqlite"（留字段给 PostgreSQL，见 PLAN 技术栈）。
+	Driver string `yaml:"driver"`
+	// Path 是 SQLite 文件路径，相对路径按进程工作目录解析。
+	// 默认 data/gateway.db。
+	Path string `yaml:"path"`
+}
+
+// ChannelConfig 描述一个上游渠道，仅用于「从 YAML 导入空数据库」。
+//
+// 注意：这个结构体是**种子数据格式**，不是运行期渠道定义。
+// 运行期渠道定义在 internal/model 的 Channel 上，两者靠 seed 逻辑转换。
 type ChannelConfig struct {
 	ID      int    `yaml:"id"`
 	Name    string `yaml:"name"`
 	Type    string `yaml:"type"`
 	BaseURL string `yaml:"base_url"`
-	Key     string `yaml:"key"`
-	// Models 是这个渠道支持的模型列表，支持通配符 "*"。
-	// 路由时就靠它判断「这个模型该走哪些渠道」。
-	Models []string `yaml:"models"`
-	// ModelMapping 把客户端请求的模型名映射成上游真实模型名。
-	// 例如 {"gpt-4o": "gpt-4o-2024-08-06"}，不改客户端就能锁定版本。
-	ModelMapping map[string]string `yaml:"model_mapping"`
-	// Weight 是加权随机的权重，越大被选中概率越高。
-	Weight int `yaml:"weight"`
+	// Key 是给上游用的渠道 key。导入时会变成该渠道下的第一个凭据（credential），
+	// 因为从 P2 开始「渠道」和「Key」就是两个概念了。
+	Key     string            `yaml:"key"`
+	Models  []string          `yaml:"models"`
+	Mapping map[string]string `yaml:"model_mapping"`
+	Weight  int               `yaml:"weight"`
 	// Enabled 用指针是为了区分「没写」和「写了 false」。
 	Enabled *bool `yaml:"enabled"`
 }
@@ -44,20 +60,20 @@ type ChannelConfig struct {
 // IsEnabled 在没配置 enabled 时默认视为启用。
 func (c *ChannelConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
 
-// TokenConfig 是调用方（客户端）用来访问网关的凭证。
-// 注意：渠道的 Key 是给上游的，令牌的 Key 是给客户端的，两者完全不同。
+// TokenConfig 是客户端访问网关的凭证，同样是种子数据格式。
 type TokenConfig struct {
-	Key  string `yaml:"key"`
-	Name string `yaml:"name"`
+	Key  string   `yaml:"key"`
+	Name string   `yaml:"name"`
 	// Models 限制这个令牌能访问哪些模型，空表示不限制。
 	Models []string `yaml:"models"`
-	// Quota 预留给后续计费，0 表示不限额度。
+	// Quota 预留给 P5 计费，0 表示不限额度。
 	Quota float64 `yaml:"quota"`
 }
 
 // Config 是整份配置的根结构。
 type Config struct {
 	Server   ServerConfig    `yaml:"server"`
+	Database DatabaseConfig  `yaml:"database"`
 	Channels []ChannelConfig `yaml:"channels"`
 	Tokens   []TokenConfig   `yaml:"tokens"`
 }
@@ -89,6 +105,12 @@ func (c *Config) applyDefaults() {
 	if c.Server.TimeoutSeconds == 0 {
 		c.Server.TimeoutSeconds = 120
 	}
+	if c.Database.Driver == "" {
+		c.Database.Driver = "sqlite"
+	}
+	if c.Database.Path == "" {
+		c.Database.Path = "data/gateway.db"
+	}
 	for i := range c.Channels {
 		ch := &c.Channels[i]
 		if ch.ID == 0 {
@@ -104,14 +126,12 @@ func (c *Config) applyDefaults() {
 }
 
 // validate 在启动时就拦住配错的配置。
-// 宁可启动失败，也不要等到线上第一个请求打进来才发现 key 是空的。
+//
+// P2 的变化：channels / tokens 从「必须有」降级为「可选」。
+// 数据库里已经有渠道时，YAML 完全可以只有 server + database 两段；
+// 反之数据库为空但 YAML 有种子数据时，导入逻辑会接管。
+// 只有「两边都没有渠道」才是真正的启动失败。
 func (c *Config) validate() error {
-	if len(c.Channels) == 0 {
-		return fmt.Errorf("配置里至少要有一个渠道")
-	}
-	if len(c.Tokens) == 0 {
-		return fmt.Errorf("配置里至少要有一个令牌")
-	}
 	seenChannel := map[int]bool{}
 	for _, ch := range c.Channels {
 		if seenChannel[ch.ID] {
@@ -121,8 +141,9 @@ func (c *Config) validate() error {
 		if ch.BaseURL == "" {
 			return fmt.Errorf("渠道 %d(%s) 缺少 base_url", ch.ID, ch.Name)
 		}
+		// P2 起渠道的 key 挂在凭据上，但种子数据允许直接写 key 字段
 		if ch.Key == "" {
-			return fmt.Errorf("渠道 %d(%s) 缺少 key", ch.ID, ch.Name)
+			return fmt.Errorf("渠道 %d(%s) 缺少 key（导入时会成为该渠道的第一个凭据）", ch.ID, ch.Name)
 		}
 		if len(ch.Models) == 0 {
 			return fmt.Errorf("渠道 %d(%s) 没有配置任何模型", ch.ID, ch.Name)
@@ -139,4 +160,9 @@ func (c *Config) validate() error {
 		seenToken[tk.Key] = true
 	}
 	return nil
+}
+
+// HasSeedData 判断 YAML 里是否带了可导入的种子数据。
+func (c *Config) HasSeedData() bool {
+	return len(c.Channels) > 0 || len(c.Tokens) > 0
 }

@@ -1,4 +1,7 @@
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 /tmp/
 mini-gateway
+gateway

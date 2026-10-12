@@ -10,14 +10,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"minigateway/internal/config"
+	"minigateway/internal/model"
 )
 
 // 上下文 key。用常量而不是裸字符串，避免拼错导致取值拿到 nil。
 const (
-	CtxTokenName   = "token_name"
+	CtxTokenName    = "token_name"
 	CtxAllowedModel = "allowed_models"
-	CtxRequestID   = "request_id"
+	CtxRequestID    = "request_id"
+	// CtxTokenID 是令牌在数据库里的 ID，写日志时要带上它，
+	// 否则「哪个令牌打的」只能靠 key 反查
+	CtxTokenID = "token_id"
 )
 
 // Recovery 捕获 panic，避免一个请求的异常打挂整个网关进程。
@@ -68,7 +71,7 @@ func RequestID() gin.HandlerFunc {
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -78,27 +81,30 @@ func CORS() gin.HandlerFunc {
 	}
 }
 
+// TokenLookup 是令牌查询能力的最小接口。
+//
+// 为什么用接口而不是直接传 *store.Store：middleware 是 HTTP 层的基础设施，
+// 不该依赖存储层的具体类型。这样以后令牌挪到 Redis 或多级缓存，
+// 只要实现同样的方法签名，中间件一行不改。
+//
+// 实现方（store.Store）负责过滤掉「已吊销/已过期」的令牌，
+// 中间件只关心「查得到就是合法的」。
+type TokenLookup interface {
+	LookupToken(key string) (model.TokenView, bool)
+}
+
 // Auth 校验客户端令牌。
 //
 // 令牌是「客户端访问网关」的凭证，和「网关访问上游」的渠道 key 是两回事。
-// 令牌表直接放内存：读多写极少，map 查找是 O(1)，
-// 不需要为了这个引入数据库查询。
+// P2 起令牌来自数据库（经 store 的内存缓存），map 查找仍是 O(1)，
+// 不产生任何 SQLite 读——管理 API 改了令牌，下一次请求就能看到。
 type Auth struct {
-	tokens map[string]tokenInfo
+	lookup TokenLookup
 }
 
-type tokenInfo struct {
-	name   string
-	models []string
-}
-
-// NewAuth 用配置里的令牌列表构建鉴权器。
-func NewAuth(tokens []config.TokenConfig) *Auth {
-	m := make(map[string]tokenInfo, len(tokens))
-	for _, t := range tokens {
-		m[t.Key] = tokenInfo{name: t.Name, models: t.Models}
-	}
-	return &Auth{tokens: m}
+// NewAuth 用令牌查询源构建鉴权器。
+func NewAuth(lookup TokenLookup) *Auth {
+	return &Auth{lookup: lookup}
 }
 
 // Handle 返回鉴权中间件。
@@ -109,14 +115,17 @@ func (a *Auth) Handle() gin.HandlerFunc {
 			abortUnauthorized(c, "缺少 API Key。请在 Authorization 头里带上 Bearer <key>")
 			return
 		}
-		info, ok := a.tokens[key]
+		view, ok := a.lookup.LookupToken(key)
 		if !ok {
+			// 不区分「key 不存在」和「key 已过期」：把区别说出去等于
+			// 告诉攻击者哪些 key 是真实存在的
 			abortUnauthorized(c, "无效的 API Key")
 			return
 		}
 		// 把令牌信息放进上下文，后续 handler 用来做模型权限校验和日志
-		c.Set(CtxTokenName, info.name)
-		c.Set(CtxAllowedModel, info.models)
+		c.Set(CtxTokenName, view.Name)
+		c.Set(CtxAllowedModel, view.Models)
+		c.Set(CtxTokenID, view.ID)
 		c.Next()
 	}
 }
