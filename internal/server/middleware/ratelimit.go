@@ -305,9 +305,18 @@ func TokenRateLimit(limiter Limiter) gin.HandlerFunc {
 		}
 		if view.TPMLimit > 0 {
 			// 请求前只能按请求体预估 token 数，真实 usage 要等上游响应。
-			// 预估值先占位，响应后由 finishTokens 用真实用量修正差额。
+			// 预估值先占位，响应后由 FinishTokens 用真实用量修正差额。
+			//
+			// TPM 必须用自己的桶（令牌桶 key 加 ":tpm" 后缀）：RPM 的
+			// 判定是 len(events)（数「笔数」），而 TPM 记的是「token
+			// 量」外加响应后补记的差额笔。两个维度共用一个桶时，TPM
+			// 的每一笔都会被 RPM 当成一次请求数进去——一个同时开了
+			// RPM=3 和 TPM 的令牌，实际每分钟只能过 1 个请求
+			// （1 笔 RPM + 1 笔预估 + 1 笔补差 = 3 笔，第 2 个请求
+			// 就被 RPM 挡掉）。
 			est := estimatePromptTokens(c)
-			allowed, retry := limiter.AllowTokens(c.Request.Context(), key, view.TPMLimit, est, now)
+			tpmKey := tpmBucketKey(view.ID)
+			allowed, retry := limiter.AllowTokens(c.Request.Context(), tpmKey, view.TPMLimit, est, now)
 			if !allowed {
 				abortRateLimited(c, retry, fmt.Sprintf(
 					"令牌 %q 每分钟 token 数超过上限 %d（本次预估 %d）", view.Name, view.TPMLimit, est))
@@ -350,7 +359,7 @@ func FinishTokens(c *gin.Context, limiter Limiter, actualTokens int) {
 	if delta == 0 {
 		return
 	}
-	limiter.AddTokens(c.Request.Context(), tokenBucketKey(view.ID), delta, time.Now())
+	limiter.AddTokens(c.Request.Context(), tpmBucketKey(view.ID), delta, time.Now())
 }
 
 // IPRateLimit 是 IP 级限流中间件，兜底防「没有令牌的暴力探测」。
@@ -384,6 +393,17 @@ func IPRateLimit(limiter Limiter, limit int) gin.HandlerFunc {
 // 免得一个数字形状的令牌 ID 撞上一个数字形状的 IP。
 func tokenBucketKey(tokenID uint) string {
 	return "tok:" + strconv.FormatUint(uint64(tokenID), 10)
+}
+
+// tpmBucketKey 拼出令牌级 TPM 限流的 key（令牌桶 key + ":tpm" 后缀）。
+//
+// 为什么 TPM 不能和 RPM 共用一个桶：RPM 判定的是 len(events)
+// （「几笔请求」），TPM 记的是「多少 token」外加响应后补记的
+// 差额笔。共用一个桶时 TPM 的每一笔都会被 RPM 当成一次请求，
+// 两个维度的阈值会互相挤占（详见 TokenRateLimit 里的说明）。
+// 后缀而不是前缀：tok:3:tpm 与 tok:3 同属令牌 3，肉眼可辨。
+func tpmBucketKey(tokenID uint) string {
+	return tokenBucketKey(tokenID) + ":tpm"
 }
 
 // ipBucketKey 拼出 IP 级限流的 key。

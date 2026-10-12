@@ -231,6 +231,76 @@ func TestRateLimitTPMPreEstimateAndPostCorrection(t *testing.T) {
 	}
 }
 
+// TestRateLimitRPMNotPollutedByTPMEvents：同时开 RPM 和 TPM 时，
+// TPM 的记账（预估值 + 响应后补差）不能挤占 RPM 的请求数。
+//
+// 这条是回归测试：两个维度曾经共用一个桶，RPM 判定 len(events)
+// 会把 TPM 的每一笔当成一次请求——rpm=3 的令牌实际每分钟只放过
+// 1 个请求（1 笔 RPM + 1 笔预估 + 1 笔补差 = 3 笔）。手动验收
+// （curl 连发）先暴露了这个行为，才补上分桶修复和本测试。
+func TestRateLimitRPMNotPollutedByTPMEvents(t *testing.T) {
+	limiter := NewMemoryLimiter()
+	// RPM=3、TPM 放到「token 维度永远不限」的量级，只考察 RPM 是否准确
+	view := model.TokenView{ID: 7, Name: "t", RPMLimit: 3, TPMLimit: 1 << 30}
+
+	e := gin.New()
+	e.POST("/v1/chat/completions", func(c *gin.Context) {
+		c.Set(CtxTokenView, view)
+		c.Set(CtxTokenID, view.ID)
+		c.Next()
+		// 模拟 relay 收尾：真实用量(30)与预估不同，会产生一笔补差记录
+		FinishTokens(c, limiter, 30)
+	}, TokenRateLimit(limiter), func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	for i := 0; i < 3; i++ {
+		if code, _ := post(t, e); code != http.StatusOK {
+			t.Fatalf("第 %d 次请求应放行，实际 %d（TPM 的记账挤占了 RPM 计数）", i+1, code)
+		}
+	}
+	code, retry := post(t, e)
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("第 4 次请求应被 RPM 挡掉（429），实际 %d", code)
+	}
+	if retry == "" {
+		t.Fatal("被 RPM 挡掉也必须带 Retry-After")
+	}
+
+	// RPM 桶里应恰好只有 3 笔请求记录，一笔 TPM 记录都不该混进来
+	lim := limiter.(*memoryLimiter)
+	lim.mu.Lock()
+	n := len(lim.buckets[tokenBucketKey(7)].events)
+	lim.mu.Unlock()
+	if n != 3 {
+		t.Fatalf("RPM 桶应恰好 3 笔请求记录，实际 %d（两个维度没有分桶）", n)
+	}
+}
+
+// TestRateLimitTPMWinsWhenRPMUnlimited：RPM 不限（0）时只有 TPM
+// 生效，且判据是 token 总量而不是请求笔数。
+//
+// 请求体 "hi" 的预估值是 1 token（3 个 ASCII 字符 × 0.25，向上取整），
+// TPM=10 时恰好放 10 个请求、第 11 个被挡。若 RPM 也在偷偷计数，
+// 或预估值没读到（按 0 计），放行数都会偏。
+func TestRateLimitTPMWinsWhenRPMUnlimited(t *testing.T) {
+	limiter := NewMemoryLimiter()
+	view := model.TokenView{ID: 8, Name: "t", RPMLimit: 0, TPMLimit: 10}
+	e := newTestEngine(t, limiter, view)
+
+	allowed := 0
+	for i := 0; i < 30; i++ {
+		if code, _ := post(t, e); code == http.StatusOK {
+			allowed++
+			continue
+		}
+		break
+	}
+	if allowed != 10 {
+		t.Fatalf("TPM=10、单请求预估 1 token 时应恰好放行 10 次，实际 %d", allowed)
+	}
+}
+
 // TestRateLimitConcurrent：并发安全（配合 go test -race）。
 //
 // 限流表是共享可变状态，是最容易出数据竞争的地方。这个测试在
@@ -431,11 +501,13 @@ func TestFinishTokensAppliesRealUsage(t *testing.T) {
 		t.Fatal("TPM 开启时应把预估值写进上下文，供响应后修正")
 	}
 
-	// 窗口里应只剩 (真实 - 预估) 的差额，而不是两笔独立的记录
+	// 窗口里应只剩 (真实 - 预估) 的差额，而不是两笔独立的记录。
+	// 注意查的是 TPM 专用桶（tok:9:tpm），不是 RPM 桶（tok:9）——
+	// 两个维度分桶后 RPM 的数不会被 token 量污染。
 	lim := limiter.(*memoryLimiter)
 	lim.mu.Lock()
 	total := 0
-	for _, ev := range lim.buckets[tokenBucketKey(9)].events {
+	for _, ev := range lim.buckets[tpmBucketKey(9)].events {
 		total += ev.n
 	}
 	lim.mu.Unlock()
