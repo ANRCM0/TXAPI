@@ -45,7 +45,7 @@ type Channel struct {
 	// 这就是「主备渠道」的表达方式——备份渠道不该抢主力渠道的流量。
 	Priority int `gorm:"not null;default:0;index" json:"priority"`
 	// Weight 是同级渠道之间的权重，越大被选中概率越高。
-	Weight int `gorm:"not null;default:1" json:"weight"`
+	Weight int    `gorm:"not null;default:1" json:"weight"`
 	Status string `gorm:"size:16;not null;default:enabled" json:"status"`
 
 	CreatedAt time.Time      `json:"created_at"`
@@ -65,13 +65,13 @@ func (c *Channel) IsEnabled() bool { return c.Status == StatusEnabled }
 // P2 阶段转发链路只用「挑一个可用的 Key」；P3 会在这个表上做加权随机、
 // 失败指数退避冷却、连续失败拉黑、会话亲和。
 type Credential struct {
-	ID        uint `gorm:"primaryKey" json:"id"`
-	ChannelID uint `gorm:"index;not null" json:"channel_id"`
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	ChannelID uint   `gorm:"index;not null" json:"channel_id"`
 	Name      string `gorm:"size:128;not null;default:''" json:"name"`
 	// APIKey 是上游渠道的 key，注意与 tokens 表的客户端 key 完全不同。
 	APIKey string `gorm:"size:512;not null" json:"api_key"`
 	// Weight 是凭据级权重，调度器在渠道内部的多个 Key 之间分流时使用。
-	Weight int `gorm:"not null;default:1" json:"weight"`
+	Weight int    `gorm:"not null;default:1" json:"weight"`
 	Status string `gorm:"size:16;not null;default:active" json:"status"`
 	// FailCount 是连续失败次数，驱动指数退避和自动拉黑。
 	FailCount int `gorm:"not null;default:0" json:"fail_count"`
@@ -87,12 +87,25 @@ type Credential struct {
 
 // IsUsable 判断这个凭据当前能否被调度器选中。
 //
-// 判断条件与 PLAN「3.3 选择算法」一致：状态为 active 且不在冷却期内。
-// P3 会把这个方法换成完整的调度器过滤，这里先给出可用的最小实现。
+// 判断条件与 PLAN「3.3 选择算法」一致：不在冷却期内、且没有被人工停用。
+//
+// 为什么 cooldown 状态在冷却到期后算可用，而不是死等 status 变回 active：
+// 状态从 cooldown 改回 active 是**后台恢复任务**的活（见
+// scheduler.StartRecovery），那个任务最坏要晚一个扫描周期（默认 30s）
+// 才跑。如果这里死等 status，就会出现「冷却时间早就过了、凭据却还选不中」
+// 的空窗；更糟的是恢复任务万一没启动（漏接线、进程刚起还没到第一个
+// tick），凭据会**永久**卡在 cooldown——凭据池单向枯竭，网关表现为
+// 「没有可用渠道」，而运维看到的是「Key 都是好的」。
+//
+// 所以可用性由**时间**说了算，status 只用来表达「被人工/自动拉黑」这类
+// 不可自愈的状态。恢复任务仍然要跑，它的职责是把 DB 里的状态收拾干净
+// （管理界面看得见、重启后不留陈旧状态），不再是可用性的前提。
 func (c *Credential) IsUsable(now time.Time) bool {
-	if c.Status != CredentialActive {
+	// disabled / banned 是「不可自愈」的标记，一律不可用
+	if c.Status == CredentialDisabled || c.Status == CredentialBanned {
 		return false
 	}
+	// active 直接可用；cooldown 看冷却时间是否已过
 	return c.CooldownUntil == 0 || c.CooldownUntil <= now.Unix()
 }
 

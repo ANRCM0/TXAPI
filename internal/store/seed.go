@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"log/slog"
 
 	"gorm.io/gorm"
 
@@ -35,7 +36,11 @@ func (s *Store) SeedFromConfig(cfg *config.Config) (imported bool, err error) {
 	}
 	if nCh > 0 || nTk > 0 {
 		// 数据库非空，跳过导入。记一条日志说明原因，避免「我改了 YAML 怎么不生效」的困惑。
-		fmt.Printf("[种子导入] 数据库已有 %d 个渠道 / %d 个令牌，跳过 YAML 导入\n", nCh, nTk)
+		//
+		// 用 slog 而不是 fmt.Printf：这条日志和进程里其他日志一样要受
+		// log_level 控制，fmt.Printf 会绕过级别过滤，在 info 级别下
+		// 把种子导入的状态和请求摘要混在一起刷屏。
+		slog.Info("[种子导入] 数据库非空，跳过 YAML 导入", "channels", nCh, "tokens", nTk)
 		return false, nil
 	}
 
@@ -78,11 +83,13 @@ func (s *Store) SeedFromConfig(cfg *config.Config) (imported bool, err error) {
 
 		for _, tc := range cfg.Tokens {
 			tk := &model.Token{
-				Name:   tc.Name,
-				Key:    tc.Key,
-				Models: model.StringList(tc.Models),
-				Quota:  tc.Quota,
-				Status: model.TokenStatusActive,
+				Name:     tc.Name,
+				Key:      tc.Key,
+				Models:   model.StringList(tc.Models),
+				Quota:    tc.Quota,
+				RPMLimit: tc.RPMLimit,
+				TPMLimit: tc.TPMLimit,
+				Status:   model.TokenStatusActive,
 			}
 			if err := tx.Create(tk).Error; err != nil {
 				return fmt.Errorf("导入令牌 %s 失败: %w", tc.Name, err)
@@ -97,6 +104,7 @@ func (s *Store) SeedFromConfig(cfg *config.Config) (imported bool, err error) {
 	if err := s.reloadCache(); err != nil {
 		return false, err
 	}
-	fmt.Printf("[种子导入] 已从 YAML 导入 %d 个渠道、%d 个令牌\n", len(cfg.Channels), len(cfg.Tokens))
+	slog.Info("[种子导入] 已从 YAML 导入种子数据",
+		"channels", len(cfg.Channels), "tokens", len(cfg.Tokens))
 	return true, nil
 }

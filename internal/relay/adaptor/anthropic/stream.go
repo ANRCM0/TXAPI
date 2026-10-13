@@ -37,8 +37,8 @@ import (
 //   - 每个 content block 的类型（text 还是 tool_use，delta 的解析方式不同）
 //   - 累积的 usage（input_tokens 在 message_start，output_tokens 在 message_delta）
 type translator struct {
-	id      string
-	model   string
+	id    string
+	model string
 	// blockTypes 记录每个 index 的内容块类型：0=text, 1=tool_use
 	// 流式里工具调用的参数是 input_json_delta 碎片，要按 index 归位
 	blockTypes map[int]string

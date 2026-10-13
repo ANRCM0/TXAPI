@@ -7,10 +7,15 @@
 package model
 
 // ModelRequest 只解析路由必需的字段。
-// 中间件和处理器不需要理解 messages、tools、temperature 这些东西。
+//
+// MaxTokens 是唯一的例外：它不在路由必需之列，但 P5 的预扣需要它
+// 算「费用上限」（max_tokens × 输出单价）。多解析一个标量字段
+// 不影响透明代理——请求体本身仍然原样透传，这个结构体只是
+// 路由/计费需要的信息投影。
 type ModelRequest struct {
-	Model  string `json:"model"`
-	Stream bool   `json:"stream"`
+	Model     string `json:"model"`
+	Stream    bool   `json:"stream"`
+	MaxTokens int    `json:"max_tokens"`
 }
 
 // Usage 是上游返回的 token 用量，是计费的唯一依据。

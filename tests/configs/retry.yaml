@@ -6,6 +6,9 @@ server:
   retry_times: 3
   timeout_seconds: 30
 
+# 管理 API 密钥（必填，缺失拒绝启动）。测试占位值。
+admin_key: "sk-test-admin"
+
 database:
   driver: "sqlite"
   path: ".local/data/test-retry.db"

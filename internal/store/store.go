@@ -30,7 +30,11 @@ import (
 type Store struct {
 	db *gorm.DB
 
-	mu      sync.RWMutex
+	// logs 是请求日志的异步批量写入器。由 Open 创建、Close 先 flush。
+	// 指针类型是为了让「不开异步」的构造路径（测试里直接造 Store）可用。
+	logs *asyncLogWriter
+
+	mu       sync.RWMutex
 	channels []model.Channel
 	tokens   map[string]*model.Token
 }
@@ -74,6 +78,8 @@ func Open(cfg config.DatabaseConfig) (*Store, error) {
 	if err := s.AutoMigrate(); err != nil {
 		return nil, err
 	}
+	// 日志异步写入器：建好表之后再启动，保证第一批日志就能落库
+	s.logs = newAsyncLogWriter(db)
 	if err := s.reloadCache(); err != nil {
 		return nil, err
 	}
@@ -100,8 +106,16 @@ func (s *Store) AutoMigrate() error {
 	return nil
 }
 
-// Close 关闭连接池。
+// Close 先 flush 异步日志再关闭连接池。
+//
+// 顺序是「不丢日志」承诺的兑现处：优雅关闭时 main 先 srv.Shutdown
+// （等在途请求写完并结束日志入队），再走到这里——先排空 channel
+// 落最后一批，数据库才允许关闭。反过来的话 flush 会撞上已关闭的
+// 连接，整批日志丢失。
 func (s *Store) Close() error {
+	if s.logs != nil {
+		s.logs.Close()
+	}
 	sqlDB, err := s.db.DB()
 	if err != nil {
 		return err

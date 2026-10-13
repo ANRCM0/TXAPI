@@ -20,6 +20,9 @@ type TokenInput struct {
 	// 用相对值而不是绝对时间戳：调用方不用关心服务器时区，也更容易表达「30 天有效」。
 	ExpiresInSeconds int64   `json:"expires_in_seconds"`
 	Quota            float64 `json:"quota"`
+	// RPMLimit/TPMLimit 是限流阈值，0 表示不限（与 Quota 的 0=不限 同语义）。
+	RPMLimit int `json:"rpm_limit"`
+	TPMLimit int `json:"tpm_limit"`
 }
 
 // validate 填充默认值并校验。传进来的 in 会被就地修改。
@@ -32,6 +35,12 @@ func (in *TokenInput) validate(now time.Time) error {
 	}
 	if in.ExpiresInSeconds < 0 {
 		return errors.New("expires_in_seconds 不能为负数")
+	}
+	if in.RPMLimit < 0 {
+		return fmt.Errorf("rpm_limit 不能为负数: %d", in.RPMLimit)
+	}
+	if in.TPMLimit < 0 {
+		return fmt.Errorf("tpm_limit 不能为负数: %d", in.TPMLimit)
 	}
 	return nil
 }
@@ -47,6 +56,8 @@ func (in *TokenInput) toModel(now time.Time) *model.Token {
 		Key:       in.Key,
 		Models:    model.StringList(in.Models),
 		Quota:     in.Quota,
+		RPMLimit:  in.RPMLimit,
+		TPMLimit:  in.TPMLimit,
 		ExpiresAt: expiresAt,
 		Status:    model.TokenStatusActive,
 	}
@@ -106,6 +117,8 @@ func (s *Store) UpdateToken(id uint, in *TokenInput) (*model.Token, error) {
 		"name":       updated.Name,
 		"models":     updated.Models,
 		"quota":      updated.Quota,
+		"rpm_limit":  updated.RPMLimit,
+		"tpm_limit":  updated.TPMLimit,
 		"expires_at": updated.ExpiresAt,
 	}
 	if err := s.db.Model(&model.Token{}).Where("id = ?", id).Updates(updates).Error; err != nil {

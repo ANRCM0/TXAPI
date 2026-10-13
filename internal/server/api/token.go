@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -72,54 +71,6 @@ func (h *Handler) DeleteToken(c *gin.Context) {
 	// 令牌不需要 notifyChanged：鉴权中间件直接查 store 的内存缓存，
 	// store 的写操作已经刷过缓存，下一次请求自动生效
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": id})
-}
-
-// ListLogs 处理 GET /api/logs?limit=N。
-//
-// limit 用 query 参数而不是 body：GET 请求带 body 不符合语义，
-// 部分客户端和代理会直接丢掉。
-func (h *Handler) ListLogs(c *gin.Context) {
-	q := store.LogQuery{}
-	if raw := c.Query("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{"message": "limit 必须是正整数，收到: " + raw, "type": "invalid_request"},
-			})
-			return
-		}
-		q.Limit = n
-	}
-	// 超过上限直接截断而不是报错：前端写错 limit 不该让整个查询失败，
-	// 返回 1000 条比返回一个错误有用得多
-	if raw := c.Query("channel_id"); raw != "" {
-		n, err := strconv.ParseUint(raw, 10, 64)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{"message": "非法的 channel_id: " + raw, "type": "invalid_request"},
-			})
-			return
-		}
-		q.ChannelID = uint(n)
-	}
-	if raw := c.Query("token_id"); raw != "" {
-		n, err := strconv.ParseUint(raw, 10, 64)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{"message": "非法的 token_id: " + raw, "type": "invalid_request"},
-			})
-			return
-		}
-		q.TokenID = uint(n)
-	}
-	q.Model = c.Query("model")
-
-	logs, err := h.store.ListLogs(q)
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": logs, "total": len(logs)})
 }
 
 // ListAbilities 处理 GET /api/abilities，暴露路由加速表。

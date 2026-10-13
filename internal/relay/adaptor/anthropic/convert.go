@@ -39,15 +39,15 @@ var ErrUnsupported = errors.New("anthropic: 不支持的参数")
 
 // claudeRequest 是 Anthropic 的请求体。
 type claudeRequest struct {
-	Model       string             `json:"model"`
-	Messages    []claudeMessage    `json:"messages"`
-	System      string             `json:"system,omitempty"`
-	MaxTokens   int                `json:"max_tokens"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	TopP        *float64           `json:"top_p,omitempty"`
-	Stop        []string           `json:"stop_sequences,omitempty"`
-	Stream      bool               `json:"stream,omitempty"`
-	Tools       []claudeTool       `json:"tools,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []claudeMessage `json:"messages"`
+	System      string          `json:"system,omitempty"`
+	MaxTokens   int             `json:"max_tokens"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	TopP        *float64        `json:"top_p,omitempty"`
+	Stop        []string        `json:"stop_sequences,omitempty"`
+	Stream      bool            `json:"stream,omitempty"`
+	Tools       []claudeTool    `json:"tools,omitempty"`
 }
 
 // claudeMessage 是 Anthropic 的消息。content 恒为块数组。
@@ -562,10 +562,10 @@ func unmapStopReason(reason string) string {
 // 不静默：日志里会写明丢了什么。
 var claudeSupportedExtra = map[string]bool{
 	// Claude 支持但规范未建模的：
-	"top_k":             true, // Claude 特有采样参数
-	"metadata":          true, // 请求元数据
-	"thinking":          true, // 扩展思考配置（type/budget_tokens）
-	"service_tier":      true, // 服务层级
+	"top_k":        true, // Claude 特有采样参数
+	"metadata":     true, // 请求元数据
+	"thinking":     true, // 扩展思考配置（type/budget_tokens）
+	"service_tier": true, // 服务层级
 	// 注意：frequency_penalty / presence_penalty / seed / n 等
 	// OpenAI 参数 Claude 完全不支持，不在白名单里——出现即记警告。
 }

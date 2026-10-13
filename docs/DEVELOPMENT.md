@@ -32,7 +32,8 @@ make run CONFIG=tests/configs/openai.yaml
 
 运行数据归 `.local/data/`。数据库不空时，再修改 YAML 种子不会覆盖渠道和 token。开发需要重新导入时使用新数据库路径，不随意删除已有业务数据库。
 
-当前管理 API 未鉴权，只在受控本地环境运行；S0 修复后再更新此说明。将程序放到反向代理后面不自动使管理 API 安全。
+当前管理 API 已启用 `X-Admin-Key` 鉴权（`admin_key` 缺失时网关拒绝启动）；
+管理密钥从环境变量 `GATEWAY_ADMIN_KEY` 注入，不要写进会进 git 的文件。
 
 ## 自动冒烟检查
 
@@ -54,11 +55,11 @@ go run ./tests/upstream/anthropic
 go run ./tests/upstream/gemini
 ```
 
-| 配置 | 网关地址 | 数据库 | 本地客户端 key |
-|---|---|---|---|
-| `tests/configs/openai.yaml` | `127.0.0.1:8080` | `.local/data/test-openai.db` | `sk-test-123` |
-| `tests/configs/retry.yaml` | `127.0.0.1:8081` | `.local/data/test-retry.db` | `sk-test-123` |
-| `tests/configs/protocols.yaml` | `127.0.0.1:8090` | `.local/data/test-protocols.db` | `sk-test-p4` |
+| 配置 | 网关地址 | 数据库 | 本地客户端 key | 管理密钥 |
+|---|---|---|---|---|
+| `tests/configs/openai.yaml` | `127.0.0.1:8080` | `.local/data/test-openai.db` | `sk-test-123` | `sk-test-admin` |
+| `tests/configs/retry.yaml` | `127.0.0.1:8081` | `.local/data/test-retry.db` | `sk-test-123` | `sk-test-admin` |
+| `tests/configs/protocols.yaml` | `127.0.0.1:8090` | `.local/data/test-protocols.db` | `sk-test-p4` | `sk-test-admin` |
 
 上述 key 都是测试占位值。运行前 `make prepare` 创建数据库目录。不同场景独立数据库，避免种子导入被另一场景已有数据跳过。
 
@@ -102,7 +103,7 @@ SDK 检查断言响应非空、finish_reason 与 usage 存在，但不保证所�
 
 改动后执行 `git diff --check`、`make check`；涉及入口、配置或转发时再执行 `make smoke`。新增并发代码运行 `go test -race ./...`。只格式化本次修改的 Go 文件，避免把全仓格式变化混入功能提交。
 
-当前 Go 代码没有 `_test.go`，`go test ./...` 输出 `[no test files]` 是事实，不等于已覆盖业务行为。S0 开始逐项补回归，CI 后续随实际测试扩展。
+当前 Go 代码有 142 个测试用例，覆盖计费、凭据调度、限流、指标格式、日志清理和配置校验；`make check` 会全部执行。S0 所列的协议、并发和权限回归仍需逐项补齐。
 
 ## 从旧目录迁移
 

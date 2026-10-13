@@ -11,12 +11,12 @@ import (
 //   - 记录 OriginModel 和 ActualModel，才能发现「模型映射配错了」
 //   - latency_ms 分开记录首字延迟和总延迟的余地（P5 再拆）
 type RequestLog struct {
-	ID         uint   `gorm:"primaryKey" json:"id"`
-	RequestID  string `gorm:"size:64;index" json:"request_id"`
-	UserID     uint   `gorm:"index" json:"user_id"`
-	TokenID    uint   `gorm:"index" json:"token_id"`
-	ChannelID  uint   `gorm:"index" json:"channel_id"`
-	CredentialID uint `gorm:"index" json:"credential_id"`
+	ID           uint   `gorm:"primaryKey" json:"id"`
+	RequestID    string `gorm:"size:64;index" json:"request_id"`
+	UserID       uint   `gorm:"index" json:"user_id"`
+	TokenID      uint   `gorm:"index" json:"token_id"`
+	ChannelID    uint   `gorm:"index" json:"channel_id"`
+	CredentialID uint   `gorm:"index" json:"credential_id"`
 	// OriginModel 是客户端请求的模型名，ActualModel 是映射后发给上游的名字。
 	OriginModel string `gorm:"size:128;index" json:"origin_model"`
 	ActualModel string `gorm:"size:128" json:"actual_model"`
@@ -33,6 +33,15 @@ type RequestLog struct {
 	// Status 是 HTTP 状态码；0 表示「还没拿到响应就失败了」（网络错误等）。
 	Status       int    `gorm:"not null;default:0" json:"status"`
 	ErrorMessage string `gorm:"type:text" json:"error_message"`
+
+	// IsEstimated 标记 usage 是否为估算值——上游没返回 usage 时按
+	// 字符数降级估算（SPEC 2.3）。true 时 token 数和 cost 都要打折看，
+	// 统计接口会把这类条数单独汇总出来。
+	IsEstimated bool `gorm:"not null;default:false" json:"is_estimated"`
+	// PriceMissing 标记价格表里没有这个模型的单价（SPEC 4.5）：
+	// 按 0 计费但正常服务。它不是 0 就说明成本数字漏了一部分，
+	// 该去补价格表了。
+	PriceMissing bool `gorm:"not null;default:false" json:"price_missing"`
 
 	CreatedAt time.Time `gorm:"index" json:"created_at"`
 }
