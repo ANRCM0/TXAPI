@@ -4,8 +4,9 @@ package middleware
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log"
+	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,16 @@ const (
 	// CtxTokenID 是令牌在数据库里的 ID，写日志时要带上它，
 	// 否则「哪个令牌打的」只能靠 key 反查
 	CtxTokenID = "token_id"
+	// CtxUserID 是令牌所属用户的 ID。P5 的额度是双层结构
+	// （先扣令牌、再扣用户），结算时要扣用户额度；
+	// 日志的 user_id 字段也用它填。
+	CtxUserID = "user_id"
+	// CtxTokenView 是完整的令牌投影（含限流阈值）。
+	// 单独存一份而不是让下游拼：限流中间件要按令牌 ID 分桶、
+	// 读 RPM/TPM 阈值，逐个取 key 会漏字段（加一个字段就要记得
+	// 在这里再加一行）。投影是「鉴权结果的完整表达」，
+	// 一个 key 存一个结构体，以后加字段不用动这里。
+	CtxTokenView = "token_view"
 )
 
 // Recovery 捕获 panic，避免一个请求的异常打挂整个网关进程。
@@ -31,7 +42,13 @@ func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("[panic] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+				// 用 error 级别 + 完整字段：panic 是「网关自己出了
+				// 错」，必须能在日志检索里按级别直接捞出来。
+				// 堆栈单独一个字段，不并进 msg——msg 要能一眼读懂。
+				slog.Error("[panic] 请求处理中崩溃，已按 500 返回",
+					"method", c.Request.Method, "path", c.Request.URL.Path,
+					"request_id", c.GetString(CtxRequestID), "err", err,
+					"stack", string(debug.Stack()))
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 					"error": gin.H{
 						"message": "网关内部错误，请稍后重试",
@@ -122,10 +139,15 @@ func (a *Auth) Handle() gin.HandlerFunc {
 			abortUnauthorized(c, "无效的 API Key")
 			return
 		}
-		// 把令牌信息放进上下文，后续 handler 用来做模型权限校验和日志
+		// 把令牌信息放进上下文，后续 handler 用来做模型权限校验、
+		// 额度扣减、限流分桶和日志
 		c.Set(CtxTokenName, view.Name)
 		c.Set(CtxAllowedModel, view.Models)
 		c.Set(CtxTokenID, view.ID)
+		c.Set(CtxUserID, view.UserID)
+		// 整个投影也存一份：限流中间件要按令牌 ID 分桶并读 RPM/TPM
+		// 阈值，只给它散落的字段会让「加一个令牌字段」变成三处改动。
+		c.Set(CtxTokenView, view)
 		c.Next()
 	}
 }

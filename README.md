@@ -1,68 +1,374 @@
 # API Gateway
 
-面向个人与多用户分发的轻量 LLM API 网关。目标是以独立转发内核为中心，用清晰的模块边界接入权限、凭据调度和管理能力。
+一个自用的 LLM API 网关：把多个上游渠道（OpenAI / Anthropic / Gemini / 任何
+OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴权、凭据池调度、
+协议互转、计费额度、限流、可观测**。
 
-**身份模型只有管理员与普通用户。** 当前代码仍为原型，目标架构与实施步骤见下列文档；文档中的规划不代表功能已经实现。
+定位见 [docs/PLAN.md](docs/PLAN.md)：**自用为主、留多用户扩展口**，单二进制，
+零第三方可观测性依赖，凭据池调度是技术亮点。
 
-| 文档 | 唯一职责 |
-|---|---|
-| [架构设计](docs/ARCHITECTURE.md) | 模块边界、管理员—用户模型、接口原则 |
-| [开发计划](docs/PLAN.md) | 当前状态、分阶段任务、验收标准 |
-| [开发指南](docs/DEVELOPMENT.md) | 构建、测试、配置和目录约定 |
+- 语言/版本：Go 1.23
+- 存储：SQLite（默认，单文件 + WAL）；接口留着 PostgreSQL 的位置
+- Go module 名仍为 `minigateway`（未随仓库更名改动，避免一次性改掉所有导入路径）
 
-## 当前能力
+---
 
-- Go + Gin，SQLite + GORM，渠道与令牌内存缓存。
-- `/v1/chat/completions`、`/v1/models`，客户端 Bearer 令牌与模型限制。
-- 渠道优先级、加权选择、模型映射和失败换渠道。
-- OpenAI 兼容透传，以及 Anthropic/Gemini 上游转换原型。
-- 渠道/令牌管理 API、配置热更新和用量日志。
+## 架构
 
-目前没有完整的管理员登录、普通用户管理、额度结算和凭据池调度。管理 API 尚未启用鉴权；流式转换与缓存还有[已知缺陷](docs/PLAN.md#s0-修复正确性与安全边界)。当前版本仅适合受控本地开发，不应直接暴露公网。
-
-## 本地启动
-
-需要 Go 1.23 或更高版本。从仓库根目录执行：
-
-```bash
-make init
-# 编辑 config.yaml，替换上游地址、模型名和两种密钥占位符
-make build
-./bin/gateway -config config.yaml
+```
+客户端 (Cherry Studio / NextChat / Cursor / 任何 OpenAI SDK)
+   │  OpenAI 兼容协议 + Bearer <令牌>
+   ▼
+┌──────────────────────────────────────────────────────────────┐
+│ HTTP 层   internal/server + middleware                       │
+│   RequestID → IP限流 → CORS → Auth(令牌) → 令牌限流 → Relay    │
+│   路由: /v1/* 转发   /api/* 管理   /metrics   /healthz        │
+├──────────────────────────────────────────────────────────────┤
+│ 转发层   internal/relay                       ⭐ 核心          │
+│   模型路由(索引) → 选渠道+选凭据 → 额度预扣 → 协议转换          │
+│   → 转发(失败换目标重试) → 结算 → 落库+埋指标                   │
+├──────────────────────────────────────────────────────────────┤
+│ 业务层                                                         │
+│   scheduler  凭据池调度(加权随机/冷却/拉黑/亲和/恢复)           │
+│   billing    计费(价格表/预扣→结算/原子扣减)                    │
+│   metrics    Prometheus 指标(手写 exposition，零依赖)           │
+│   logging    结构化日志(log/slog，级别可配)                     │
+├──────────────────────────────────────────────────────────────┤
+│ 存储层   internal/store                                        │
+│   SQLite + GORM + 内存缓存(渠道/令牌) + 异步批量日志写入          │
+└──────────────────────┬───────────────────────────────────────┘
+                       │ 渠道 Key（每个渠道可配多把，构成凭据池）
+                       ▼
+        上游: OpenAI / Anthropic / Gemini / DeepSeek / ...
 ```
 
-`make init` 不覆盖已有 `config.yaml`，只创建本地配置和运行目录。`config.yaml` 不提交；可复用的示例在 `configs/`。渠道与令牌仅在数据库空时从 YAML 导入，之后通过管理 API 更新。
+目录结构：
+
+```
+.
+├── cmd/gateway/                 入口：装配依赖 + 启动 + 优雅关闭（极薄）
+├── Dockerfile                   多阶段构建（golang:1.23-alpine → alpine）
+├── docker-compose.yml           网关 + 命名数据卷
+├── Makefile                     init / build / run / check / smoke
+├── configs/gateway.example.yaml 可提交的配置模板（不含真实密钥）
+├── internal/
+│   ├── config/                  YAML + 环境变量 + 启动期校验
+│   ├── logging/                 log/slog 初始化（级别来自配置）
+│   ├── metrics/                 Prometheus 指标（手写 exposition 格式）
+│   ├── model/                   GORM 数据模型
+│   ├── store/                   数据访问 + 内存缓存 + 异步日志 + 清理
+│   ├── billing/                 价格表、额度预扣/结算、原子扣减
+│   ├── scheduler/               凭据池调度：选择/健康/亲和/恢复/清理
+│   ├── relay/                   转发核心
+│   │   ├── registry.go          渠道池 + 适配器表 + 模型索引
+│   │   ├── relay.go             单次转发 + 失败重试
+│   │   ├── handler.go           HTTP 入口 + 收尾（结算/记账/埋点）
+│   │   ├── convert.go           协议枢纽（客户端 → 规范 → 上游）
+│   │   ├── canonical/           规范格式（厂商中立的请求/响应表示）
+│   │   └── adaptor/             各厂商适配器（openai/anthropic/gemini）
+│   └── server/
+│       ├── server.go            中间件链 + 路由注册
+│       ├── api/                 管理 API（渠道/凭据/令牌/日志/价格 CRUD）
+│       └── middleware/          Recovery/RequestID/CORS/Auth/限流/AdminAuth
+├── tests/
+│   ├── configs/                 各场景独立数据库的手工测试配置
+│   ├── upstream/                假上游（无 Key 跑通全链路）
+│   └── smoke/                   冒烟检查与可选 SDK 检查
+├── docs/                        架构、开发计划、开发指南、P6 方案
+└── bin/、.local/                本地生成物，不提交
+```
+
+> 入口在 `cmd/gateway`，不是仓库根目录：`go run ./cmd/gateway` / `go build ./cmd/gateway`。
+> 根目录的 `config.yaml` 是个人配置，被 Git 忽略；可提交的模板在 `configs/`。
+
+---
+
+## 功能矩阵
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| 令牌鉴权 | ✅ | Bearer 令牌，可按令牌限制可访问的模型 |
+| 渠道路由 | ✅ | 按模型名索引命中（O(1)，支持 `*` 通配渠道），按权重分流 |
+| 凭据池调度 | ✅ | 每请求选 Key：加权随机 + 一致性哈希亲和 |
+| 健康状态机 | ✅ | 失败分类 → 指数退避冷却（30s 起，封顶 1h）→ 连续失败拉黑 |
+| 自动恢复 | ✅ | 冷却到期自动回 active（每 30s 扫描）；banned 需人工解封 |
+| 失败重试 | ✅ | 重试单元是 (渠道, 凭据) 对；400/404/422 不重试也不罚凭据 |
+| 协议互转 | ✅ | OpenAI ↔ Anthropic ↔ Gemini（经规范格式枢纽） |
+| 流式转发 | ✅ | SSE 逐行翻译，打字机效果保留；anthropic/gemini 也支持 |
+| embeddings | ✅ | 与对话共用整条链路，只按输入 token 计费 |
+| 计费 | ✅ | 价格表（支持通配符/分组倍率）、预扣→结算、原子额度扣减 |
+| 限流 | ✅ | 令牌级 RPM/TPM（滑动窗口）+ IP 级兜底；429 + `Retry-After` |
+| 结构化日志 | ✅ | log/slog，级别可配（debug/info/warn/error），七个统一字段 |
+| Prometheus 指标 | ✅ | `GET /metrics`，六个指标族；手写 exposition，零新依赖 |
+| 日志清理 | ✅ | `logs` 表按保留天数每日分批删除（每批 1000 行） |
+| 管理 API | ✅ | 渠道/凭据/令牌/日志/统计/价格 CRUD，`X-Admin-Key` 鉴权 |
+| Docker | ✅ | 多阶段构建 + compose + 数据卷；密钥走环境变量 |
+| CI | ✅ | build + vet + `go test -race` + `gofmt -l` |
+| 用户注册/登录 | ❌ | 自用场景「令牌即租户」，见 [docs/PLAN.md](docs/PLAN.md) 的不做清单 |
+| 支付/充值 | ❌ | 同上 |
+| images/audio/rerank | ❌ | 适配器接口已留扩展位，等真有需求 |
+| Redis 限流 | ❌ | 单机内存版够自用；接口留位置，需要时替换实现 |
+| PostgreSQL | ❌ | `Open()` 对非 SQLite 直接报错，属部署阶段 |
+
+> `docs/PLAN.md` 是上游建立的开发基线，其「当前状态」一节写于本分支的 P5/P6
+> 代码合入之前，因此仍把计费与请求级凭据调度列为未实现。能力状态以本表为准。
+
+---
+
+## 快速开始
+
+### 方式一：本机编译（无需 Docker）
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+
+make init          # 只在缺少 config.yaml 时从 configs/ 复制模板
+# 编辑 config.yaml：填 admin_key、替换上游地址与密钥占位符
+make build
+make run
+```
 
 不使用 Make 时：
 
 ```bash
 mkdir -p bin .local/data
-# 仅在没有 config.yaml 时复制，避免覆盖已有配置
 test -f config.yaml || cp configs/gateway.example.yaml config.yaml
 go build -o bin/gateway ./cmd/gateway
 ./bin/gateway -config config.yaml
 ```
 
-## 无真实密钥的检查
+**管理密钥是必填项**：`admin_key`（或环境变量 `GATEWAY_ADMIN_KEY`）缺失时
+网关拒绝启动。管理 API 能改渠道、看上游 Key，裸奔的代价是「谁连上 localhost
+就能拿走全部凭据」。
+
+### 方式二：Docker Compose
 
 ```bash
-make check
-make smoke
+# 密钥全部走环境变量（不写进镜像、不写进 compose 文件）
+export GATEWAY_ADMIN_KEY=dev-secret
+export GATEWAY_CHANNEL_KEY_1=sk-your-real-key
+
+docker compose up -d
+curl http://127.0.0.1:8080/healthz
 ```
 
-`make check` 执行构建、vet 和 Go 测试；当前尚无 Go 单元测试，编译通过不能代表业务正确性。`make smoke` 使用 Python 标准库管理本地假 OpenAI 上游和临时数据库，验证启动、鉴权、非流式与流式转发，不会调用外部模型或使用真实密钥。
+- 配置文件用 volume 挂载：改渠道不用重新 build
+- SQLite 落在命名卷 `gateway-data`：`docker compose down` 不丢数据，
+  `docker compose down -v` 才清
+- 日志级别/保留天数也可用环境变量覆盖：
+  `GATEWAY_LOG_LEVEL=debug`、`GATEWAY_LOG_RETENTION_DAYS=7`
+- 容器内监听地址由 `GATEWAY_ADDR` 覆盖为 `0.0.0.0:8080`；端口默认只绑
+  `127.0.0.1`（见 `docker-compose.yml` 的注释）
 
-## 目录
+### 配置项
 
-| 路径 | 内容 |
-|---|---|
-| `cmd/gateway/` | 程序入口 |
-| `internal/` | 当前业务实现；按计划逐步提取内核 |
-| `configs/` | 可提交的示例配置，不含真实密钥 |
-| `tests/configs/` | 各场景独立数据库的测试配置 |
-| `tests/upstream/` | 本地假上游 |
-| `tests/smoke/` | 冒烟检查与可选 SDK 检查 |
-| `docs/` | 架构、开发计划和操作指南 |
-| `bin/`、`.local/` | 本地生成物，不提交 |
+| 字段 | 默认 | 环境变量 | 说明 |
+|------|------|----------|------|
+| `server.addr` | `127.0.0.1:8080` | `GATEWAY_ADDR` | 监听地址（容器内必须 0.0.0.0） |
+| `server.retry_times` | `2` | — | 首次失败后最多再试几次 |
+| `server.timeout_seconds` | `120` | — | 单次上游请求超时（流式别设太小） |
+| `server.ip_rpm_limit` | `0`（不限） | — | IP 级限流，防无令牌的探测请求 |
+| `admin_key` | 必填 | `GATEWAY_ADMIN_KEY` | 管理 API 密钥，缺失拒绝启动 |
+| `log_level` | `info` | `GATEWAY_LOG_LEVEL` | `debug`/`info`/`warn`/`error` |
+| `log_retention_days` | `30` | `GATEWAY_LOG_RETENTION_DAYS` | `logs` 表保留天数，`0` 关闭清理 |
+| `database.driver` | `sqlite` | — | 目前只支持 sqlite |
+| `database.path` | `data/gateway.db` | — | SQLite 文件路径 |
+| `channels[].key` | — | `GATEWAY_CHANNEL_KEY_<id>` | 渠道上游 Key，环境变量优先 |
 
-入口已从根目录 `main.go` 移至 `cmd/gateway/main.go`；原 `go run .` / `go build .` 请改为 `go run ./cmd/gateway` / `go build ./cmd/gateway`。Go module 暂保留 `minigateway`，避免目录整理时额外修改所有导入路径。
+> **环境变量优先于 YAML** 是全局规则：部署时改配置不用重新打镜像/改文件，
+> 密钥尤其应该走环境变量（不进 git）。
+
+> **渠道和令牌不是运行期配置**：`channels`/`tokens` 段只在**数据库为空时**
+> 导入一次（种子数据），之后一律通过管理 API 增删改，改完立即生效、不用重启。
+
+---
+
+## API 一览
+
+### 转发面（客户端用，Bearer 令牌鉴权）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/chat/completions` | 对话补全（支持 `stream: true`） |
+| POST | `/v1/embeddings` | 文本转向量（只按输入 token 计费） |
+| GET | `/v1/models` | 该令牌可访问的模型清单（客户端用来填下拉框） |
+
+### 管理面（`/api/*`，`X-Admin-Key` 头鉴权）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/channels` | 渠道列表 |
+| POST | `/api/channels` | 建渠道 |
+| GET | `/api/channels/:id` | 渠道详情（Key 默认掩码，`?reveal=1` 看明文） |
+| PUT | `/api/channels/:id` | 改渠道 |
+| DELETE | `/api/channels/:id` | 删渠道 |
+| GET | `/api/channels/:id/credentials` | 凭据列表（含健康状态） |
+| POST | `/api/channels/:id/credentials` | 加一把 Key |
+| PUT | `/api/credentials/:id` | 改凭据（权重等） |
+| DELETE | `/api/credentials/:id` | 删凭据（最后一把会拒绝） |
+| POST | `/api/credentials/:id/status` | 手动重置 active / 解除拉黑 |
+| GET/POST/PUT/DELETE | `/api/tokens[/:id]` | 令牌 CRUD |
+| GET | `/api/logs` | 请求流水（支持按渠道/令牌/模型过滤 + 分页） |
+| GET | `/api/stats/...` | 用量统计（汇总/按模型/按渠道） |
+| GET/POST/PUT/DELETE | `/api/prices[/:model]` | 价格表 CRUD |
+| GET | `/api/abilities` | 能力表（模型 → 渠道，路由索引的数据源） |
+
+### 运维面（免鉴权）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/healthz` | 健康检查（不依赖数据库和上游，给探活用） |
+| GET | `/metrics` | Prometheus exposition 格式指标 |
+
+**指标族**：
+
+| 指标 | 类型 | 标签 |
+|------|------|------|
+| `gateway_requests_total` | counter | `model,channel,status` |
+| `gateway_request_duration_seconds` | histogram | `model,channel`（桶 0.05~60s + `+Inf`） |
+| `gateway_tokens_total` | counter | `model,channel,type`(prompt/completion) |
+| `gateway_cost_total` | counter | `model,channel` |
+| `gateway_credentials` | gauge | `channel,status`(active/cooldown/banned/disabled) |
+| `gateway_credential_failures_total` | counter | `channel,credential` |
+
+> `/metrics` 和 `/healthz` **不鉴权也不限流**。理由：抓取方是 Prometheus，
+> 它没有也不该有客户端令牌；指标只有聚合计数和标签（模型名/渠道名），
+> 不含请求内容、不含任何 Key。要在公网暴露时，正确做法是在反向代理层按
+> 来源 IP 放行，而不是在应用层加一套监控专用鉴权（那意味着密钥进了监控
+> 系统的配置，暴露面更大）。完整理由见 `internal/server/server.go` 的注释。
+
+**日志级别**（`log_level` 或 `GATEWAY_LOG_LEVEL`）：
+
+| 级别 | 内容 |
+|------|------|
+| `error` | 网关自身故障：panic、结算失败、额度预检失败 |
+| `warn` | 上游返回错误、请求被拒（4xx/5xx）、限流触发、渠道装载跳过 |
+| `info`（默认） | 请求摘要一行一条 + 启动/关闭/清理等生命周期事件 |
+| `debug` | 上述全部 + 选凭据细节（渠道/凭据/权重/会话/第几次尝试）、冷却判定、上游原始用量 |
+
+统一字段（info 及以上的请求日志都带）：`request_id` `token_id` `channel_id`
+`credential_id` `model` `latency_ms` `status`。
+
+---
+
+## 设计决策
+
+### 1. 渠道与凭据分离
+
+「渠道」是上游服务商的连接信息（base_url、协议类型、模型列表），
+「凭据」是该渠道下的一把 Key。一个渠道可以挂多把 Key，构成**凭据池**。
+
+为什么分开：实际使用中同一个服务商通常有多个 Key（多个账号、多个额度包）。
+如果「一个渠道 = 一个 Key」，就没法表达「这 5 把 Key 是同一家的，应该一起
+做负载均衡」，也无法在 Key 级别做故障隔离。
+
+代价是调度复杂了一层（选渠道 → 再选渠道内的凭据），收益是单渠道挂 3 把 Key
+真的等于有 3 份容量——而不是配了不用。详见 [docs/PLAN.md](docs/PLAN.md)。
+
+### 2. 规范格式枢纽
+
+协议转换走「客户端协议 → 规范格式 → 上游协议」两段式，而不是 N×M 个直连
+适配器。
+
+新增一个上游协议只需要：实现规范格式 → 该协议的反向转换。已支持的客户端
+协议自动获得它，已支持的上游协议也自动能被它调用。N+M 而不是 N×M。
+
+客户端协议当前固定 OpenAI（网关只暴露 `/v1/*` OpenAI 兼容入口）；上游协议
+已支持 openai / anthropic / gemini。
+
+### 3. 请求体透明透传
+
+请求体只解析 `model`/`stream`/`max_tokens` 三个字段，其余**原样转发**。
+
+为什么不用结构体完整建模：LLM 请求参数在快速演进（reasoning、tools、
+response_format…）。用结构体反序列化再序列化，任何未声明的字段都会被静默
+丢掉，用户会遇到「某个参数在网关后面失效了」这种极难排查的问题。
+`max_tokens` 是唯一例外——预扣额度需要它算费用上限。
+
+### 4. 原子额度扣减
+
+额度检查 + 预扣发生在**转发之前**，结算在响应之后修正差额。
+
+- 超额时直接回 403，一个字节都不发给上游——转发注定被拒的请求等于白烧钱
+  （上游 Key 是按量收费的）
+- 扣减走 gorm 的原子 `UPDATE ... SET used = used + ?`，并发下不丢更新
+- 预扣→结算用 flag + defer 保证「无论 Relay 正常返回还是 panic 都要结算」：
+  预扣了钱不结账，令牌额度会被永久占用（表现为「没用几次就 403」）
+- 结算失败只告警不阻断：用户请求已经成功了，网关因为自己的账本坏了就报错
+  是不讲道理的
+
+### 5. 一致性哈希亲和
+
+会话 ID（`X-Session-Id` 头，缺省用「令牌 + 首条消息哈希」）经一致性哈希
+定位到一把凭据，同一会话固定打同一把 Key。
+
+**为什么重要**：上游按账号缓存 prompt，同一对话固定打同一把 Key 才能吃到
+缓存命中——省钱又提速。这不是「避免上下文错乱」，是成本优化。
+
+用一致性哈希而不是 `hash % N`：凭据增删时只有相邻的一小段会话会重映射，
+不会整体重排。亲和目标不可用时降级到加权随机——不能因为亲和把请求卡死。
+
+### 6. 可观测性零新增依赖
+
+结构化日志用标准库 `log/slog`，Prometheus 指标**手写 exposition 纯文本格式**，
+都不引第三方库。
+
+取舍：项目从 P1 起就把第三方依赖压在 gin/gorm/sqlite/yaml 四个，每一个新
+依赖都是供应链面和升级面；而需要的六个指标全是「带标签的 counter /
+histogram / gauge」，exposition 格式是个几十行的纯文本协议。手写版只覆盖
+「本网关自己埋的点」，不需要官方库的 collector 注册表、默认运行时指标、
+推送网关那些能力——等真要多协议暴露或上 Pushgateway 时再换，替换成本很低
+（`internal/metrics` 只被 relay 和 server 各调一两个函数）。取舍理由写在
+`internal/metrics/metrics.go` 的头注里。
+
+### 7. 注入而不是直接依赖
+
+计费引擎、限流器、日志落库、凭据选择、健康反馈、渠道重载——全部由 `main`
+在启动时注入，`internal/` 之间不横向 import 业务包。
+
+`relay` 不知道 store 存在，`scheduler` 不知道 relay 存在，`metrics` 不知道
+任何业务存在。这让「转发层保持纯粹」（换存储甚至改成外发日志都不用改
+relay），也让单元测试能不注入就不注入（nil = 关闭该功能）。
+
+---
+
+## 测试
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+make check            # build + vet + go test
+make smoke            # 假上游 + 临时库，端到端验证 OpenAI 链路
+
+go test -race -count=1 ./...
+gofmt -l .            # 应无输出
+```
+
+142 个用例覆盖：计费端到端（6 个 P5 验收场景）、凭据调度（加权分布/冷却
+退避/拉黑阈值/亲和稳定与降级/错误分类）、限流（RPM/TPM 分桶）、指标格式
+（counter/histogram/gauge 的 exposition 正确性 + 标签转义 + 并发计数）、
+日志清理（分批删除 + 保留天数语义）、配置校验。
+
+`make smoke` 用 Python 标准库管理本地假 OpenAI 上游和临时数据库，验证启动、
+鉴权、模型列表/映射、非流式与流式转发的完整文本/结束原因/用量，不调用外部
+模型、不使用真实密钥。
+
+> **为什么 `-race` 是硬要求**：凭据调度、限流计数、指标埋点全是并发路径，
+> 而 Go 的 data race 在不开 race detector 时表现为「偶发的奇怪数字」——
+> 亲和分流偏斜和 RPM/TPM 共桶缺陷都是这样逃过普通测试的。CI 里这条不能省。
+
+---
+
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 目标架构：模块边界、管理员—用户模型、接口原则 |
+| [docs/PLAN.md](docs/PLAN.md) | 开发基线与分阶段任务（S0–S5）、验收标准 |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 构建、测试、配置和目录约定 |
+| [docs/PLAN-P6.md](docs/PLAN-P6.md) | 已交付的 P6 内核补全方案：安全、调度、限流、可观测性 |
+
+---
+
+## 许可
+
+MIT

@@ -1,14 +1,28 @@
+# CI：构建 + 静态检查 + 竞态测试 + 格式检查 + 端到端冒烟。
+#
+# 为什么 CI 是必需的（不是形式主义）：
+#   - 计费的 priceMissing 反转 bug（把「找到价格」赋值给「缺失」标记）
+#     是集成测试抓到的。没有 CI，下次同类 bug 只能靠人手记得跑测试。
+#   - 凭据池的亲和环分流偏斜（一致性哈希定位错环段）是 -race +
+#     分布断言抓到的。
+#   - 限流的 RPM/TPM 共桶缺陷（两个维度挤占同一个计数桶）是手动
+#     验收时压测暴露的。
+#   三者的共同点：都是「看起来能跑、实际算错」的类型，肉眼 review
+#   看不出，只有跑起来才会暴露。CI 把「记得跑测试」从纪律变成机制。
 name: Verify
 
 on:
   push:
-    branches: [master]
+    branches: [main, master, "feat/**"]
   pull_request:
+  # 允许在 Actions 页面手动触发：排查「本地能过 CI 红」时有用
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# 同一分支上新 push 就取消旧运行：省 runner 分钟，也让「最新状态」
+# 始终是正在跑的那个（否则要等前面排队的跑完才知道这次改动的结果）。
 concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -16,14 +30,76 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
+      # 按 commit SHA 固定版本：tag 可以被上游重指，SHA 不能。
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
+          # 打开模块缓存：依赖列表不变时直接命中，省掉每分钟的下载
           cache: true
-      - name: Build, vet, and test
-        run: make check
-      - name: Local OpenAI smoke check
+
+      - name: 检查 go.mod / go.sum 是否整洁
+        # 本项目坚持零新增第三方依赖（可观测性用手写 exposition 而不是
+        # 引 prometheus/client_golang，就是这个原则的延续）。
+        # `go mod tidy` 有 diff 意味着有人加/改了依赖却没同步 go.sum，
+        # 或者反过来删了 import 没清理——两种情况在别人机器上会构建失败。
+        # 校验方式：跑一次 tidy 后看 git 有没有变化（不留 --check 的
+        # 歧义），有变化就失败并给出 diff。
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
+            echo "::error::go.mod/go.sum 不整洁，请运行 go mod tidy 并提交"
+            git diff go.mod go.sum
+            exit 1
+          fi
+
+      - name: 构建
+        run: go build ./...
+
+      - name: go vet
+        # vet 抓的是「能编译但几乎一定是 bug」的写法：Printf 格式串与
+        # 参数不匹配、锁拷贝、不可达的代码、结构体标签拼错。
+        # 本项目有大量 slog.Info("msg", "k", v) 调用，vet 的
+        # slog 检查能抓出「奇数个 key-value」这种静默丢字段的错误。
+        run: go vet ./...
+
+      - name: gofmt 检查
+        # 检查**全仓库**，不设排除名单。
+        #
+        # 为什么可以全查：存量未格式化的老文件已由独立的 commit
+        # （「格式化存量未格式化文件」）一次性修好。相比之下，维护一份
+        # 「已知不干净」的排除列表会让列表随新文件不断腐化，而且新写的
+        # 代码一旦落进被排除的目录就永远没人管。
+        #
+        # 全查的代价是一次性的历史格式化；收益是规则简单到不需要
+        # 文档解释，且新增文件自动被覆盖。
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::以下文件未通过 gofmt，请运行 gofmt -w："
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: 测试（-race）
+        # -race 是硬要求：凭据池调度、限流计数、指标埋点全是并发路径，
+        # 而 Go 的 data race 在不开 race detector 时表现为「偶发的
+        # 奇怪数字」——亲和偏斜就是这样逃过普通测试的。
+        # -count=1 关掉测试缓存：缓存命中会跳过真实执行，
+        # CI 上跑缓存等于没跑。
+        run: go test -race -count=1 ./...
+
+      - name: 测试覆盖率（仅报告，不设门槛）
+        # 只跑不给阈值：当前阶段的门槛会是「为了覆盖率写测试」，
+        # 那类测试断言的是实现细节而不是行为。先让数字可见，
+        # 等有明确的回归风险面（计费、调度）再给阈值。
+        run: go test -cover ./... | tee coverage.txt
+        continue-on-error: true
+
+      - name: 端到端冒烟（假上游 + 临时库）
+        # 单元测试覆盖模块行为，冒烟覆盖「编译出来的二进制真的能起来
+        # 并跑通一条 OpenAI 链路」——入口在 cmd/gateway、配置项必填这类
+        # 问题只有把二进制跑起来才会暴露。
         run: make smoke

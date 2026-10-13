@@ -1,19 +1,34 @@
 # Copy to config.yaml (ignored by Git) and edit locally.
-# Development only: management API authentication is not implemented yet.
 # Relative database paths are resolved from the process working directory.
 server:
   addr: "127.0.0.1:8080"
   retry_times: 2
   timeout_seconds: 120
+  # IP 级限流的每分钟请求数上限，0 表示不限。
+  # 自用（本机/内网访问）保持 0；暴露到公网时务必配上，比如 120。
+  ip_rpm_limit: 0
+
+# 管理 API（/api/*）的访问密钥，**必填**——缺失时网关拒绝启动。
+# 生产部署优先用环境变量 GATEWAY_ADMIN_KEY（密钥不该写进会进 git 的文件）。
+admin_key: "REPLACE_WITH_ADMIN_KEY"
+
+# 进程日志级别：debug / info / warn / error（环境变量 GATEWAY_LOG_LEVEL 优先）。
+log_level: "info"
+
+# 请求日志（logs 表）保留天数，0 表示关闭自动清理
+# （环境变量 GATEWAY_LOG_RETENTION_DAYS 优先）。
+log_retention_days: 30
 
 database:
   driver: "sqlite"
   path: ".local/data/gateway.db"
 
-# Imported only when both channels and tokens are empty in the database.
-# Replace model names and both key placeholders before using real upstreams.
+# 渠道与令牌是**种子数据**：只在数据库为空时导入一次，之后通过管理 API 增删改。
+# 真实使用时替换 base_url、模型名和两个 key 占位符；
+# 渠道上游 Key 也可用环境变量 GATEWAY_CHANNEL_KEY_<id> 覆盖（部署时更推荐）。
 channels:
-  - name: "primary"
+  - id: 1
+    name: "primary"
     type: "openai"
     base_url: "https://api.example.com"
     key: "REPLACE_WITH_UPSTREAM_KEY"

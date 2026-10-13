@@ -23,18 +23,27 @@ func (h *Handler) ListChannels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": channels, "total": len(channels)})
 }
 
-// maskKey 把 key 中间打码，只留头尾各 4 位。
+// maskKey 把 key 中间打码，只留前 3 位和后 4 位（形如 sk-...abcd）。
 //
 // 为什么要打码：日志、列表接口、截图排查时 key 经常被无意带出去。
-// 留头尾 4 位足够人工辨认是哪一个 key，又不足以完整泄露。
+// 留头尾足够人工辨认是哪一个 key，又不足以完整泄露——Key 的核心
+// 熵在中段，截掉中段后即使拿到掩码值也拼不回真身。
+//
+// 短 key（≤8 字符）整体打码：前后一共只留 7 位的话，短 key 的
+// 掩码版几乎等于原文，打码失去意义。
 func maskKey(key string) string {
 	if len(key) <= 8 {
 		return "****"
 	}
-	return key[:4] + "****" + key[len(key)-4:]
+	return key[:3] + "..." + key[len(key)-4:]
 }
 
 // GetChannel 处理 GET /api/channels/:id。
+//
+// api_key 默认返回掩码。详情接口常被人在浏览器里开着、被截图、
+// 被贴进工单——明文 Key 在这些场合会静默扩散。所以默认只看得到
+// 掩码，要看明文必须显式带 ?reveal=1，让「我要看 Key」成为一个
+// 有意识的操作而不是顺手滑过的结果。
 func (h *Handler) GetChannel(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok {
@@ -45,8 +54,12 @@ func (h *Handler) GetChannel(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	// 单个渠道详情回显真实 key：这个接口是「管理」用途，
-	// 运维需要确认 key 是否填错（最常见的渠道故障原因）
+	reveal := c.Query("reveal") == "1"
+	if !reveal {
+		for i := range ch.Credentials {
+			ch.Credentials[i].APIKey = maskKey(ch.Credentials[i].APIKey)
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"data": ch})
 }
 
@@ -112,6 +125,15 @@ func (h *Handler) DeleteChannel(c *gin.Context) {
 func (h *Handler) notifyChanged() {
 	if h.onChannelsChanged != nil {
 		h.onChannelsChanged()
+	}
+}
+
+// notifyPricesChanged 让计费引擎重读价格表和分组倍率。
+//
+// 判空同理：计费未启用（billingEngine 为 nil）时管理接口照常工作。
+func (h *Handler) notifyPricesChanged() {
+	if h.onPricesChanged != nil {
+		h.onPricesChanged()
 	}
 }
 

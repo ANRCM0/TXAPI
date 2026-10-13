@@ -90,8 +90,12 @@ def main():
             subprocess.run([args.go, "build", "-o", str(output), package], cwd=ROOT, check=True, timeout=240)
         gateway_port, upstream_port = ports()
         key = "sk-local-smoke-only"
+        # The management key is mandatory: config.Load refuses to start
+        # without it, and this check asserts the binary really starts.
+        admin_key = "sk-local-smoke-admin"
         config = {
             "server": {"addr": f"127.0.0.1:{gateway_port}", "retry_times": 1, "timeout_seconds": 10},
+            "admin_key": admin_key,
             "database": {"driver": "sqlite", "path": str(work / "gateway.db")},
             "channels": [{"name": "local", "type": "openai", "base_url": f"http://127.0.0.1:{upstream_port}",
                           "key": "sk-local-upstream-only", "models": ["smoke-model"],

@@ -1,10 +1,11 @@
-// Package api 提供管理 REST API：渠道 / 令牌 / 日志的 CRUD。
+// Package api 提供管理 REST API：渠道 / 凭据 / 令牌 / 日志 / 统计 / 价格的 CRUD。
 //
 // 设计约定：
 //   - 所有路由挂在 /api 前缀下，与客户端转发入口 /v1 完全分开，
-//     这样将来给 /api 加管理员鉴权时不会影响转发链路
-//   - 目前不做鉴权（PLAN 的 P2 阶段明确「先做无鉴权或简单鉴权」），
-//     但挂载点已经留好：见 Register 的 adminAuth 参数，P3 传入真正的中间件即可
+//     两个面用不同的密钥体系（/api 用管理密钥，/v1 用客户端令牌），
+//     互不影响
+//   - 整个 /api 分组强制鉴权（见 Register 的 adminAuth 参数，必填）：
+//     管理接口能改渠道、看上游 Key，裸奔的代价是凭据池整体泄露
 //   - 错误格式统一成 OpenAI 风格 {"error": {...}}，和 /v1 保持一致
 package api
 
@@ -19,18 +20,23 @@ import (
 
 // Handler 持有管理 API 需要的一切依赖。
 //
-// 为什么把 store 和 reload 函数都塞进来：渠道变更后必须同步刷新转发层的
-// 渠道池，否则「API 显示改成功了但转发还用旧数据」。把 reload 作为依赖注入，
-// api 包就不需要反向 import relay（那会形成 server → api → relay → server 的环）。
+// 为什么把 store 和回调函数都塞进来：渠道变更后必须同步刷新转发层的
+// 渠道池，价格变更后必须让计费引擎失效价格缓存——否则会出现
+// 「API 显示改成功了但转发/计费还用旧数据」的静默故障。
+// 把回调作为依赖注入，api 包就不需要反向 import relay/billing
+// （那会形成 server → api → relay → server 的环）。
 type Handler struct {
 	store *store.Store
 	// onChannelsChanged 在渠道发生任何写操作后调用，用于刷新 relay 渠道池。
 	onChannelsChanged func()
+	// onPricesChanged 在价格/倍率发生任何写操作后调用，用于让计费引擎
+	// 重读价格表。nil 表示计费未启用。
+	onPricesChanged func()
 }
 
 // New 创建管理 API handler。
-func New(st *store.Store, onChannelsChanged func()) *Handler {
-	return &Handler{store: st, onChannelsChanged: onChannelsChanged}
+func New(st *store.Store, onChannelsChanged, onPricesChanged func()) *Handler {
+	return &Handler{store: st, onChannelsChanged: onChannelsChanged, onPricesChanged: onPricesChanged}
 }
 
 // Register 把管理路由挂到引擎上。
@@ -38,13 +44,16 @@ func New(st *store.Store, onChannelsChanged func()) *Handler {
 // 用 *gin.RouterGroup 而不是 gin.IRoutes：IRoutes 没有 Group 方法，
 // 而这里需要建一个 /api 分组来统一挂中间件。
 //
-// adminAuth 是管理员鉴权中间件的挂载点。传 nil 表示暂不鉴权（P2 现状）；
-// P3 要加鉴权时，在这里传一个 gin.HandlerFunc 即可，路由代码不用动。
+// adminAuth 从 P6 批次 1 起是**必填**。管理接口能改渠道、看 Key 明文，
+// 漏挂鉴权的后果是「连上 localhost 就能拿走全部凭据」。所以这里传 nil
+// 直接 panic：装配错误要在启动时炸出来，而不是留一个裸奔的管理面。
+// （client token 的 /v1 路由不走这个分组，不受影响。）
 func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
-	group := r.Group("/api")
-	if adminAuth != nil {
-		group.Use(adminAuth)
+	if adminAuth == nil {
+		panic("api.Register: adminAuth 不能为 nil，管理 API 必须鉴权")
 	}
+	group := r.Group("/api")
+	group.Use(adminAuth)
 
 	// 渠道 CRUD
 	group.GET("/channels", h.ListChannels)
@@ -53,14 +62,36 @@ func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
 	group.PUT("/channels/:id", h.UpdateChannel)
 	group.DELETE("/channels/:id", h.DeleteChannel)
 
-	// 令牌（只做增删查，修改走 PUT 但 key 不可变，见 store.UpdateToken）
+	// 凭据 CRUD（渠道下的上游 Key）
+	// 路由分两种形态：挂在 /channels/:id 下的走「渠道视角」（列、增），
+	// 凭据自身的改删状态走 /credentials/:id——凭据 ID 全局唯一，
+	// 不需要再带一层渠道 ID
+	group.GET("/channels/:id/credentials", h.ListCredentials)
+	group.POST("/channels/:id/credentials", h.CreateCredential)
+	group.PUT("/credentials/:id", h.UpdateCredential)
+	group.DELETE("/credentials/:id", h.DeleteCredential)
+	group.POST("/credentials/:id/status", h.SetCredentialStatus)
+
+	// 令牌（增删查 + 单独的额度设置端点）
 	group.GET("/tokens", h.ListTokens)
 	group.POST("/tokens", h.CreateToken)
 	group.PUT("/tokens/:id", h.UpdateToken)
 	group.DELETE("/tokens/:id", h.DeleteToken)
+	group.POST("/tokens/:id/quota", h.SetTokenQuota)
 
 	// 日志查询
 	group.GET("/logs", h.ListLogs)
+
+	// 用量统计
+	group.GET("/stats/summary", h.StatsSummary)
+	group.GET("/stats/by-model", h.StatsByModel)
+	group.GET("/stats/by-channel", h.StatsByChannel)
+
+	// 价格表与分组倍率
+	group.GET("/prices", h.ListPrices)
+	group.PUT("/prices/:model", h.UpsertPrice)
+	group.DELETE("/prices/:model", h.DeletePrice)
+	group.PUT("/group-rates", h.SetGroupRates)
 
 	// 能力表：路由加速器的可视化，排查「为什么这个模型路由不到某渠道」时看它
 	group.GET("/abilities", h.ListAbilities)

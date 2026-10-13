@@ -56,23 +56,6 @@ func isNotFound(err error) bool {
 	return err == gorm.ErrRecordNotFound
 }
 
-// ModelPrices 列出全部模型价格。
-func (s *Store) ModelPrices() ([]model.ModelPrice, error) {
-	var rows []model.ModelPrice
-	if err := s.db.Order("model ASC").Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("读取价格表失败: %w", err)
-	}
-	return rows, nil
-}
-
-// UpsertModelPrice 写入/更新一个模型的单价。
-func (s *Store) UpsertModelPrice(p *model.ModelPrice) error {
-	if err := s.db.Clauses(upsertClause()).Create(p).Error; err != nil {
-		return fmt.Errorf("写入模型 %s 的价格失败: %w", p.Model, err)
-	}
-	return nil
-}
-
 // Ping 探活，供健康检查用。
 func (s *Store) Ping() error {
 	sqlDB, err := s.db.DB()

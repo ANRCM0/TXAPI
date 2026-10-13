@@ -86,6 +86,70 @@ func main() {
 		})
 	})
 
+	// embeddings 端点（P6 批次 3 加的）。
+	//
+	// 为什么要单独加：真实 OpenAI 的 /v1/embeddings 和
+	// /v1/chat/completions 是两个独立端点，返回结构完全不同
+	// （data[].embedding 而不是 choices[].message）。假上游只模拟
+	// 对话端点的话，网关的 Mode 透传根本验证不到——请求会被打到
+	// /v1/chat/completions 上，拿到一个对话响应冒充向量。
+	//
+	// usage 刻意只给 {prompt_tokens, total_tokens}：这正是真实
+	// embeddings 响应的形状，没有 completion_tokens。网关的计费
+	// 要能正确处理这种「只有输入」的用量。
+	http.HandleFunc("/v1/embeddings", func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "missing api key", "type": "auth_error"},
+			})
+			return
+		}
+
+		var req struct {
+			Model string `json:"model"`
+			Input any    `json:"input"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		// 按 input 的长度决定 prompt_tokens，让不同长度的输入
+		// 在日志里可区分（恒为同一个数的话看不出网关真的读了 input）
+		n := 1
+		switch v := req.Input.(type) {
+		case string:
+			n = len([]rune(v))
+		case []any:
+			n = len(v)
+		}
+		if n < 1 {
+			n = 1
+		}
+
+		log.Printf("[fake-upstream] 收到 embeddings 请求: model=%s 输入单元数=%d", req.Model, n)
+
+		if strings.Contains(auth, "bad") {
+			w.WriteHeader(429)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "rate limit exceeded", "type": "rate_limit_error"},
+			})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"model":  req.Model,
+			"data": []map[string]any{{
+				"object":    "embedding",
+				"index":     0,
+				"embedding": []float64{0.0123, -0.0456, 0.0789, 0.0234},
+			}},
+			// 注意：没有 completion_tokens——embeddings 只有输入 token
+			"usage": map[string]any{"prompt_tokens": n, "total_tokens": n},
+		})
+	})
+
 	log.Printf("假上游已启动: http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
