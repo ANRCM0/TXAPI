@@ -1,7 +1,31 @@
+# Local configuration and credentials
+/config.yaml
+/config.local.yaml
+/.env
+/.env.*
+!/.env.example
+
+# Build output and runtime state
+/bin/
+/.local/
+/data/
+/tmp/
+/mini-gateway
+/gateway
 *.db
 *.db-wal
 *.db-shm
 *.sqlite
-/tmp/
-mini-gateway
-gateway
+*.sqlite-wal
+*.sqlite-shm
+*.log
+*.out
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.venv/
+
+# Editor / operating system files
+.DS_Store
+*.swp

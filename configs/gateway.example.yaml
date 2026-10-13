@@ -1,0 +1,28 @@
+# Copy to config.yaml (ignored by Git) and edit locally.
+# Development only: management API authentication is not implemented yet.
+# Relative database paths are resolved from the process working directory.
+server:
+  addr: "127.0.0.1:8080"
+  retry_times: 2
+  timeout_seconds: 120
+
+database:
+  driver: "sqlite"
+  path: ".local/data/gateway.db"
+
+# Imported only when both channels and tokens are empty in the database.
+# Replace model names and both key placeholders before using real upstreams.
+channels:
+  - name: "primary"
+    type: "openai"
+    base_url: "https://api.example.com"
+    key: "REPLACE_WITH_UPSTREAM_KEY"
+    models:
+      - "your-model"
+    weight: 1
+
+tokens:
+  - key: "REPLACE_WITH_CLIENT_KEY"
+    name: "local-client"
+    models:
+      - "your-model"

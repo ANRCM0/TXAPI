@@ -1,13 +1,18 @@
-# P4 多协议互转测试配置
-# 三个假上游都在本地跑（见 testtools/）：
-#   9911 = 假 OpenAI 上游（fakeupstream）
-#   9912 = 假 Claude 上游（fakeclaude）
-#   9913 = 假 Gemini 上游（fakegemini）
+# Gemini 样本仍采用旧快照假设，不用于证明真实协议兼容性；修复见 docs/PLAN.md S0-02。
+# 多协议转换原型的手工测试配置
+# 三个假上游都在本地跑（见 tests/upstream/）：
+#   9911 = 假 OpenAI 上游（openai）
+#   9912 = 假 Claude 上游（anthropic）
+#   9913 = 假 Gemini 上游（gemini）
 
 server:
   addr: "127.0.0.1:8090"
   retry_times: 1
   timeout_seconds: 30
+
+database:
+  driver: "sqlite"
+  path: ".local/data/test-protocols.db"
 
 channels:
   # OpenAI 渠道（P1 已有链路，回归验证用）

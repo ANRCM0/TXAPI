@@ -1,428 +1,134 @@
-# 网关开发方案与目标架构
-
-> 定位：**自用为主、留多用户扩展口的 LLM API 网关**
-> 原则：单二进制、MIT 许可、凭据池调度为技术亮点
-
----
-
-## 一、总体架构
-
-### 1.1 分层
-
-```
-┌─────────────────────────────────────────────────────┐
-│  客户端 (Cherry Studio / NextChat / Cursor / SDK)     │
-└──────────────────────┬──────────────────────────────┘
-                       │ OpenAI / Claude / Gemini 原生协议
-┌──────────────────────▼──────────────────────────────┐
-│  HTTP 层  internal/server                            │
-│  中间件: RequestID → CORS → Auth → RateLimit → Trace │
-│  路由:   /v1/* 转发入口   /api/* 管理接口              │
-├─────────────────────────────────────────────────────┤
-│  转发层  internal/relay          ⭐ 核心              │
-│   路由(能力表) → 调度(选凭据) → 转换 → 转发 → 记账      │
-├─────────────────────────────────────────────────────┤
-│  业务层                                              │
-│   scheduler 凭据池调度   billing 计费   log 日志       │
-├─────────────────────────────────────────────────────┤
-│  存储层  internal/store                              │
-│   SQLite(默认) / PostgreSQL(可选)  +  内存缓存         │
-└──────────────────────┬──────────────────────────────┘
-                       │ 渠道 Key（可多个，构成凭据池）
-┌──────────────────────▼──────────────────────────────┐
-│  上游: OpenAI / Anthropic / Gemini / DeepSeek / ...   │
-└─────────────────────────────────────────────────────┘
-```
-
-### 1.2 目录结构（目标形态）
-
-```
-gateway/
-├── cmd/gateway/main.go            入口（极薄）
-├── internal/
-│   ├── config/                    配置：YAML + 环境变量 + 数据库设置
-│   ├── model/                     ⭐ 数据模型（GORM 定义）
-│   ├── store/                     数据访问层（含内存缓存）
-│   ├── relay/                     ⭐ 转发核心
-│   │   ├── adaptor/               协议适配器接口
-│   │   │   ├── openai/            OpenAI 协议
-│   │   │   ├── anthropic/         Claude 协议
-│   │   │   ├── gemini/            Gemini 协议
-│   │   │   └── compatible/        OpenAI 兼容厂商（DeepSeek 等）
-│   │   ├── canonical/             ⭐ 规范格式（内部统一表示）
-│   │   ├── meta/                  单次转发上下文
-│   │   ├── pipeline.go            转发流水线
-│   │   └── registry.go            适配器注册表
-│   ├── scheduler/                 ⭐ 凭据池调度（差异化卖点）
-│   │   ├── selector.go            加权随机选择
-│   │   ├── health.go              冷却 / 拉黑 / 恢复
-│   │   └── affinity.go            会话亲和
-│   ├── billing/                   计费：token 计数 + 价格表
-│   ├── server/
-│   │   ├── router.go              路由注册
-│   │   ├── middleware/            鉴权 / 限流 / 追踪
-│   │   └── api/                   管理接口（渠道/令牌/日志 CRUD）
-│   ├── cache/                     内存缓存 + 可选 Redis
-│   └── pkg/                       通用工具（日志/错误/ID 生成）
-├── web/                           前端（构建后 embed 进二进制）
-├── docs/                          文档
-└── deploy/                        Docker / compose
-```
-
----
-
-## 二、数据模型（架构的地基）
-
-### 2.1 关键决策：渠道与凭据分离
-
-这是比 One API 更进一步的**核心设计**。
-
-One API 里「渠道 = 一个 Key」，想用 5 个 Key 就得建 5 个渠道，
-无法表达「这 5 个 Key 是同一家的、应该一起调度」。
-
-**本项目的设计**：
-
-```
-渠道 (Channel) = 上游服务商配置
-  ├── 凭据 1 (Key A, 权重 10, 健康)
-  ├── 凭据 2 (Key B, 权重 5, 冷却中)
-  └── 凭据 3 (Key C, 权重 1, 已拉黑)
-```
-
-一个渠道下挂多个凭据，调度器在凭据之间做负载均衡。
-这是实现「多 Key 轮换 / 失败冷却 / 自动拉黑 / 会话亲和」的前提。
-
-### 2.2 表结构
-
-```sql
--- 用户（自用阶段只有 1 个 admin，但表先建好，为多用户留口子）
-users(id, username, password_hash, role, quota, used_quota, status, created_at)
-
--- 渠道 = 上游服务商
-channels(
-  id, name, type,              -- type: openai/anthropic/gemini
-  base_url,                    -- 上游地址
-  models,                      -- JSON 数组，支持 "*" 通配
-  model_mapping,               -- JSON 对象，模型名映射
-  group_name,                  -- 渠道分组（用于分组倍率/权限）
-  priority,                    -- 优先级（高优先级先选）
-  weight,                      -- 渠道级权重
-  status,                      -- enabled/disabled
-  created_at, updated_at
-)
-
--- ⭐ 凭据 = 渠道下的一个 Key
-credentials(
-  id, channel_id, name,
-  api_key,
-  weight,                      -- 凭据级权重
-  status,                      -- active/cooldown/banned/disabled
-  fail_count,                  -- 连续失败次数
-  cooldown_until,              -- 冷却截止时间戳
-  last_used_at,
-  last_error,                  -- 最近一次错误（便于排查）
-  created_at
-)
-
--- 令牌 = 客户端访问网关的凭证
-tokens(
-  id, user_id, name, key,
-  models,                      -- 允许访问的模型（空=不限制）
-  quota, used_quota,           -- 额度（自用阶段可设 0=不限）
-  expires_at, status, created_at
-)
-
--- ⭐ 能力表 = 路由加速器
-abilities(
-  group_name, model, channel_id,
-  enabled, priority, weight,
-  PRIMARY KEY(group_name, model, channel_id)
-)
--- 作用：选渠道时直接查这张表，一次索引命中，
---      不用去扫描 channels 表解析 JSON 模型列表
-
--- 请求日志
-logs(
-  id, request_id, user_id, token_id,
-  channel_id, credential_id,
-  model, is_stream,
-  prompt_tokens, completion_tokens, total_tokens,
-  cost, latency_ms,
-  status, error_message, created_at
-)
-
--- 价格表（用于计费）
-model_prices(model, input_price_per_1k, output_price_per_1k, updated_at)
-
--- 系统设置
-settings(key, value)
-```
-
----
-
-## 三、四个核心机制的设计
-
-### 3.1 转发流水线
-
-```
-① 接收       读 body，只解析 model/stream，其余原样保留
-                ↓
-② 路由       查能力表 → 得到候选渠道列表（按 priority 排序）
-                ↓
-③ 调度       每个候选渠道 → 调度器选一个可用凭据
-                ↓
-④ 入站转换   客户端协议 → 规范格式        (如 Claude → 规范)
-                ↓
-⑤ 出站转换   规范格式 → 上游协议          (如 规范 → OpenAI)
-                ↓
-⑥ 转发       发请求（带超时 / 请求 ID / 追踪）
-                ↓
-⑦ 响应转换   上游协议 → 规范格式 → 客户端协议
-                ↓
-⑧ 记账       抽 usage → 计费 → 写日志 → 更新凭据健康状态
-                ↓
-⑨ 失败处理   换凭据重试 → 换渠道重试 → 返回错误
-```
-
-### 3.2 多协议互转：规范格式（关键洞察）
-
-**朴素做法**（N × M 爆炸）：
-```
-OpenAI 客户端 → OpenAI 上游    ┐
-OpenAI 客户端 → Claude 上游    │ 3 种协议 = 9 条转换路径
-OpenAI 客户端 → Gemini 上游    │ 5 种协议 = 25 条
-Claude 客户端 → OpenAI 上游    │ 每加一种协议，路径数平方增长
-...                            ┘
-```
-
-**本项目的做法**（N + M）：
-```
-        入站适配器              出站适配器
-OpenAI  ─┐                 ┌─  OpenAI
-Claude  ─┼→ [规范格式] ────┼─  Claude
-Gemini  ─┘                 └─  Gemini
-
-3 种协议 = 3 + 3 = 6 个转换器（而不是 9 个）
-5 种协议 = 5 + 5 = 10 个（而不是 25 个）
-```
-
-**规范格式选谁**：选 OpenAI Chat Completions 格式。
-理由：它是事实标准，几乎所有客户端和 SDK 都用它，文档最全。
-
-**规范格式长什么样**（`internal/relay/canonical/`）：
-
-```go
-type ChatRequest struct {
-    Model       string
-    Messages    []Message      // 统一的消息结构
-    MaxTokens   int
-    Temperature *float64
-    Stream      bool
-    Tools       []Tool         // 函数调用
-    // ... 只保留各协议都能表达的共同子集
-}
-
-type Message struct {
-    Role    string        // system / user / assistant / tool
-    Content []ContentPart // 统一的多模态内容
-}
-
-type ContentPart struct {
-    Type string  // text / image / tool_use / tool_result
-    Text string
-    // ...
-}
-```
-
-**适配器接口**（每个协议实现一次）：
-
-```go
-type ProtocolAdaptor interface {
-    Name() string
-
-    // 请求方向
-    ParseRequest(body []byte) (*canonical.ChatRequest, error)   // 本协议 → 规范
-    BuildRequest(req *canonical.ChatRequest) ([]byte, error)     // 规范 → 本协议
-
-    // 响应方向
-    ParseResponse(body []byte) (*canonical.ChatResponse, error)
-    BuildResponse(resp *canonical.ChatResponse) ([]byte, error)
-
-    // 流式（最难的部分）
-    ParseStreamLine(line []byte) (*canonical.StreamChunk, error)
-    BuildStreamLine(chunk *canonical.StreamChunk) ([]byte, error)
-
-    // 元信息
-    DefaultBaseURL() string
-    AuthHeader(apiKey string) (name, value string)
-}
-```
-
-⚠️ **必须正视的问题：协议能力不对等**
-
-格式转换是**有损的**。举例：
-- Claude 的 `system` 是独立顶层字段；OpenAI 是 `messages` 里的 `role=system`
-- Gemini 的 role 只有 `user`/`model`，没有 `assistant`/`system`
-- 函数调用（tools）三家格式完全不同
-- Claude 有 `thinking`（扩展思考），OpenAI 用 `reasoning_effort`
-
-**策略：能转则转，不能转则明确降级或报错，绝不静默丢弃。**
-静默丢弃会产生「参数在网关后面失效」这类极难排查的问题。
-
-**流式转换是最难的一环**：客户端说 OpenAI 协议、上游说 Claude 协议时，
-必须把 Claude 的 SSE 事件流实时翻译成 OpenAI 的 chunk 流。
-这块要单独设计并重点测试。
-
-### 3.3 凭据池调度（差异化卖点）
-
-**四件事**：
-
-| 机制 | 作用 | 实现要点 |
-|------|------|---------|
-| **加权随机** | 按权重分配流量 | 在 `[0, Σweight)` 掷点，落在谁区间就是谁 |
-| **失败冷却** | 失败的凭据暂时下线 | `cooldown = base × 2^(fail_count-1)`，指数退避 + 封顶 |
-| **自动拉黑** | 连续失败的永久禁用 | `fail_count >= 阈值` → `status=banned`，并告警 |
-| **会话亲和** | 同一会话固定同一凭据 | 会话 ID 哈希 → 固定凭据 |
-
-**选择算法**：
-
-```
-1. 过滤:  status == active
-       && cooldown_until < now
-       && 凭据所属渠道支持该模型
-2. 加权随机选一个
-3. 记录 last_used_at
-```
-
-**成功/失败的状态迁移**：
-
-```
-成功:  fail_count = 0, cooldown_until = 0, status = active
-失败:  fail_count++
-       if fail_count >= 阈值(默认5):  status = banned（需人工或定时任务恢复）
-       else:                          status = cooldown
-                                      cooldown_until = now + base × 2^(fail_count-1)
-```
-
-**会话亲和为什么重要**（这是很多人忽略的点）：
-上游（OpenAI / Anthropic）会按账号缓存 prompt。
-如果同一个多轮对话反复打到不同凭据，缓存命中率是 0；
-固定打到同一凭据，缓存命中能**省钱又提速**。
-所以亲和不只是「避免上下文错乱」，更是**成本优化**。
-
-### 3.4 计费与用量
-
-```
-计费公式:
-  cost = prompt_tokens/1000 × 输入单价 + completion_tokens/1000 × 输出单价
-        × 渠道分组倍率 × 用户分组倍率
-
-扣减流程:
-  1. 请求前: 预估扣减（可选，防止超额）
-  2. 响应后: 按实际 usage 结算（以实际为准）
-  3. 流式:   从最后一个带 usage 的 chunk 取用量
-```
-
----
-
-## 四、开发阶段
-
-| 阶段 | 内容 | 交付物 | 预计 |
-|------|------|--------|------|
-| **P1** ✅ | 极简内核 | 转发链路跑通（已完成） | — |
-| **P2** | 持久化地基 | SQLite + GORM + 渠道/令牌/日志表 + 管理 REST API | 1-2 周 |
-| **P3** | 凭据池调度 | 凭据表 + 权重/冷却/拉黑/亲和 | 1-2 周 |
-| **P4** | 多协议互转 | 规范格式 + Anthropic/Gemini 适配器 | 2-3 周 |
-| **P5** | 计费与日志 | 价格表 + 额度扣减 + 日志查询 | 1 周 |
-| **P6** | 管理界面 | React + 内嵌二进制 | 2-3 周 |
-| **P7** | 发布 | Docker + 文档 + 测试 | 1 周 |
-
-### P2 详细：持久化地基
-
-这是**最关键的一步**——所有后续功能都依赖它。
-
-- [ ] 引入 GORM，建 SQLite（默认）/ PostgreSQL（可选）
-- [ ] 迁移：users / channels / credentials / tokens / abilities / logs
-- [ ] `store/` 层：渠道和令牌的 CRUD + 内存缓存
-- [ ] 能力表自动维护（渠道增删改时同步更新）
-- [ ] 管理 API（先做无鉴权或简单鉴权）：
-  - `GET/POST/PUT/DELETE /api/channels`
-  - `GET/POST/DELETE /api/tokens`
-  - `GET /api/logs`
-- [ ] 启动时从数据库加载，替代现在的 YAML 配置
-
-**验证标准**：能通过 REST API 增删渠道，不重启网关就生效。
-
-### P3 详细：凭据池调度
-
-- [ ] `credentials` 表 + 渠道下的凭据 CRUD
-- [ ] `scheduler/selector.go`：加权随机 + 过滤不可用凭据
-- [ ] `scheduler/health.go`：成功/失败的状态迁移 + 指数退避
-- [ ] `scheduler/affinity.go`：会话亲和（一致性哈希）
-- [ ] 后台定时任务：恢复冷却到期的凭据
-- [ ] 单元测试：调度算法必须测（这是最容易写错的地方）
-
-**验证标准**：配 3 个凭据，其中 1 个故意用坏 Key，
-连发 20 次请求，坏凭据应被冷却，其余两个按权重分流。
-
-### P4 详细：多协议互转
-
-- [ ] `canonical/` 定义规范格式
-- [ ] 重构现有 openai 适配器 → 实现 `ProtocolAdaptor` 接口
-- [ ] 新增 anthropic 适配器（`x-api-key` 鉴权、`messages` 格式、SSE 事件流）
-- [ ] 新增 gemini 适配器（URL 带 key、`generateContent` 格式）
-- [ ] 流式转换（最难，单独测试）
-- [ ] 能力不对等的降级策略 + 明确报错
-
-**验证标准**：用 OpenAI SDK 调 Claude 模型，能正常对话（含流式）。
-
-### P6 详细：管理界面
-
-- [ ] React + Vite + TypeScript
-- [ ] 页面：概览 / 渠道 / 凭据 / 令牌 / 日志 / 设置
-- [ ] `go:embed` 把构建产物打进二进制
-- [ ] 单文件部署
-
----
-
-## 五、明确不做（避免过度设计）
-
-| 不做 | 理由 |
-|------|------|
-| ❌ 一上来支持 40 个厂商 | 用 `compatible` 适配器兜底，先做 3 个协议 |
-| ❌ 支付/充值/邀请码 | New API 有，但那是商业系统；自用不需要 |
-| ❌ OAuth / Passkey / 2FA | AxonHub 有，但会拖慢几个月 |
-| ❌ 插件系统 | New API 的 JS 插件很酷，但先有核心 |
-| ❌ GraphQL | AxonHub 用 gqlgen，但 REST 对新手友好 10 倍 |
-| ❌ 微服务拆分 | 单二进制就是优势，别拆 |
-| ❌ 集群/多机部署 | 自用场景用不上，等真需要再说 |
-
----
-
-## 六、技术栈
-
-| 层 | 选择 | 理由 |
-|----|------|------|
-| 语言 | Go 1.23 | 单二进制、并发模型适合 IO 密集转发 |
-| HTTP | Gin | 生态成熟、中间件模型清晰、资料最多 |
-| ORM | GORM | 比 Ent 上手快，代码生成少 |
-| 数据库 | SQLite 默认 + PG 可选 | SQLite 零配置跑起来，PG 留给生产 |
-| 缓存 | 内存 + 可选 Redis | 别一上来就上 Redis |
-| 前端 | React + Vite + TS | 生态大、AI 辅助写代码资料多 |
-| 部署 | Docker + 单二进制内嵌前端 | 一个命令跑起来 |
-
----
-
-## 七、参考资料对照
-
-| 抄什么 | 抄自 | 许可证 |
-|--------|------|--------|
-| 项目骨架、Adaptor 接口思路、能力表 | One API | MIT |
-| 凭据池调度（权重/冷却/拉黑/亲和） | GPT-Load | MIT |
-| 工程分层、目录组织 | AxonHub | Apache-2.0 |
-| 规范格式做枢纽的思路 | LiteLLM | MIT（注意 enterprise/ 是商业授权） |
-| 插件架构、crate 分层 | codex-proxy-rs | Apache-2.0 |
-| 前端内嵌、单二进制交付 | GPT-Load | MIT |
-
-⚠️ **避开 New API 的代码**：它是 AGPL-3.0，抄了会传染。
-只借鉴它的功能设计思路，不复制代码。
+# 开发计划 v1：管理员—用户、极简内核
+
+状态：2026-10-13 建立的新开发基线。架构约束以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，操作命令见 [DEVELOPMENT.md](DEVELOPMENT.md)。旧 P1–P7、SPEC-P3、SPEC-P5 被本方案替代，原文保留在 Git 历史中。
+
+## 当前状态
+
+| 内容 | 状态 |
+|---|---|
+| Go/Gin 转发、SQLite 持久化、渠道/令牌 CRUD | 已有原型 |
+| OpenAI 入站与 Anthropic/Gemini 出站 | 已有原型，存在流式正确性缺陷 |
+| 用户表 | 仅数据结构；没有完整管理员—用户工作流 |
+| 渠道下多凭据 | 仅基础模型；加载时选定一把，尚无请求级调度 |
+| 完整权限、计费、管理页面 | 未实现 |
+| 架构、文档与目录整理 | 本次交付 |
+| 下列 S0–S5 | 待开发，不因写入计划而视为已完成 |
+
+## 本次整理交付
+
+- [x] 确定 admin/user 身份模型，去除上一版组织隔离与成员关系设计。
+- [x] 精简模块与接口，确定单次转发内核和请求协调层的边界。
+- [x] README、架构、实施计划、开发指南各自只承担一种职责。
+- [x] 程序入口归入 `cmd/gateway`，示例配置归入 `configs`。
+- [x] 假上游、测试配置、冒烟脚本归入 `tests`。
+- [x] 每个手工测试配置使用独立数据库，SDK 检查的地址与 key 可配置。
+- [x] 提供 Make 命令、自动本地冒烟检查和 GitHub Actions 验证入口。
+
+本次不重写现有转发实现，不改数据库结构；目录调整后的构建入口变化已写入 README。真正的核心行为修复从 S0 开始。
+
+## 开发顺序与交付门槛
+
+| 阶段 | 目标 | 前置 | 完成条件 |
+|---|---|---|---|
+| S0 | 现有实现正确、安全、可回归 | 无 | 下列已知缺陷回归通过 |
+| S1 | 提取最小 core 与 gateway | S0 | core 无数据库/框架即可测试，建立性能基线 |
+| S2 | 管理员—用户与 API Key 权限 | S1 | 用户隔离、权限交集、密钥生命周期成立 |
+| S3 | 请求级凭据调度与准入 | S2 | 多 key 切换、公平并发、冷却恢复可靠 |
+| S4 | 管理页面、配置发布、部署交付 | S3 | 全链路可操作，版本生效可见、可部署 |
+| S5（可选） | 预算与可靠结算 | S2、S3 | 并发预算与崩溃恢复通过验证 |
+
+阶段按验收推进，不按预设周数宣布完成。性能和文档维护贯穿各阶段，不能只在最后补测试。若先做收费版本，S5 必须在对外收费前完成。
+
+## S0 修复正确性与安全边界
+
+以下来自当前基线代码审查，需先补能复现的测试，再修复。
+
+| 编号 | 任务 | 关键位置 | 验收 |
+|---|---|---|---|
+| S0-01 | 为全部管理 API 启用独立管理员鉴权；默认拒绝未配置认证的管理请求 | server、api、main | 匿名与普通调用 key 不可查询密钥或修改渠道；无未保护旧路由 |
+| S0-02 | 修复 Gemini 将 chunk 当累计快照的错误；同步更换独立依据的假上游样本 | gemini/stream、tests/upstream/gemini | 等长、变长、UTF-8 增量都完整输出；测试不能复制实现错误假设 |
+| S0-03 | 每请求独立协议转换会话 | relay/convert、适配器 | 相同外部 Request ID 的并发流不串状态；race 检查通过 |
+| S0-04 | 传播流式错误并记录真实终止状态 | relay、convert、openai 流处理 | 断流/超时/错误事件不记成成功，不伪造正常结束，不在提交后重试 |
+| S0-05 | 脱敏不修改共享缓存，清理密钥回显 | store/channel、api/channel、api/token | 列表/详情不污染缓存、不返回已有完整 key；并发读取安全 |
+| S0-06 | 基础资源边界与配置校验 | server、config、relay | 请求体上限、合理超时、负数拒绝；显式 retry_times=0 真正关闭重试 |
+
+S0 先采用独立管理员凭证保护管理 API；S2 引入用户会话后替换其验证方式，复用同一权限边界。不得将 localhost 监听等同于已经实现鉴权。
+
+当前 SDK 与假上游只能检查已模拟的路径。S0-02 完成前，Gemini 模拟检查通过不能作为真实协议正确性的证据。
+
+## S1 提取内核并固定生命周期
+
+- [ ] S1-01 将 `relay` 中单次 HTTP 执行提取为 `internal/core`，复用 Transport。
+- [ ] S1-02 将协议实现移至 `internal/protocol`，每次请求创建转换会话；保留同协议快速路径。
+- [ ] S1-03 `internal/gateway` 编排一次用户请求，负责重试、调度反馈和统一收尾。
+- [ ] S1-04 用类型化上下文与结果替代 Gin 字符串键；区分请求汇总与每次尝试。
+- [ ] S1-05 去除全局可变 registry/client 配置；由组装入口显式注入实例依赖。
+- [ ] S1-06 明确响应提交、请求重放、客户端取消、总时间预算与逐次尝试的边界。
+- [ ] S1-07 创建基准：同协议非流式、同协议 SSE、跨协议、慢客户端和并发流。
+
+验收：core 测试无需 SQLite、Redis、用户表或 Gin；已有入口响应保持兼容；并发和取消无泄漏；记录机器、Go 版本、payload、并发、上游延迟、p95/p99 与分配量。不能在没有基线时写出“性能提升百分比”。
+
+拆分方式：先保留旧接口兼容包装，每个小提交迁移一个调用方，再删无调用旧路径。禁止一次性重写所有业务包。
+
+## S2 管理员—用户与密钥分发
+
+- [ ] S2-01 明确 User 的 admin/user 角色与 active/disabled 状态；一次性管理员初始化，无默认密码。
+- [ ] S2-02 实现管理登录会话与登出；会话/调用 key 分离，适当登录限速；若使用 Cookie，实施对应的 CSRF 防护。
+- [ ] S2-03 管理员创建、停用用户，设置允许模型和上限；阻止失去最后一位管理员。
+- [ ] S2-04 Token 归属 user_id，服务端生成 key，仅创建时显示，使用摘要验证；版本化迁移已有明文 key。
+- [ ] S2-05 实现系统/用户/key 权限交集，显式 all/allowlist；自助创建 key 只能缩小权限。
+- [ ] S2-06 建立 `/api/admin/*`、`/api/me/*`、`/api/auth/*`；旧管理路由保持保护直至退役。
+- [ ] S2-07 日志写入可信 user_id，个人读取、修改、吊销都按 owner 检查。
+- [ ] S2-08 用户/key 停用、过期和权限变更及时生效，模型列表与调用权限一致。
+
+最低业务验收：管理员创建 A、B 两用户；A 获两个模型，B 获一个；两人分别创建 key。B 不可调用第二个模型，不可查看/修改 A 的 key 和日志；key 限制不可扩大用户权限；停用 A 后其所有 key 的新请求失败。管理员调用 key 仍遵守自身配置限制。
+
+迁移：备份数据库 → 新版本迁移 → 管理员明确认领旧 user_id=0 的 token → 校验 → 切换验证 → 删除不再需要的明文。保留可恢复的升级步骤，不将历史 token 默认为跨用户超级凭证。
+
+## S3 凭据调度、限流与并发
+
+- [ ] S3-01 每次尝试按已授权模型选择渠道，再选择可用凭据；支持凭据 CRUD。
+- [ ] S3-02 首版采用优先级 + 加权选择，固定随机种子测试选择边界。
+- [ ] S3-03 按错误原因更新健康；临时冷却有上限，支持人工禁用/恢复与冷却到期试探。
+- [ ] S3-04 加入实例、用户、key、渠道的有界并发控制；取消/失败必须释放。
+- [ ] S3-05 支持用户/key 请求速率限制；需要时采用有界短队列，满则明确拒绝。
+- [ ] S3-06 重试不超总时长、不无限循环，不因凭据失败绕过用户授权。
+- [ ] S3-07 只有测到实际收益后才做可选会话亲和；按 user_id 隔离会话，失效回退仍受授权限制。
+
+验收：坏凭据不会被持续选中；正常凭据可分流；客户端参数错误不误惩罚整个池；冷却可恢复；压力和取消后并发计数归零；单用户不占满全部实例资源。权重分布使用足够样本和统计容差，不要求少量随机样本精确 9:1。
+
+## S4 管理、配置与交付
+
+- [ ] S4-01 管理页面：用户、渠道/凭据、日志、设置；用户页面：自己的 key、模型与用量。
+- [ ] S4-02 只读快照发布有 desired/applied 版本和失败原因；配置脱敏不触碰运行对象。
+- [ ] S4-03 管理角色与资源归属在服务端校验，页面调用真实 API。
+- [ ] S4-04 基础请求/尝试指标与有界日志队列；明确保留周期和丢弃计数。
+- [ ] S4-05 单二进制内嵌前端；Docker 支持挂载配置与数据、非 root 运行、健康检查、优雅退出。
+- [ ] S4-06 版本化数据库迁移、备份与恢复文档；支持外部反向代理，不捆绑数据库/Redis/Caddy。
+- [ ] S4-07 CI 覆盖构建、vet、单测、race、冒烟和关键协议回归，发布附迁移说明。
+
+前端在 API 和权限行为稳定后加入，届时只选择一套前端框架。第一版不增加支付、充值、邀请码、角色编辑器或分布式控制台。
+
+验收：管理员完成创建用户→授权→配置渠道；用户生成 key→调用→查看自己用量；修改配置能看到生效结果。全新安装和旧版本升级均可按文档完成。
+
+## S5 可选预算与结算
+
+- [ ] S5-01 明确“不计费”和“严格预算”运行模式；严格模式缺少必需组件则拒绝新调用。
+- [ ] S5-02 价格采用整数/定点，保存价格版本；无价格默认拒绝严格计费请求。
+- [ ] S5-03 用户与 key 双层预算原子预留；最大允许请求费用有上界。
+- [ ] S5-04 实际用量幂等结算、返还余量；usage 缺失进入估算或待对账状态，不默认免费。
+- [ ] S5-05 预留有租约/在途确认，崩溃恢复不重复扣费；客户端取消不等于无成本。
+- [ ] S5-06 每次尝试成本与最终用户收费分开；账本不依赖可丢弃日志队列。
+
+验收：并发请求不能突破定义的预算上界；重复结算不重复扣费；进程崩溃/取消/未知执行结果有可追踪恢复路径。预留与实际价格维度覆盖输入、输出及启用的其他计价项，不能只预留 max_tokens 的输出费用。
+
+## 每个阶段的交付约定
+
+1. 先写清变更影响和可复现问题，再实现最小变更。
+2. 回归命令通过；新行为有与风险对应的测试，文档指向实际命令。
+3. 不提交真实密钥、数据库、编译产物、日志、临时分析或个人配置。
+4. 对性能敏感路径附基准对照；没有性能影响的文档修改不滥加单元测试。
+5. 数据库变更附迁移和回滚限制；删除实现前确认调用方已迁移。
+6. 完成后更新本文件勾选项和 README 能力状态，避免“文档完成等于功能完成”。
+
+下一项工作：S0-01 至 S0-06。先建立可靠转发基线，再实施 S1 的模块拆分。

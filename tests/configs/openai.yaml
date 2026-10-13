@@ -4,6 +4,10 @@ server:
   retry_times: 2
   timeout_seconds: 30
 
+database:
+  driver: "sqlite"
+  path: ".local/data/test-openai.db"
+
 channels:
   # 主渠道：权重高，模拟主力线路
   - id: 1
