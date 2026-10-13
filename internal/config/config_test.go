@@ -174,6 +174,33 @@ channels:
 	}
 }
 
+// TestServerAddrFromEnv 验证监听地址可被环境变量覆盖。
+//
+// Docker 部署需要它：容器内必须监听 0.0.0.0，而配置文件的默认值是
+// 127.0.0.1:8080（自用直连时更安全）。绑 127.0.0.1 的容器会让
+// -p 映射的端口根本连不上——流量到不了容器的回环接口。
+func TestServerAddrFromEnv(t *testing.T) {
+	t.Setenv(EnvServerAddr, "0.0.0.0:8080")
+	cfg, err := Load(writeCfg(t, minimalCfg))
+	if err != nil {
+		t.Fatalf("加载失败: %v", err)
+	}
+	if cfg.Server.Addr != "0.0.0.0:8080" {
+		t.Errorf("addr = %q，期望 0.0.0.0:8080（环境变量应优先）", cfg.Server.Addr)
+	}
+}
+
+// TestServerAddrDefault 验证不设环境变量时保留配置文件的默认值。
+func TestServerAddrDefault(t *testing.T) {
+	cfg, err := Load(writeCfg(t, minimalCfg))
+	if err != nil {
+		t.Fatalf("加载失败: %v", err)
+	}
+	if cfg.Server.Addr != "127.0.0.1:8080" {
+		t.Errorf("addr = %q，期望 127.0.0.1:8080", cfg.Server.Addr)
+	}
+}
+
 // TestChannelKeyEnvOnlyForMatchingID 验证只影响对应 ID 的渠道。
 func TestChannelKeyEnvOnlyForMatchingID(t *testing.T) {
 	t.Setenv(EnvChannelKeyPrefix+"1", "sk-one")

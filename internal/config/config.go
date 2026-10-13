@@ -126,10 +126,19 @@ const EnvAdminKey = "GATEWAY_ADMIN_KEY"
 //
 // 与 EnvAdminKey 同一套理由：名字集中在一处，拼错会被 validate 立刻
 // 抓到（级别写错直接拒绝启动，不会静默退化到 info）。
+//
+// EnvServerAddr 覆盖监听地址。
+//
+// 为什么单独为它开环境变量：Docker 部署时容器内必须监听 0.0.0.0，
+// 而配置文件的默认值是 127.0.0.1:8080（自用直连时更安全——不对外）。
+// 没有这个覆盖的话，用户在 Docker 里要么改 config.yaml（那就得为
+// 容器单独维护一份配置），要么把默认值改成 0.0.0.0（那就把「默认
+// 只听本机」这个安全默认给破坏了）。环境变量让两种场景各取所需。
 const (
 	EnvLogLevel         = "GATEWAY_LOG_LEVEL"
 	EnvLogRetentionDays = "GATEWAY_LOG_RETENTION_DAYS"
 	EnvChannelKeyPrefix = "GATEWAY_CHANNEL_KEY_"
+	EnvServerAddr       = "GATEWAY_ADDR"
 )
 
 // Load 读取并校验配置文件。
@@ -150,6 +159,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvLogLevel)); v != "" {
 		cfg.LogLevel = v
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvServerAddr)); v != "" {
+		cfg.Server.Addr = v
 	}
 	// 保留天数走 strconv 而不是直接字符串：YAML 里已经是 int，
 	// 环境变量一律是字符串，解析失败必须报错而不是静默取 0
