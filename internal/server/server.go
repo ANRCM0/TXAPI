@@ -5,12 +5,14 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
+	"minigateway/internal/metrics"
 	"minigateway/internal/relay"
 	"minigateway/internal/server/api"
 	"minigateway/internal/server/middleware"
@@ -74,6 +76,40 @@ func NewEngine(deps Deps) *gin.Engine {
 	// 注意 Recovery/RequestID 在上面已经挂上了，探活仍然享受这两层。
 	engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// Prometheus 抓取端点，与 /healthz 同样免鉴权、免限流。
+	//
+	// 为什么不鉴权：抓取方是 Prometheus（或临时 curl 的运维），
+	// 它没有、也不该有客户端令牌；给监控系统单独发一把管理密钥
+	// 意味着「密钥进了监控系统的配置」，比不鉴权的暴露面更大。
+	// 指标本身只有聚合计数和标签（模型名/渠道名），不含请求内容、
+	// 不含任何 Key——泄漏它的后果是「竞争对手看到你的调用量」，
+	// 而不是「凭据被盗」。真要在公网暴露时，正确做法是在反向代理
+	// 层按来源 IP 放行 /metrics（和 /healthz 一样），而不是在应用层
+	// 加一套监控专用鉴权。
+	//
+	// 为什么也绕过限流：抓取通常 15~30s 一次，但误配成 1s 一次时
+	// 限流会把抓取打挂，表现为「监控图上突然全是断点」——监控自己
+	// 被打挂是最难排查的一类故障，而它本来就不该占业务配额。
+	//
+	// 凭据状态 provider 在这里注入而不是 main：只有 server 层同时
+	// 看得见 relay 的渠道池，且注入点紧挨着使用处。
+	metrics.Default.SetCredentialStatsProvider(relay.CredentialStats)
+	engine.GET("/metrics", func(c *gin.Context) {
+		// Content-Type 必须带 version=0.0.4：Prometheus 按它判断
+		// 解析器，缺了会走文本兜底且告警（多数情况下仍能解析，
+		// 但那是未定义行为）。
+		c.Header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		// 直接写给 ResponseWriter 而不是先拼字符串：抓取时渠道池
+		// 的读锁会被 provider 持有一次， Render 内部不再加锁，
+		// 所以这里没有「大字符串占内存」的问题。
+		if err := metrics.Default.Render(c.Writer); err != nil {
+			// 写一半失败（客户端断开）时 gin 已经不能改状态码了，
+			// 只能留痕。抓取失败的对岸是 Prometheus 的 target down，
+			// 服务端日志是唯一线索。
+			slog.Error("[指标] 写出 /metrics 失败", "err", err)
+		}
 	})
 
 	// IP 级限流：兜底防「拿随机 key 试」的探测请求。它不依赖令牌信息，

@@ -1,0 +1,59 @@
+# docker compose 部署：网关 + 命名数据卷（SQLite 持久化）。
+#
+# 一条命令起服务：
+#   GATEWAY_ADMIN_KEY=xxx GATEWAY_CHANNEL_KEY_1=sk-real docker compose up -d
+#
+# 密钥全部走环境变量，不写进这个文件、不写进镜像：
+#   - GATEWAY_ADMIN_KEY      管理 API 密钥（缺失时网关拒绝启动，
+#                            见 config.validate——这是批次 1 的安全底线）
+#   - GATEWAY_CHANNEL_KEY_1  渠道 id=1 的上游 Key（渠道名 → id 的
+#                            映射在挂载的 config.yaml 里）
+#   - GATEWAY_LOG_LEVEL      debug/info/warn/error，改级别不用重打镜像
+#   - GATEWAY_LOG_RETENTION_DAYS  请求日志保留天数
+#
+# 为什么用 compose 的 ${VAR} 语法 + .env 而不是把值写在这：
+# 这个文件会进 git，任何写进来的密钥等于公开。变量缺省时 compose
+# 给空串，config.Load 会把空 admin_key 判为缺失并拒绝启动——
+# 「忘了配密钥」的后果是起不来，不是一个裸奔的管理接口。
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: minigateway:latest
+    container_name: minigateway
+    restart: unless-stopped
+
+    # 配置文件用 volume 挂载而不是 COPY 进镜像：
+    # 改渠道/加令牌不用重新 build；而且镜像层里不留任何一份可能含
+    # 真实 Key 的配置。
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      # 命名卷持久化 SQLite。用命名卷而不是 bind mount：宿主机上
+      # 不需要预先建目录，`docker compose down` 也不会误删，
+      # 只有 `down -v` 才显式清数据——清数据必须是有意识的动作。
+      - gateway-data:/app/data
+
+    environment:
+      # 缺省空串：交给 config.Load 校验（缺 admin_key 拒绝启动）。
+      # 在 .env 或命令行里给真实值。
+      GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN_KEY:-}
+      GATEWAY_LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-info}
+      GATEWAY_LOG_RETENTION_DAYS: ${GATEWAY_LOG_RETENTION_DAYS:-30}
+      # 渠道上游 Key。下面的 1/2 与 config.yaml 里的渠道 id 对应；
+      # 渠道更多时按同样规则往下加。
+      GATEWAY_CHANNEL_KEY_1: ${GATEWAY_CHANNEL_KEY_1:-}
+      GATEWAY_CHANNEL_KEY_2: ${GATEWAY_CHANNEL_KEY_2:-}
+
+    ports:
+      # 只绑 127.0.0.1：默认不给容器开公网入口。要暴露时改成
+      # "0.0.0.0:8080:8080"，但那时务必在前面加反向代理做 TLS
+      # 和 /metrics 的来源 IP 限制（见 server.go 的 /metrics 注释）。
+      - "127.0.0.1:8080:8080"
+
+    # 不用 depends_on：网关不依赖别的服务（SQLite 是文件，就在卷里）。
+    # 以后加分库（PostgreSQL）时再加。
+
+volumes:
+  gateway-data:
+    # 不指定 driver/路径，用 docker 的默认 local driver。

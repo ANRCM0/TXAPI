@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -463,5 +463,10 @@ func abortRateLimited(c *gin.Context, retryAfterSec int, msg string) {
 	c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 		"error": gin.H{"message": msg, "type": "rate_limit_error"},
 	})
-	log.Printf("[限流] %s %s: %s", c.Request.Method, c.Request.URL.Path, msg)
+	// warn 而不是 info：限流意味着有客户端在超配额使用，属于
+	// 需要人看一眼的事件；但它不是故障（网关在正常工作），
+	// 所以不到 error。
+	slog.Warn("[限流] 请求被限流",
+		"method", c.Request.Method, "path", c.Request.URL.Path,
+		"request_id", c.GetString(CtxRequestID), "reason", msg)
 }

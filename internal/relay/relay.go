@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/relay/adaptor"
 	"minigateway/internal/relay/meta"
@@ -94,6 +95,10 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 		// 存 uint 而不是 int：RequestLog.ChannelID 是 uint，类型不匹配会让
 		// 类型断言静默失败，日志里 channel_id 全是 0，事后查不出走了哪条渠道。
 		c.Set(relayChannelKey, uint(ch.id))
+		// 指标用的渠道名。channel_id 是数字，作为 Prometheus 标签
+		// 可读性差（「哪个渠道在报错」要反查数据库），指标一律用
+		// 人可读的名字；logs 表仍然存 ID（要 join）。
+		c.Set(relayChannelNameKey, ch.name)
 		if credID, ok := m.CredentialID(); ok {
 			c.Set(relayCredentialKey, credID)
 		}
@@ -104,16 +109,36 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 		// 分组决定计费倍率，必须等选完渠道才有意义。
 		c.Set(relayChannelGroupKey, ch.groupName)
 
+		// 选目标的结果用 debug：正常流量下这是纯噪音（每个请求一条），
+		// 但排查「为什么这把 Key 一直不被选中」「亲和有没有生效」
+		// 时它是唯一现场——配合 AddSource 还能看到走的是哪条选择
+		// 分支（亲和命中 / 加权随机 / 降级）。
+		slog.Debug("[调度] 选中转发目标",
+			"request_id", c.GetString(middleware.CtxRequestID),
+			"channel", ch.name, "channel_id", ch.id,
+			"credential_id", cred.ID, "credential_weight", cred.Weight,
+			"model", m.ActualModel,
+			"session_id", sessionID,
+			"attempt", attempt)
+
 		usage, err := doRelay(c, m, body, timeout)
 		if err == nil {
 			if usage != nil {
 				c.Set(relayUsageKey, usage)
-				log.Printf("[用量] 渠道=%s 模型=%s 输入=%d 输出=%d 合计=%d",
-					ch.name, m.ActualModel, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+				// debug 而不是 info：上游返回的原始用量在 info 级别
+				// 会和请求摘要重复（摘要里也有 token 数），而真正需要
+				// 它的场景是「usage 数字对不上」的排查——那时会开
+				// debug。字段名与统一字段一致（model/channel），
+				// 方便按字段检索而不是按 msg 文本检索。
+				slog.Debug("[用量] 上游返回 token 用量",
+					"channel", ch.name, "model", m.ActualModel,
+					"prompt_tokens", usage.PromptTokens,
+					"completion_tokens", usage.CompletionTokens,
+					"total_tokens", usage.TotalTokens)
 			}
 			// 健康反馈：成功即清零。让这把 Key 的冷却/拉黑状态立刻回到
 			// 全绿，下一次选择就不会再跳过它。
-			reportCredentialHealth(cred, http.StatusOK, "")
+			reportCredentialHealth(ch.name, cred, http.StatusOK, "")
 			c.Set(relayStatusKey, http.StatusOK)
 			return
 		}
@@ -124,15 +149,24 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 		// 见 scheduler.ShouldPenalizeCredential）。必须在 shouldRetry
 		// 判断**之后**：400 这类错误本来就不会重试，但反馈还是要做——
 		// 「不重试」和「不惩罚」是两件独立的事。
-		reportCredentialHealth(cred, err.StatusCode, err.Error.Message)
+		reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
 
 		// 只有「可重试的错误」才换渠道。
 		// 比如 400 参数错误，换渠道也没用，反而浪费一次请求。
 		if !shouldRetry(err.StatusCode) {
-			log.Printf("[转发失败] 渠道=%s 状态码=%d 不重试: %s", ch.name, err.StatusCode, err.Error.Message)
+			// warn：上游返回了错误状态码。这是「本次请求没成」，
+			// 属于必须留痕的事件，但网关本身在正确工作（分类、
+			// 不重试都是设计行为），所以不是 error。
+			slog.Warn("[转发失败] 上游错误，不重试",
+				"channel", ch.name, "model", m.ActualModel,
+				"credential_id", cred.ID, "status", err.StatusCode,
+				"error", err.Error.Message)
 			break
 		}
-		log.Printf("[转发失败] 渠道=%s 状态码=%d 准备重试: %s", ch.name, err.StatusCode, err.Error.Message)
+		slog.Warn("[转发失败] 上游错误，准备换目标重试",
+			"channel", ch.name, "model", m.ActualModel,
+			"credential_id", cred.ID, "status", err.StatusCode,
+			"error", err.Error.Message, "attempt", attempt)
 	}
 
 	if lastErr == nil {
@@ -223,7 +257,8 @@ func doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout time.Duration) (
 			usage, err := relayStream(c, a, resp, m)
 			if err != nil {
 				// 流已开始，无法改状态码；记日志后按「已发出的流」处理
-				log.Printf("[流式转发] 渠道=%s 流结束异常: %v", m.ChannelName, err)
+				slog.Warn("[流式转发] 流结束异常",
+					"channel", m.ChannelName, "model", m.ActualModel, "err", err)
 			}
 			return usage, nil
 		}
@@ -526,8 +561,11 @@ func writeError(c *gin.Context, statusCode int, message, errType string) {
 // 尝试的结果」才对账本有意义。写在 context 上，handler 收尾时读到的
 // 天然就是最终值，不需要 Relay 再包一个结果结构体往外传。
 const (
-	relayStatusKey       = "relay_status"
-	relayChannelKey      = "relay_channel_id"
+	relayStatusKey  = "relay_status"
+	relayChannelKey = "relay_channel_id"
+	// relayChannelNameKey 是命中的渠道名，给 Prometheus 指标当标签
+	// （见 Relay 里设置处的注释）。
+	relayChannelNameKey  = "relay_channel_name"
 	relayCredentialKey   = "relay_credential_id"
 	relayActualModelKey  = "relay_actual_model"
 	relayUsageKey        = "relay_usage"
@@ -575,8 +613,19 @@ func SetHealthReporter(fn credentialHealthReporter) { reportHealthFn = fn }
 // 放在 Relay 里而不是 handler 里：只有 Relay 知道「这次用的是哪把
 // 凭据、结果如何」，handler 那层只看到最终状态码（重试后的），会把
 // 中间失败的那把 Key 漏掉——而那把恰恰是最该被冷却的。
-func reportCredentialHealth(cred *dbmodel.Credential, statusCode int, errMsg string) {
-	if reportHealthFn == nil || cred == nil {
+//
+// 同时在这里埋凭据失败指标：与调度器共用同一个「该不该罚」的判定
+// （scheduler.ShouldPenalizeCredential），保证「被惩罚的失败」和
+// 「被计数的失败」永远是同一批——两处各写一遍判定的话，以后改分类
+// 规则一定会漏改一处，指标和冷却行为就会对不上。
+func reportCredentialHealth(channel string, cred *dbmodel.Credential, statusCode int, errMsg string) {
+	if cred == nil {
+		return
+	}
+	if statusCode != http.StatusOK && scheduler.ShouldPenalizeCredential(statusCode) {
+		metrics.Default.RecordCredentialFailure(channel, cred.ID)
+	}
+	if reportHealthFn == nil {
 		return
 	}
 	reportHealthFn(cred, statusCode, errMsg)

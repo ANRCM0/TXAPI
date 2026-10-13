@@ -3,7 +3,7 @@ package relay
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -215,7 +215,7 @@ func relayStream(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta
 			// 单行转换失败不中断整条流：坏行跳过，继续读后面的行。
 			// 理由：流式一旦开始就无法回退，为一行坏数据掐断整个对话
 			// 比丢一行数据的伤害大得多。
-			log.Printf("[流式转换] 跳过无法解析的上游行: %v", err)
+			slog.Warn("[流式转换] 跳过无法解析的上游行", "err", err)
 			continue
 		}
 		for _, ln := range lines {

@@ -2,7 +2,7 @@ package store
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -110,7 +110,7 @@ func writeLogSync(db *gorm.DB, entry *model.RequestLog) {
 	if err := db.Create(entry).Error; err != nil {
 		// 打到标准错误日志而不是静默：丢日志的代价是账目永久对不上，
 		// 必须留痕（SPEC 2.4：异步写失败不能静默丢失）
-		log.Printf("[日志写入失败] request_id=%s: %v", entry.RequestID, err)
+		slog.Error("[日志写入失败] 请求日志落库失败", "request_id", entry.RequestID, "err", err)
 	}
 }
 
@@ -128,10 +128,10 @@ func writeLogBatch(db *gorm.DB, batch []*model.RequestLog) {
 		}
 	}
 	if err := db.CreateInBatches(batch, logBatchSize).Error; err != nil {
-		log.Printf("[日志批量写入失败，降级逐条重试] 条数=%d: %v", len(batch), err)
+		slog.Warn("[日志批量写入失败，降级逐条重试]", "count", len(batch), "err", err)
 		for _, e := range batch {
 			if err := db.Create(e).Error; err != nil {
-				log.Printf("[日志写入失败] request_id=%s: %v", e.RequestID, err)
+				slog.Error("[日志写入失败] 请求日志落库失败", "request_id", e.RequestID, "err", err)
 			}
 		}
 	}

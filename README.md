@@ -1,60 +1,124 @@
 # mini-gateway
 
-一个极简的 LLM API 网关内核，用于学习「网关是怎么工作的」。
+一个自用的 LLM API 网关：把多个上游渠道（OpenAI / Anthropic / Gemini / 任何
+OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴权、凭据池调度、
+协议互转、计费额度、限流、可观测**。
 
-设计目标：**用最少的代码把完整转发链路讲清楚**。没有数据库、没有前端、
-没有计费系统，只有转发本身。约 900 行 Go 代码。
+定位见 [docs/PLAN.md](docs/PLAN.md)：**自用为主、留多用户扩展口**，单二进制，
+零第三方可观测性依赖，凭据池调度是技术亮点。
 
-## 它做了什么
+- 语言/版本：Go 1.23
+- 存储：SQLite（默认，单文件 + WAL）；接口留着 PostgreSQL 的位置
+- 规模：约 18,200 行 Go（其中约 5,500 行测试），142 个测试用例
+
+---
+
+## 架构
 
 ```
-客户端 ──Bearer sk-xxx──> 网关 ──渠道 key──> 上游 LLM
-         (令牌鉴权)       (路由/转换/重试)    (OpenAI/Claude/...)
+客户端 (Cherry Studio / NextChat / Cursor / 任何 OpenAI SDK)
+   │  OpenAI 兼容协议 + Bearer <令牌>
+   ▼
+┌──────────────────────────────────────────────────────────────┐
+│ HTTP 层   internal/server + middleware                       │
+│   RequestID → IP限流 → CORS → Auth(令牌) → 令牌限流 → Relay    │
+│   路由: /v1/* 转发   /api/* 管理   /metrics   /healthz        │
+├──────────────────────────────────────────────────────────────┤
+│ 转发层   internal/relay                       ⭐ 核心          │
+│   模型路由(索引) → 选渠道+选凭据 → 额度预扣 → 协议转换          │
+│   → 转发(失败换目标重试) → 结算 → 落库+埋指标                   │
+├──────────────────────────────────────────────────────────────┤
+│ 业务层                                                         │
+│   scheduler  凭据池调度(加权随机/冷却/拉黑/亲和/恢复)           │
+│   billing    计费(价格表/预扣→结算/原子扣减)                    │
+│   metrics    Prometheus 指标(手写 exposition，零依赖)           │
+│   logging    结构化日志(log/slog，级别可配)                     │
+├──────────────────────────────────────────────────────────────┤
+│ 存储层   internal/store                                        │
+│   SQLite + GORM + 内存缓存(渠道/令牌) + 异步批量日志写入          │
+└──────────────────────┬───────────────────────────────────────┘
+                       │ 渠道 Key（每个渠道可配多把，构成凭据池）
+                       ▼
+        上游: OpenAI / Anthropic / Gemini / DeepSeek / ...
 ```
 
-1. **令牌鉴权** —— 校验客户端令牌，支持按令牌限制可访问的模型
-2. **渠道路由** —— 按模型名筛选渠道，按权重随机选择
-3. **协议转换** —— 把客户端请求体转成上游格式（含模型名映射）
-4. **失败重试** —— 429/5xx 时自动换渠道重试，跳过已失败的渠道
-5. **流式转发** —— SSE 边收边发，保持打字机效果
-6. **用量统计** —— 从响应中抽取 token 用量并记录
-
-## 目录结构
+目录结构：
 
 ```
 mini-gateway/
-├── main.go                          入口：加载配置 → 初始化 → 启动（极薄）
-├── config.yaml                      生产配置示例
-├── config.test.yaml                 测试配置（指向本地假上游）
-├── config.retry.yaml                重试测试配置
+├── main.go                      入口：装配依赖 + 启动 + 优雅关闭（极薄）
+├── Dockerfile                   多阶段构建（golang:1.23-alpine → alpine）
+├── docker-compose.yml           网关 + 命名数据卷
+├── config.yaml                  配置（渠道/令牌是种子数据，仅首次导入）
 ├── internal/
-│   ├── config/config.go             配置加载、默认值、启动期校验
-│   ├── server/
-│   │   ├── server.go                中间件链 + 路由注册
-│   │   └── middleware/middleware.go Recovery / RequestID / CORS / Auth
-│   └── relay/
-│       ├── adaptor/adaptor.go       ⭐ Adaptor 接口（网关的扩展点）
-│       ├── adaptor/openai/          OpenAI 兼容协议适配器
-│       ├── meta/meta.go             单次转发的上下文
-│       ├── model/model.go           内部数据结构
-│       ├── registry.go              渠道池 + 适配器表
-│       ├── relay.go                 ⭐ 转发主流程 + 重试
-│       └── handler.go               HTTP 处理器
-└── testtools/fakeupstream/          假上游，用于无 Key 测试
+│   ├── config/                  YAML + 环境变量 + 启动期校验
+│   ├── logging/                 log/slog 初始化（级别来自配置）
+│   ├── metrics/                 Prometheus 指标（手写 exposition 格式）
+│   ├── model/                   GORM 数据模型
+│   ├── store/                   数据访问 + 内存缓存 + 异步日志 + 清理
+│   ├── billing/                 价格表、额度预扣/结算、原子扣减
+│   ├── scheduler/               凭据池调度：选择/健康/亲和/恢复/清理
+│   ├── relay/                   转发核心
+│   │   ├── registry.go          渠道池 + 适配器表 + 模型索引
+│   │   ├── relay.go             单次转发 + 失败重试
+│   │   ├── handler.go           HTTP 入口 + 收尾（结算/记账/埋点）
+│   │   ├── convert.go           协议枢纽（客户端 → 规范 → 上游）
+│   │   ├── canonical/           规范格式（厂商中立的请求/响应表示）
+│   │   └── adaptor/             各厂商适配器（openai/anthropic/gemini）
+│   └── server/
+│       ├── server.go            中间件链 + 路由注册
+│       ├── api/                 管理 API（渠道/凭据/令牌/日志/价格 CRUD）
+│       └── middleware/          Recovery/RequestID/CORS/Auth/限流/AdminAuth
+└── testtools/                   假上游（无 Key 跑通全链路）
 ```
+
+---
+
+## 功能矩阵
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| 令牌鉴权 | ✅ | Bearer 令牌，可按令牌限制可访问的模型 |
+| 渠道路由 | ✅ | 按模型名索引命中（O(1)，支持 `*` 通配渠道），按权重分流 |
+| 凭据池调度 | ✅ | 每请求选 Key：加权随机 + 一致性哈希亲和 |
+| 健康状态机 | ✅ | 失败分类 → 指数退避冷却（30s 起，封顶 1h）→ 连续失败拉黑 |
+| 自动恢复 | ✅ | 冷却到期自动回 active（每 30s 扫描）；banned 需人工解封 |
+| 失败重试 | ✅ | 重试单元是 (渠道, 凭据) 对；400/404/422 不重试也不罚凭据 |
+| 协议互转 | ✅ | OpenAI ↔ Anthropic ↔ Gemini（经规范格式枢纽） |
+| 流式转发 | ✅ | SSE 逐行翻译，打字机效果保留；anthropic/gemini 也支持 |
+| embeddings | ✅ | 与对话共用整条链路，只按输入 token 计费 |
+| 计费 | ✅ | 价格表（支持通配符/分组倍率）、预扣→结算、原子额度扣减 |
+| 限流 | ✅ | 令牌级 RPM/TPM（滑动窗口）+ IP 级兜底；429 + `Retry-After` |
+| 结构化日志 | ✅ | log/slog，级别可配（debug/info/warn/error），七个统一字段 |
+| Prometheus 指标 | ✅ | `GET /metrics`，六个指标族；手写 exposition，零新依赖 |
+| 日志清理 | ✅ | `logs` 表按保留天数每日分批删除（每批 1000 行） |
+| 管理 API | ✅ | 渠道/凭据/令牌/日志/统计/价格 CRUD，`X-Admin-Key` 鉴权 |
+| Docker | ✅ | 多阶段构建 + compose + 数据卷；密钥走环境变量 |
+| CI | ✅ | build + vet + `go test -race` + `gofmt -l` |
+| 用户注册/登录 | ❌ | 自用场景「令牌即租户」，见 [docs/PLAN.md](docs/PLAN.md) 的不做清单 |
+| 支付/充值 | ❌ | 同上 |
+| images/audio/rerank | ❌ | 适配器接口已留扩展位，等真有需求 |
+| Redis 限流 | ❌ | 单机内存版够自用；接口留位置，需要时替换实现 |
+| PostgreSQL | ❌ | `Open()` 对非 SQLite 直接报错，属部署阶段（P7） |
+
+---
 
 ## 快速开始
 
+### 方式一：本机编译（无需 Docker）
+
 ```bash
-# 1. 编译
 export PATH=$PATH:/usr/local/go/bin
-go build -o mini-gateway .
 
-# 2. 改 config.yaml，填入真实的上游 key
-vim config.yaml
+# 1. 编译网关和假上游
+go build -o /tmp/gateway .
+go build -o /tmp/fakeupstream ./testtools/fakeupstream
 
-# 3. 启动
-./mini-gateway -config config.yaml
+# 2. 终端 1：假上游（模拟 OpenAI，不需要真实 Key）
+/tmp/fakeupstream 127.0.0.1:9911
+
+# 3. 终端 2：网关（管理密钥必填，缺失会拒绝启动）
+GATEWAY_ADMIN_KEY=dev-secret /tmp/gateway -config config.test.yaml
 
 # 4. 调用
 curl http://127.0.0.1:8080/v1/chat/completions \
@@ -63,80 +127,231 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"你好"}]}'
 ```
 
-## 无 Key 测试（推荐先跑这个）
+> `config.test.yaml` 指向本地假上游；`config.yaml` 是生产模板，把渠道
+> `base_url`/`key` 换成真实值即可。
 
-不需要任何真实 API Key，用假上游验证完整链路：
+### 方式二：Docker Compose
 
 ```bash
-# 终端 1：启动假上游
-go build -o /tmp/fakeupstream ./testtools/fakeupstream
-/tmp/fakeupstream 127.0.0.1:9911
+# 密钥全部走环境变量（不写进镜像、不写进 compose 文件）
+export GATEWAY_ADMIN_KEY=dev-secret
+export GATEWAY_CHANNEL_KEY_1=sk-your-real-upstream-key
 
-# 终端 2：启动网关（测试配置指向假上游）
-go build -o /tmp/minigateway .
-/tmp/minigateway -config config.test.yaml
-
-# 终端 3：验证
-curl http://127.0.0.1:8080/v1/chat/completions \
-  -H 'Authorization: Bearer sk-test-123' -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+docker compose up -d
+curl http://127.0.0.1:8080/healthz
 ```
 
-## 三个核心设计
+- 配置文件用 volume 挂载：改渠道不用重新 build
+- SQLite 落在命名卷 `gateway-data`：`docker compose down` 不丢数据，
+  `docker compose down -v` 才清
+- 日志级别/保留天数也可用环境变量覆盖：
+  `GATEWAY_LOG_LEVEL=debug`、`GATEWAY_LOG_RETENTION_DAYS=7`
+- 端口默认只绑 `127.0.0.1`（见 `docker-compose.yml` 的注释）
 
-### 1. Adaptor 接口 —— 网关的心脏
+### 配置项
 
-```go
-type Adaptor interface {
-    GetRequestURL(m *meta.Meta) (string, error)
-    SetupRequestHeader(req *http.Request, m *meta.Meta) error
-    ConvertRequest(body []byte, m *meta.Meta) ([]byte, error)
-    DoResponse(c *gin.Context, resp *http.Response, m *meta.Meta) (*model.Usage, *model.ErrorWithStatusCode)
-    GetChannelName() string
-}
-```
+| 字段 | 默认 | 环境变量 | 说明 |
+|------|------|----------|------|
+| `server.addr` | `127.0.0.1:8080` | — | 监听地址 |
+| `server.retry_times` | `2` | — | 首次失败后最多再试几次 |
+| `server.timeout_seconds` | `120` | — | 单次上游请求超时（流式别设太小） |
+| `server.ip_rpm_limit` | `0`（不限） | — | IP 级限流，防无令牌的探测请求 |
+| `admin_key` | 必填 | `GATEWAY_ADMIN_KEY` | 管理 API 密钥，缺失拒绝启动 |
+| `log_level` | `info` | `GATEWAY_LOG_LEVEL` | `debug`/`info`/`warn`/`error` |
+| `log_retention_days` | `30` | `GATEWAY_LOG_RETENTION_DAYS` | `logs` 表保留天数，`0` 关闭清理 |
+| `database.driver` | `sqlite` | — | 目前只支持 sqlite |
+| `database.path` | `data/gateway.db` | — | SQLite 文件路径 |
+| `channels[].key` | — | `GATEWAY_CHANNEL_KEY_<id>` | 渠道上游 Key，环境变量优先 |
 
-所有厂商差异被压进这一个接口。**新增厂商 = 新建一个包实现 5 个方法，
-不改任何核心代码。**
+> **环境变量优先于 YAML** 是全局规则：部署时改配置不用重新打镜像/改文件，
+> 密钥尤其应该走环境变量（不进 git）。
 
-### 2. 请求体透明透传
+> **渠道和令牌不是运行期配置**：`channels`/`tokens` 段只在**数据库为空时**
+> 导入一次（种子数据），之后一律通过管理 API 增删改，改完立即生效、不用重启。
 
-请求体只解析 `model` 和 `stream` 两个字段，其余**原样转发**给上游。
+---
 
-为什么不用结构体完整建模：LLM 请求参数在快速演进，用结构体反序列化
-会静默丢掉未声明的字段，用户会遇到「某个参数在网关后面失效了」这种
-极难排查的问题。
+## API 一览
 
-### 3. 重试换渠道的两个坑
+### 转发面（客户端用，Bearer 令牌鉴权）
 
-```go
-tried := make(map[int]bool)   // 坑1：记录已失败渠道，重试时跳过
-```
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/chat/completions` | 对话补全（支持 `stream: true`） |
+| POST | `/v1/embeddings` | 文本转向量（只按输入 token 计费） |
+| GET | `/v1/models` | 该令牌可访问的模型清单（客户端用来填下拉框） |
 
-```go
-if !shouldRetry(err.StatusCode) { break }   // 坑2：400 换渠道也没用
-```
+### 管理面（`/api/*`，`X-Admin-Key` 头鉴权）
 
-- **不记录已失败渠道** → 一个坏渠道被反复选中，重试全浪费在它身上
-- **不区分错误类型** → 参数错误(400)也去重试，白打一次上游
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/channels` | 渠道列表 |
+| POST | `/api/channels` | 建渠道 |
+| GET | `/api/channels/:id` | 渠道详情（Key 默认掩码，`?reveal=1` 看明文） |
+| PUT | `/api/channels/:id` | 改渠道 |
+| DELETE | `/api/channels/:id` | 删渠道 |
+| GET | `/api/channels/:id/credentials` | 凭据列表（含健康状态） |
+| POST | `/api/channels/:id/credentials` | 加一把 Key |
+| PUT | `/api/credentials/:id` | 改凭据（权重等） |
+| DELETE | `/api/credentials/:id` | 删凭据（最后一把会拒绝） |
+| POST | `/api/credentials/:id/status` | 手动重置 active / 解除拉黑 |
+| GET/POST/PUT/DELETE | `/api/tokens[/:id]` | 令牌 CRUD |
+| GET | `/api/logs` | 请求流水（支持按渠道/令牌/模型过滤 + 分页） |
+| GET | `/api/stats/...` | 用量统计（汇总/按模型/按渠道） |
+| GET/POST/PUT/DELETE | `/api/prices[/:model]` | 价格表 CRUD |
+| GET | `/api/abilities` | 能力表（模型 → 渠道，路由索引的数据源） |
 
-## 已验证的行为
+### 运维面（免鉴权）
 
-| 场景 | 结果 |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/healthz` | 健康检查（不依赖数据库和上游，给探活用） |
+| GET | `/metrics` | Prometheus exposition 格式指标 |
+
+**指标族**：
+
+| 指标 | 类型 | 标签 |
+|------|------|------|
+| `gateway_requests_total` | counter | `model,channel,status` |
+| `gateway_request_duration_seconds` | histogram | `model,channel`（桶 0.05~60s + `+Inf`） |
+| `gateway_tokens_total` | counter | `model,channel,type`(prompt/completion) |
+| `gateway_cost_total` | counter | `model,channel` |
+| `gateway_credentials` | gauge | `channel,status`(active/cooldown/banned/disabled) |
+| `gateway_credential_failures_total` | counter | `channel,credential` |
+
+> `/metrics` 和 `/healthz` **不鉴权也不限流**。理由：抓取方是 Prometheus，
+> 它没有也不该有客户端令牌；指标只有聚合计数和标签（模型名/渠道名），
+> 不含请求内容、不含任何 Key。要在公网暴露时，正确做法是在反向代理层按
+> 来源 IP 放行，而不是在应用层加一套监控专用鉴权（那意味着密钥进了监控
+> 系统的配置，暴露面更大）。完整理由见 `internal/server/server.go` 的注释。
+
+**日志级别**（`log_level` 或 `GATEWAY_LOG_LEVEL`）：
+
+| 级别 | 内容 |
 |------|------|
-| 非流式转发 | ✅ 正常返回，usage 记录 |
-| 流式转发 (SSE) | ✅ 逐 chunk 转发，打字机效果保留 |
-| model_mapping | ✅ 请求 `gpt-4o`，上游收到 `gpt-4o-2024-08-06` |
-| 无令牌 / 错误令牌 | ✅ 401 |
-| 受限令牌访问未授权模型 | ✅ 503 + 明确错误信息 |
-| 模型列表按权限过滤 | ✅ 受限令牌只看到授权模型 |
-| 429 重试换渠道 | ✅ bad-1(429) → bad-2(429) → good-3(成功) |
+| `error` | 网关自身故障：panic、结算失败、额度预检失败 |
+| `warn` | 上游返回错误、请求被拒（4xx/5xx）、限流触发、渠道装载跳过 |
+| `info`（默认） | 请求摘要一行一条 + 启动/关闭/清理等生命周期事件 |
+| `debug` | 上述全部 + 选凭据细节（渠道/凭据/权重/会话/第几次尝试）、冷却判定、上游原始用量 |
 
-## 还没做（后续阶段）
+统一字段（info 及以上的请求日志都带）：`request_id` `token_id` `channel_id`
+`credential_id` `model` `latency_ms` `status`。
 
-- SQLite/PostgreSQL 持久化（渠道、令牌、日志）
-- 管理界面
-- 凭据池调度（冷却、黑名单、会话亲和）
-- 计费与配额扣减
-- Anthropic / Gemini 适配器
-- 单二进制内嵌前端
+---
+
+## 设计决策
+
+### 1. 渠道与凭据分离
+
+「渠道」是上游服务商的连接信息（base_url、协议类型、模型列表），
+「凭据」是该渠道下的一把 Key。一个渠道可以挂多把 Key，构成**凭据池**。
+
+为什么分开：实际使用中同一个服务商通常有多个 Key（多个账号、多个额度包）。
+如果「一个渠道 = 一个 Key」，就没法表达「这 5 把 Key 是同一家的，应该一起
+做负载均衡」，也无法在 Key 级别做故障隔离。
+
+代价是调度复杂了一层（选渠道 → 再选渠道内的凭据），收益是单渠道挂 3 把 Key
+真的等于有 3 份容量——而不是配了不用。详见 [docs/SPEC-P3.md](docs/SPEC-P3.md)。
+
+### 2. 规范格式枢纽
+
+协议转换走「客户端协议 → 规范格式 → 上游协议」两段式，而不是 N×M 个直连
+适配器。
+
+新增一个上游协议只需要：实现规范格式 → 该协议的反向转换。已支持的客户端
+协议自动获得它，已支持的上游协议也自动能被它调用。N+M 而不是 N×M。
+
+客户端协议当前固定 OpenAI（网关只暴露 `/v1/*` OpenAI 兼容入口）；上游协议
+已支持 openai / anthropic / gemini。
+
+### 3. 请求体透明透传
+
+请求体只解析 `model`/`stream`/`max_tokens` 三个字段，其余**原样转发**。
+
+为什么不用结构体完整建模：LLM 请求参数在快速演进（reasoning、tools、
+response_format…）。用结构体反序列化再序列化，任何未声明的字段都会被静默
+丢掉，用户会遇到「某个参数在网关后面失效了」这种极难排查的问题。
+`max_tokens` 是唯一例外——预扣额度需要它算费用上限。
+
+### 4. 原子额度扣减
+
+额度检查 + 预扣发生在**转发之前**，结算在响应之后修正差额。
+
+- 超额时直接回 403，一个字节都不发给上游——转发注定被拒的请求等于白烧钱
+  （上游 Key 是按量收费的）
+- 扣减走 gorm 的原子 `UPDATE ... SET used = used + ?`，并发下不丢更新
+- 预扣→结算用 flag + defer 保证「无论 Relay 正常返回还是 panic 都要结算」：
+  预扣了钱不结账，令牌额度会被永久占用（表现为「没用几次就 403」）
+- 结算失败只告警不阻断：用户请求已经成功了，网关因为自己的账本坏了就报错
+  是不讲道理的
+
+### 5. 一致性哈希亲和
+
+会话 ID（`X-Session-Id` 头，缺省用「令牌 + 首条消息哈希」）经一致性哈希
+定位到一把凭据，同一会话固定打同一把 Key。
+
+**为什么重要**：上游按账号缓存 prompt，同一对话固定打同一把 Key 才能吃到
+缓存命中——省钱又提速。这不是「避免上下文错乱」，是成本优化。
+
+用一致性哈希而不是 `hash % N`：凭据增删时只有相邻的一小段会话会重映射，
+不会整体重排。亲和目标不可用时降级到加权随机——不能因为亲和把请求卡死。
+
+### 6. 可观测性零新增依赖
+
+结构化日志用标准库 `log/slog`，Prometheus 指标**手写 exposition 纯文本格式**，
+都不引第三方库。
+
+取舍：项目从 P1 起就把第三方依赖压在 gin/gorm/sqlite/yaml 四个，每一个新
+依赖都是供应链面和升级面；而需要的六个指标全是「带标签的 counter /
+histogram / gauge」，exposition 格式是个几十行的纯文本协议。手写版只覆盖
+「本网关自己埋的点」，不需要官方库的 collector 注册表、默认运行时指标、
+推送网关那些能力——等真要多协议暴露或上 Pushgateway 时再换，替换成本很低
+（`internal/metrics` 只被 relay 和 server 各调一两个函数）。取舍理由写在
+`internal/metrics/metrics.go` 的头注里。
+
+### 7. 注入而不是直接依赖
+
+计费引擎、限流器、日志落库、凭据选择、健康反馈、渠道重载——全部由 `main`
+在启动时注入，`internal/` 之间不横向 import 业务包。
+
+`relay` 不知道 store 存在，`scheduler` 不知道 relay 存在，`metrics` 不知道
+任何业务存在。这让「转发层保持纯粹」（换存储甚至改成外发日志都不用改
+relay），也让单元测试能不注入就不注入（nil = 关闭该功能）。
+
+---
+
+## 测试
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go build ./...
+go vet ./...
+go test -race -count=1 ./...
+gofmt -l .            # 应无输出
+```
+
+142 个用例覆盖：计费端到端（6 个 P5 验收场景）、凭据调度（加权分布/冷却
+退避/拉黑阈值/亲和稳定与降级/错误分类）、限流（RPM/TPM 分桶）、指标格式
+（counter/histogram/gauge 的 exposition 正确性 + 标签转义 + 并发计数）、
+日志清理（分批删除 + 保留天数语义）、配置校验。
+
+> **为什么 `-race` 是硬要求**：凭据调度、限流计数、指标埋点全是并发路径，
+> 而 Go 的 data race 在不开 race detector 时表现为「偶发的奇怪数字」——
+> 亲和分流偏斜和 RPM/TPM 共桶缺陷都是这样逃过普通测试的。CI 里这条不能省。
+
+---
+
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| [docs/PLAN.md](docs/PLAN.md) | 总体方案与目标架构：分层、目录、技术栈、明确不做的事 |
+| [docs/SPEC-P3.md](docs/SPEC-P3.md) | 凭据池调度规格：选择算法、健康状态机、会话亲和、后台恢复 |
+| [docs/SPEC-P5.md](docs/SPEC-P5.md) | 计费与用量统计规格：价格表、预扣→结算、估算降级、统计 API |
+| [docs/PLAN-P6.md](docs/PLAN-P6.md) | 内核补全方案：安全、调度、限流、可观测性、工程化（当前阶段） |
+
+---
+
+## 许可
+
+MIT

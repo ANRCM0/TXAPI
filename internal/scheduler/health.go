@@ -1,7 +1,7 @@
 package scheduler
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -149,11 +149,19 @@ func RecordFailure(cred *dbmodel.Credential, statusCode int, errMsg string, now 
 	}
 	next := NextFailure(cred, statusCode, errMsg, now)
 	if next.Changed(cred) {
-		log.Printf("[凭据健康] 凭据 %d 失败(状态码=%d) fail_count=%d → %s 冷却至 %s",
-			cred.ID, statusCode, next.FailCount, next.Status,
-			time.Unix(next.CooldownUntil, 0).Format("15:04:05"))
+		// debug 而不是 info：状态迁移在故障期会非常密集（每个失败
+		// 请求一条），info 级别会把请求摘要冲掉；但它又是排查
+		// 「这把 Key 为什么被冷却」的唯一现场，所以不能没有。
+		slog.Debug("[凭据健康] 凭据失败，状态迁移",
+			"credential_id", cred.ID,
+			"status_code", statusCode,
+			"fail_count", next.FailCount,
+			"next_status", next.Status,
+			"cooldown_until", time.Unix(next.CooldownUntil, 0).Format(time.RFC3339),
+			"error", errMsg)
 	} else {
-		log.Printf("[凭据健康] 凭据 %d 失败(状态码=%d) 属客户端错误，不惩罚凭据", cred.ID, statusCode)
+		slog.Debug("[凭据健康] 凭据失败但属客户端错误，不惩罚",
+			"credential_id", cred.ID, "status_code", statusCode, "error", errMsg)
 	}
 	submit(next, cred)
 }
@@ -265,7 +273,7 @@ func submit(next HealthUpdate, from *dbmodel.Credential) {
 	case ch <- next:
 	default:
 		// 队列满：丢弃 + 告警。见 healthQueueSize 的说明。
-		log.Printf("[凭据健康] 状态队列已满，丢弃凭据 %d 的一次状态更新", next.CredentialID)
+		slog.Warn("[凭据健康] 状态队列已满，丢弃一次状态更新", "credential_id", next.CredentialID)
 	}
 }
 
@@ -323,14 +331,14 @@ func flush(batch []HealthUpdate) {
 				if r := recover(); r != nil {
 					// 持久化的 panic 绝不能扩散：worker 死了整个健康
 					// 状态机就静默失效，而且会把进程带崩
-					log.Printf("[凭据健康] 持久化凭据 %d 状态时 panic: %v", u.CredentialID, r)
+					slog.Error("[凭据健康] 持久化凭据状态时 panic", "credential_id", u.CredentialID, "err", r)
 				}
 			}()
 			if err := p(u); err != nil {
 				// 告警但不重试、不阻塞：状态是优化手段，响应早就发出去了。
 				// 留痕是因为连续失败意味着调度状态机在空转（库里永远是旧状态），
 				// 那种「看起来有调度其实没有」的故障只能靠日志发现。
-				log.Printf("[凭据健康] 持久化凭据 %d 状态失败: %v", u.CredentialID, err)
+				slog.Warn("[凭据健康] 持久化凭据状态失败", "credential_id", u.CredentialID, "err", err)
 			}
 		}()
 	}

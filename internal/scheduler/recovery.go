@@ -1,7 +1,7 @@
 package scheduler
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -69,15 +69,15 @@ func StartRecovery(scan RecoveryScan, interval time.Duration) func() {
 func recoverOnce(scan RecoveryScan) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[凭据恢复] 扫描时 panic: %v", r)
+			slog.Error("[凭据恢复] 扫描时 panic", "err", r)
 		}
 	}()
 	n, err := scan()
 	if err != nil {
-		log.Printf("[凭据恢复] 扫描失败: %v", err)
+		slog.Warn("[凭据恢复] 扫描失败", "err", err)
 		return
 	}
 	if n > 0 {
-		log.Printf("[凭据恢复] %d 个凭据冷却到期，已恢复为 active", n)
+		slog.Info("[凭据恢复] 冷却到期凭据已恢复", "count", n)
 	}
 }

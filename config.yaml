@@ -19,6 +19,23 @@ server:
   # 单次上游请求超时（秒），流式响应会长时间挂连接，不要设太小
   timeout_seconds: 120
 
+# 进程日志级别：debug / info / warn / error。
+#
+# info（默认）只打请求摘要（一行一条，含 request_id/token_id/
+# channel_id/credential_id/model/latency_ms/status 七个统一字段）；
+# debug 额外打出选凭据、冷却判定、上游原始用量这些排查细节。
+# 环境变量 GATEWAY_LOG_LEVEL 优先于这里的值——Docker 部署改级别
+# 不用重打镜像。
+log_level: "info"
+
+# 请求日志（logs 表）保留天数，默认 30。
+#
+# logs 表每请求一行且只增不减，SQLite 单文件会越用越慢；后台任务
+# 每天分批（每批 1000 行）删除过期行。设为 0 关闭自动清理
+# （logs 表将无限增长，适合自己导出归档后再删的场景）。
+# 环境变量 GATEWAY_LOG_RETENTION_DAYS 优先。
+log_retention_days: 30
+
 database:
   # 目前只支持 sqlite；PostgreSQL 留到后续阶段
   driver: "sqlite"

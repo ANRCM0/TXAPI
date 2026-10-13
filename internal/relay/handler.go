@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"minigateway/internal/billing"
+	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/relay/meta"
 	"minigateway/internal/relay/model"
@@ -121,8 +122,19 @@ func handleRelay(c *gin.Context, mode int) {
 	tokenName, _ := c.Get(middleware.CtxTokenName)
 	requestID, _ := c.Get(middleware.CtxRequestID)
 
-	log.Printf("[请求] id=%s 令牌=%v 模型=%s 端点=%s 流式=%v",
-		requestID, tokenName, req.Model, modeName(mode), req.Stream)
+	// 请求摘要用 info：一条请求一行，是日志的骨干。只放「进来时
+	// 就知道」的字段——结果字段（status/latency/tokens/cost）在
+	// finishRequest 里补，那时才拿得到。
+	//
+	// 为什么拆成两条而不是等结束打一条完整的：流式请求可以挂几十秒，
+	// 期间如果进程被杀或上游卡住，只有入口这条日志能证明「请求到过
+	// 网关」。两条日志用同一个 request_id 串起来。
+	slog.Info("[请求] 收到转发请求",
+		"request_id", requestID,
+		"token", tokenName,
+		"model", req.Model,
+		"endpoint", modeName(mode),
+		"stream", req.Stream)
 
 	// 记录开始时间，用于算整条链路耗时（含重试）
 	startedAt := time.Now()
@@ -153,7 +165,9 @@ func handleRelay(c *gin.Context, mode int) {
 		// 额度子系统自身故障（读库失败等）：放行，不拦请求。
 		// 计费挂了不该让转发也挂——服务可用性优先，与
 		// 「价格缺失不报错」是同一条原则。但必须响亮的告警。
-		log.Printf("[额度] 预检失败，放行本次请求: %v", err)
+		// error 级别：这是网关自身子系统的故障，不是上游问题。
+		slog.Error("[额度] 预检失败，放行本次请求",
+			"request_id", requestID, "model", req.Model, "err", err)
 		pre = nil
 	}
 
@@ -246,7 +260,12 @@ func finishRequest(c *gin.Context, req *model.ModelRequest, startedAt time.Time,
 	// 结算：把预扣和实际的差额调整掉
 	if billingEngine != nil && pre != nil {
 		if err := billingEngine.Settle(tokenID, userID, pre, cost); err != nil {
-			log.Printf("[结算] token=%d user=%d 结算失败: %v", tokenID, userID, err)
+			// error：结算失败意味着预扣的钱没被修正，令牌额度会被
+			// 永久占用（表现为「没用几次就 403」）。钱相关的问题
+			// 不能只是 warn。
+			slog.Error("[结算] 额度结算失败，预扣可能未释放",
+				"request_id", c.GetString(middleware.CtxRequestID),
+				"token_id", tokenID, "user_id", userID, "err", err)
 		}
 	}
 
@@ -261,6 +280,104 @@ func finishRequest(c *gin.Context, req *model.ModelRequest, startedAt time.Time,
 	}
 
 	writeRequestLog(c, req, startedAt, cost, usage, isEstimated, priceMissing)
+	// 请求结果摘要 + 指标埋点放在最后：两个都只需要「最终状态」，
+	// 而且必须和 writeRequestLog 看到同一份数据——摘要是给人看的
+	// 这条日志、指标是给机器看的那条，两者对不上比缺一个更难排查。
+	finishObservability(c, req, startedAt, status, cost, usage, priceMissing)
+}
+
+// finishObservability 打请求结果日志（按结果分级）并记 Prometheus 指标。
+//
+// 分级规则（B4-1 的要求）：
+//
+//	200        info  正常请求，一行摘要
+//	4xx        warn  客户端侧被拒（含网关自己的 403 额度拦截）
+//	5xx/无码   error 上游故障或网关自身故障
+//
+// 为什么 4xx 是 warn 而不是 info：客户端会收到错误，通常意味着
+// 配置或用法有问题，需要人看一眼；但它不是网关故障。
+// 为什么 403 也按 warn：额度耗尽是「预期内的拒绝」，但运维需要
+// 看到它才能及时充值——埋在 info 里会被正常流量冲掉。
+//
+// 指标只在这里埋一次（而不是每次转发尝试都埋）：重试时中间那次
+// 失败的渠道信息已经由 scheduler 的凭据失败指标和 relay 的 warn
+// 日志覆盖；请求级指标记的是「这次请求最终结果」，重复记会把
+// gateway_requests_total 撑成重试次数，rate() 算出来的 QPS 是假的。
+func finishObservability(c *gin.Context, req *model.ModelRequest, startedAt time.Time,
+	status int, cost float64, usage *model.Usage, priceMissing bool) {
+	latency := time.Since(startedAt)
+	channel := ""
+	if v, ok := c.Get(relayChannelNameKey); ok {
+		if s, ok := v.(string); ok {
+			channel = s
+		}
+	}
+	rid := c.GetString(middleware.CtxRequestID)
+
+	attrs := []any{
+		"request_id", rid,
+		"token_id", ctxUint(c, middleware.CtxTokenID),
+		"channel_id", ctxUint(c, relayChannelKey),
+		"credential_id", ctxUint(c, relayCredentialKey),
+		"channel", channel,
+		"model", req.Model,
+		"latency_ms", latency.Milliseconds(),
+		"status", status,
+	}
+	if usage != nil {
+		attrs = append(attrs,
+			"prompt_tokens", usage.PromptTokens,
+			"completion_tokens", usage.CompletionTokens,
+			"total_tokens", usage.TotalTokens)
+	}
+	if cost > 0 {
+		attrs = append(attrs, "cost", cost)
+	}
+	if priceMissing {
+		// 缺价必须出现在日志里：计费数字会偏低，而这是唯一能
+		// 提醒「去补价格表」的信号（见 SPEC 4.5）。
+		attrs = append(attrs, "price_missing", true)
+	}
+	// error 只在真的失败时带上：重试成功的请求，Relay 会把中间那次
+	// 失败的 error_message 留在 context 里（账本需要它记录「这次请求
+	// 中间踩过什么」）。但把它打在 status=200 的摘要里会让人以为这次
+	// 请求失败了——日志的读者看的是摘要，不是账本。
+	if status >= 400 {
+		if msg, ok := c.Get(relayErrorKey); ok {
+			if s, ok := msg.(string); ok && s != "" {
+				attrs = append(attrs, "error", s)
+			}
+		}
+	}
+
+	switch {
+	case status >= 500:
+		slog.Error("[请求] 失败（服务端错误）", attrs...)
+	case status >= 400:
+		slog.Warn("[请求] 被拒绝（客户端错误）", attrs...)
+	default:
+		slog.Info("[请求] 完成", attrs...)
+	}
+
+	// 指标：实际模型名当 model 标签（价格和 token 都是它产生的），
+	// 客户端请求名只在日志里——否则 model_mapping 会让两个名字
+	// 的流量被算成两个指标，看不出真实分布。
+	metrics.Default.RecordRequest(actualModelFor(c, req.Model), channel, status, latency)
+	if usage != nil {
+		metrics.Default.RecordTokens(actualModelFor(c, req.Model), channel,
+			metrics.TokenTypePrompt, int64(usage.PromptTokens))
+		metrics.Default.RecordTokens(actualModelFor(c, req.Model), channel,
+			metrics.TokenTypeCompletion, int64(usage.CompletionTokens))
+	}
+	metrics.Default.RecordCost(actualModelFor(c, req.Model), channel, cost)
+}
+
+// actualModelFor 取映射后的上游模型名（无映射时回落客户端请求名）。
+//
+// 单独包一层而不是直接调 relayActualModel：那个函数第二参数是
+// fallback，语义一样但名字读不出「这是给指标用的」。
+func actualModelFor(c *gin.Context, fallback string) string {
+	return relayActualModel(c, fallback)
 }
 
 // captureWriter 把回写给客户端的字节复制一份（封顶），供估算用。

@@ -12,7 +12,7 @@
 package billing
 
 import (
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -159,7 +159,7 @@ func (t *PriceTable) ReloadPrices() error {
 	}
 	prices, rates, err := t.loader()
 	if err != nil {
-		log.Printf("[价格表] 重读失败，继续用旧缓存: %v", err)
+		slog.Warn("[价格表] 重读失败，继续用旧缓存", "err", err)
 		return err
 	}
 	exact := make(map[string]model.ModelPrice, len(prices))

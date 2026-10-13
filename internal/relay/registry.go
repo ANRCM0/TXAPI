@@ -9,11 +9,12 @@
 package relay
 
 import (
-	"log"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
 
+	"minigateway/internal/metrics"
 	"minigateway/internal/model"
 	"minigateway/internal/relay/adaptor"
 	"minigateway/internal/relay/adaptor/anthropic"
@@ -182,8 +183,9 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 			// 不直接返回错误：一个渠道类型写错不该让整个网关起不来。
 			// 跳掉它并告警，其余渠道照常服务；运维看到日志再去改。
 			// 报错信息里列出所有可用类型，运维配错时能直接抄正确答案。
-			log.Printf("[渠道装载] 渠道 %d(%s) 使用了未知类型 %q，已跳过（可用: %v）",
-				ch.ID, ch.Name, ch.Type, r.adaptorTypes())
+			slog.Warn("[渠道装载] 渠道类型未知，已跳过",
+				"channel_id", ch.ID, "channel", ch.Name,
+				"type", ch.Type, "available", r.adaptorTypes())
 			skipped++
 			continue
 		}
@@ -194,7 +196,7 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 		// 注意这里只做**装载时**的快照判断：冷却/拉黑在运行期会变，
 		// 一个此刻全冷却的渠道下次热更新就能回来，所以不做永久剔除。
 		if !hasUsableCredential(ch.Credentials, now) {
-			log.Printf("[渠道装载] 渠道 %d(%s) 没有可用凭据，已跳过", ch.ID, ch.Name)
+			slog.Warn("[渠道装载] 渠道没有可用凭据，已跳过", "channel_id", ch.ID, "channel", ch.Name)
 			skipped++
 			continue
 		}
@@ -219,7 +221,8 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 		}
 	}
 	if skipped > 0 {
-		log.Printf("[渠道装载] 共 %d 个渠道，跳过 %d 个（停用/类型未知/无可用凭据）", len(channels), skipped)
+		slog.Info("[渠道装载] 完成", "total", len(channels), "skipped", skipped,
+			"loaded", len(r.channels))
 	}
 	// 注意：这里**不**再要求「至少一个渠道」。
 	// P2 起渠道可以全部通过 API 动态增删，空渠道池是合法状态
@@ -264,6 +267,51 @@ func ChannelCount() int {
 	reg.mu.RLock()
 	defer reg.mu.RUnlock()
 	return len(reg.channels)
+}
+
+// CredentialStats 返回「渠道名 × 凭据状态 → 数量」，给指标层的
+// gateway_credentials gauge 当数据源。
+//
+// 为什么要这个函数：gauge 的语义是「当前有多少」，不能像 counter
+// 那样累加——一把 Key 从 cooldown 回到 active 是「这一档 -1、那一档
+// +1」，累加式根本表达不了。所以每次抓取都从渠道池现算一遍。
+//
+// 为什么从 relay 的内存池算而不是查库：渠道池就是转发实际看到的
+// 那份快照，按它统计才能回答「调度器现在面对的是什么」；查库会
+// 多一次 SQLite 读，而且会包含被装载逻辑跳掉的渠道（类型未知/
+// 无可用凭据），数字反而对不上转发行为。
+func CredentialStats() []metrics.CredentialStat {
+	if reg == nil {
+		return nil
+	}
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	// (渠道名, 状态) → 计数。用两层 map 而不是切片线性查找：
+	// 凭据总数在自用场景是几十到几百，线性查找在每次抓取时都是
+	// O(n²)，没必要。
+	counts := map[string]map[string]int64{}
+	for _, ch := range reg.channels {
+		if counts[ch.name] == nil {
+			counts[ch.name] = map[string]int64{}
+		}
+		for i := range ch.credentials {
+			st := ch.credentials[i].Status
+			if st == "" {
+				// 状态为空不该出现（模型上有 default:active），但
+				// 空标签值在 Prometheus 里是合法的空串，会让
+				// 按 status 分组的查询少一类却看不出异常。
+				st = "unknown"
+			}
+			counts[ch.name][st]++
+		}
+	}
+	out := make([]metrics.CredentialStat, 0, len(counts))
+	for name, byStatus := range counts {
+		for st, n := range byStatus {
+			out = append(out, metrics.CredentialStat{Channel: name, Status: st, Count: n})
+		}
+	}
+	return out
 }
 
 // ensureInit 在 reg 为 nil 时兜底初始化，避免 nil map 写入 panic。

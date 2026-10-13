@@ -4,8 +4,9 @@ package middleware
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log"
+	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -41,7 +42,13 @@ func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("[panic] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+				// 用 error 级别 + 完整字段：panic 是「网关自己出了
+				// 错」，必须能在日志检索里按级别直接捞出来。
+				// 堆栈单独一个字段，不并进 msg——msg 要能一眼读懂。
+				slog.Error("[panic] 请求处理中崩溃，已按 500 返回",
+					"method", c.Request.Method, "path", c.Request.URL.Path,
+					"request_id", c.GetString(CtxRequestID), "err", err,
+					"stack", string(debug.Stack()))
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 					"error": gin.H{
 						"message": "网关内部错误，请稍后重试",
