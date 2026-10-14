@@ -313,3 +313,16 @@ func itoa(n uint) string {
 	}
 	return string(buf)
 }
+
+func TestTokenKeyChangeErrorDoesNotRevealStoredKey(t *testing.T) {
+	e, st := newAPITestEngine(t)
+	const key = "sk-stored-secret-must-not-leak"
+	token, err := st.CreateToken(&store.TokenInput{Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body := doAPI(t, e, http.MethodPut, "/api/tokens/"+itoa(token.ID), `{"key":"a-different-key"}`, true)
+	if code != http.StatusBadRequest || strings.Contains(body, key) {
+		t.Fatalf("invalid key change must fail without exposing stored key: code=%d body=%s", code, body)
+	}
+}

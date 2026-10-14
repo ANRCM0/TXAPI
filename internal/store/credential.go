@@ -302,7 +302,7 @@ func (s *Store) validateCredentialInput(channelID uint, in *CredentialInput, exc
 		return fmt.Errorf("检查凭据重复失败: %w", err)
 	}
 	if dup > 0 {
-		return fmt.Errorf("渠道 %d 下已存在相同的 api_key: %s", channelID, in.APIKey)
+		return fmt.Errorf("渠道 %d 下已存在相同的 api_key", channelID)
 	}
 	return nil
 }

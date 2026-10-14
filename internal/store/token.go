@@ -84,7 +84,7 @@ func (s *Store) CreateToken(in *TokenInput) (*model.Token, error) {
 		return nil, fmt.Errorf("检查令牌重复失败: %w", err)
 	}
 	if dup > 0 {
-		return nil, fmt.Errorf("令牌 key 已存在: %s", in.Key)
+		return nil, errors.New("令牌 key 已存在")
 	}
 	if err := s.db.Create(tk).Error; err != nil {
 		return nil, fmt.Errorf("创建令牌失败: %w", err)
@@ -112,7 +112,7 @@ func (s *Store) UpdateToken(id uint, in *TokenInput) (*model.Token, error) {
 		return nil, fmt.Errorf("读取令牌 %d 失败: %w", id, err)
 	}
 	if in.Key != tk.Key {
-		return nil, fmt.Errorf("不允许修改令牌 key（原 key=%s）；如需更换请删除后重建", tk.Key)
+		return nil, errors.New("不允许修改令牌 key；如需更换请删除后重建")
 	}
 
 	updated := in.toModel(now)
