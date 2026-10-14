@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"minigateway/internal/config"
+	"minigateway/internal/gateway"
 	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
 )
@@ -41,7 +42,13 @@ func newEngine(t *testing.T, adminAuth gin.HandlerFunc) *gin.Engine {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
+	gw, err := gateway.New(gateway.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(gw.Close)
 	return NewEngine(Deps{
+		Gateway:   gw,
 		Cfg:       &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
 		Store:     st,
 		AdminAuth: adminAuth,
@@ -134,7 +141,13 @@ func TestHealthzNotRateLimited(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
+	gw, err := gateway.New(gateway.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(gw.Close)
 	e := NewEngine(Deps{
+		Gateway:   gw,
 		Cfg:       &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
 		Store:     st,
 		AdminAuth: middleware.AdminAuth(testSecret),

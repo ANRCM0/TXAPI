@@ -36,9 +36,10 @@ import (
 
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
+	"minigateway/internal/gateway"
 	"minigateway/internal/logging"
+	"minigateway/internal/metrics"
 	"minigateway/internal/model"
-	"minigateway/internal/relay"
 	"minigateway/internal/scheduler"
 	"minigateway/internal/server"
 	"minigateway/internal/server/middleware"
@@ -101,20 +102,6 @@ func main() {
 		return
 	}
 
-	// 4. 初始化转发层：渠道来自数据库快照，不再来自 YAML
-	if err := relay.Init(st.Channels()); err != nil {
-		slog.Error("初始化适配器失败", "err", err)
-		os.Exit(1)
-	}
-	// 把运行参数注入转发层
-	relay.SetRetryTimes(cfg.Server.RetryTimes)
-	relay.SetTimeout(time.Duration(cfg.Server.TimeoutSeconds) * time.Second)
-	// 记账：转发结束后把请求日志写进 logs 表（store 内部是异步批量
-	// 写入，不阻塞响应）。注入而不是 relay 直接依赖 store，是为了让
-	// 转发层保持纯粹——它不该知道数据存在哪，换存储甚至改成外发
-	// 日志都不用改 relay。
-	relay.SetLogRecorder(st.WriteLog)
-
 	// 5. 组装计费引擎：价格表缓存从 store 加载，管理接口改价后主动
 	// ReloadPrices 失效；额度扣减走 gorm 的原子 UPDATE（并发不丢）。
 	priceTable := billing.NewPriceTable(func() ([]model.ModelPrice, map[string]float64, error) {
@@ -130,28 +117,31 @@ func main() {
 	}, billing.DefaultPriceTTL)
 	engine := billing.New(st.DB(), priceTable)
 
-	// 5.5 接线凭据池调度器：加权随机分流 + 失败冷却 + 自动拉黑 + 会话亲和。
-	//
-	// 三个注入点各自解决一个依赖方向问题：
-	//   - SetCredentialPicker：relay 的选择调用 scheduler，反向不成立，
-	//     所以用函数变量把选择算法递过去（scheduler 保持叶子包）；
-	//   - SetHealthPersister：scheduler 算出状态变更后要落库，但它不该
-	//     知道 store 存在——这里把 store 的方法递过去；
-	//   - SetPoolReloader：状态落库后必须让转发层看到，否则会出现
-	//     「库里已经 cooldown、转发还在用它」的窗口。
-	relay.SetCredentialPicker(func(creds []model.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*model.Credential, bool) {
-		return scheduler.PickWithAffinity(creds, sessionID, exclude, now)
+	limiter := middleware.NewMemoryLimiter()
+	gw, err := gateway.New(gateway.Options{
+		Channels: st.Channels(), RetryTimes: cfg.Server.RetryTimes,
+		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
+		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
+		Billing:        engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
+		Picker: func(creds []model.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*model.Credential, bool) {
+			return scheduler.PickWithAffinity(creds, sessionID, exclude, now)
+		},
+		HealthReporter: func(cred *model.Credential, statusCode int, errMsg string) {
+			// 成功/失败都走这里：scheduler 内部按状态码决定是清零还是退避，
+			// 并在状态真的变化时才落库（见 scheduler.HealthUpdate.Changed）。
+			now := time.Now()
+			if statusCode == http.StatusOK {
+				scheduler.RecordSuccess(cred, now)
+				return
+			}
+			scheduler.RecordFailure(cred, statusCode, errMsg, now)
+		},
 	})
-	relay.SetHealthReporter(func(cred *model.Credential, statusCode int, errMsg string) {
-		// 成功/失败都走这里：scheduler 内部按状态码决定是清零还是退避，
-		// 并在状态真的变化时才落库（见 scheduler.HealthUpdate.Changed）。
-		now := time.Now()
-		if statusCode == http.StatusOK {
-			scheduler.RecordSuccess(cred, now)
-			return
-		}
-		scheduler.RecordFailure(cred, statusCode, errMsg, now)
-	})
+	if err != nil {
+		slog.Error("gateway initialization failed", "err", err)
+		os.Exit(1)
+	}
+	defer gw.Close()
 	scheduler.SetHealthPersister(scheduler.HealthPersister(func(u scheduler.HealthUpdate) error {
 		return st.UpdateCredentialHealth(store.HealthUpdate{
 			CredentialID:  u.CredentialID,
@@ -163,7 +153,7 @@ func main() {
 		})
 	}))
 	scheduler.SetPoolReloader(func() {
-		if err := relay.Reload(st.Channels()); err != nil {
+		if err := gw.Reload(st.Channels()); err != nil {
 			// 重载失败必须告警：状态改了但转发层没看到，等于这次健康
 			// 反馈白做，坏 Key 还会继续被选中
 			slog.Error("[调度] 凭据状态变更后刷新渠道池失败", "err", err)
@@ -225,7 +215,6 @@ func main() {
 	// 阈值来自数据库里每个令牌的 rpm_limit/tpm_limit 字段，管理 API
 	// 改完即生效（限流中间件每次请求都从上下文读投影，不缓存阈值）。
 	// 多机部署时把这一行换成 Redis 实现即可，中间件不用改。
-	limiter := middleware.NewMemoryLimiter()
 	// 优雅关闭时先停限流：在途请求收尾期间不该再有新请求挤进来
 	// 重新计数（见 middleware.Limiter.Close 的注释）。
 	defer func() {
@@ -240,6 +229,7 @@ func main() {
 	// X-Admin-Key 头。/v1 转发面和 /healthz 不走这个中间件
 	httpEngine := server.NewEngine(server.Deps{
 		Cfg:         cfg,
+		Gateway:     gw,
 		Store:       st,
 		Billing:     engine,
 		RateLimiter: limiter,
@@ -268,7 +258,7 @@ func main() {
 		}
 	}()
 	slog.Info("网关已启动", "url", "http://"+cfg.Server.Addr,
-		"channels", relay.ChannelCount(), "tokens", len(st.ListTokens()),
+		"channels", gw.ChannelCount(), "tokens", len(st.ListTokens()),
 		"metrics", "http://"+cfg.Server.Addr+"/metrics")
 	slog.Info("管理接口", "url", "http://"+cfg.Server.Addr+"/api/channels")
 	slog.Info("试试转发",

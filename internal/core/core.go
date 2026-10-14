@@ -56,6 +56,7 @@ type Result struct {
 }
 
 type Frame struct {
+	// Deferred frame commit is handled solely by core, never by the decoder.
 	Data  []byte
 	Usage *Usage
 	// Complete marks a protocol terminal event (e.g. OpenAI DONE/Claude stop).

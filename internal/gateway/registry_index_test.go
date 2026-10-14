@@ -1,4 +1,4 @@
-package relay
+package gateway
 
 import (
 	"path/filepath"
@@ -42,18 +42,18 @@ func makeChannel(id int, name string, models []string) dbmodel.Channel {
 }
 
 // indexFor 取某个模型在索引里的渠道 ID 列表（测试用直读内部状态）。
-func indexFor(t *testing.T, modelName string) []int {
+func indexFor(t *testing.T, gw *Gateway, modelName string) []int {
 	t.Helper()
-	reg.mu.RLock()
-	defer reg.mu.RUnlock()
-	return append([]int(nil), reg.modelIndex[modelName]...)
+	gw.reg.mu.RLock()
+	defer gw.reg.mu.RUnlock()
+	return append([]int(nil), gw.reg.modelIndex[modelName]...)
 }
 
 // pickedIDs 取 pickChannels 选中的渠道 ID 列表。
-func pickedIDs(t *testing.T, modelName string) []int {
+func pickedIDs(t *testing.T, gw *Gateway, modelName string) []int {
 	t.Helper()
 	out := []int{}
-	for _, ch := range pickChannels(modelName, nil) {
+	for _, ch := range gw.pickChannels(modelName, nil) {
 		out = append(out, ch.id)
 	}
 	return out
@@ -72,32 +72,33 @@ func containsID(ids []int, id int) bool {
 // TestModelIndexBuiltOnInit：Init 后索引按「渠道的每个 models 条目」
 // 建好，与 abilities 表的写入规则一致。
 func TestModelIndexBuiltOnInit(t *testing.T) {
+	gw := testCoordinator(t)
 	channels := []dbmodel.Channel{
 		makeChannel(1, "ch-a", []string{"gpt-4o-mini", "gpt-3.5-turbo"}),
 		makeChannel(2, "ch-b", []string{"gpt-4o-mini"}),
 		makeChannel(3, "ch-c", []string{"claude-3-5-sonnet"}),
 	}
-	if err := Init(channels); err != nil {
+	if err := gw.initRegistry(channels); err != nil {
 		t.Fatalf("Init 失败: %v", err)
 	}
 
 	// gpt-4o-mini 应同时指向渠道 1 和 2
-	got := indexFor(t, "gpt-4o-mini")
+	got := indexFor(t, gw, "gpt-4o-mini")
 	if len(got) != 2 || !containsID(got, 1) || !containsID(got, 2) {
 		t.Fatalf("gpt-4o-mini 的索引应为 [1 2]（顺序不定），实际 %v", got)
 	}
 	// gpt-3.5-turbo 只指向渠道 1
-	got = indexFor(t, "gpt-3.5-turbo")
+	got = indexFor(t, gw, "gpt-3.5-turbo")
 	if len(got) != 1 || got[0] != 1 {
 		t.Fatalf("gpt-3.5-turbo 的索引应为 [1]，实际 %v", got)
 	}
 	// claude 只指向渠道 3
-	got = indexFor(t, "claude-3-5-sonnet")
+	got = indexFor(t, gw, "claude-3-5-sonnet")
 	if len(got) != 1 || got[0] != 3 {
 		t.Fatalf("claude-3-5-sonnet 的索引应为 [3]，实际 %v", got)
 	}
 	// 没配过的模型不该有索引条目
-	if got := indexFor(t, "not-a-model"); len(got) != 0 {
+	if got := indexFor(t, gw, "not-a-model"); len(got) != 0 {
 		t.Fatalf("未配置的模型不该有索引条目，实际 %v", got)
 	}
 }
@@ -108,34 +109,35 @@ func TestModelIndexBuiltOnInit(t *testing.T) {
 // 这是 B3-3 的主断言：接入索引之后**行为不能变**，只是实现从
 // 全表扫描换成 map 命中。
 func TestPickChannelsUsesIndex(t *testing.T) {
+	gw := testCoordinator(t)
 	channels := []dbmodel.Channel{
 		makeChannel(1, "ch-a", []string{"gpt-4o-mini", "*"}),
 		makeChannel(2, "ch-b", []string{"gpt-4o-mini"}),
 		makeChannel(3, "ch-c", []string{"claude-3-5-sonnet"}),
 	}
-	if err := Init(channels); err != nil {
+	if err := gw.initRegistry(channels); err != nil {
 		t.Fatalf("Init 失败: %v", err)
 	}
 
 	// 具体模型：命中精确索引 + 通配渠道
-	got := pickedIDs(t, "gpt-4o-mini")
+	got := pickedIDs(t, gw, "gpt-4o-mini")
 	if len(got) != 2 || !containsID(got, 1) || !containsID(got, 2) {
 		t.Fatalf("gpt-4o-mini 应选中渠道 1 和 2，实际 %v", got)
 	}
 	// 只配在通配渠道上的模型：靠 "*" 命中
-	got = pickedIDs(t, "some-unlisted-model")
+	got = pickedIDs(t, gw, "some-unlisted-model")
 	if len(got) != 1 || got[0] != 1 {
 		t.Fatalf("未显式配置的模型应命中通配渠道 1，实际 %v", got)
 	}
 	// 完全没有渠道支持的模型：空
-	if got := pickedIDs(t, "nope"); len(got) != 1 || got[0] != 1 {
+	if got := pickedIDs(t, gw, "nope"); len(got) != 1 || got[0] != 1 {
 		// 渠道 1 配了 "*"，所以任何模型都会命中它——这正是通配的语义
 		t.Fatalf("有通配渠道时任何模型都应命中渠道 1，实际 %v", got)
 	}
 
 	// 逐个模型对照 supports()：这是「行为没变」的证明
 	for _, m := range []string{"gpt-4o-mini", "claude-3-5-sonnet", "whatever", ""} {
-		picked := pickedIDs(t, m)
+		picked := pickedIDs(t, gw, m)
 		for _, ch := range channels {
 			// 用旧语义（supports）当基准
 			var want bool
@@ -158,34 +160,35 @@ func TestPickChannelsUsesIndex(t *testing.T) {
 // 这条防的是「换渠道不换索引」的静默故障：渠道删了、索引还指着它，
 // 转发时从 map 里取到 nil 直接 panic。
 func TestIndexRebuiltOnReload(t *testing.T) {
-	if err := Init([]dbmodel.Channel{
+	gw := testCoordinator(t)
+	if err := gw.initRegistry([]dbmodel.Channel{
 		makeChannel(1, "ch-a", []string{"gpt-4o-mini"}),
 		makeChannel(2, "ch-b", []string{"gpt-4o-mini"}),
 	}); err != nil {
 		t.Fatalf("Init 失败: %v", err)
 	}
-	if got := pickedIDs(t, "gpt-4o-mini"); len(got) != 2 {
+	if got := pickedIDs(t, gw, "gpt-4o-mini"); len(got) != 2 {
 		t.Fatalf("初始应选中 2 个渠道，实际 %v", got)
 	}
 
 	// 热更新：渠道 2 改去服务别的模型
-	if err := Reload([]dbmodel.Channel{
+	if err := gw.Reload([]dbmodel.Channel{
 		makeChannel(1, "ch-a", []string{"gpt-4o-mini"}),
 		makeChannel(2, "ch-b", []string{"claude-3-5-sonnet"}),
 	}); err != nil {
 		t.Fatalf("Reload 失败: %v", err)
 	}
 
-	got := pickedIDs(t, "gpt-4o-mini")
+	got := pickedIDs(t, gw, "gpt-4o-mini")
 	if len(got) != 1 || got[0] != 1 {
 		t.Fatalf("Reload 后 gpt-4o-mini 应只剩渠道 1，实际 %v", got)
 	}
 	// 旧的索引条目必须清掉：渠道 2 不再服务 gpt-4o-mini
-	if stale := indexFor(t, "gpt-4o-mini"); containsID(stale, 2) {
+	if stale := indexFor(t, gw, "gpt-4o-mini"); containsID(stale, 2) {
 		t.Fatalf("Reload 后索引里还残留渠道 2，实际 %v", stale)
 	}
 	// 新模型要能选中渠道 2
-	if got := pickedIDs(t, "claude-3-5-sonnet"); len(got) != 1 || got[0] != 2 {
+	if got := pickedIDs(t, gw, "claude-3-5-sonnet"); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("Reload 后 claude-3-5-sonnet 应选中渠道 2，实际 %v", got)
 	}
 }
@@ -197,6 +200,7 @@ func TestIndexRebuiltOnReload(t *testing.T) {
 // 增删改时维护，路由走内存索引——两者必须给出同一份答案，否则
 // 「接入」就白接了。
 func TestIndexMatchesAbilitiesTable(t *testing.T) {
+	gw := testCoordinator(t)
 	st, err := store.Open(config.DatabaseConfig{
 		Driver: "sqlite",
 		Path:   filepath.Join(t.TempDir(), "gateway.db"),
@@ -224,7 +228,7 @@ func TestIndexMatchesAbilitiesTable(t *testing.T) {
 	}
 
 	// 转发层用 store 的快照装载——和 main.go 的启动路径一致
-	if err := Init(st.Channels()); err != nil {
+	if err := gw.initRegistry(st.Channels()); err != nil {
 		t.Fatalf("Init 失败: %v", err)
 	}
 
@@ -239,7 +243,7 @@ func TestIndexMatchesAbilitiesTable(t *testing.T) {
 	// 逐行对照：abilities 表里每个 (model, channel) 组合，
 	// pickChannels 都必须选中那个渠道。
 	for _, ab := range abilities {
-		picked := pickedIDs(t, ab.Model)
+		picked := pickedIDs(t, gw, ab.Model)
 		if !containsID(picked, int(ab.ChannelID)) {
 			t.Fatalf("abilities 表说模型 %q 由渠道 %d 服务，但路由没选中它（选中: %v）",
 				ab.Model, ab.ChannelID, picked)
@@ -248,7 +252,7 @@ func TestIndexMatchesAbilitiesTable(t *testing.T) {
 	// 反向对照：路由选中的每个渠道，abilities 表里也该有对应行——
 	// 否则说明索引比表「多」了指不存在的组合。
 	for _, m := range []string{"gpt-4o-mini", "gpt-3.5-turbo", "claude-3-5-sonnet"} {
-		for _, id := range pickedIDs(t, m) {
+		for _, id := range pickedIDs(t, gw, m) {
 			found := false
 			for _, ab := range abilities {
 				if ab.Model == m && int(ab.ChannelID) == id {
@@ -269,7 +273,7 @@ func TestIndexMatchesAbilitiesTable(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("改渠道失败: %v", err)
 	}
-	if err := Reload(st.Channels()); err != nil {
+	if err := gw.Reload(st.Channels()); err != nil {
 		t.Fatalf("Reload 失败: %v", err)
 	}
 
@@ -278,12 +282,12 @@ func TestIndexMatchesAbilitiesTable(t *testing.T) {
 		t.Fatalf("重查 abilities 失败: %v", err)
 	}
 	for _, ab := range abilities {
-		if !containsID(pickedIDs(t, ab.Model), int(ab.ChannelID)) {
+		if !containsID(pickedIDs(t, gw, ab.Model), int(ab.ChannelID)) {
 			t.Fatalf("改渠道后 abilities 表说模型 %q 由渠道 %d 服务，但路由没选中它", ab.Model, ab.ChannelID)
 		}
 	}
 	// gpt-3.5-turbo 已从渠道 1 移除，但渠道 2 没配它——应该谁都选不中
-	if got := pickedIDs(t, "gpt-3.5-turbo"); len(got) != 0 {
+	if got := pickedIDs(t, gw, "gpt-3.5-turbo"); len(got) != 0 {
 		t.Fatalf("gpt-3.5-turbo 已无渠道支持，实际选中 %v", got)
 	}
 	_ = ch1
@@ -296,15 +300,16 @@ func TestIndexMatchesAbilitiesTable(t *testing.T) {
 // 建——否则索引会指向一个根本没进渠道池的 ID，pickChannels 取不到
 // 渠道对象（代码里有防御性跳过，但那是兜底，不该靠它兜）。
 func TestIndexSkipsDisabledChannels(t *testing.T) {
+	gw := testCoordinator(t)
 	disabled := makeChannel(1, "ch-disabled", []string{"gpt-4o-mini"})
 	disabled.Status = dbmodel.StatusDisabled
-	if err := Init([]dbmodel.Channel{disabled}); err != nil {
+	if err := gw.initRegistry([]dbmodel.Channel{disabled}); err != nil {
 		t.Fatalf("Init 失败: %v", err)
 	}
-	if got := pickedIDs(t, "gpt-4o-mini"); len(got) != 0 {
+	if got := pickedIDs(t, gw, "gpt-4o-mini"); len(got) != 0 {
 		t.Fatalf("停用的渠道不该被选中，实际 %v", got)
 	}
-	if got := indexFor(t, "gpt-4o-mini"); len(got) != 0 {
+	if got := indexFor(t, gw, "gpt-4o-mini"); len(got) != 0 {
 		t.Fatalf("停用的渠道不该进索引，实际 %v", got)
 	}
 }
@@ -315,12 +320,13 @@ func TestIndexSkipsDisabledChannels(t *testing.T) {
 // 不去重的话，它在加权随机里被选中两次的概率翻倍——等于偷偷改了
 // 权重，而这种偏差在流量分布上是看不出来的。
 func TestIndexNoDuplicateForWildcardAndExplicit(t *testing.T) {
-	if err := Init([]dbmodel.Channel{
+	gw := testCoordinator(t)
+	if err := gw.initRegistry([]dbmodel.Channel{
 		makeChannel(1, "ch-both", []string{"gpt-4o-mini", "*"}),
 	}); err != nil {
 		t.Fatalf("Init 失败: %v", err)
 	}
-	got := pickedIDs(t, "gpt-4o-mini")
+	got := pickedIDs(t, gw, "gpt-4o-mini")
 	if len(got) != 1 || got[0] != 1 {
 		t.Fatalf("同时配具体模型和通配的渠道应只出现一次，实际 %v", got)
 	}
@@ -332,30 +338,31 @@ func TestIndexNoDuplicateForWildcardAndExplicit(t *testing.T) {
 // 「索引指向已被丢弃的渠道」的中间态——pickChannels 取不到对象，
 // 依赖的是代码里的防御性跳过，而不是一致性保证。
 func TestIndexRollbackOnBadChannel(t *testing.T) {
-	if err := Init([]dbmodel.Channel{
+	gw := testCoordinator(t)
+	if err := gw.initRegistry([]dbmodel.Channel{
 		makeChannel(1, "ch-a", []string{"gpt-4o-mini"}),
 	}); err != nil {
 		t.Fatalf("Init 失败: %v", err)
 	}
-	before := indexFor(t, "gpt-4o-mini")
+	before := indexFor(t, gw, "gpt-4o-mini")
 
 	// 未知协议类型会被 applyLocked 跳过而不是报错，所以这里用
 	// 「空渠道列表」来验证回滚路径不会把索引清空：
 	// 空列表装载成功（0 个渠道是合法状态），索引应该跟着变空。
-	if err := Reload(nil); err != nil {
+	if err := gw.Reload(nil); err != nil {
 		t.Fatalf("Reload 空列表失败: %v", err)
 	}
-	if got := indexFor(t, "gpt-4o-mini"); len(got) != 0 {
+	if got := indexFor(t, gw, "gpt-4o-mini"); len(got) != 0 {
 		t.Fatalf("Reload 空列表后索引应清空，实际 %v", got)
 	}
 
 	// 再装回去，索引要能完整恢复
-	if err := Reload([]dbmodel.Channel{
+	if err := gw.Reload([]dbmodel.Channel{
 		makeChannel(1, "ch-a", []string{"gpt-4o-mini"}),
 	}); err != nil {
 		t.Fatalf("Reload 失败: %v", err)
 	}
-	after := indexFor(t, "gpt-4o-mini")
+	after := indexFor(t, gw, "gpt-4o-mini")
 	if len(after) != len(before) {
 		t.Fatalf("重新装载后索引应恢复，期望 %v 实际 %v", before, after)
 	}
@@ -366,7 +373,8 @@ func TestIndexRollbackOnBadChannel(t *testing.T) {
 // pickChannels 走读锁、Reload 走写锁，两者共用同一份 map。
 // -race 下跑这条能抓出漏加锁的读写（那是会直接打挂进程的 bug）。
 func TestIndexConcurrentReadWrite(t *testing.T) {
-	if err := Init([]dbmodel.Channel{
+	gw := testCoordinator(t)
+	if err := gw.initRegistry([]dbmodel.Channel{
 		makeChannel(1, "ch-a", []string{"gpt-4o-mini"}),
 		makeChannel(2, "ch-b", []string{"gpt-4o-mini"}),
 	}); err != nil {
@@ -377,7 +385,7 @@ func TestIndexConcurrentReadWrite(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 200; i++ {
-			_ = Reload([]dbmodel.Channel{
+			_ = gw.Reload([]dbmodel.Channel{
 				makeChannel(1, "ch-a", []string{"gpt-4o-mini"}),
 				makeChannel(2, "ch-b", []string{"gpt-4o-mini", "claude-3-5-sonnet"}),
 			})
@@ -388,8 +396,8 @@ func TestIndexConcurrentReadWrite(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		for i := 0; i < 100; i++ {
-			_ = pickChannels("gpt-4o-mini", nil)
-			_ = pickChannels("claude-3-5-sonnet", nil)
+			_ = gw.pickChannels("gpt-4o-mini", nil)
+			_ = gw.pickChannels("claude-3-5-sonnet", nil)
 		}
 		select {
 		case <-done:

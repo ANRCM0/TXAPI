@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	relaymodel "minigateway/internal/relay/model"
+	relaymodel "minigateway/internal/protocol/model"
 )
 
 // 估算用的「字符 → token」折算比例（经验值）：

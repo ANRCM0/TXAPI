@@ -29,6 +29,8 @@ type ServerConfig struct {
 	// TimeoutSeconds 是单次上游请求的超时时间。
 	// 流式响应会长时间挂着连接，所以这个值不能太小。
 	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// TotalTimeoutSeconds bounds the entire request, including all retries.
+	TotalTimeoutSeconds int `yaml:"total_timeout_seconds"`
 	// IPRPMLimit 是 IP 级限流的每分钟请求数上限，0 表示不限。
 	//
 	// 为什么和令牌级限流分开：令牌级限流挂在鉴权之后，管得住
@@ -220,6 +222,9 @@ func (c *Config) applyDefaults() {
 	if c.Server.TimeoutSeconds == 0 {
 		c.Server.TimeoutSeconds = 120
 	}
+	if c.Server.TotalTimeoutSeconds == 0 {
+		c.Server.TotalTimeoutSeconds = c.Server.TimeoutSeconds
+	}
 	if c.Database.Driver == "" {
 		c.Database.Driver = "sqlite"
 	}
@@ -289,6 +294,9 @@ func (c *Config) validate() error {
 	}
 	if c.Server.TimeoutSeconds < 1 || c.Server.TimeoutSeconds > 600 {
 		return fmt.Errorf("server.timeout_seconds 必须在 1 到 600 之间（收到 %d）", c.Server.TimeoutSeconds)
+	}
+	if c.Server.TotalTimeoutSeconds < 1 || c.Server.TotalTimeoutSeconds > 600 {
+		return fmt.Errorf("server.total_timeout_seconds must be between 1 and 600")
 	}
 	if c.Server.IPRPMLimit < 0 {
 		return fmt.Errorf("server.ip_rpm_limit 不能为负数（收到 %d）", c.Server.IPRPMLimit)

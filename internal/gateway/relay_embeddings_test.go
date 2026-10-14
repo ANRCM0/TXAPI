@@ -1,4 +1,4 @@
-package relay
+package gateway
 
 import (
 	"encoding/json"
@@ -39,6 +39,7 @@ type embeddingsGateway struct {
 
 // newEmbeddingsGateway 搭一套支持 embeddings 的最小网关。
 func newEmbeddingsGateway(t *testing.T) *embeddingsGateway {
+	gw := testCoordinator(t)
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -118,10 +119,10 @@ func newEmbeddingsGateway(t *testing.T) *embeddingsGateway {
 		t.Fatalf("建令牌失败: %v", err)
 	}
 
-	if err := Init(st.Channels()); err != nil {
+	if err := gw.initRegistry(st.Channels()); err != nil {
 		t.Fatalf("初始化转发层失败: %v", err)
 	}
-	SetTimeout(10 * time.Second)
+	gw.SetTimeout(10 * time.Second)
 
 	// 两个模型都配价，输出价故意给 embedding 模型配一个非 0 值：
 	// 这样「cost 只按输入计价」才能被真正验证到——如果计费错误地
@@ -149,15 +150,15 @@ func newEmbeddingsGateway(t *testing.T) *embeddingsGateway {
 	}, billing.DefaultPriceTTL)
 	eng := billing.New(st.DB(), priceTable)
 
-	SetBilling(eng)
-	SetLogRecorder(st.WriteLog)
+	gw.SetBilling(eng)
+	gw.SetLogRecorder(st.WriteLog)
 
 	e := gin.New()
 	e.Use(middleware.RequestID())
 	auth := middleware.NewAuth(st)
 	// 两个入口都挂上，验证它们走同一条转发链路但打不同上游路径
-	e.POST("/v1/chat/completions", auth.Handle(), HandleChatCompletions)
-	e.POST("/v1/embeddings", auth.Handle(), HandleEmbeddings)
+	e.POST("/v1/chat/completions", auth.Handle(), gw.HandleChatCompletions)
+	e.POST("/v1/embeddings", auth.Handle(), gw.HandleEmbeddings)
 
 	return &embeddingsGateway{
 		engine:           e,
@@ -371,6 +372,7 @@ func (g *embeddingsGateway) sendChat(t *testing.T, body string) (int, string) {
 // 没有 messages 字段，不认 input 的话估算恒为 0，日志里 prompt_tokens
 // 会是 0——比估算不准更糟，那是彻底没记账。
 func TestEmbeddingsWithoutUsageFallsBackToEstimate(t *testing.T) {
+	gw := testCoordinator(t)
 	// 单独搭一个「不给 usage」的上游：走 newEmbeddingsGateway 的话
 	// usage 恒有，这条用例就没意义了。
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -403,10 +405,10 @@ func TestEmbeddingsWithoutUsageFallsBackToEstimate(t *testing.T) {
 	if _, err := st.CreateToken(&store.TokenInput{Key: tokenKey, Name: "t"}); err != nil {
 		t.Fatalf("建令牌失败: %v", err)
 	}
-	if err := Init(st.Channels()); err != nil {
+	if err := gw.initRegistry(st.Channels()); err != nil {
 		t.Fatalf("初始化转发层失败: %v", err)
 	}
-	SetTimeout(10 * time.Second)
+	gw.SetTimeout(10 * time.Second)
 	if err := st.UpsertModelPrice(&dbmodel.ModelPrice{
 		Model: "text-embedding-3-small", InputPricePer1K: 0.02, OutputPricePer1K: 0,
 	}); err != nil {
@@ -423,12 +425,12 @@ func TestEmbeddingsWithoutUsageFallsBackToEstimate(t *testing.T) {
 		}
 		return prices, rates, nil
 	}, billing.DefaultPriceTTL)
-	SetBilling(billing.New(st.DB(), priceTable))
-	SetLogRecorder(st.WriteLog)
+	gw.SetBilling(billing.New(st.DB(), priceTable))
+	gw.SetLogRecorder(st.WriteLog)
 
 	e := gin.New()
 	e.Use(middleware.RequestID())
-	e.POST("/v1/embeddings", middleware.NewAuth(st).Handle(), HandleEmbeddings)
+	e.POST("/v1/embeddings", middleware.NewAuth(st).Handle(), gw.HandleEmbeddings)
 
 	// 一段足够长的中文输入，估算值应该明显大于 0
 	const inputText = "这是一段用于测试 embeddings 估算降级路径的输入文本，需要足够长才能让估算值明显大于零"

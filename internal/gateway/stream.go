@@ -1,4 +1,4 @@
-package relay
+package gateway
 
 import (
 	"bufio"
@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/model"
 )
 
 // 这个文件放流式响应的公共工具。

@@ -103,3 +103,20 @@ func TestExecutorBoundsNormalResponse(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 }
+
+type failedWriter struct{ header http.Header }
+
+func (w *failedWriter) Header() http.Header         { return w.header }
+func (w *failedWriter) WriteHeader(int)             {}
+func (w *failedWriter) Write(b []byte) (int, error) { return 1, io.ErrClosedPipe }
+func TestExecutorDownstreamFailureKeepsCommittedState(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"ok":true}`) }))
+	defer upstream.Close()
+	e := New(Options{})
+	defer e.Close()
+	w := &failedWriter{header: make(http.Header)}
+	result := e.Execute(context.Background(), w, Input{URL: upstream.URL, Decoder: rawDecoder{}, Replayable: true})
+	if !result.Committed || result.HTTPStatus != 200 || result.Termination != ClientWriteError || result.BytesWritten != 1 || result.Error == nil {
+		t.Fatalf("downstream failure result=%+v", result)
+	}
+}

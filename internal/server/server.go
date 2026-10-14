@@ -12,8 +12,7 @@ import (
 
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
-	"minigateway/internal/metrics"
-	"minigateway/internal/relay"
+	"minigateway/internal/gateway"
 	"minigateway/internal/server/api"
 	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
@@ -24,8 +23,9 @@ import (
 // 为什么用结构体而不是一长串参数：参数已经多到容易传错位（cfg 和 store 都是指针），
 // 具名字段让调用处自解释。
 type Deps struct {
-	Cfg   *config.Config
-	Store *store.Store
+	Gateway *gateway.Gateway
+	Cfg     *config.Config
+	Store   *store.Store
 	// AdminAuth 是管理 API 的鉴权中间件，**必填**。
 	// 管理接口能改渠道、看上游 Key 明文，nil 意味着整个 /api 裸奔，
 	// 所以漏传时 NewEngine 直接 panic——装配错误要在启动时炸出来，
@@ -33,7 +33,7 @@ type Deps struct {
 	// 密钥来源见 config.EnvAdminKey（环境变量优先于配置文件）。
 	AdminAuth gin.HandlerFunc
 	// Billing 是计费引擎，nil 表示不启用计费（测试场景）。
-	// main 在 store 打开后创建它，这里注入给 relay 用。
+	// main 同时注入 gateway 和管理价格刷新路径。
 	Billing *billing.Engine
 	// RateLimiter 是限流器，nil 表示不启用限流（测试场景）。
 	// 令牌级和 IP 级共用同一个实例：同一个内存表、同一份配置，
@@ -61,6 +61,10 @@ func NewEngine(deps Deps) *gin.Engine {
 	if deps.AdminAuth == nil {
 		panic("server.NewEngine: Deps.AdminAuth 不能为 nil（管理 API 必须鉴权）")
 	}
+	if deps.Gateway == nil {
+		panic("server.NewEngine: Deps.Gateway must be explicitly supplied")
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 
@@ -95,7 +99,7 @@ func NewEngine(deps Deps) *gin.Engine {
 	//
 	// 凭据状态 provider 在这里注入而不是 main：只有 server 层同时
 	// 看得见 relay 的渠道池，且注入点紧挨着使用处。
-	metrics.Default.SetCredentialStatsProvider(relay.CredentialStats)
+	deps.Gateway.Metrics().SetCredentialStatsProvider(deps.Gateway.CredentialStats)
 	engine.GET("/metrics", func(c *gin.Context) {
 		// Content-Type 必须带 version=0.0.4：Prometheus 按它判断
 		// 解析器，缺了会走文本兜底且告警（多数情况下仍能解析，
@@ -104,7 +108,7 @@ func NewEngine(deps Deps) *gin.Engine {
 		// 直接写给 ResponseWriter 而不是先拼字符串：抓取时渠道池
 		// 的读锁会被 provider 持有一次， Render 内部不再加锁，
 		// 所以这里没有「大字符串占内存」的问题。
-		if err := metrics.Default.Render(c.Writer); err != nil {
+		if err := deps.Gateway.Metrics().Render(c.Writer); err != nil {
 			// 写一半失败（客户端断开）时 gin 已经不能改状态码了，
 			// 只能留痕。抓取失败的对岸是 Prometheus 的 target down，
 			// 服务端日志是唯一线索。
@@ -123,13 +127,12 @@ func NewEngine(deps Deps) *gin.Engine {
 	auth := middleware.NewAuth(deps.Store)
 
 	// 计费引擎注入转发层：额度检查/预扣/结算都发生在请求路径上
-	relay.SetBilling(deps.Billing)
+
 	// 限流器注入转发层：TPM 是「请求前预估、响应后按真实用量修正」的
 	// 两段式，真实 usage 只有 relay 的收尾逻辑拿得到（见 handler.go）。
-	relay.SetRateLimiter(deps.RateLimiter)
 
 	// 模型列表：让客户端知道这个令牌能用哪些模型
-	engine.GET("/v1/models", auth.Handle(), relay.ListModels)
+	engine.GET("/v1/models", auth.Handle(), deps.Gateway.ListModels)
 
 	// 转发主入口：对话补全。
 	// 鉴权 → 令牌限流 → 转发：限流必须挂在 Auth **之后**，
@@ -139,19 +142,19 @@ func NewEngine(deps Deps) *gin.Engine {
 	// 防不住 1000 个并发在结算前全打到上游（见 ratelimit.go 头注）。
 	engine.POST("/v1/chat/completions", auth.Handle(),
 		middleware.TokenRateLimit(deps.RateLimiter),
-		relay.HandleChatCompletions)
+		deps.Gateway.HandleChatCompletions)
 
 	// embeddings：与对话共用整条转发链路，区别只有 Mode 一个值。
 	// 限流同样按令牌生效——embedding 请求同样在烧上游 Key。
 	engine.POST("/v1/embeddings", auth.Handle(),
 		middleware.TokenRateLimit(deps.RateLimiter),
-		relay.HandleEmbeddings)
+		deps.Gateway.HandleEmbeddings)
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。
 	apiHandler := api.New(deps.Store, func() {
 		// 渠道变更后热刷新转发层渠道池：这就是「不重启网关就生效」的那一环
-		if err := relay.Reload(deps.Store.Channels()); err != nil {
+		if err := deps.Gateway.Reload(deps.Store.Channels()); err != nil {
 			// 刷新失败不能影响 API 的返回值（数据已经落库了），
 			// 但必须响亮的告警——否则会出现「库里改了、转发还用旧的」的静默故障
 			gin.DefaultErrorWriter.Write([]byte("[热更新] 刷新渠道池失败: " + err.Error() + "\n"))

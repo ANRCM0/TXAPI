@@ -1,4 +1,4 @@
-package relay
+package gateway
 
 import (
 	"encoding/json"
@@ -18,11 +18,12 @@ import (
 	"minigateway/internal/protocol/adaptor"
 	"minigateway/internal/protocol/adaptor/anthropic"
 	"minigateway/internal/protocol/adaptor/gemini"
-	"minigateway/internal/relay/meta"
-	relaymodel "minigateway/internal/relay/model"
+	"minigateway/internal/protocol/meta"
+	relaymodel "minigateway/internal/protocol/model"
 )
 
 func TestCommittedStreamFailureIsNotRetriedOrMarkedDone(t *testing.T) {
+	gw := testCoordinator(t)
 	gin.SetMode(gin.TestMode)
 	var hits atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,12 +35,12 @@ func TestCommittedStreamFailureIsNotRetriedOrMarkedDone(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	oldRegistry, oldRetries := reg, cfgRetryTimes
+	oldRegistry, oldRetries := gw.reg, gw.retryTimes
 	defer func() {
-		reg, cfgRetryTimes = oldRegistry, oldRetries
+		gw.reg, gw.retryTimes = oldRegistry, oldRetries
 	}()
-	SetRetryTimes(2)
-	if err := Init([]dbmodel.Channel{{
+	gw.SetRetryTimes(2)
+	if err := gw.initRegistry([]dbmodel.Channel{{
 		ID: 1, Name: "stream-failure", Type: "openai", BaseURL: upstream.URL,
 		Models: dbmodel.StringList{"gpt-4o-mini"}, Status: dbmodel.StatusEnabled, Weight: 1,
 		Credentials: []dbmodel.Credential{
@@ -54,7 +55,7 @@ func TestCommittedStreamFailureIsNotRetriedOrMarkedDone(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	body := []byte(`{"model":"gpt-4o-mini","stream":true,"messages":[]}`)
-	Relay(ctx, &relaymodel.ModelRequest{Model: "gpt-4o-mini", Stream: true}, body, nil, meta.ModeChatCompletions, time.Second)
+	gw.Relay(ctx, &relaymodel.ModelRequest{Model: "gpt-4o-mini", Stream: true}, body, nil, meta.ModeChatCompletions, time.Second)
 
 	if got := hits.Load(); got != 1 {
 		t.Fatalf("已提交流发生错误后上游请求数 = %d, want 1", got)
@@ -68,6 +69,7 @@ func TestCommittedStreamFailureIsNotRetriedOrMarkedDone(t *testing.T) {
 }
 
 func TestRetryTimesZeroStopsAfterFirstFailure(t *testing.T) {
+	gw := testCoordinator(t)
 	gin.SetMode(gin.TestMode)
 	var hits atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -77,12 +79,12 @@ func TestRetryTimesZeroStopsAfterFirstFailure(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	oldRegistry, oldRetries := reg, cfgRetryTimes
+	oldRegistry, oldRetries := gw.reg, gw.retryTimes
 	defer func() {
-		reg, cfgRetryTimes = oldRegistry, oldRetries
+		gw.reg, gw.retryTimes = oldRegistry, oldRetries
 	}()
-	SetRetryTimes(0)
-	if err := Init([]dbmodel.Channel{{
+	gw.SetRetryTimes(0)
+	if err := gw.initRegistry([]dbmodel.Channel{{
 		ID: 1, Name: "retry-zero", Type: "openai", BaseURL: upstream.URL,
 		Models: []string{"gpt-4o-mini"}, Status: dbmodel.StatusEnabled, Weight: 1,
 		Credentials: []dbmodel.Credential{
@@ -97,7 +99,7 @@ func TestRetryTimesZeroStopsAfterFirstFailure(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	body := []byte(`{"model":"gpt-4o-mini","messages":[]}`)
-	Relay(ctx, &relaymodel.ModelRequest{Model: "gpt-4o-mini"}, body, nil, meta.ModeChatCompletions, time.Second)
+	gw.Relay(ctx, &relaymodel.ModelRequest{Model: "gpt-4o-mini"}, body, nil, meta.ModeChatCompletions, time.Second)
 
 	if got := hits.Load(); got != 1 {
 		t.Fatalf("retry_times=0 时上游请求数 = %d, want 1", got)
@@ -142,10 +144,16 @@ func TestConcurrentStreamsWithSameRequestID(t *testing.T) {
 			}))
 			defer upstream.Close()
 			go func() {
+				defer close(release)
+				timer := time.NewTimer(5 * time.Second)
+				defer timer.Stop()
 				for i := 0; i < clients; i++ {
-					<-arrived
+					select {
+					case <-arrived:
+					case <-timer.C:
+						return
+					}
 				}
-				close(release)
 			}()
 			var group sync.WaitGroup
 			for i := 0; i < clients; i++ {

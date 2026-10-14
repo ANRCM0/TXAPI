@@ -6,10 +6,11 @@
 //   - convert.go   协议枢纽（P4：客户端协议 → 规范 → 上游协议）
 //   - stream.go    流式公共工具
 //   - adaptor/     各厂商适配器实现
-package relay
+package gateway
 
 import (
 	"log/slog"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -103,14 +104,12 @@ type registry struct {
 	modelIndex map[string][]int
 }
 
-var reg *registry
-
 // Init 建好适配器表并装载首批渠道。
 //
 // P2 的变化：渠道不再来自 YAML，而是来自数据库快照。
 // main 在完成 store.Open + SeedFromConfig 之后调用本函数，
 // 之后每次渠道变更再调 Reload 刷新。
-func Init(channels []model.Channel) error {
+func (g *Gateway) initRegistry(channels []model.Channel) error {
 	r := &registry{
 		channels: make(map[int]*channel, len(channels)),
 		// 适配器表：协议名 → 适配器实例。
@@ -125,7 +124,7 @@ func Init(channels []model.Channel) error {
 	if err := r.apply(channels); err != nil {
 		return err
 	}
-	reg = r
+	g.reg = r
 	return nil
 }
 
@@ -140,21 +139,21 @@ func Init(channels []model.Channel) error {
 // ——选中的渠道在 map 里已经不存在，转发时拿到 nil 直接 panic。
 // 整表替换（而不是增量 diff）让「读到的索引」永远是替换前或
 // 替换后的完整快照，没有中间态。
-func Reload(channels []model.Channel) error {
-	if reg == nil {
-		return Init(channels)
+func (g *Gateway) Reload(channels []model.Channel) error {
+	if g.reg == nil {
+		return g.initRegistry(channels)
 	}
-	reg.mu.Lock()
-	defer reg.mu.Unlock()
+	g.reg.mu.Lock()
+	defer g.reg.mu.Unlock()
 	next := make(map[int]*channel, len(channels))
 	nextIndex := make(map[string][]int)
-	saved := reg.channels
-	savedIndex := reg.modelIndex
-	reg.channels = next
-	reg.modelIndex = nextIndex
-	if err := reg.applyLocked(channels); err != nil {
-		reg.channels = saved // 失败回滚，别把好数据换成坏数据
-		reg.modelIndex = savedIndex
+	saved := g.reg.channels
+	savedIndex := g.reg.modelIndex
+	g.reg.channels = next
+	g.reg.modelIndex = nextIndex
+	if err := g.reg.applyLocked(channels); err != nil {
+		g.reg.channels = saved // 失败回滚，别把好数据换成坏数据
+		g.reg.modelIndex = savedIndex
 		return err
 	}
 	return nil
@@ -206,8 +205,8 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 			typ:         ch.Type,
 			baseURL:     ch.BaseURL,
 			credentials: append([]model.Credential(nil), ch.Credentials...),
-			models:      []string(ch.Models),
-			mapping:     map[string]string(ch.ModelMapping),
+			models:      append([]string(nil), ch.Models...),
+			mapping:     maps.Clone(map[string]string(ch.ModelMapping)),
 			weight:      ch.Weight,
 			priority:    ch.Priority,
 			groupName:   ch.GroupName,
@@ -260,13 +259,13 @@ func (r *registry) allChannels() []*channel {
 }
 
 // ChannelCount 返回当前可用渠道数，供健康检查用。
-func ChannelCount() int {
-	if reg == nil {
+func (g *Gateway) ChannelCount() int {
+	if g.reg == nil {
 		return 0
 	}
-	reg.mu.RLock()
-	defer reg.mu.RUnlock()
-	return len(reg.channels)
+	g.reg.mu.RLock()
+	defer g.reg.mu.RUnlock()
+	return len(g.reg.channels)
 }
 
 // CredentialStats 返回「渠道名 × 凭据状态 → 数量」，给指标层的
@@ -280,17 +279,17 @@ func ChannelCount() int {
 // 那份快照，按它统计才能回答「调度器现在面对的是什么」；查库会
 // 多一次 SQLite 读，而且会包含被装载逻辑跳掉的渠道（类型未知/
 // 无可用凭据），数字反而对不上转发行为。
-func CredentialStats() []metrics.CredentialStat {
-	if reg == nil {
+func (g *Gateway) CredentialStats() []metrics.CredentialStat {
+	if g.reg == nil {
 		return nil
 	}
-	reg.mu.RLock()
-	defer reg.mu.RUnlock()
+	g.reg.mu.RLock()
+	defer g.reg.mu.RUnlock()
 	// (渠道名, 状态) → 计数。用两层 map 而不是切片线性查找：
 	// 凭据总数在自用场景是几十到几百，线性查找在每次抓取时都是
 	// O(n²)，没必要。
 	counts := map[string]map[string]int64{}
-	for _, ch := range reg.channels {
+	for _, ch := range g.reg.channels {
 		if counts[ch.name] == nil {
 			counts[ch.name] = map[string]int64{}
 		}
@@ -314,13 +313,13 @@ func CredentialStats() []metrics.CredentialStat {
 	return out
 }
 
-// ensureInit 在 reg 为 nil 时兜底初始化，避免 nil map 写入 panic。
+// ensureInit 在 g.reg 为 nil 时兜底初始化，避免 nil map 写入 panic。
 //
 // 什么时候会走到：单元测试直接调 pickChannels 而没有先 Init。
 // 生产路径上 main 一定会先 Init，这里只是防御。
-func ensureInit() {
-	if reg == nil {
-		reg = &registry{
+func (g *Gateway) ensureInit() {
+	if g.reg == nil {
+		g.reg = &registry{
 			channels: map[int]*channel{},
 			adaptors: map[string]adaptor.Adaptor{
 				"openai":    &openai.Adaptor{},
@@ -333,10 +332,10 @@ func ensureInit() {
 }
 
 // Snapshot 返回当前渠道池的可读快照（调试/健康检查用）。
-func Snapshot() []map[string]any {
-	ensureInit()
+func (g *Gateway) Snapshot() []map[string]any {
+	g.ensureInit()
 	out := make([]map[string]any, 0)
-	for _, ch := range reg.allChannels() {
+	for _, ch := range g.reg.allChannels() {
 		out = append(out, map[string]any{
 			"id":       ch.id,
 			"name":     ch.name,

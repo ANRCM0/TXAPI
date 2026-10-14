@@ -1,15 +1,19 @@
-package relay
+package gateway
 
 import (
 	"context"
 	"errors"
 	"github.com/gin-gonic/gin"
+	"minigateway/internal/billing"
 	"minigateway/internal/core"
+	dbmodel "minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/adaptor"
-	"minigateway/internal/relay/meta"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/meta"
+	"minigateway/internal/protocol/model"
+	"minigateway/internal/server/middleware"
 	"net/http"
+	"time"
 )
 
 func convertRequestBody(a adaptor.Adaptor, b []byte, m *meta.Meta) ([]byte, error) {
@@ -38,3 +42,11 @@ func relayStream(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta
 	}
 	return result.Usage, nil
 }
+
+func (g *Gateway) SetTimeout(d time.Duration)                        { g.attemptTimeout = d }
+func (g *Gateway) SetBilling(e *billing.Engine)                      { g.billing = e }
+func (g *Gateway) SetRateLimiter(l middleware.Limiter)               { g.limiter = l }
+func (g *Gateway) SetLogRecorder(fn func(entry *dbmodel.RequestLog)) { g.logRecorder = fn }
+func (g *Gateway) SetRetryTimes(n int)                               { g.retryTimes = n }
+func (g *Gateway) SetCredentialPicker(fn credentialPicker)           { g.picker = fn }
+func (g *Gateway) SetHealthReporter(fn credentialHealthReporter)     { g.healthReporter = fn }

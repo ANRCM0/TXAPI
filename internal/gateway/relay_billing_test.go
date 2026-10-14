@@ -1,4 +1,4 @@
-package relay
+package gateway
 
 import (
 	"bytes"
@@ -43,6 +43,7 @@ type testGateway struct {
 
 // newTestGateway 搭一套完整的最小网关。
 func newTestGateway(t *testing.T, tokenQuota float64) *testGateway {
+	gw := testCoordinator(t)
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -115,10 +116,10 @@ func newTestGateway(t *testing.T, tokenQuota float64) *testGateway {
 		t.Fatalf("建令牌失败: %v", err)
 	}
 
-	if err := Init(st.Channels()); err != nil {
+	if err := gw.initRegistry(st.Channels()); err != nil {
 		t.Fatalf("初始化转发层失败: %v", err)
 	}
-	SetTimeout(10 * time.Second)
+	gw.SetTimeout(10 * time.Second)
 
 	// 价格表：gpt-4o-mini 输入 0.15 / 输出 0.6（SPEC 4.1 的配置）
 	if err := st.UpsertModelPrice(&dbmodel.ModelPrice{
@@ -141,13 +142,13 @@ func newTestGateway(t *testing.T, tokenQuota float64) *testGateway {
 	}, billing.DefaultPriceTTL)
 	eng := billing.New(st.DB(), priceTable)
 
-	SetBilling(eng)
-	SetLogRecorder(st.WriteLog)
+	gw.SetBilling(eng)
+	gw.SetLogRecorder(st.WriteLog)
 
 	e := gin.New()
 	e.Use(middleware.RequestID())
 	auth := middleware.NewAuth(st)
-	e.POST("/v1/chat/completions", auth.Handle(), HandleChatCompletions)
+	e.POST("/v1/chat/completions", auth.Handle(), gw.HandleChatCompletions)
 
 	return &testGateway{
 		engine:      e,
@@ -407,6 +408,7 @@ func TestAcceptLogNotBlocking(t *testing.T) {
 // is_estimated，且估算值非零（prompt 从请求体文本估、completion
 // 从响应内容估）。
 func TestUsageEstimateFallback(t *testing.T) {
+	gw := testCoordinator(t)
 	gin.SetMode(gin.TestMode)
 	// 一个不回 usage 的假上游
 	noUsage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +439,7 @@ func TestUsageEstimateFallback(t *testing.T) {
 	if _, err := st.CreateToken(&store.TokenInput{Key: "sk-est", Name: "est"}); err != nil {
 		t.Fatalf("建令牌失败: %v", err)
 	}
-	if err := Init(st.Channels()); err != nil {
+	if err := gw.initRegistry(st.Channels()); err != nil {
 		t.Fatalf("初始化失败: %v", err)
 	}
 	if err := st.UpsertModelPrice(&dbmodel.ModelPrice{
@@ -456,12 +458,12 @@ func TestUsageEstimateFallback(t *testing.T) {
 		}
 		return prices, rates, nil
 	}, 0)
-	SetBilling(billing.New(st.DB(), priceTable))
-	SetLogRecorder(st.WriteLog)
+	gw.SetBilling(billing.New(st.DB(), priceTable))
+	gw.SetLogRecorder(st.WriteLog)
 
 	e := gin.New()
 	auth := middleware.NewAuth(st)
-	e.POST("/v1/chat/completions", auth.Handle(), HandleChatCompletions)
+	e.POST("/v1/chat/completions", auth.Handle(), gw.HandleChatCompletions)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
 		bytes.NewReader([]byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"你好，请介绍一下你自己"}]}`)))

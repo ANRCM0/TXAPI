@@ -256,3 +256,27 @@ channels:
 		t.Errorf("key 覆盖串到了别的渠道: ch1=%q ch2=%q", cfg.Channels[0].Key, cfg.Channels[1].Key)
 	}
 }
+
+func TestTotalTimeoutDefaultAndValidation(t *testing.T) {
+	for _, tc := range []struct {
+		body  string
+		want  int
+		valid bool
+	}{
+		{"server:\n  timeout_seconds: 20\n", 20, true},
+		{"server:\n  timeout_seconds: 20\n  total_timeout_seconds: 45\n", 45, true},
+		{"server:\n  total_timeout_seconds: -1\n", 0, false},
+		{"server:\n  total_timeout_seconds: 601\n", 0, false},
+	} {
+		cfg, err := Load(writeCfg(t, "admin_key: test\n"+tc.body))
+		if !tc.valid {
+			if err == nil {
+				t.Fatal("invalid total timeout accepted")
+			}
+			continue
+		}
+		if err != nil || cfg.Server.TotalTimeoutSeconds != tc.want {
+			t.Fatalf("total timeout=%+v err=%v", cfg, err)
+		}
+	}
+}

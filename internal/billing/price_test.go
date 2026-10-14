@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"minigateway/internal/model"
-	relaymodel "minigateway/internal/relay/model"
+	relaymodel "minigateway/internal/protocol/model"
 )
 
 // newTestTable 构造一个直接给定价格和倍率的价格表（不经存储层），

@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"minigateway/internal/model"
-	relaymodel "minigateway/internal/relay/model"
+	relaymodel "minigateway/internal/protocol/model"
 )
 
 // PriceLoader 从存储层加载价格表和分组倍率。

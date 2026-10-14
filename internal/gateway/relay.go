@@ -1,28 +1,26 @@
-package relay
+package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"minigateway/internal/core"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"minigateway/internal/core"
-	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/adaptor"
-	"minigateway/internal/relay/meta"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/meta"
+	"minigateway/internal/protocol/model"
 	"minigateway/internal/scheduler"
-	"minigateway/internal/server/middleware"
 )
 
 // Temporary legacy instance; production moves to gateway.New in S1.
-var executor = core.New(core.Options{})
 
 // Relay 执行一次完整的转发，失败时换渠道重试。
 //
@@ -33,20 +31,31 @@ var executor = core.New(core.Options{})
 // 一路透传到 buildMeta：适配器要靠它决定上游路径（openai 适配器的
 // /v1/embeddings 就是靠 Mode 分的支）。以前这里写死对话模式，
 // 新增端点时每个调用方都得记得改，透传让「加端点」只动 handler。
-func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels []string, mode int, timeout time.Duration) {
+func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels []string, mode int, timeout time.Duration) {
+	result := state(c)
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), g.totalTimeout)
+	defer cancel()
+	c.Request = c.Request.WithContext(ctx)
+	defer func() {
+		result.TotalDuration = time.Since(started)
+		result.Committed = c.Writer.Written()
+		result.HTTPStatus = c.Writer.Status()
+	}()
+
 	// 1. 筛选出能服务这个模型的渠道
-	candidates := pickChannels(req.Model, allowedModels)
+	candidates := g.pickChannels(req.Model, allowedModels)
 	if len(candidates) == 0 {
 		// 记账先行：这个提前返回的分支最容易漏掉状态码记录，
 		// 漏了就会把一次彻底失败的请求记成 status=200，账本失去意义
-		c.Set(relayStatusKey, http.StatusServiceUnavailable)
-		c.Set(relayErrorKey, fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model))
+		state(c).StatusCode = http.StatusServiceUnavailable
+		state(c).ErrorMessage = fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model)
 		writeError(c, http.StatusServiceUnavailable,
 			fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model), "no_channel")
 		return
 	}
 
-	retryTimes := cfgRetryTimes
+	retryTimes := g.retryTimes
 	// 重试预算的上限跟着「重试单元」一起变了：以前单元是渠道，所以拿
 	// 渠道数 - 1 当上限；现在单元是 (渠道, 凭据) 对，就该拿「可用凭据
 	// 总数 - 1」当上限。否则一个渠道挂 3 把 Key 仍然只允许试 1 次，
@@ -67,10 +76,21 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 	remaining := candidates
 	// 会话 ID 只算一次：整个请求（含重试）必须落在同一个会话上，
 	// 否则亲和会把重试打到另一把 Key 上，上游的 prompt 缓存白白作废。
-	sessionID := requestSessionID(c, ctxUint(c, middleware.CtxTokenID), body)
+	sessionID := requestSessionID(c, state(c).Identity.TokenID, body)
 
 	for attempt := 0; attempt <= retryTimes; attempt++ {
-		ch, cred := selectTarget(remaining, triedCred, sessionID, time.Now())
+		if ctx.Err() != nil {
+			code := http.StatusGatewayTimeout
+			term := core.Deadline
+			if ctx.Err() == context.Canceled {
+				code = 499
+				term = core.Canceled
+			}
+			lastErr = &model.ErrorWithStatusCode{StatusCode: code, Error: model.ErrorDetail{Message: "request time budget exhausted or canceled", Type: string(term)}}
+			result.Termination = term
+			break
+		}
+		ch, cred := g.selectTarget(remaining, triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}
@@ -83,37 +103,40 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 		//
 		// 存 uint 而不是 int：RequestLog.ChannelID 是 uint，类型不匹配会让
 		// 类型断言静默失败，日志里 channel_id 全是 0，事后查不出走了哪条渠道。
-		c.Set(relayChannelKey, uint(ch.id))
+		state(c).ChannelID = uint(ch.id)
 		// 指标用的渠道名。channel_id 是数字，作为 Prometheus 标签
 		// 可读性差（「哪个渠道在报错」要反查数据库），指标一律用
 		// 人可读的名字；logs 表仍然存 ID（要 join）。
-		c.Set(relayChannelNameKey, ch.name)
+		state(c).ChannelName = ch.name
 		if credID, ok := m.CredentialID(); ok {
-			c.Set(relayCredentialKey, credID)
+			state(c).CredentialID = credID
 		}
-		c.Set(relayActualModelKey, m.ActualModel)
+		state(c).ActualModel = m.ActualModel
 		// 记账用：命中的渠道分组。重试会不断覆盖它，最终值是
 		// 「最后一次尝试的渠道」——和 status/channel_id 一样，
 		// 账本只该记录实际服务了这次请求的那个渠道。
 		// 分组决定计费倍率，必须等选完渠道才有意义。
-		c.Set(relayChannelGroupKey, ch.groupName)
+		state(c).ChannelGroup = ch.groupName
 
 		// 选目标的结果用 debug：正常流量下这是纯噪音（每个请求一条），
 		// 但排查「为什么这把 Key 一直不被选中」「亲和有没有生效」
 		// 时它是唯一现场——配合 AddSource 还能看到走的是哪条选择
 		// 分支（亲和命中 / 加权随机 / 降级）。
 		slog.Debug("[调度] 选中转发目标",
-			"request_id", c.GetString(middleware.CtxRequestID),
+			"request_id", state(c).Identity.RequestID,
 			"channel", ch.name, "channel_id", ch.id,
 			"credential_id", cred.ID, "credential_weight", cred.Weight,
 			"model", m.ActualModel,
 			"session_id", sessionID,
 			"attempt", attempt)
 
-		usage, err := doRelay(c, m, body, timeout)
+		attemptResult := g.doRelay(c, m, body, timeout)
+		result.Attempts = append(result.Attempts, AttemptResult{ChannelID: uint(ch.id), CredentialID: cred.ID, Model: m.ActualModel, Result: attemptResult})
+		result.Result = attemptResult
+		usage, err := attemptResult.Usage, attemptResult.Error
 		if err == nil {
 			if usage != nil {
-				c.Set(relayUsageKey, usage)
+				state(c).Usage = usage
 				// debug 而不是 info：上游返回的原始用量在 info 级别
 				// 会和请求摘要重复（摘要里也有 token 数），而真正需要
 				// 它的场景是「usage 数字对不上」的排查——那时会开
@@ -127,19 +150,20 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 			}
 			// 健康反馈：成功即清零。让这把 Key 的冷却/拉黑状态立刻回到
 			// 全绿，下一次选择就不会再跳过它。
-			reportCredentialHealth(ch.name, cred, http.StatusOK, "")
-			c.Set(relayStatusKey, http.StatusOK)
+			g.reportCredentialHealth(ch.name, cred, http.StatusOK, "")
+			state(c).StatusCode = http.StatusOK
+			state(c).ErrorMessage = ""
 			return
 		}
 		lastErr = err
-		c.Set(relayStatusKey, err.StatusCode)
-		c.Set(relayErrorKey, err.Error.Message)
-		if c.Writer.Written() {
+		state(c).StatusCode = err.StatusCode
+		state(c).ErrorMessage = err.Error.Message
+		if attemptResult.Committed {
 			// SSE headers/body are already visible; never append an error JSON or retry
 			// after the client may have consumed part of this response.
 			responseCommitted = true
-			if err.StatusCode != 499 {
-				reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
+			if err.StatusCode != 499 && attemptResult.Termination != core.ClientWriteError {
+				g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
 			}
 			break
 		}
@@ -147,11 +171,11 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 		// 见 scheduler.ShouldPenalizeCredential）。必须在 shouldRetry
 		// 判断**之后**：400 这类错误本来就不会重试，但反馈还是要做——
 		// 「不重试」和「不惩罚」是两件独立的事。
-		reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
+		g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
 
 		// 只有「可重试的错误」才换渠道。
 		// 比如 400 参数错误，换渠道也没用，反而浪费一次请求。
-		if !shouldRetry(err.StatusCode) {
+		if !attemptResult.Replayable || ctx.Err() != nil || attemptResult.Termination == core.ClientWriteError || !shouldRetry(err.StatusCode) {
 			// warn：上游返回了错误状态码。这是「本次请求没成」，
 			// 属于必须留痕的事件，但网关本身在正确工作（分类、
 			// 不重试都是设计行为），所以不是 error。
@@ -173,8 +197,8 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 			Error:      model.ErrorDetail{Message: "所有可用渠道均不可用", Type: "all_channels_failed"},
 		}
 	}
-	c.Set(relayStatusKey, lastErr.StatusCode)
-	c.Set(relayErrorKey, lastErr.Error.Message)
+	state(c).StatusCode = lastErr.StatusCode
+	state(c).ErrorMessage = lastErr.Error.Message
 	if responseCommitted {
 		return
 	}
@@ -182,18 +206,17 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 }
 
 // doRelay 向单个渠道发一次请求。
-func doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout time.Duration) (*model.Usage, *model.ErrorWithStatusCode) {
-	a, ok := reg.getAdaptor(m.ChannelType)
+func (g *Gateway) doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout time.Duration) core.Result {
+	a, ok := g.reg.getAdaptor(m.ChannelType)
 	if !ok {
-		return nil, &model.ErrorWithStatusCode{StatusCode: 500, Error: model.ErrorDetail{Message: "no upstream adaptor", Type: "no_adaptor"}}
+		return core.Result{StatusCode: 500, Error: &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "no upstream adaptor", Type: "no_adaptor"}}}
 	}
 	input, err := protocol.Prepare(a, body, m)
 	if err != nil {
-		return nil, err
+		return core.Result{StatusCode: err.StatusCode, Error: err, Termination: core.UpstreamError}
 	}
 	input.Timeout = timeout
-	result := executor.Execute(c.Request.Context(), c.Writer, input)
-	return result.Usage, result.Error
+	return g.executor.Execute(c.Request.Context(), c.Writer, input)
 }
 
 // needsProtocolConversion 判断这个渠道是否需要走协议枢纽。
@@ -243,7 +266,7 @@ func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest, m
 // sessionID 非空时凭据选择走会话亲和（见 pickCredentialWithSession）。
 //
 // 返回 (nil, nil) 表示没有可试的目标了（所有凭据都试过或都不可用）。
-func selectTarget(candidates []*channel, triedCred map[uint]bool, sessionID string, now time.Time) (*channel, *dbmodel.Credential) {
+func (g *Gateway) selectTarget(candidates []*channel, triedCred map[uint]bool, sessionID string, now time.Time) (*channel, *dbmodel.Credential) {
 	pool := make([]*channel, 0, len(candidates))
 	total := 0
 	// 未试过的候选里的最高优先级。只在这一层里选，低优先级渠道留作兜底。
@@ -278,7 +301,7 @@ func selectTarget(candidates []*channel, triedCred map[uint]bool, sessionID stri
 			break
 		}
 	}
-	cred := pickCredentialWithSession(ch, triedCred, sessionID, now)
+	cred := g.pickCredentialWithSession(ch, triedCred, sessionID, now)
 	if cred == nil {
 		// hasUntriedCredential 已经保证有，防御性返回：真出现说明两个
 		// 判断条件不一致，宁可放弃这次尝试也不要发出一个没有 Key 的请求
@@ -318,21 +341,9 @@ func countAvailableCredentials(candidates []*channel, now time.Time) int {
 	return n
 }
 
-// pickCredentialWithSession 在渠道的凭据池里挑一把本次请求要用的 Key。
-//
-// 默认实现（未注入调度器时）与旧 pickKey **行为等价**：按权重降序、
-// 同权重按 ID 升序取第一个可用的。
-//
-// 注入调度器后（SetCredentialPicker）换成加权随机 + 会话亲和：
-// 旧实现会让权重低的凭据永远拿不到流量，权重退化成优先级——运维配
-// weight=5 的意图是「这把 Key 分 5 份流量」而不是「这把 Key 优先」。
-//
-// 亲和只在「首次选择」时起作用：重试时 exclude 里已经有了失败的那把，
-// 亲和目标若正是它，调度器会在剩余可用凭据里重新定位——行为上等于降级
-// 到加权随机，不会把请求卡死（见 scheduler.PickWithAffinity 的说明）。
-func pickCredentialWithSession(ch *channel, triedCred map[uint]bool, sessionID string, now time.Time) *dbmodel.Credential {
-	if pickCredentialFn != nil {
-		if cred, ok := pickCredentialFn(ch.credentials, triedCred, sessionID, now); ok {
+func (g *Gateway) pickCredentialWithSession(ch *channel, triedCred map[uint]bool, sessionID string, now time.Time) *dbmodel.Credential {
+	if g.picker != nil {
+		if cred, ok := g.picker(ch.credentials, triedCred, sessionID, now); ok {
 			return cred
 		}
 		return nil
@@ -359,18 +370,18 @@ func pickCredentialWithSession(ch *channel, triedCred map[uint]bool, sessionID s
 // 通配渠道（models 里配了 "*"）在索引里存在 "*" 这个 key 下，
 // 查询时与精确命中的结果合并——和 abilities 表的语义一致
 // （表里也是存 model="*" 一行，不展开）。
-func pickChannels(modelName string, allowedModels []string) []*channel {
+func (g *Gateway) pickChannels(modelName string, allowedModels []string) []*channel {
 	if !modelAllowed(modelName, allowedModels) {
 		return nil
 	}
-	reg.mu.RLock()
-	defer reg.mu.RUnlock()
+	g.reg.mu.RLock()
+	defer g.reg.mu.RUnlock()
 	// 两个来源合并：精确命中的渠道 + 通配渠道。
 	// 用 seen 去重：一个渠道同时配了具体模型和 "*" 时，
 	// 它会在两个 key 下各出现一次，不去重会让它在候选列表里
 	// 出现两次——权重随机选中它两次的概率翻倍，等于偷偷改了权重。
-	ids := reg.modelIndex[modelName]
-	wild := reg.modelIndex["*"]
+	ids := g.reg.modelIndex[modelName]
+	wild := g.reg.modelIndex["*"]
 	seen := make(map[int]bool, len(ids)+len(wild))
 	out := make([]*channel, 0, len(ids)+len(wild))
 	appendCh := func(list []int) {
@@ -382,7 +393,7 @@ func pickChannels(modelName string, allowedModels []string) []*channel {
 			// 索引与渠道池同生命周期重建，正常情况下一定命中；
 			// 防御一下：真取不到说明两者不同步，跳过比 panic 好
 			// （一次路由失败只是一个请求 503，panic 会打挂进程）。
-			if ch, ok := reg.channels[id]; ok {
+			if ch, ok := g.reg.channels[id]; ok {
 				out = append(out, ch)
 			}
 		}
@@ -436,59 +447,9 @@ func writeError(c *gin.Context, statusCode int, message, errType string) {
 	c.JSON(statusCode, gin.H{"error": gin.H{"message": message, "type": errType}})
 }
 
-// 记账用的 context key。
-//
-// 为什么 Relay 把结果写进 context 而不是返回：记账信息（命中的渠道、
-// 实际模型名、用量、状态码）在重试过程中会不断被覆盖，只有「最后一次
-// 尝试的结果」才对账本有意义。写在 context 上，handler 收尾时读到的
-// 天然就是最终值，不需要 Relay 再包一个结果结构体往外传。
-const (
-	relayStatusKey  = "relay_status"
-	relayChannelKey = "relay_channel_id"
-	// relayChannelNameKey 是命中的渠道名，给 Prometheus 指标当标签
-	// （见 Relay 里设置处的注释）。
-	relayChannelNameKey  = "relay_channel_name"
-	relayCredentialKey   = "relay_credential_id"
-	relayActualModelKey  = "relay_actual_model"
-	relayUsageKey        = "relay_usage"
-	relayErrorKey        = "relay_error"
-	relayChannelGroupKey = "relay_channel_group"
-)
-
-// cfgRetryTimes 由 Init 从配置写入。
-var cfgRetryTimes = 2
-
-// SetRetryTimes 让 main 把配置里的重试次数注入进来。
-func SetRetryTimes(n int) { cfgRetryTimes = n }
-
-// credentialPicker 是凭据选择函数，由 main 注入调度器的实现。
-//
-// 签名与 relay 内部旧逻辑保持一致（返回渠道快照里的元素指针），
-// 这样注入与否对调用点完全透明。默认（不注入）走 pickCredentialSort：
-// 按权重降序取第一个可用的，与 P6 批次 2 之前行为一致。
-//
-// 为什么用函数变量而不是让 relay 直接 import scheduler：scheduler 是叶子
-// 包，它不能反过来依赖 relay；而 relay 依赖 scheduler 会让「调度器可替换」
-// 变成空话（换个实现要改 relay 代码）。函数变量 + SetCredentialPicker 是
-// 本项目既有的解耦套路（见 handler.go 的 SetLogRecorder），保持一致。
 type credentialPicker func(creds []dbmodel.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*dbmodel.Credential, bool)
 
-var pickCredentialFn credentialPicker
-
-// SetCredentialPicker 注入凭据选择实现。传 nil 恢复默认（按权重降序取第一个）。
-func SetCredentialPicker(fn credentialPicker) { pickCredentialFn = fn }
-
-// credentialHealthReporter 是凭据健康状态的反馈函数，由 main 注入。
-//
-// 与 SetCredentialPicker 同一套路：relay 只负责「把结果告诉调度器」，
-// 具体怎么算状态、怎么落库是 scheduler 的事。不注入时（单元测试）
-// 反馈是空操作，转发行为与 P6 批次 2 之前完全一致。
 type credentialHealthReporter func(cred *dbmodel.Credential, statusCode int, errMsg string)
-
-var reportHealthFn credentialHealthReporter
-
-// SetHealthReporter 注入凭据健康反馈实现。传 nil 关闭反馈。
-func SetHealthReporter(fn credentialHealthReporter) { reportHealthFn = fn }
 
 // reportCredentialHealth 把一次转发结果反馈给调度器。
 //
@@ -500,17 +461,17 @@ func SetHealthReporter(fn credentialHealthReporter) { reportHealthFn = fn }
 // （scheduler.ShouldPenalizeCredential），保证「被惩罚的失败」和
 // 「被计数的失败」永远是同一批——两处各写一遍判定的话，以后改分类
 // 规则一定会漏改一处，指标和冷却行为就会对不上。
-func reportCredentialHealth(channel string, cred *dbmodel.Credential, statusCode int, errMsg string) {
+func (g *Gateway) reportCredentialHealth(channel string, cred *dbmodel.Credential, statusCode int, errMsg string) {
 	if cred == nil {
 		return
 	}
 	if statusCode != http.StatusOK && scheduler.ShouldPenalizeCredential(statusCode) {
-		metrics.Default.RecordCredentialFailure(channel, cred.ID)
+		g.metrics.RecordCredentialFailure(channel, cred.ID)
 	}
-	if reportHealthFn == nil {
+	if g.healthReporter == nil {
 		return
 	}
-	reportHealthFn(cred, statusCode, errMsg)
+	g.healthReporter(cred, statusCode, errMsg)
 }
 
 // SessionIDHeader 是客户端声明会话 ID 的请求头。
