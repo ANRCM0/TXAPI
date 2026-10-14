@@ -35,7 +35,7 @@ func TestCommittedStreamFailureIsNotRetriedOrMarkedDone(t *testing.T) {
 	SetRetryTimes(2)
 	if err := Init([]dbmodel.Channel{{
 		ID: 1, Name: "stream-failure", Type: "openai", BaseURL: upstream.URL,
-		Models: dbmodel.StringList{"gpt-4o-mini"}, Status: dbmodel.StatusEnabled,
+		Models: dbmodel.StringList{"gpt-4o-mini"}, Status: dbmodel.StatusEnabled, Weight: 1,
 		Credentials: []dbmodel.Credential{
 			{ID: 1, APIKey: "key-one", Status: dbmodel.CredentialActive, Weight: 1},
 			{ID: 2, APIKey: "key-two", Status: dbmodel.CredentialActive, Weight: 1},
@@ -78,7 +78,7 @@ func TestRetryTimesZeroStopsAfterFirstFailure(t *testing.T) {
 	SetRetryTimes(0)
 	if err := Init([]dbmodel.Channel{{
 		ID: 1, Name: "retry-zero", Type: "openai", BaseURL: upstream.URL,
-		Models: []string{"gpt-4o-mini"}, Status: dbmodel.StatusEnabled,
+		Models: []string{"gpt-4o-mini"}, Status: dbmodel.StatusEnabled, Weight: 1,
 		Credentials: []dbmodel.Credential{
 			{ID: 1, APIKey: "key-one", Status: dbmodel.CredentialActive, Weight: 1},
 			{ID: 2, APIKey: "key-two", Status: dbmodel.CredentialActive, Weight: 1},
