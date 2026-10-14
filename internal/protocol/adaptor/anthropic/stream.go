@@ -3,8 +3,8 @@ package anthropic
 import (
 	"encoding/json"
 
-	"minigateway/internal/relay/canonical"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/canonical"
+	"minigateway/internal/protocol/model"
 )
 
 // 这个文件实现「Claude SSE 事件流 → OpenAI chunk 流」的翻译。

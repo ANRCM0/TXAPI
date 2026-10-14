@@ -3,7 +3,7 @@ package anthropic
 import (
 	"testing"
 
-	"minigateway/internal/relay/adaptor"
+	"minigateway/internal/protocol/adaptor"
 )
 
 func TestStreamSessionsKeepMessageStateSeparate(t *testing.T) {

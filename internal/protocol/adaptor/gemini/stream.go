@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"minigateway/internal/relay/canonical"
+	"minigateway/internal/protocol/canonical"
 )
 
 // 这个文件实现「Gemini SSE → OpenAI chunk」的翻译。

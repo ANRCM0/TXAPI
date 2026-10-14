@@ -10,10 +10,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
-
-	"minigateway/internal/relay/meta"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/meta"
 )
 
 // Adaptor 是上游厂商适配器。
@@ -32,12 +29,6 @@ type Adaptor interface {
 	// 参数 body 是客户端原始 JSON。返回 nil 表示「格式与上游一致，原样透传」。
 	// 这是协议转换的核心：OpenAI 格式进、Claude 格式出，就发生在这里。
 	ConvertRequest(body []byte, m *meta.Meta) ([]byte, error)
-
-	// DoResponse 解析上游响应，并抽取 token 用量。
-	//
-	// 它负责把响应写给客户端（包括流式转发），
-	// 返回值 usage 供计费使用，err 非 nil 表示本次转发失败。
-	DoResponse(c *gin.Context, resp *http.Response, m *meta.Meta) (*model.Usage, *model.ErrorWithStatusCode)
 
 	// GetChannelName 返回渠道展示名，用于日志。
 	GetChannelName() string

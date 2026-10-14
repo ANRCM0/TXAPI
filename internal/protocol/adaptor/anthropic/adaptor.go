@@ -9,17 +9,14 @@
 package anthropic
 
 import (
-	"io"
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-
-	"minigateway/internal/relay/adaptor"
-	"minigateway/internal/relay/adaptor/openai"
-	"minigateway/internal/relay/canonical"
-	"minigateway/internal/relay/meta"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/adaptor"
+	"minigateway/internal/protocol/adaptor/openai"
+	"minigateway/internal/protocol/canonical"
+	"minigateway/internal/protocol/meta"
+	"minigateway/internal/protocol/model"
 )
 
 // openaiPA 是入站（客户端侧）协议适配器。
@@ -79,26 +76,6 @@ func (a *Adaptor) ConvertRequest(body []byte, m *meta.Meta) ([]byte, error) {
 	}
 	req.Model = m.ActualModel
 	return a.BuildRequest(req)
-}
-
-// DoResponse 是 adaptor.Adaptor 接口方法。
-// 枢纽模式下 relay 自己处理响应（不走这里），保留实现保持接口完整。
-func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, m *meta.Meta) (*model.Usage, *model.ErrorWithStatusCode) {
-	// 直接转发路径：读整体 → 转成 OpenAI 响应 → 回写
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, upstreamError("读取上游响应失败: " + err.Error())
-	}
-	cResp, err := a.ParseResponse(body)
-	if err != nil {
-		return nil, upstreamError("解析上游响应失败: " + err.Error())
-	}
-	out, err := openaiPA.BuildResponse(cResp)
-	if err != nil {
-		return nil, upstreamError("构造客户端响应失败: " + err.Error())
-	}
-	c.Data(http.StatusOK, "application/json", out)
-	return cResp.Usage, nil
 }
 
 // ---- ProtocolAdaptor 实现（委托给 convert.go / stream.go 的包级函数）----

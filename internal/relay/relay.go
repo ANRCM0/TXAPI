@@ -1,12 +1,8 @@
 package relay
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -14,28 +10,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/core"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
-	"minigateway/internal/relay/adaptor"
+	"minigateway/internal/protocol"
+	"minigateway/internal/protocol/adaptor"
 	"minigateway/internal/relay/meta"
 	"minigateway/internal/relay/model"
 	"minigateway/internal/scheduler"
 	"minigateway/internal/server/middleware"
 )
 
-// httpClient 是所有上游请求共用的客户端。
-//
-// 为什么全局复用一个 client：每次请求新建 client 会丢掉连接池，
-// 每次都要重新 TCP 握手 + TLS 握手，在高频转发下开销很大。
-// 超时在单次请求上用 context 控制，不设 client.Timeout，
-// 否则流式响应会在固定时长后被掐断。
-var httpClient = &http.Client{
-	Transport: &http.Transport{
-		MaxIdleConns:        200,
-		MaxIdleConnsPerHost: 50,
-		IdleConnTimeout:     90 * time.Second,
-	},
-}
+// Temporary legacy instance; production moves to gateway.New in S1.
+var executor = core.New(core.Options{})
 
 // Relay 执行一次完整的转发，失败时换渠道重试。
 //
@@ -198,92 +185,15 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 func doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout time.Duration) (*model.Usage, *model.ErrorWithStatusCode) {
 	a, ok := reg.getAdaptor(m.ChannelType)
 	if !ok {
-		return nil, &model.ErrorWithStatusCode{
-			StatusCode: http.StatusInternalServerError,
-			Error:      model.ErrorDetail{Message: "未找到渠道类型 " + m.ChannelType + " 的适配器", Type: "no_adaptor"},
-		}
+		return nil, &model.ErrorWithStatusCode{StatusCode: 500, Error: model.ErrorDetail{Message: "no upstream adaptor", Type: "no_adaptor"}}
 	}
-
-	url, err := a.GetRequestURL(m)
+	input, err := protocol.Prepare(a, body, m)
 	if err != nil {
-		return nil, &model.ErrorWithStatusCode{
-			StatusCode: http.StatusInternalServerError,
-			Error:      model.ErrorDetail{Message: "构造上游地址失败: " + err.Error(), Type: "bad_request"},
-		}
+		return nil, err
 	}
-
-	// 协议转换：客户端协议 → 规范格式 → 上游协议
-	//
-	// 客户端协议当前固定是 OpenAI（网关只暴露 /v1/chat/completions 入口）。
-	// 如果渠道类型也是 openai，走适配器自己的 ConvertRequest（纯模型名映射，
-	// 不碰 body，保持 P1 的透明代理行为）；否则走规范格式两段转换。
-	converted, err := convertRequestBody(a, body, m)
-	if err != nil {
-		return nil, &model.ErrorWithStatusCode{
-			StatusCode: http.StatusBadRequest,
-			Error:      model.ErrorDetail{Message: "请求转换失败: " + err.Error(), Type: "convert_error"},
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(converted))
-	if err != nil {
-		return nil, &model.ErrorWithStatusCode{
-			StatusCode: http.StatusInternalServerError,
-			Error:      model.ErrorDetail{Message: "构造请求失败: " + err.Error(), Type: "internal_error"},
-		}
-	}
-	req.Header.Set("Content-Type", "application/json")
-	// 客户端声明的流式偏好要透传给上游，否则上游不会返回 SSE
-	if m.IsStream {
-		req.Header.Set("Accept", "text/event-stream")
-	}
-	if err := a.SetupRequestHeader(req, m); err != nil {
-		return nil, &model.ErrorWithStatusCode{
-			StatusCode: http.StatusInternalServerError,
-			Error:      model.ErrorDetail{Message: "设置鉴权头失败: " + err.Error(), Type: "internal_error"},
-		}
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		// 网络层错误（连不上、超时、TLS 失败）统一视为 502，可重试
-		return nil, &model.ErrorWithStatusCode{
-			StatusCode: http.StatusBadGateway,
-			Error:      model.ErrorDetail{Message: "请求上游失败: " + err.Error(), Type: "upstream_unreachable"},
-		}
-	}
-	defer resp.Body.Close()
-
-	// 响应方向：上游协议 → 规范 → 客户端协议(OpenAI)
-	//
-	// openai 渠道走适配器原生的 DoResponse（P1 行为，非流式直接透传）；
-	// 其他渠道类型在这里分流：
-	//   - 非流式：整体读 body → 转换 → 回写
-	//   - 流式：逐行翻译（relayStream），保持打字机效果
-	if resp.StatusCode != http.StatusOK {
-		return handleUpstreamError(a, resp)
-	}
-	if needsProtocolConversion(a) {
-		if m.IsStream {
-			usage, err := relayStream(c, a, resp, m)
-			if err != nil {
-				status := http.StatusBadGateway
-				if c.Request.Context().Err() != nil || errors.Is(err, context.Canceled) {
-					status = 499
-				}
-				return usage, &model.ErrorWithStatusCode{
-					StatusCode: status,
-					Error:      model.ErrorDetail{Message: "流式转发未正常结束: " + err.Error(), Type: "stream_error"},
-				}
-			}
-			return usage, nil
-		}
-		return relayNormal(c, a, resp, m)
-	}
-	return a.DoResponse(c, resp, m)
+	input.Timeout = timeout
+	result := executor.Execute(c.Request.Context(), c.Writer, input)
+	return result.Usage, result.Error
 }
 
 // needsProtocolConversion 判断这个渠道是否需要走协议枢纽。
@@ -294,53 +204,6 @@ func needsProtocolConversion(a adaptor.Adaptor) bool {
 		return false
 	}
 	return pa.Name() != "openai"
-}
-
-// relayNormal 处理非流式的协议转换响应。
-func relayNormal(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta.Meta) (*model.Usage, *model.ErrorWithStatusCode) {
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, &model.ErrorWithStatusCode{
-			StatusCode: http.StatusBadGateway,
-			Error:      model.ErrorDetail{Message: "读取上游响应失败: " + err.Error(), Type: "upstream_error"},
-		}
-	}
-	out, usage, err := convertResponseBody(a, body, m)
-	if err != nil {
-		return nil, &model.ErrorWithStatusCode{
-			StatusCode: http.StatusBadGateway,
-			Error:      model.ErrorDetail{Message: "响应转换失败: " + err.Error(), Type: "convert_error"},
-		}
-	}
-	c.Data(http.StatusOK, "application/json", out)
-	return usage, nil
-}
-
-// handleUpstreamError 把上游的错误响应转成网关统一的错误体。
-//
-// 为什么要统一：上游错误格式各家不同（OpenAI/Claude/Gemini 结构都不一样），
-// 而且可能泄露渠道信息（比如 key 的提示）。网关对外只暴露 OpenAI 风格错误。
-func handleUpstreamError(a adaptor.Adaptor, resp *http.Response) (*model.Usage, *model.ErrorWithStatusCode) {
-	body, _ := io.ReadAll(resp.Body)
-
-	detail := model.ErrorDetail{
-		Message: string(body),
-		Type:    "upstream_error",
-	}
-	// 各协议错误体都有 error.message 字段，结构接近，先按通用形状解析
-	var parsed struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-			Code    any    `json:"code"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &parsed) == nil && parsed.Error.Message != "" {
-		detail.Message = parsed.Error.Message
-		detail.Type = parsed.Error.Type
-		detail.Code = parsed.Error.Code
-	}
-	return nil, &model.ErrorWithStatusCode{StatusCode: resp.StatusCode, Error: detail}
 }
 
 // buildMeta 把渠道配置和选中的凭据组装成一次转发的上下文。

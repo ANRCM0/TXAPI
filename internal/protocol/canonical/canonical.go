@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/model"
 )
 
 // 内容块类型。取值对齐三家协议的最大公约数：

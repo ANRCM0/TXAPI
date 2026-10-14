@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"strings"
 
-	"minigateway/internal/relay/canonical"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/canonical"
+	"minigateway/internal/protocol/model"
 )
 
 // anthropicVersion 是 Anthropic API 的版本头。

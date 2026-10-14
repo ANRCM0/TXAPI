@@ -24,8 +24,8 @@ import (
 	"net/url"
 	"strings"
 
-	"minigateway/internal/relay/canonical"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/canonical"
+	"minigateway/internal/protocol/model"
 )
 
 // ErrUnsupported 标记「Gemini 表达不了的请求」。

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"minigateway/internal/relay/adaptor"
-	"minigateway/internal/relay/canonical"
+	"minigateway/internal/protocol/adaptor"
+	"minigateway/internal/protocol/canonical"
 )
 
 func textFromChunks(chunks []*canonical.StreamChunk) string {

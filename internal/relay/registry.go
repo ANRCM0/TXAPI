@@ -16,10 +16,10 @@ import (
 
 	"minigateway/internal/metrics"
 	"minigateway/internal/model"
-	"minigateway/internal/relay/adaptor"
-	"minigateway/internal/relay/adaptor/anthropic"
-	"minigateway/internal/relay/adaptor/gemini"
-	"minigateway/internal/relay/adaptor/openai"
+	"minigateway/internal/protocol/adaptor"
+	"minigateway/internal/protocol/adaptor/anthropic"
+	"minigateway/internal/protocol/adaptor/gemini"
+	"minigateway/internal/protocol/adaptor/openai"
 )
 
 // channel 是运行期的渠道对象，由 model.Channel + 凭据池构建。

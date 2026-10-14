@@ -15,9 +15,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	dbmodel "minigateway/internal/model"
-	"minigateway/internal/relay/adaptor"
-	"minigateway/internal/relay/adaptor/anthropic"
-	"minigateway/internal/relay/adaptor/gemini"
+	"minigateway/internal/protocol/adaptor"
+	"minigateway/internal/protocol/adaptor/anthropic"
+	"minigateway/internal/protocol/adaptor/gemini"
 	"minigateway/internal/relay/meta"
 	relaymodel "minigateway/internal/relay/model"
 )

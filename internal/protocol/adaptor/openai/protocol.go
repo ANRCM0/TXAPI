@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"minigateway/internal/relay/canonical"
+	"minigateway/internal/protocol/canonical"
 )
 
 // 下面是 ProtocolAdaptor 的实现（协议层转换）。

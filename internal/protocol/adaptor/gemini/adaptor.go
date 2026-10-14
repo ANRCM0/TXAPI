@@ -12,16 +12,13 @@
 package gemini
 
 import (
-	"io"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
-
-	"minigateway/internal/relay/adaptor"
-	"minigateway/internal/relay/adaptor/openai"
-	"minigateway/internal/relay/canonical"
-	"minigateway/internal/relay/meta"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/adaptor"
+	"minigateway/internal/protocol/adaptor/openai"
+	"minigateway/internal/protocol/canonical"
+	"minigateway/internal/protocol/meta"
+	"minigateway/internal/protocol/model"
 )
 
 // Adaptor 是 Gemini 协议适配器。
@@ -73,27 +70,6 @@ func (a *Adaptor) ConvertRequest(body []byte, m *meta.Meta) ([]byte, error) {
 	}
 	req.Model = m.ActualModel
 	return a.BuildRequest(req)
-}
-
-// DoResponse 是 adaptor.Adaptor 接口方法（直接转发路径用）。
-// 枢纽模式下 relay 自己处理，保留实现保持接口完整。
-func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, m *meta.Meta) (*model.Usage, *model.ErrorWithStatusCode) {
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, upstreamError("读取上游响应失败: " + err.Error())
-	}
-	cResp, err := a.ParseResponse(body)
-	if err != nil {
-		return nil, upstreamError("解析上游响应失败: " + err.Error())
-	}
-	// Gemini 响应不带模型名，回写时用请求的模型名
-	cResp.Model = m.ActualModel
-	out, err := openaiPA.BuildResponse(cResp)
-	if err != nil {
-		return nil, upstreamError("构造客户端响应失败: " + err.Error())
-	}
-	c.Data(http.StatusOK, "application/json", out)
-	return cResp.Usage, nil
 }
 
 // ---- ProtocolAdaptor 实现 ----

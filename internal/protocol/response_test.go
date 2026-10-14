@@ -1,6 +1,7 @@
-package openai
+package protocol
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -8,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
-
-	"minigateway/internal/relay/meta"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/core"
+	"minigateway/internal/protocol/adaptor/openai"
+	"minigateway/internal/protocol/meta"
+	"minigateway/internal/protocol/model"
 )
 
 var errUpstreamRead = errors.New("upstream connection reset")
@@ -29,14 +30,16 @@ func (r *errorAfterData) Read(p []byte) (int, error) {
 	return 0, errUpstreamRead
 }
 
+type staticResponse struct{ body io.Reader }
+
+func (s staticResponse) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(s.body), Header: make(http.Header)}, nil
+}
 func callStreamResponse(body io.Reader) (*httptest.ResponseRecorder, *model.ErrorWithStatusCode) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(body), Header: make(http.Header)}
-	_, relayErr := (&Adaptor{}).DoResponse(ctx, resp, &meta.Meta{IsStream: true})
-	return recorder, relayErr
+	rec := httptest.NewRecorder()
+	e := core.New(core.Options{Client: &http.Client{Transport: staticResponse{body: body}}})
+	result := e.Execute(context.Background(), rec, core.Input{URL: "http://upstream.test", Stream: true, Decoder: NewDecoder(&openai.Adaptor{}, &meta.Meta{IsStream: true})})
+	return rec, result.Error
 }
 
 func TestStreamReadErrorIsReturnedWithoutDone(t *testing.T) {

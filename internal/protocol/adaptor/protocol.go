@@ -1,7 +1,7 @@
 package adaptor
 
 import (
-	"minigateway/internal/relay/canonical"
+	"minigateway/internal/protocol/canonical"
 )
 
 // ProtocolAdaptor 是「协议层」的适配器接口，对应 PLAN 3.2 的协议互转设计。

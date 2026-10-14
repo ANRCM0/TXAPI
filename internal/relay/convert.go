@@ -1,234 +1,40 @@
 package relay
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-
+	"context"
+	"errors"
 	"github.com/gin-gonic/gin"
-
-	"minigateway/internal/relay/adaptor"
-	"minigateway/internal/relay/adaptor/openai"
-	"minigateway/internal/relay/canonical"
+	"minigateway/internal/core"
+	"minigateway/internal/protocol"
+	"minigateway/internal/protocol/adaptor"
 	"minigateway/internal/relay/meta"
 	"minigateway/internal/relay/model"
+	"net/http"
 )
 
-// 这个文件是 P4 的「协议枢纽」，对应 PLAN 3.2 的 N+M 设计。
-//
-// 整体数据流（客户端说 OpenAI 协议，上游说任意协议）：
-//
-//	客户端 body ──openaiPA.ParseRequest──▶ 规范 ChatRequest
-//	                                        │（模型名映射在这里生效）
-//	规范 ChatRequest ──upstreamPA.BuildRequest──▶ 上游 body
-//
-//	上游 body ──upstreamPA.ParseResponse──▶ 规范 ChatResponse
-//	                                        │
-//	规范 ChatResponse ──openaiPA.BuildResponse──▶ 客户端 body
-//
-// 流式同理，逐行翻译。关键点：每收到一行上游 SSE，先转成规范 chunk，
-// 再转成客户端协议的行。不能整条流收完再转——那样打字机效果就没了。
-//
-// 为什么客户端侧固定用 openai 适配器：网关目前只暴露 /v1/chat/completions
-// 一个入口（PLAN 里「客户端说 OpenAI 协议」）。将来加 Claude 客户端入口时，
-// 只需要在这里多注册一个入站适配器，出站侧完全不用动。
-
-// clientPA 是入站（客户端侧）协议适配器。
-// 固定为 OpenAI：网关对客户端只暴露 OpenAI 协议。
-var clientPA adaptor.ProtocolAdaptor = &openai.Adaptor{}
-
-// convertRequestBody 把客户端请求体转换成上游能懂的请求体。
-//
-// 两条路：
-//   - 渠道类型是 openai：直接调适配器的 ConvertRequest（只做模型名映射，
-//     body 原样透传），保持 P1 的透明代理行为——openai→openai 不做
-//     结构化重写，避免未建模字段被我们的结构体吃掉。
-//   - 其他渠道类型：走「OpenAI → 规范 → 上游协议」两段转换。
-func convertRequestBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, error) {
-	// 非 openai 渠道才需要走枢纽；openai 渠道走原路，行为与 P1 一致
-	if _, ok := a.(interface{ Name() string }); ok {
-		if pa, ok := a.(adaptor.ProtocolAdaptor); ok && pa.Name() == "openai" {
-			return a.ConvertRequest(body, m)
-		}
-	}
-
-	upstreamPA, ok := a.(adaptor.ProtocolAdaptor)
-	if !ok {
-		// 适配器没实现协议层接口：退化成只做模型名映射，不报错。
-		// 理由：适配器可能只服务 embeddings 等非对话模式，硬性要求
-		// 实现全套协议方法会阻碍扩展。
-		return a.ConvertRequest(body, m)
-	}
-
-	// 第一段：客户端协议(OpenAI) → 规范
-	cReq, err := clientPA.ParseRequest(body)
-	if err != nil {
-		return nil, fmt.Errorf("解析客户端请求失败: %w", err)
-	}
-
-	// 模型名映射在规范层生效：把 OriginModel 换成 ActualModel，
-	// 各协议适配器构造请求时直接用 req.Model，不用各自再处理一遍。
-	cReq.Model = m.ActualModel
-
-	// 第二段：规范 → 上游协议
-	return upstreamPA.BuildRequest(cReq)
+func convertRequestBody(a adaptor.Adaptor, b []byte, m *meta.Meta) ([]byte, error) {
+	return protocol.ConvertRequestBody(a, b, m)
+}
+func convertResponseBody(a adaptor.Adaptor, b []byte, m *meta.Meta) ([]byte, *model.Usage, error) {
+	return protocol.ConvertResponseBody(a, b, m)
+}
+func convertStreamLine(a adaptor.Adaptor, line []byte, s adaptor.StreamSession, m *meta.Meta) ([][]byte, error) {
+	return protocol.ConvertStreamLine(a, line, s, m)
 }
 
-// convertResponseBody 把上游非流式响应转换成客户端协议的响应体。
-// 返回转换后的 body 和抽取出的 usage（供计费）。
-func convertResponseBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, *model.Usage, error) {
-	upstreamPA, ok := a.(adaptor.ProtocolAdaptor)
-	if !ok || upstreamPA.Name() == "openai" {
-		// openai 渠道：不转换，直接透传（P1 行为）。
-		// usage 单独抽一下，免得计费逻辑要为两种路径写两遍。
-		var parsed struct {
-			Usage *model.Usage `json:"usage"`
-		}
-		_ = json.Unmarshal(body, &parsed)
-		return body, parsed.Usage, nil
-	}
+// Temporary bridge for legacy tests; normal production attempts use core.Execute.
+type responseTransport struct{ response *http.Response }
 
-	cResp, err := upstreamPA.ParseResponse(body)
-	if err != nil {
-		return nil, nil, fmt.Errorf("解析上游响应失败: %w", err)
-	}
-	// 补 id / model：Gemini 响应不带这两个字段（Claude 带），
-	// 空 id 会让部分 OpenAI SDK 的缓存/去重逻辑出问题，
-	// 空 model 会让客户端的模型名显示异常。
-	// 用请求时的模型名（已映射后的 ActualModel）兜底。
-	if m != nil {
-		if cResp.Model == "" {
-			cResp.Model = m.ActualModel
-		}
-		if cResp.ID == "" {
-			cResp.ID = "chatcmpl-gw-" + m.ActualModel
-		}
-	}
-	out, err := clientPA.BuildResponse(cResp)
-	if err != nil {
-		return nil, nil, fmt.Errorf("构造客户端响应失败: %w", err)
-	}
-	return out, cResp.Usage, nil
-}
-
-// convertStreamLine 把上游的一行 SSE 翻译成客户端协议的多行 SSE。
-//
-// 返回的每一行都不含结尾换行（调用方负责写 \n）。
-// 上游的 [DONE] 之类的协议终止标记在这里被消费掉，由客户端适配器
-// 重新生成自己的终止标记（不同协议的 [DONE] 语义一致但位置不同）。
-func convertStreamLine(a adaptor.Adaptor, line []byte, session adaptor.StreamSession, m *meta.Meta) ([][]byte, error) {
-	upstreamPA, ok := a.(adaptor.ProtocolAdaptor)
-	if !ok || upstreamPA.Name() == "openai" {
-		// openai 上游：原样透传（P1 行为）
-		return [][]byte{line}, nil
-	}
-
-	var chunks []*canonical.StreamChunk
-	var err error
-	if session != nil {
-		chunks, err = session.ParseStreamLine(line)
-	} else {
-		chunks, err = upstreamPA.ParseStreamLine(line)
-	}
-	if err != nil {
-		return nil, err
-	}
-	var out [][]byte
-	for _, ch := range chunks {
-		if ch == nil {
-			continue
-		}
-		// 补 id / model：Gemini 流式快照不带 id/model（Claude 的
-		// message_start 带）。空 id 会让客户端按「无 ID 响应」处理，
-		// 个别 SDK 会拒绝。用请求时的模型名兜底。
-		if m != nil {
-			if ch.Model == "" {
-				ch.Model = m.ActualModel
-			}
-			if ch.ID == "" {
-				ch.ID = "chatcmpl-gw-" + m.ActualModel
-			}
-		}
-		encoded, err := clientPA.BuildStreamLine(ch)
-		if err != nil {
-			return nil, err
-		}
-		if len(encoded) > 0 {
-			out = append(out, encoded)
-		}
-	}
-	return out, nil
-}
-
-// streamDoneMarker 返回客户端协议的流结束标记。
-// OpenAI 是 "data: [DONE]"；上游的终止标记由 convertStreamLine 消费。
-func streamDoneMarker() []byte {
-	return []byte("data: [DONE]")
-}
-
-// relayStream 处理协议转换路径下的流式响应。
-//
-// 与 openai 适配器里的 handleStreamResponse 的区别：
-//   - 逐行做协议翻译（上游 Claude/Gemini SSE → OpenAI SSE）
-//   - 上游流结束时补发客户端的 [DONE] 标记
-//   - 流中途出错不能改状态码（头已经发出），只能记日志后结束
+func (t responseTransport) RoundTrip(*http.Request) (*http.Response, error) { return t.response, nil }
 func relayStream(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta.Meta) (*model.Usage, error) {
-	defer resp.Body.Close()
-
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
-
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		return nil, fmt.Errorf("当前服务器不支持流式响应")
+	e := core.New(core.Options{Client: &http.Client{Transport: responseTransport{response: resp}}})
+	ctx := context.Background()
+	if c.Request != nil {
+		ctx = c.Request.Context()
 	}
-
-	var session adaptor.StreamSession
-	if pa, ok := a.(adaptor.SessionStreamer); ok {
-		session = pa.NewStreamSession()
+	result := e.Execute(ctx, c.Writer, core.Input{URL: "http://legacy-response.test", Stream: true, Decoder: protocol.NewDecoder(a, m)})
+	if result.Error != nil {
+		return result.Usage, errors.New(result.Error.Error.Message)
 	}
-
-	var usage *model.Usage
-	sawFinish := false
-	scanner := newStreamScanner(resp.Body)
-
-	for scanner.Scan() {
-		lines, err := convertStreamLine(a, scanner.Bytes(), session, m)
-		if err != nil {
-			return usage, fmt.Errorf("解析上游流失败: %w", err)
-		}
-		for _, ln := range lines {
-			if hasFinishReason(ln) {
-				sawFinish = true
-			}
-			// 从翻译后的行里顺手抽 usage（OpenAI 协议最后一条带 usage）
-			if u := usageFromSSELine(ln); u != nil {
-				usage = u
-			}
-			// SSE 事件之间必须用空行分隔（\n\n）。
-			// 只写单个 \n 时，很多客户端会把多个 data: 行读成「同一个事件的多行」，
-			// 从而把 chunk 拼接成一坨 JSON 而解析失败。
-			if _, err := c.Writer.Write(append(ln, '\n', '\n')); err != nil {
-				return usage, fmt.Errorf("写入客户端流失败: %w", err)
-			}
-			flusher.Flush()
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return usage, fmt.Errorf("读取上游流失败: %w", err)
-	}
-	if !sawFinish {
-		return usage, fmt.Errorf("上游流意外结束，缺少 finish_reason")
-	}
-	// 上游流正常结束后，补发客户端协议的终止标记。
-	// 没有它，OpenAI SDK 会一直等不到流结束事件。
-	if _, err := c.Writer.Write(append(streamDoneMarker(), '\n', '\n')); err != nil {
-		return usage, fmt.Errorf("写入流终止标记失败: %w", err)
-	}
-	flusher.Flush()
-	return usage, nil
+	return result.Usage, nil
 }

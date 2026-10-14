@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"minigateway/internal/relay/canonical"
-	"minigateway/internal/relay/model"
+	"minigateway/internal/protocol/canonical"
+	"minigateway/internal/protocol/model"
 )
 
 // 这个文件放 OpenAI 协议的结构体和 JSON 辅助函数。

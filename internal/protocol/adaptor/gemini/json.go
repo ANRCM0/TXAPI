@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	"minigateway/internal/relay/canonical"
+	"minigateway/internal/protocol/canonical"
 )
 
 // 这个文件放 gemini 包自己的 JSON 辅助函数。

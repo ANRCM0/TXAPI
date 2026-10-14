@@ -6,6 +6,8 @@
 // 这样上游新增的任何字段都不会被网关吃掉。
 package model
 
+import "minigateway/internal/core"
+
 // ModelRequest 只解析路由必需的字段。
 //
 // MaxTokens 是唯一的例外：它不在路由必需之列，但 P5 的预扣需要它
@@ -19,24 +21,13 @@ type ModelRequest struct {
 }
 
 // Usage 是上游返回的 token 用量，是计费的唯一依据。
-type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
+type Usage = core.Usage
 
 // ErrorDetail 是 OpenAI 风格的错误体，也是网关对外统一的错误格式。
-type ErrorDetail struct {
-	Message string `json:"message"`
-	Type    string `json:"type,omitempty"`
-	Code    any    `json:"code,omitempty"`
-}
+type ErrorDetail = core.ErrorDetail
 
 // ErrorWithStatusCode 把 HTTP 状态码和错误体绑在一起。
 //
 // 为什么要绑在一起：重试逻辑要先看状态码决定「要不要换渠道重试」，
 // 再看错误消息决定「给客户端回什么」。两者分开传会到处漏判。
-type ErrorWithStatusCode struct {
-	StatusCode int
-	Error      ErrorDetail
-}
+type ErrorWithStatusCode = core.Error
