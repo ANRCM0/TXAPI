@@ -11,11 +11,10 @@
 //     （注意 function_declarations 是数组包一层，和 Claude 的扁平 tools 不同）
 //   - usage 叫 usageMetadata：promptTokenCount / candidatesTokenCount /
 //     totalTokenCount（名字和 OpenAI 完全不同，要逐个映射）
-//   - 流式：每条 SSE data 是当前候选的累计快照；最后一条可能同时含 parts 和 finishReason
+//   - 流式：每条 SSE data 是新生成的增量；最后一条可能同时含 parts 和 finishReason
 //   - finishReason 枚举：STOP / MAX_TOKENS / SAFETY / RECITATION / OTHER
 //
-// Gemini 流式的每个 data 事件携带当前累计文本。转换时需与前一快照比较，
-// 只把新增后缀输出为 OpenAI 增量。
+// Gemini 流式文本按增量发送；每个块完整转发，不按之前块的长度截断。
 package gemini
 
 import (
@@ -103,6 +102,7 @@ type geminiFunctionDecl struct {
 
 // geminiResponse 是 Gemini 的非流式响应。
 type geminiResponse struct {
+	Error      *json.RawMessage  `json:"error,omitempty"`
 	Candidates []geminiCandidate `json:"candidates"`
 	Usage      *geminiUsage      `json:"usageMetadata,omitempty"`
 	// promptFeedback 在请求被安全策略拦截时出现（candidates 为空）

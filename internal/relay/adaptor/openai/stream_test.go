@@ -61,3 +61,21 @@ func TestStreamRequiresFinishAndDoneBeforeSuccess(t *testing.T) {
 		t.Fatalf("client done marker count = %d, want exactly one; body=%s", got, recorder.Body.String())
 	}
 }
+
+func TestStreamRejectsErrorOrMalformedEventAfterFinish(t *testing.T) {
+	finish := "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+	for _, event := range []string{
+		`data: {"error":{"message":"upstream failed","type":"server_error"}}`,
+		`data: {broken json`,
+	} {
+		t.Run(event, func(t *testing.T) {
+			recorder, err := callStreamResponse(strings.NewReader(finish + event + "\n\ndata: [DONE]\n\n"))
+			if err == nil || err.StatusCode != http.StatusBadGateway {
+				t.Fatalf("bad event was accepted: err=%v body=%s", err, recorder.Body.String())
+			}
+			if strings.Contains(recorder.Body.String(), "[DONE]") {
+				t.Fatal("failed stream was marked done")
+			}
+		})
+	}
+}

@@ -1,10 +1,13 @@
 package relay
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +15,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	dbmodel "minigateway/internal/model"
+	"minigateway/internal/relay/adaptor"
+	"minigateway/internal/relay/adaptor/anthropic"
+	"minigateway/internal/relay/adaptor/gemini"
 	"minigateway/internal/relay/meta"
 	relaymodel "minigateway/internal/relay/model"
 )
@@ -95,5 +101,144 @@ func TestRetryTimesZeroStopsAfterFirstFailure(t *testing.T) {
 
 	if got := hits.Load(); got != 1 {
 		t.Fatalf("retry_times=0 时上游请求数 = %d, want 1", got)
+	}
+}
+
+// Same client-controlled request IDs must never cause two concurrent streams to
+// share a parser. Hold all readers at the same barrier after their first event.
+func TestConcurrentStreamsWithSameRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const clients = 8
+	for _, protocol := range []string{"gemini", "anthropic"} {
+		t.Run(protocol, func(t *testing.T) {
+			arrived := make(chan struct{}, clients)
+			release := make(chan struct{})
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var input struct{ Messages []struct{ Content string } }
+				_ = json.NewDecoder(r.Body).Decode(&input)
+				label := r.URL.Query().Get("key")
+				if protocol == "anthropic" {
+					label = r.Header.Get("X-Api-Key")
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				if protocol == "gemini" {
+					fmt.Fprintf(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":%q}]}}]}\n\n", label)
+				} else {
+					fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":%q,\"model\":\"claude-test\"}}\n\n", label)
+				}
+				w.(http.Flusher).Flush()
+				arrived <- struct{}{}
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return
+				}
+				if protocol == "gemini" {
+					fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"!\"}]},\"finishReason\":\"STOP\"}]}\n\n")
+				} else {
+					fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", label+"!")
+					fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
+				}
+			}))
+			defer upstream.Close()
+			go func() {
+				for i := 0; i < clients; i++ {
+					<-arrived
+				}
+				close(release)
+			}()
+			var group sync.WaitGroup
+			for i := 0; i < clients; i++ {
+				group.Add(1)
+				go func(i int) {
+					defer group.Done()
+					label := fmt.Sprintf("stream-%d", i)
+					recorder := httptest.NewRecorder()
+					ctx, _ := gin.CreateTestContext(recorder)
+					ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+					ctx.Request.Header.Set("X-Request-Id", "same-external-id")
+					ctx.Set("request_id", "same-external-id")
+					var a adaptor.Adaptor
+					if protocol == "gemini" {
+						a = &gemini.Adaptor{}
+					} else {
+						a = &anthropic.Adaptor{}
+					}
+					m := &meta.Meta{ChannelID: 1, ChannelName: "same-channel", BaseURL: upstream.URL, APIKey: label, ActualModel: "model-test", IsStream: true}
+					url, err := a.GetRequestURL(m)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(`{"messages":[]}`))
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_ = a.SetupRequestHeader(req, m)
+					client := &http.Client{Timeout: 5 * time.Second}
+					resp, err := client.Do(req)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_, err = relayStream(ctx, a, resp, m)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					var text strings.Builder
+					for _, line := range strings.Split(recorder.Body.String(), "\n") {
+						if !strings.HasPrefix(line, "data: ") || strings.Contains(line, "[DONE]") {
+							continue
+						}
+						var chunk struct {
+							ID      string
+							Choices []struct{ Delta struct{ Content string } }
+						}
+						if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk); err != nil {
+							t.Error(err)
+							return
+						}
+						if protocol == "anthropic" && chunk.ID != label {
+							t.Errorf("mixed stream ID: got %s, want %s", chunk.ID, label)
+						}
+						for _, choice := range chunk.Choices {
+							text.WriteString(choice.Delta.Content)
+						}
+					}
+					if text.String() != label+"!" || strings.Count(recorder.Body.String(), "data: [DONE]") != 1 {
+						t.Errorf("stream %s: text=%q body=%s", label, text.String(), recorder.Body.String())
+					}
+				}(i)
+			}
+			group.Wait()
+		})
+	}
+}
+
+func TestConvertedStreamsRejectErrorsAfterFinish(t *testing.T) {
+	cases := []struct {
+		name   string
+		a      adaptor.Adaptor
+		finish string
+		event  string
+	}{
+		{"gemini error", &gemini.Adaptor{}, `data: {"candidates":[{"finishReason":"STOP"}]}`, `data: {"error":{"code":500,"message":"upstream failed"}}`},
+		{"gemini malformed", &gemini.Adaptor{}, `data: {"candidates":[{"finishReason":"STOP"}]}`, `data: {broken`},
+		{"anthropic error", &anthropic.Adaptor{}, `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`, `data: {"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`},
+		{"anthropic malformed", &anthropic.Adaptor{}, `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`, `data: {broken`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(tc.finish + "\n\n" + tc.event + "\n\n"))}
+			_, err := relayStream(ctx, tc.a, resp, &meta.Meta{ActualModel: "test-model"})
+			if err == nil || strings.Contains(recorder.Body.String(), "[DONE]") {
+				t.Fatalf("failed stream marked success: err=%v body=%s", err, recorder.Body.String())
+			}
+		})
 	}
 }

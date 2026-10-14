@@ -5,7 +5,7 @@
 //   - POST /v1beta/models/{model}:generateContent?key=xxx（key 在 URL 上）
 //   - 流式是 :streamGenerateContent?alt=sse
 //   - 非流式返回 candidates[{content, finishReason}] + usageMetadata
-//   - 流式返回 SSE 累计快照：每条 data 包含截至当前的完整文本
+//   - 流式返回 SSE 增量：每条 data 包含本次新生成的文本
 //   - 会打印收到的请求体，验证转换是否正确：
 //     systemInstruction 是顶层字段、role 只有 user/model、
 //     contents[].parts 是分片数组
@@ -101,22 +101,20 @@ func main() {
 		reply := fmt.Sprintf("【假Gemini上游】模型=%s，system=%q。这是非流式回复。", modelName, sysText)
 
 		if stream {
-			// Gemini 流式：alt=sse，每条 data 是累计快照，不是文本增量
+			// Gemini 流式：alt=sse，每条 data 携带本次新生成的文本增量
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(200)
 			flusher := w.(http.Flusher)
 
 			chunks := []string{"你好", "世界", "，", "stream", "!"}
-			full := ""
 			for i, ch := range chunks {
-				full += ch
 				snap := map[string]any{
 					"candidates": []map[string]any{{
 						"content": map[string]any{
 							"role":  "model",
-							"parts": []map[string]any{{"text": full}},
+							"parts": []map[string]any{{"text": ch}},
 						},
-						// 最后一条快照带 finishReason
+						// 最后一条增量带 finishReason
 					}},
 				}
 				if i == len(chunks)-1 {

@@ -151,18 +151,26 @@ func handleStreamResponse(c *gin.Context, resp *http.Response) (*model.Usage, *m
 		line := scanner.Text()
 
 		// 从数据行里找 usage。带 usage 的 chunk 一般是最后一条。
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
+		if strings.HasPrefix(line, "data:") {
+			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if data == "[DONE]" {
 				seenDone = true
 				break
-			} else {
-				var chunk struct {
-					Usage *model.Usage `json:"usage"`
-				}
-				if json.Unmarshal([]byte(data), &chunk) == nil && chunk.Usage != nil {
-					usage = chunk.Usage
-				}
+			}
+			var chunk struct {
+				Usage *model.Usage     `json:"usage"`
+				Error *json.RawMessage `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				return usage, &model.ErrorWithStatusCode{StatusCode: http.StatusBadGateway,
+					Error: model.ErrorDetail{Message: "上游流包含无效 JSON", Type: "stream_error"}}
+			}
+			if chunk.Error != nil {
+				return usage, &model.ErrorWithStatusCode{StatusCode: http.StatusBadGateway,
+					Error: model.ErrorDetail{Message: "上游流报告错误", Type: "stream_error"}}
+			}
+			if chunk.Usage != nil {
+				usage = chunk.Usage
 			}
 		}
 		if hasStreamFinishReason([]byte(line)) {

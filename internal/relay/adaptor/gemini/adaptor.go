@@ -2,7 +2,7 @@
 //
 // 包结构：
 //   - convert.go  请求/响应转换 + URL 构造 + 协议结构体
-//   - stream.go   流式快照差分（Gemini SSE → OpenAI chunk）
+//   - stream.go   流式增量翻译（Gemini SSE → OpenAI chunk）
 //   - adaptor.go  HTTP 层外壳（实现 adaptor.Adaptor）+ 接口绑定
 //   - json.go     JSON 辅助函数
 //

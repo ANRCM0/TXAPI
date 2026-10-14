@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"errors"
 
 	"minigateway/internal/relay/canonical"
 )
@@ -9,23 +10,21 @@ import (
 // 这个文件实现「Gemini SSE → OpenAI chunk」的翻译。
 //
 // Gemini 流式的关键特性（和 Claude 完全不同）：
-//   - 每条 SSE data 是一条完整的 GenerateContentResponse 快照，
-//     后续快照中的文本包含前一快照文本，需差分出新增后缀。
+//   - 每条 SSE data 携带新生成的文本增量，不按累计快照差分或去重。
 //   - 没有 message_start 之类的生命周期事件，也没有独立的 usage 事件
 //     （usageMetadata 通常只出现在最后一个 chunk 里）。
 //   - finishReason 直接出现在 chunk 的 candidate 上。
 //
-// 翻译策略：记录上一条快照的文本长度，只输出新增的后缀。
+// 翻译策略：将每条响应的文本完整转为 OpenAI 增量。
 //   - finishReason：出现时发结束帧。
 //   - usage：出现时发 usage 尾帧。
 //
 // 单条 chunk 里 candidates 可能有多个（候选数 > 1），本项目只处理
 // 第一个候选（和 OpenAI 单候选假设一致）。
 type translator struct {
-	id          string
-	model       string
-	finished    bool
-	lastTextLen int
+	id       string
+	model    string
+	finished bool
 	// usageSent 防止重复发 usage 帧
 	usageSent bool
 	// roleSent 首帧是否已发过 role（OpenAI 约定首帧 delta.role="assistant"）
@@ -50,6 +49,10 @@ func (t *translator) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, err
 	var chunk geminiResponse
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return nil, err
+	}
+
+	if chunk.Error != nil {
+		return nil, errors.New("Gemini 上游流报告错误")
 	}
 
 	var chunks []*canonical.StreamChunk
@@ -91,18 +94,14 @@ func (t *translator) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, err
 
 	cand := chunk.Candidates[0]
 
-	var text string
 	for _, p := range cand.Content.Parts {
-		text += p.Text
-	}
-	if len(text) > t.lastTextLen {
-		delta := text[t.lastTextLen:]
-		t.lastTextLen = len(text)
-		chunks = append(chunks, &canonical.StreamChunk{
-			ID:      t.id,
-			Model:   t.model,
-			Content: []canonical.ContentPart{{Type: canonical.PartText, Text: delta}},
-		})
+		if p.Text != "" {
+			chunks = append(chunks, &canonical.StreamChunk{
+				ID:      t.id,
+				Model:   t.model,
+				Content: []canonical.ContentPart{{Type: canonical.PartText, Text: p.Text}},
+			})
+		}
 	}
 
 	// 函数调用：Gemini 流式里 functionCall 通常完整出现在某条 chunk

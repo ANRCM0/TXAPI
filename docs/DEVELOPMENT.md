@@ -69,7 +69,7 @@ go run ./tests/upstream/gemini
 make run CONFIG=tests/configs/protocols.yaml
 ```
 
-Gemini 假上游按累计快照发送文本，用于验证网关正确提取各快照新增的 UTF-8 后缀；模拟测试不等于对真实 Gemini 服务的完整兼容性证明。
+Gemini 假上游按独立增量发送文本；回归样本覆盖等长、变长、UTF-8 增量，验证每个块完整输出。协议依据为 Google 官方 streamGenerateContent 文档和 SDK 的逐块拼接示例；模拟测试不等于真实服务的完整兼容性证明。
 
 ## 可选 SDK 检查
 
