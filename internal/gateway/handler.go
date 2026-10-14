@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -111,6 +112,9 @@ func (g *Gateway) handleRelay(c *gin.Context, mode int) {
 
 	// 记录开始时间，用于算整条链路耗时（含重试）
 	startedAt := time.Now()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), g.totalTimeout)
+	defer cancel()
+	c.Request = c.Request.WithContext(ctx)
 
 	// 包一层 writer 记录回写给客户端的字节：只有「上游没返回 usage」
 	// 时才需要它估算 completion tokens。成本接近零（一次内存拷贝，

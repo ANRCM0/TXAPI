@@ -296,6 +296,10 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 			return
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		fail("response canceled", err, Canceled)
+		return
+	}
 	result.StatusCode = http.StatusOK
 	result.Termination = Success
 	return

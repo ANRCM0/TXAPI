@@ -16,16 +16,6 @@ import (
 	"time"
 )
 
-func convertRequestBody(a adaptor.Adaptor, b []byte, m *meta.Meta) ([]byte, error) {
-	return protocol.ConvertRequestBody(a, b, m)
-}
-func convertResponseBody(a adaptor.Adaptor, b []byte, m *meta.Meta) ([]byte, *model.Usage, error) {
-	return protocol.ConvertResponseBody(a, b, m)
-}
-func convertStreamLine(a adaptor.Adaptor, line []byte, s adaptor.StreamSession, m *meta.Meta) ([][]byte, error) {
-	return protocol.ConvertStreamLine(a, line, s, m)
-}
-
 // Temporary bridge for legacy tests; normal production attempts use core.Execute.
 type responseTransport struct{ response *http.Response }
 

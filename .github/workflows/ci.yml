@@ -55,6 +55,14 @@ jobs:
             exit 1
           fi
 
+      - name: S1 内核与协议依赖边界
+        run: |
+          deps=$(go list -deps ./internal/core ./internal/protocol/...)
+          if echo "$deps" | grep -E 'gin-gonic|gorm.io|internal/(gateway|store|billing|server)'; then
+            echo "::error::core/protocol 不得依赖 HTTP 框架或业务/存储层"
+            exit 1
+          fi
+
       - name: 构建
         run: go build ./...
 
@@ -103,3 +111,10 @@ jobs:
         # 并跑通一条 OpenAI 链路」——入口在 cmd/gateway、配置项必填这类
         # 问题只有把二进制跑起来才会暴露。
         run: make smoke
+
+      - name: S1 转发性能基线（仅报告）
+        # 每个场景 100 个样本；记录环境、payload、并发、p95/p99、B/op。
+        # 与分配报告一并留在 Actions 日志中，不声明提升比例、不设噪声门槛。
+        run: |
+          set -o pipefail
+          go test ./internal/core -run '^$' -bench BenchmarkExecutor -benchtime=100x -benchmem | tee benchmark.txt

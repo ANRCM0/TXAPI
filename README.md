@@ -24,7 +24,7 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 │   RequestID → IP限流 → CORS → Auth(令牌) → 令牌限流 → Relay    │
 │   路由: /v1/* 转发   /api/* 管理   /metrics   /healthz        │
 ├──────────────────────────────────────────────────────────────┤
-│ 转发层   internal/relay                       ⭐ 核心          │
+│ 转发层   gateway 编排 + core 执行 + protocol 转换             │
 │   模型路由(索引) → 选渠道+选凭据 → 额度预扣 → 协议转换          │
 │   → 转发(失败换目标重试) → 结算 → 落库+埋指标                   │
 ├──────────────────────────────────────────────────────────────┤
@@ -59,13 +59,11 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 │   ├── store/                   数据访问 + 内存缓存 + 异步日志 + 清理
 │   ├── billing/                 价格表、额度预扣/结算、原子扣减
 │   ├── scheduler/               凭据池调度：选择/健康/亲和/恢复/清理
-│   ├── relay/                   转发核心
-│   │   ├── registry.go          渠道池 + 适配器表 + 模型索引
-│   │   ├── relay.go             单次转发 + 失败重试
-│   │   ├── handler.go           HTTP 入口 + 收尾（结算/记账/埋点）
-│   │   ├── convert.go           协议枢纽（客户端 → 规范 → 上游）
-│   │   ├── canonical/           规范格式（厂商中立的请求/响应表示）
-│   │   └── adaptor/             各厂商适配器（openai/anthropic/gemini）
+│   ├── core/                    单次 HTTP 执行、连接复用、取消与提交状态（纯标准库）
+│   ├── gateway/                 实例化请求编排、调度/重试、结算与记账
+│   ├── protocol/                请求/响应及每请求 SSE 转换（不依赖 Gin/数据库）
+│   │   ├── canonical/           厂商中立的请求/响应格式
+│   │   └── adaptor/             openai / anthropic / gemini
 │   └── server/
 │       ├── server.go            中间件链 + 路由注册
 │       ├── api/                 管理 API（渠道/凭据/令牌/日志/价格 CRUD）
@@ -166,7 +164,8 @@ curl http://127.0.0.1:8080/healthz
 |------|------|----------|------|
 | `server.addr` | `127.0.0.1:8080` | `GATEWAY_ADDR` | 监听地址（容器内必须 0.0.0.0） |
 | `server.retry_times` | `2` | — | 首次失败后最多再试几次；`0` 表示不重试 |
-| `server.timeout_seconds` | `120` | — | 单次上游请求超时（流式别设太小） |
+| `server.timeout_seconds` | `120` | — | 单次上游请求超时（含完整流） |
+| `server.total_timeout_seconds` | 同单次超时 | — | 全部重试共享的总时间预算，1–600 秒 |
 | `server.ip_rpm_limit` | `0`（不限） | — | IP 级限流，防无令牌的探测请求 |
 | `admin_key` | 必填 | `GATEWAY_ADMIN_KEY` | 管理 API 密钥，缺失拒绝启动 |
 | `log_level` | `info` | `GATEWAY_LOG_LEVEL` | `debug`/`info`/`warn`/`error` |
@@ -320,7 +319,7 @@ response_format…）。用结构体反序列化再序列化，任何未声明�
 histogram / gauge」，exposition 格式是个几十行的纯文本协议。手写版只覆盖
 「本网关自己埋的点」，不需要官方库的 collector 注册表、默认运行时指标、
 推送网关那些能力——等真要多协议暴露或上 Pushgateway 时再换，替换成本很低
-（`internal/metrics` 只被 relay 和 server 各调一两个函数）。取舍理由写在
+（`internal/metrics` 由 gateway 与 server 消费）。取舍理由写在
 `internal/metrics/metrics.go` 的头注里。
 
 ### 7. 注入而不是直接依赖

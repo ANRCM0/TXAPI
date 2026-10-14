@@ -14,7 +14,6 @@ import (
 
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/adaptor"
 	"minigateway/internal/protocol/meta"
 	"minigateway/internal/protocol/model"
 	"minigateway/internal/scheduler"
@@ -197,6 +196,7 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 			Error:      model.ErrorDetail{Message: "所有可用渠道均不可用", Type: "all_channels_failed"},
 		}
 	}
+	result.Error = lastErr
 	state(c).StatusCode = lastErr.StatusCode
 	state(c).ErrorMessage = lastErr.Error.Message
 	if responseCommitted {
@@ -217,16 +217,6 @@ func (g *Gateway) doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout tim
 	}
 	input.Timeout = timeout
 	return g.executor.Execute(c.Request.Context(), c.Writer, input)
-}
-
-// needsProtocolConversion 判断这个渠道是否需要走协议枢纽。
-// openai 渠道不需要（客户端也是 openai，透传即可）。
-func needsProtocolConversion(a adaptor.Adaptor) bool {
-	pa, ok := a.(adaptor.ProtocolAdaptor)
-	if !ok {
-		return false
-	}
-	return pa.Name() != "openai"
 }
 
 // buildMeta 把渠道配置和选中的凭据组装成一次转发的上下文。

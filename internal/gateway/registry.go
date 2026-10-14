@@ -340,7 +340,7 @@ func (g *Gateway) Snapshot() []map[string]any {
 			"id":       ch.id,
 			"name":     ch.name,
 			"type":     ch.typ,
-			"models":   ch.models,
+			"models":   append([]string(nil), ch.models...),
 			"weight":   ch.weight,
 			"priority": ch.priority,
 		})

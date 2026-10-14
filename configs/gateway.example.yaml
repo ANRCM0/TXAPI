@@ -4,6 +4,8 @@ server:
   addr: "127.0.0.1:8080"
   retry_times: 2
   timeout_seconds: 120
+  # 包含全部重试的总请求预算；未填写时与 timeout_seconds 相同。
+  total_timeout_seconds: 120
   # IP 级限流的每分钟请求数上限，0 表示不限。
   # 自用（本机/内网访问）保持 0；暴露到公网时务必配上，比如 120。
   ip_rpm_limit: 0

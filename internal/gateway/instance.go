@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -43,6 +44,9 @@ type Gateway struct {
 }
 
 func New(opts Options) (*Gateway, error) {
+	if opts.RetryTimes < 0 || opts.RetryTimes > 10 || opts.AttemptTimeout < 0 || opts.TotalTimeout < 0 {
+		return nil, fmt.Errorf("invalid gateway retry or timeout configuration")
+	}
 	if opts.AttemptTimeout <= 0 {
 		opts.AttemptTimeout = 120 * time.Second
 	}
