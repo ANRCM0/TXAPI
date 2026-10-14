@@ -1,0 +1,312 @@
+// Package core executes one HTTP attempt. It has no framework, database, user,
+// routing, billing, or protocol-specific dependencies.
+package core
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type ErrorDetail struct {
+	Message string `json:"message"`
+	Type    string `json:"type,omitempty"`
+	Code    any    `json:"code,omitempty"`
+}
+
+type Error struct {
+	StatusCode int
+	Error      ErrorDetail
+}
+
+type Termination string
+
+const (
+	Success          Termination = "success"
+	UpstreamError    Termination = "upstream_error"
+	Deadline         Termination = "deadline"
+	Canceled         Termination = "canceled"
+	ClientWriteError Termination = "client_write_error"
+)
+
+// Result reports execution independently of the HTTP status already sent.
+// Committed is monotonic: once headers/body have been sent it cannot be reset.
+type Result struct {
+	StatusCode   int
+	HTTPStatus   int
+	Committed    bool
+	Replayable   bool
+	Termination  Termination
+	Usage        *Usage
+	Error        *Error
+	Duration     time.Duration
+	BytesWritten int64
+}
+
+type Frame struct {
+	Data  []byte
+	Usage *Usage
+	// Complete marks a protocol terminal event (e.g. OpenAI DONE/Claude stop).
+	Complete bool
+}
+
+type StreamDecoder interface {
+	DecodeLine([]byte) ([]Frame, error)
+	End() ([]Frame, error)
+}
+
+type Decoder interface {
+	Decode([]byte) ([]byte, *Usage, error)
+	NewStream() StreamDecoder
+}
+
+type Input struct {
+	URL        string
+	Header     http.Header
+	Body       []byte
+	Stream     bool
+	Replayable bool
+	Timeout    time.Duration
+	Decoder    Decoder
+}
+
+type Options struct {
+	Client           *http.Client
+	MaxResponseBytes int64
+	MaxLineBytes     int
+}
+
+type Executor struct {
+	client           *http.Client
+	maxResponseBytes int64
+	maxLineBytes     int
+}
+
+func New(opts Options) *Executor {
+	client := opts.Client
+	if client == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 200
+		transport.MaxIdleConnsPerHost = 50
+		client = &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
+	if opts.MaxResponseBytes <= 0 {
+		opts.MaxResponseBytes = 32 << 20
+	}
+	if opts.MaxLineBytes <= 0 {
+		opts.MaxLineBytes = 1 << 20
+	}
+	return &Executor{client: client, maxResponseBytes: opts.MaxResponseBytes, maxLineBytes: opts.MaxLineBytes}
+}
+
+func (e *Executor) Close() { e.client.CloseIdleConnections() }
+
+func failure(status int, message string, kind string) *Error {
+	return &Error{StatusCode: status, Error: ErrorDetail{Message: message, Type: kind}}
+}
+
+func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Input) (result Result) {
+	started := time.Now()
+	result.Replayable = in.Replayable
+	result.Termination = UpstreamError
+	defer func() { result.Duration = time.Since(started) }()
+	ctx := parent
+	var cancel context.CancelFunc
+	if in.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(parent, in.Timeout)
+		defer cancel()
+	}
+	fail := func(message string, cause error, term Termination) {
+		result.StatusCode = http.StatusBadGateway
+		result.Termination = term
+		if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+			if errors.Is(parent.Err(), context.Canceled) || errors.Is(cause, context.Canceled) {
+				result.StatusCode = 499
+				result.Termination = Canceled
+			} else {
+				result.StatusCode = http.StatusGatewayTimeout
+				result.Termination = Deadline
+			}
+		}
+		// Never expose request URLs (Gemini credentials may be in query strings).
+		result.Error = failure(result.StatusCode, message, string(result.Termination))
+	}
+	if in.Decoder == nil {
+		result.StatusCode = http.StatusInternalServerError
+		result.Error = failure(result.StatusCode, "missing response decoder", "internal_error")
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		fail("request canceled before upstream execution", err, Canceled)
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, in.URL, bytes.NewReader(in.Body))
+	if err != nil {
+		result.StatusCode = 400
+		result.Error = failure(400, "invalid upstream request", "invalid_request")
+		return
+	}
+	req.Header = in.Header.Clone()
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if in.Stream {
+		req.Header.Set("Accept", "text/event-stream")
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		fail("upstream request failed", err, UpstreamError)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := readBounded(resp.Body, e.maxResponseBytes)
+		if readErr != nil {
+			fail("failed reading upstream error", readErr, UpstreamError)
+			return
+		}
+		detail := ErrorDetail{Message: http.StatusText(resp.StatusCode), Type: "upstream_error"}
+		var envelope struct {
+			Error ErrorDetail `json:"error"`
+		}
+		if json.Unmarshal(body, &envelope) == nil && envelope.Error.Message != "" {
+			detail = envelope.Error
+		}
+		result.StatusCode = resp.StatusCode
+		result.Error = &Error{StatusCode: resp.StatusCode, Error: detail}
+		return
+	}
+	controller := http.NewResponseController(w)
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := controller.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			fail("failed setting downstream write deadline", err, ClientWriteError)
+			return
+		}
+		defer controller.SetWriteDeadline(time.Time{})
+	}
+	write := func(data []byte, stream bool) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !result.Committed {
+			if stream {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Cache-Control", "no-cache")
+				w.Header().Set("X-Accel-Buffering", "no")
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+			}
+			result.Committed = true
+			result.HTTPStatus = http.StatusOK
+			w.WriteHeader(http.StatusOK)
+		}
+		n, err := w.Write(data)
+		result.BytesWritten += int64(n)
+		if err == nil && stream {
+			err = controller.Flush()
+		}
+		return err
+	}
+	if !in.Stream {
+		body, err := readBounded(resp.Body, e.maxResponseBytes)
+		if err != nil {
+			fail("failed reading upstream response", err, UpstreamError)
+			return
+		}
+		out, usage, err := in.Decoder.Decode(body)
+		result.Usage = usage
+		if err != nil {
+			fail("failed decoding upstream response", err, UpstreamError)
+			return
+		}
+		if err = write(out, false); err != nil {
+			fail("failed writing downstream response", err, ClientWriteError)
+			return
+		}
+	} else {
+		decoder := in.Decoder.NewStream()
+		if decoder == nil {
+			fail("missing stream decoder", nil, UpstreamError)
+			return
+		}
+		emit := func(frames []Frame) error {
+			for _, frame := range frames {
+				if frame.Usage != nil {
+					result.Usage = frame.Usage
+				}
+				if len(frame.Data) > 0 {
+					if err := write(frame.Data, true); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), e.maxLineBytes)
+		complete := false
+		for scanner.Scan() {
+			if err := ctx.Err(); err != nil {
+				fail("stream canceled", err, Canceled)
+				return
+			}
+			frames, err := decoder.DecodeLine(scanner.Bytes())
+			if err != nil {
+				fail("invalid or failed upstream stream", err, UpstreamError)
+				return
+			}
+			if err = emit(frames); err != nil {
+				fail("failed writing downstream stream", err, ClientWriteError)
+				return
+			}
+			for _, frame := range frames {
+				if frame.Complete {
+					complete = true
+				}
+			}
+			if complete {
+				break
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			fail("failed reading upstream stream", err, UpstreamError)
+			return
+		}
+		frames, err := decoder.End()
+		if err != nil {
+			fail("upstream stream ended prematurely", err, UpstreamError)
+			return
+		}
+		if err = emit(frames); err != nil {
+			fail("failed writing stream terminator", err, ClientWriteError)
+			return
+		}
+	}
+	result.StatusCode = http.StatusOK
+	result.Termination = Success
+	return
+}
+
+func readBounded(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response exceeds %d bytes", limit)
+	}
+	return data, nil
+}
