@@ -1,6 +1,6 @@
-# API Gateway
+# TXAPI
 
-一个自用的 LLM API 网关：把多个上游渠道（OpenAI / Anthropic / Gemini / 任何
+TXAPI 是一个自用的 LLM API 网关：把多个上游渠道（OpenAI / Anthropic / Gemini / 任何
 OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴权、凭据池调度、
 协议互转、计费额度、限流、可观测**。
 
@@ -9,7 +9,7 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 
 - 语言/版本：Go 1.23
 - 存储：SQLite（默认，单文件 + WAL）；接口留着 PostgreSQL 的位置
-- Go module 名仍为 `minigateway`（未随仓库更名改动，避免一次性改掉所有导入路径）
+- Go module/import 路径仍为 `minigateway`，保持现有代码与依赖路径兼容；项目对外名称为 TXAPI
 
 ---
 
@@ -110,8 +110,8 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 | Redis 限流 | ❌ | 单机内存版够自用；接口留位置，需要时替换实现 |
 | PostgreSQL | ❌ | `Open()` 对非 SQLite 直接报错，属部署阶段 |
 
-> `docs/PLAN.md` 是上游建立的开发基线，其「当前状态」一节写于本分支的 P5/P6
-> 代码合入之前，因此仍把计费与请求级凭据调度列为未实现。能力状态以本表为准。
+> P5/P6 的计费与请求级凭据调度已交付。当前阶段和 S0 验收进度见
+> [docs/PLAN.md](docs/PLAN.md)。
 
 ---
 
@@ -165,7 +165,7 @@ curl http://127.0.0.1:8080/healthz
 | 字段 | 默认 | 环境变量 | 说明 |
 |------|------|----------|------|
 | `server.addr` | `127.0.0.1:8080` | `GATEWAY_ADDR` | 监听地址（容器内必须 0.0.0.0） |
-| `server.retry_times` | `2` | — | 首次失败后最多再试几次 |
+| `server.retry_times` | `2` | — | 首次失败后最多再试几次；`0` 表示不重试 |
 | `server.timeout_seconds` | `120` | — | 单次上游请求超时（流式别设太小） |
 | `server.ip_rpm_limit` | `0`（不限） | — | IP 级限流，防无令牌的探测请求 |
 | `admin_key` | 必填 | `GATEWAY_ADMIN_KEY` | 管理 API 密钥，缺失拒绝启动 |
@@ -177,6 +177,8 @@ curl http://127.0.0.1:8080/healthz
 
 > **环境变量优先于 YAML** 是全局规则：部署时改配置不用重新打镜像/改文件，
 > 密钥尤其应该走环境变量（不进 git）。
+
+HTTP 请求体上限为 20 MiB，超限请求返回 `413`。
 
 > **渠道和令牌不是运行期配置**：`channels`/`tokens` 段只在**数据库为空时**
 > 导入一次（种子数据），之后一律通过管理 API 增删改，改完立即生效、不用重启。
@@ -199,7 +201,7 @@ curl http://127.0.0.1:8080/healthz
 |------|------|------|
 | GET | `/api/channels` | 渠道列表 |
 | POST | `/api/channels` | 建渠道 |
-| GET | `/api/channels/:id` | 渠道详情（Key 默认掩码，`?reveal=1` 看明文） |
+| GET | `/api/channels/:id` | 渠道详情（已有上游 Key 始终掩码） |
 | PUT | `/api/channels/:id` | 改渠道 |
 | DELETE | `/api/channels/:id` | 删渠道 |
 | GET | `/api/channels/:id/credentials` | 凭据列表（含健康状态） |
@@ -343,10 +345,9 @@ go test -race -count=1 ./...
 gofmt -l .            # 应无输出
 ```
 
-142 个用例覆盖：计费端到端（6 个 P5 验收场景）、凭据调度（加权分布/冷却
-退避/拉黑阈值/亲和稳定与降级/错误分类）、限流（RPM/TPM 分桶）、指标格式
-（counter/histogram/gauge 的 exposition 正确性 + 标签转义 + 并发计数）、
-日志清理（分批删除 + 保留天数语义）、配置校验。
+测试覆盖计费端到端、凭据调度、限流、指标、日志清理、配置校验，以及 S0 的
+管理鉴权、Gemini 增量流、逐请求转换状态、异常流终止、密钥脱敏和请求资源限制。
+全量测试需使用 `go test -race -count=1 ./...` 执行；当前 S0 验收状态见开发计划。
 
 `make smoke` 用 Python 标准库管理本地假 OpenAI 上游和临时数据库，验证启动、
 鉴权、模型列表/映射、非流式与流式转发的完整文本/结束原因/用量，不调用外部

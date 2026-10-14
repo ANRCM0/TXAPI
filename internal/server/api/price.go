@@ -51,10 +51,7 @@ func (h *Handler) UpsertPrice(c *gin.Context) {
 		return
 	}
 	var in store.PriceInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	if err := in.Validate(); err != nil {
@@ -94,10 +91,7 @@ func (h *Handler) DeletePrice(c *gin.Context) {
 // body 形如 {"default": 1.0, "relay": 0.8}。
 func (h *Handler) SetGroupRates(c *gin.Context) {
 	var rates map[string]float64
-	if err := c.ShouldBindJSON(&rates); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &rates) {
 		return
 	}
 	if err := h.store.SetGroupRates(rates); err != nil {
@@ -121,10 +115,7 @@ func (h *Handler) SetTokenQuota(c *gin.Context) {
 	var in struct {
 		Quota float64 `json:"quota"`
 	}
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	tk, err := h.store.SetTokenQuota(id, in.Quota)
@@ -132,5 +123,6 @@ func (h *Handler) SetTokenQuota(c *gin.Context) {
 		fail(c, err)
 		return
 	}
+	tk.Key = maskKey(tk.Key)
 	c.JSON(http.StatusOK, gin.H{"data": tk})
 }

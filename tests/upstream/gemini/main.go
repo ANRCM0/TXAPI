@@ -5,8 +5,7 @@
 //   - POST /v1beta/models/{model}:generateContent?key=xxx（key 在 URL 上）
 //   - 流式是 :streamGenerateContent?alt=sse
 //   - 非流式返回 candidates[{content, finishReason}] + usageMetadata
-//   - 流式返回「快照」序列：每条 SSE data 是当前候选的完整内容快照
-//     （不是 delta 增量！这是 Gemini 流式和 OpenAI/Claude 最大的区别）
+//   - 流式返回 SSE 累计快照：每条 data 包含截至当前的完整文本
 //   - 会打印收到的请求体，验证转换是否正确：
 //     systemInstruction 是顶层字段、role 只有 user/model、
 //     contents[].parts 是分片数组
@@ -102,15 +101,13 @@ func main() {
 		reply := fmt.Sprintf("【假Gemini上游】模型=%s，system=%q。这是非流式回复。", modelName, sysText)
 
 		if stream {
-			// Gemini 流式：alt=sse，每条 data 是快照（完整内容，非增量）
+			// Gemini 流式：alt=sse，每条 data 是累计快照，不是文本增量
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(200)
 			flusher := w.(http.Flusher)
 
-			// 快照式流：第 N 条的文本 = 前 N-1 条文本 + 新增部分。
-			// 网关必须做「只发增量」的翻译，否则客户端收到重复文本。
+			chunks := []string{"你好", "世界", "，", "stream", "!"}
 			full := ""
-			chunks := []string{"你好", "，这是", "假Gemini", "的流式", "回复。"}
 			for i, ch := range chunks {
 				full += ch
 				snap := map[string]any{

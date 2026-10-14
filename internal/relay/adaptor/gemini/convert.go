@@ -11,13 +11,11 @@
 //     （注意 function_declarations 是数组包一层，和 Claude 的扁平 tools 不同）
 //   - usage 叫 usageMetadata：promptTokenCount / candidatesTokenCount /
 //     totalTokenCount（名字和 OpenAI 完全不同，要逐个映射）
-//   - 流式：每个 SSE data 是一条完整的 GenerateContentResponse 快照
-//     （不是增量 delta！一条里可能同时含 parts 和 finishReason）
+//   - 流式：每条 SSE data 是当前候选的累计快照；最后一条可能同时含 parts 和 finishReason
 //   - finishReason 枚举：STOP / MAX_TOKENS / SAFETY / RECITATION / OTHER
 //
-// 最大的坑：Gemini 流式不是 delta 语义。OpenAI 的每个 chunk 是增量，
-// Gemini 的每条 SSE 是该候选当前的「完整快照」。翻译时必须把快照
-// 当成增量处理（取最后新增的部分），否则客户端会收到重复文本。
+// Gemini 流式的每个 data 事件携带当前累计文本。转换时需与前一快照比较，
+// 只把新增后缀输出为 OpenAI 增量。
 package gemini
 
 import (

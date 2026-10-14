@@ -97,6 +97,11 @@ func HandleEmbeddings(c *gin.Context) {
 func handleRelay(c *gin.Context, mode int) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(c, http.StatusRequestEntityTooLarge, "请求体超过大小限制", "request_too_large")
+			return
+		}
 		writeError(c, http.StatusBadRequest, "读取请求体失败: "+err.Error(), "invalid_request_error")
 		return
 	}

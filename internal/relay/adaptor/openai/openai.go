@@ -131,8 +131,6 @@ func handleStreamResponse(c *gin.Context, resp *http.Response) (*model.Usage, *m
 	c.Writer.Header().Set("Connection", "keep-alive")
 	// 关掉 Nginx 之类的缓冲，否则流式会被攒成一坨再发
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
-
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		return nil, &model.ErrorWithStatusCode{
@@ -140,8 +138,11 @@ func handleStreamResponse(c *gin.Context, resp *http.Response) (*model.Usage, *m
 			Error:      model.ErrorDetail{Message: "当前服务器不支持流式响应", Type: "server_error"},
 		}
 	}
+	c.Writer.WriteHeader(http.StatusOK)
 
 	var usage *model.Usage
+	seenDone := false
+	sawFinish := false
 	scanner := bufio.NewScanner(resp.Body)
 	// 单个 SSE 行可能很长（比如一次吐一大段文本），默认 64KB 不够用
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -152,7 +153,10 @@ func handleStreamResponse(c *gin.Context, resp *http.Response) (*model.Usage, *m
 		// 从数据行里找 usage。带 usage 的 chunk 一般是最后一条。
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
-			if data != "[DONE]" {
+			if data == "[DONE]" {
+				seenDone = true
+				break
+			} else {
 				var chunk struct {
 					Usage *model.Usage `json:"usage"`
 				}
@@ -161,20 +165,72 @@ func handleStreamResponse(c *gin.Context, resp *http.Response) (*model.Usage, *m
 				}
 			}
 		}
+		if hasStreamFinishReason([]byte(line)) {
+			sawFinish = true
+		}
 
 		// 原样转发这一行（含换行），保持 SSE 协议完整
 		if _, err := c.Writer.WriteString(line + "\n"); err != nil {
-			// 客户端断开连接是常见情况，不算上游错误
-			return usage, nil
+			status := http.StatusBadGateway
+			if c.Request.Context().Err() != nil {
+				status = 499
+			}
+			return usage, &model.ErrorWithStatusCode{
+				StatusCode: status,
+				Error:      model.ErrorDetail{Message: "写入流式响应失败: " + err.Error(), Type: "stream_error"},
+			}
 		}
 		flusher.Flush()
 	}
 
 	if err := scanner.Err(); err != nil && err != io.EOF {
-		// 已经往客户端写了数据，无法再改状态码，只能记录用量后返回
-		return usage, nil
+		status := http.StatusBadGateway
+		if c.Request.Context().Err() != nil {
+			status = 499
+		}
+		return usage, &model.ErrorWithStatusCode{
+			StatusCode: status,
+			Error:      model.ErrorDetail{Message: "读取上游流失败: " + err.Error(), Type: "stream_error"},
+		}
 	}
+	if c.Request.Context().Err() != nil {
+		return usage, &model.ErrorWithStatusCode{
+			StatusCode: 499,
+			Error:      model.ErrorDetail{Message: "客户端取消了流式请求", Type: "stream_cancelled"},
+		}
+	}
+	if !seenDone || !sawFinish {
+		return usage, &model.ErrorWithStatusCode{
+			StatusCode: http.StatusBadGateway,
+			Error:      model.ErrorDetail{Message: "上游流未正常结束（缺少 finish_reason 或 [DONE]）", Type: "stream_error"},
+		}
+	}
+	if _, err := c.Writer.WriteString("data: [DONE]\n\n"); err != nil {
+		return usage, &model.ErrorWithStatusCode{StatusCode: 499, Error: model.ErrorDetail{Message: "写入流式终止标记失败: " + err.Error(), Type: "stream_error"}}
+	}
+	flusher.Flush()
 	return usage, nil
+}
+
+func hasStreamFinishReason(line []byte) bool {
+	s := strings.TrimSpace(string(line))
+	if !strings.HasPrefix(s, "data:") {
+		return false
+	}
+	var parsed struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(s, "data:"))), &parsed) != nil {
+		return false
+	}
+	for _, choice := range parsed.Choices {
+		if choice.FinishReason != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // handleErrorResponse 解析上游错误，转成统一的错误结构。

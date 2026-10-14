@@ -21,10 +21,7 @@ func (h *Handler) ListTokens(c *gin.Context) {
 // CreateToken 处理 POST /api/tokens。
 func (h *Handler) CreateToken(c *gin.Context) {
 	var in store.TokenInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	tk, err := h.store.CreateToken(&in)
@@ -44,10 +41,7 @@ func (h *Handler) UpdateToken(c *gin.Context) {
 		return
 	}
 	var in store.TokenInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	tk, err := h.store.UpdateToken(id, &in)
@@ -55,6 +49,7 @@ func (h *Handler) UpdateToken(c *gin.Context) {
 		fail(c, err)
 		return
 	}
+	tk.Key = maskKey(tk.Key)
 	c.JSON(http.StatusOK, gin.H{"data": tk})
 }
 

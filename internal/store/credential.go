@@ -284,7 +284,10 @@ func (s *Store) validateCredentialInput(channelID uint, in *CredentialInput, exc
 	if in.APIKey == "" {
 		return errors.New("凭据 api_key 不能为空")
 	}
-	if in.Weight <= 0 {
+	if in.Weight < 0 {
+		return fmt.Errorf("凭据 weight 不能为负数: %d", in.Weight)
+	}
+	if in.Weight == 0 {
 		// 默认 1 而不是报错：调用方不关心权重时不该被迫传一个数，
 		// 而 0 权重会让这个凭据永远选不中（比没有它还糟）
 		in.Weight = 1

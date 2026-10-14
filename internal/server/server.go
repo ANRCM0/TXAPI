@@ -112,6 +112,8 @@ func NewEngine(deps Deps) *gin.Engine {
 		}
 	})
 
+	engine.Use(middleware.RequestBodyLimit(middleware.MaxRequestBodyBytes))
+
 	// IP 级限流：兜底防「拿随机 key 试」的探测请求。它不依赖令牌信息，
 	// 所以挂在最前面，越早拦住越省（详见 middleware.IPRateLimit）。
 	engine.Use(middleware.IPRateLimit(deps.RateLimiter, deps.IPRPMLimit))

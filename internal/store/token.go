@@ -36,6 +36,9 @@ func (in *TokenInput) validate(now time.Time) error {
 	if in.ExpiresInSeconds < 0 {
 		return errors.New("expires_in_seconds 不能为负数")
 	}
+	if in.Quota < 0 {
+		return fmt.Errorf("quota 不能为负数: %v", in.Quota)
+	}
 	if in.RPMLimit < 0 {
 		return fmt.Errorf("rpm_limit 不能为负数: %d", in.RPMLimit)
 	}

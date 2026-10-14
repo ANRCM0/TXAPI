@@ -2,7 +2,7 @@
 //
 // 包结构：
 //   - convert.go  请求/响应转换 + URL 构造 + 协议结构体
-//   - stream.go   流式快照翻译（Gemini SSE → OpenAI chunk）
+//   - stream.go   流式快照差分（Gemini SSE → OpenAI chunk）
 //   - adaptor.go  HTTP 层外壳（实现 adaptor.Adaptor）+ 接口绑定
 //   - json.go     JSON 辅助函数
 //
@@ -14,7 +14,6 @@ package gemini
 import (
 	"io"
 	"net/http"
-	"sync"
 
 	"github.com/gin-gonic/gin"
 
@@ -121,42 +120,12 @@ func (a *Adaptor) BuildResponse(resp *canonical.ChatResponse) ([]byte, error) {
 	return BuildResponse(resp)
 }
 
-// ParseStreamLine 无状态调用（单测用）。正式路径走 ParseStreamLineSession。
+// ParseStreamLine 是单行解析入口；完整流应使用 NewStreamSession 保留逐流状态。
 func (a *Adaptor) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, error) {
-	return getTranslator("__shared__").ParseStreamLine(line)
+	return newTranslator().ParseStreamLine(line)
 }
 
-// ParseStreamLineSession 在会话上下文里解析一行 Gemini SSE。
-// 每个会话有独立 translator：lastTextLen 不能跨请求共享
-// （否则两个并发流会互相把对方的文本当成重复）。
-func (a *Adaptor) ParseStreamLineSession(line []byte, sessionID string) ([]*canonical.StreamChunk, error) {
-	return getTranslator(sessionID).ParseStreamLine(line)
-}
-
-// ReleaseStreamSession 流结束后清理会话状态。
-func (a *Adaptor) ReleaseStreamSession(sessionID string) {
-	translatorsMu.Lock()
-	defer translatorsMu.Unlock()
-	delete(translators, sessionID)
-}
-
-// getTranslator 取（或创建）会话的流翻译器。
-func getTranslator(sessionID string) *translator {
-	translatorsMu.Lock()
-	defer translatorsMu.Unlock()
-	t, ok := translators[sessionID]
-	if !ok {
-		t = newTranslator()
-		translators[sessionID] = t
-	}
-	return t
-}
-
-// translators 是会话 translator 缓存（mutex 保护 map 并发读写）。
-var (
-	translators   = map[string]*translator{}
-	translatorsMu sync.Mutex
-)
+func (a *Adaptor) NewStreamSession() adaptor.StreamSession { return newTranslator() }
 
 // BuildStreamLine 是 ProtocolAdaptor 方法（Gemini 客户端出站用，当前项目未启用）。
 func (a *Adaptor) BuildStreamLine(chunk *canonical.StreamChunk) ([]byte, error) {

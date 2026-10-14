@@ -40,3 +40,25 @@ func usageFromSSELine(line []byte) *model.Usage {
 	}
 	return nil
 }
+
+func hasFinishReason(line []byte) bool {
+	s := strings.TrimSpace(string(line))
+	if !strings.HasPrefix(s, "data:") {
+		return false
+	}
+	data := strings.TrimSpace(strings.TrimPrefix(s, "data:"))
+	var parsed struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal([]byte(data), &parsed) != nil {
+		return false
+	}
+	for _, choice := range parsed.Choices {
+		if choice.FinishReason != "" {
+			return true
+		}
+	}
+	return false
+}

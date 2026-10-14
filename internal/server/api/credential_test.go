@@ -99,7 +99,7 @@ func decodeData(t *testing.T, body string) map[string]any {
 // 等于某个掩码值」——前者才是安全属性，后者只是格式约定，
 // 格式对但 Key 漏在别处（比如某个调试字段）时后者照样通过。
 func TestGetChannelMasksKeyByDefault(t *testing.T) {
-	e, _ := newAPITestEngine(t)
+	e, st := newAPITestEngine(t)
 
 	code, body := doAPI(t, e, http.MethodGet, "/api/channels/1", "", true)
 	if code != http.StatusOK {
@@ -118,28 +118,36 @@ func TestGetChannelMasksKeyByDefault(t *testing.T) {
 	if first != "sk-...cccc" {
 		t.Fatalf("掩码形态错误: %s (期望 sk-...cccc)", first)
 	}
+	if got := st.Channels()[0].Credentials[0].APIKey; got != "sk-aaaa1111bbbb2222cccc" {
+		t.Fatalf("读取 API 不应修改共享凭据缓存，got %q", got)
+	}
 }
 
-// TestGetChannelRevealsKey 对应验收 B1-3：?reveal=1 才回显明文。
-//
-// reveal 只在显式传 "1" 时生效：reveal=true / reveal=yes 都不算，
-// 避免「看起来像开了其实没开」的歧义。
-func TestGetChannelRevealsKey(t *testing.T) {
+// TestGetChannelNeverRevealsKey verifies existing upstream keys stay masked.
+func TestGetChannelNeverRevealsKey(t *testing.T) {
 	e, _ := newAPITestEngine(t)
 
-	code, body := doAPI(t, e, http.MethodGet, "/api/channels/1?reveal=1", "", true)
-	if code != http.StatusOK {
-		t.Fatalf("reveal 请求失败: %d %s", code, body)
-	}
-	if !strings.Contains(body, "sk-aaaa1111bbbb2222cccc") {
-		t.Fatal("reveal=1 应回显完整 api_key")
-	}
-	// 非 "1" 的值不触发明文：宁可保守
-	for _, v := range []string{"true", "yes", "0", ""} {
-		_, body := doAPI(t, e, http.MethodGet, "/api/channels/1?reveal="+v, "", true)
-		if strings.Contains(body, "sk-aaaa1111bbbb2222cccc") {
-			t.Fatalf("reveal=%q 不应回显明文", v)
+	for _, query := range []string{"", "?reveal=1", "?reveal=true"} {
+		code, body := doAPI(t, e, http.MethodGet, "/api/channels/1"+query, "", true)
+		if code != http.StatusOK {
+			t.Fatalf("详情请求失败: %d %s", code, body)
 		}
+		if strings.Contains(body, "sk-aaaa1111bbbb2222cccc") {
+			t.Fatalf("详情接口不应回显明文 key，query=%q", query)
+		}
+	}
+}
+
+func TestCreateChannelDoesNotEchoUpstreamKey(t *testing.T) {
+	e, _ := newAPITestEngine(t)
+	const key = "sk-channel-create-secret-123456"
+	code, body := doAPI(t, e, http.MethodPost, "/api/channels",
+		`{"name":"created","type":"openai","base_url":"http://127.0.0.1:9912","models":["gpt-4o-mini"],"api_key":"`+key+`"}`, true)
+	if code != http.StatusCreated {
+		t.Fatalf("创建渠道失败: status=%d body=%s", code, body)
+	}
+	if strings.Contains(body, key) {
+		t.Fatal("创建渠道响应不应回显上游明文 key")
 	}
 }
 
@@ -163,6 +171,22 @@ func TestAdminAPIRequiresAuth(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("错密钥应 401, 实际 %d", rec.Code)
+	}
+	for _, target := range []struct{ method, path string }{
+		{http.MethodGet, "/api/channels/1"},
+		{http.MethodPost, "/api/channels"},
+		{http.MethodPut, "/api/credentials/1"},
+		{http.MethodDelete, "/api/tokens/1"},
+		{http.MethodGet, "/api/logs"},
+		{http.MethodGet, "/api/prices"},
+	} {
+		req := httptest.NewRequest(target.method, target.path, strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer client-token")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("普通客户端令牌不应访问 %s %s: status=%d body=%s", target.method, target.path, rec.Code, rec.Body.String())
+		}
 	}
 	// 带头 → 200
 	if code, _ := doAPI(t, e, http.MethodGet, "/api/channels", "", true); code != http.StatusOK {
@@ -209,17 +233,23 @@ func TestCredentialRoutes(t *testing.T) {
 	// 改权重
 	creds := st.ListCredentials(1)
 	target := creds[0].ID
-	code, _ = doAPI(t, e, http.MethodPut, "/api/credentials/"+itoa(target),
+	code, body = doAPI(t, e, http.MethodPut, "/api/credentials/"+itoa(target),
 		`{"api_key":"sk-aaaa1111bbbb2222cccc","weight":7}`, true)
 	if code != http.StatusOK {
 		t.Fatalf("改凭据应 200, 实际 %d", code)
 	}
+	if strings.Contains(body, "sk-aaaa1111bbbb2222cccc") {
+		t.Fatal("更新凭据响应不应回显已有明文 key")
+	}
 
 	// 设状态：banned
-	code, _ = doAPI(t, e, http.MethodPost, "/api/credentials/"+itoa(target)+"/status",
+	code, body = doAPI(t, e, http.MethodPost, "/api/credentials/"+itoa(target)+"/status",
 		`{"status":"banned"}`, true)
 	if code != http.StatusOK {
 		t.Fatalf("设状态应 200, 实际 %d", code)
+	}
+	if strings.Contains(body, "sk-aaaa1111bbbb2222cccc") {
+		t.Fatal("状态更新响应不应回显已有明文 key")
 	}
 	if got, _ := st.GetCredential(target); got.Status != "banned" {
 		t.Fatalf("状态没写进库: %s", got.Status)
@@ -248,6 +278,26 @@ func TestCredentialRoutes(t *testing.T) {
 	code, _ = doAPI(t, e, http.MethodPut, "/api/credentials/9999", `{"api_key":"sk-x"}`, true)
 	if code != http.StatusNotFound {
 		t.Fatalf("不存在的凭据应 404, 实际 %d", code)
+	}
+}
+
+func TestTokenMutationDoesNotEchoExistingKey(t *testing.T) {
+	e, st := newAPITestEngine(t)
+	const key = "sk-existing-token-secret-123456"
+	token, err := st.CreateToken(&store.TokenInput{Key: key, Name: "existing"})
+	if err != nil {
+		t.Fatalf("创建测试令牌失败: %v", err)
+	}
+
+	code, body := doAPI(t, e, http.MethodPut, "/api/tokens/"+itoa(token.ID),
+		`{"key":"sk-existing-token-secret-123456","name":"renamed"}`, true)
+	if code != http.StatusOK || strings.Contains(body, key) {
+		t.Fatalf("更新令牌应成功且不回显已有 key: status=%d body=%s", code, body)
+	}
+
+	code, body = doAPI(t, e, http.MethodPost, "/api/tokens/"+itoa(token.ID)+"/quota", `{"quota":5}`, true)
+	if code != http.StatusOK || strings.Contains(body, key) {
+		t.Fatalf("设置额度应成功且不回显已有 key: status=%d body=%s", code, body)
 	}
 }
 

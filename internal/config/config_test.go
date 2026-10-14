@@ -22,6 +22,36 @@ func writeCfg(t *testing.T, body string) string {
 // minimalCfg 是能通过 validate 的最小配置（必填 admin_key）。
 const minimalCfg = "admin_key: test-key\n"
 
+func TestRetryTimesZeroDisablesRetries(t *testing.T) {
+	cfg, err := Load(writeCfg(t, "admin_key: test-key\nserver:\n  retry_times: 0\n"))
+	if err != nil {
+		t.Fatalf("加载失败: %v", err)
+	}
+	if cfg.Server.RetryTimes != 0 {
+		t.Fatalf("retry_times = %d，显式的 0 必须关闭重试", cfg.Server.RetryTimes)
+	}
+}
+
+func TestServerResourceLimitsRejectInvalidValues(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"negative retries", "admin_key: k\nserver:\n  retry_times: -1\n"},
+		{"too many retries", "admin_key: k\nserver:\n  retry_times: 11\n"},
+		{"negative timeout", "admin_key: k\nserver:\n  timeout_seconds: -1\n"},
+		{"excessive timeout", "admin_key: k\nserver:\n  timeout_seconds: 601\n"},
+		{"negative ip rpm", "admin_key: k\nserver:\n  ip_rpm_limit: -1\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Load(writeCfg(t, tt.body)); err == nil {
+				t.Fatal("非法资源限制应被拒绝")
+			}
+		})
+	}
+}
+
 // TestLogLevelDefaults 验证不配 log_level 时默认 info。
 func TestLogLevelDefaults(t *testing.T) {
 	cfg, err := Load(writeCfg(t, minimalCfg))

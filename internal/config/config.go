@@ -151,7 +151,18 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("解析 YAML 失败: %w", err)
 	}
+	var explicit struct {
+		Server struct {
+			RetryTimes *int `yaml:"retry_times"`
+		} `yaml:"server"`
+	}
+	if err := yaml.Unmarshal(raw, &explicit); err != nil {
+		return nil, fmt.Errorf("解析 YAML 失败: %w", err)
+	}
 	cfg.applyDefaults()
+	if explicit.Server.RetryTimes != nil {
+		cfg.Server.RetryTimes = *explicit.Server.RetryTimes
+	}
 	// 环境变量覆盖配置文件：部署时改配置要重新打镜像/改文件，
 	// 改环境变量不用。密钥尤其应该走环境变量（不进 git）。
 	if v := strings.TrimSpace(os.Getenv(EnvAdminKey)); v != "" {
@@ -237,7 +248,7 @@ func (c *Config) applyDefaults() {
 		if ch.ID == 0 {
 			ch.ID = i + 1
 		}
-		if ch.Weight <= 0 {
+		if ch.Weight == 0 {
 			ch.Weight = 1
 		}
 		if ch.Type == "" {
@@ -273,12 +284,24 @@ func (c *Config) validate() error {
 	if c.LogRetentionDays < 0 {
 		return fmt.Errorf("log_retention_days 不能为负数（收到 %d；0 表示关闭自动清理）", c.LogRetentionDays)
 	}
+	if c.Server.RetryTimes < 0 || c.Server.RetryTimes > 10 {
+		return fmt.Errorf("server.retry_times 必须在 0 到 10 之间（收到 %d）", c.Server.RetryTimes)
+	}
+	if c.Server.TimeoutSeconds < 1 || c.Server.TimeoutSeconds > 600 {
+		return fmt.Errorf("server.timeout_seconds 必须在 1 到 600 之间（收到 %d）", c.Server.TimeoutSeconds)
+	}
+	if c.Server.IPRPMLimit < 0 {
+		return fmt.Errorf("server.ip_rpm_limit 不能为负数（收到 %d）", c.Server.IPRPMLimit)
+	}
 	seenChannel := map[int]bool{}
 	for _, ch := range c.Channels {
 		if seenChannel[ch.ID] {
 			return fmt.Errorf("渠道 ID 重复: %d", ch.ID)
 		}
 		seenChannel[ch.ID] = true
+		if ch.Weight < 0 {
+			return fmt.Errorf("渠道 %d(%s) weight 不能为负数", ch.ID, ch.Name)
+		}
 		if ch.BaseURL == "" {
 			return fmt.Errorf("渠道 %d(%s) 缺少 base_url", ch.ID, ch.Name)
 		}
@@ -299,6 +322,9 @@ func (c *Config) validate() error {
 			return fmt.Errorf("令牌 key 重复: %s", tk.Name)
 		}
 		seenToken[tk.Key] = true
+		if tk.Quota < 0 || tk.RPMLimit < 0 || tk.TPMLimit < 0 {
+			return fmt.Errorf("令牌 %q 的 quota/rpm_limit/tpm_limit 不能为负数", tk.Name)
+		}
 	}
 	return nil
 }

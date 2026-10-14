@@ -5,16 +5,13 @@
 //   - stream.go   流式事件流翻译（Claude SSE → OpenAI chunk）
 //   - adaptor.go  HTTP 层外壳（实现 adaptor.Adaptor）+ 接口绑定
 //
-// 每个 Anthropic 请求会话需要一个独立的流翻译器（状态跨行保持），
-// 所以 adaptor.go 里用 map[会话ID]*translator 缓存——不能把 translator
-// 挂在适配器实例上：适配器是全局共享的，多请求并发会串状态。
+// 每条流由 relay 单独创建 translator，状态不存放在共享适配器或全局 map 中。
 package anthropic
 
 import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/gin-gonic/gin"
 
@@ -123,48 +120,11 @@ func (a *Adaptor) BuildResponse(resp *canonical.ChatResponse) ([]byte, error) {
 }
 
 // ParseStreamLine 解析一行 Claude SSE。
-//
-// 每个请求会话有独立 translator：用请求 ID 做 key 缓存。
-// 并发安全：translator 只在单条流的读取循环里被顺序访问，
-// mutex 只保护 map 本身的并发读写（不同会话可能同时创建）。
-var (
-	translators   = map[string]*translator{}
-	translatorsMu sync.Mutex
-)
-
 func (a *Adaptor) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, error) {
-	// 无会话上下文时用共享 translator：只支持单流场景（单测/直接调用）。
-	// 正式转发路径走 relay.convertStreamLine，那里会传入会话 ID。
-	t := getTranslator("__shared__")
-	return t.ParseStreamLine(line)
+	return newTranslator().ParseStreamLine(line)
 }
 
-// ParseStreamLineSession 在指定会话上下文里解析一行 Claude SSE。
-// 每个 sessionID 有独立 translator，互不串状态。
-func (a *Adaptor) ParseStreamLineSession(line []byte, sessionID string) ([]*canonical.StreamChunk, error) {
-	return getTranslator(sessionID).ParseStreamLine(line)
-}
-
-// getTranslator 取（或创建）某个会话的流翻译器。
-//
-// 缓存在流结束后由 ReleaseStreamSession 清理，不会无限增长。
-func getTranslator(sessionID string) *translator {
-	translatorsMu.Lock()
-	defer translatorsMu.Unlock()
-	t, ok := translators[sessionID]
-	if !ok {
-		t = newTranslator()
-		translators[sessionID] = t
-	}
-	return t
-}
-
-// ReleaseStreamSession 流结束后删除会话的 translator，释放内存。
-func (a *Adaptor) ReleaseStreamSession(sessionID string) {
-	translatorsMu.Lock()
-	defer translatorsMu.Unlock()
-	delete(translators, sessionID)
-}
+func (a *Adaptor) NewStreamSession() adaptor.StreamSession { return newTranslator() }
 
 // BuildStreamLine 是 ProtocolAdaptor 方法。
 // Claude 作为出站协议时由它把规范 chunk 写成 Claude SSE——

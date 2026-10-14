@@ -3,9 +3,7 @@ package relay
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -14,7 +12,6 @@ import (
 	"minigateway/internal/relay/canonical"
 	"minigateway/internal/relay/meta"
 	"minigateway/internal/relay/model"
-	"minigateway/internal/server/middleware"
 )
 
 // 这个文件是 P4 的「协议枢纽」，对应 PLAN 3.2 的 N+M 设计。
@@ -119,14 +116,20 @@ func convertResponseBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, 
 // 返回的每一行都不含结尾换行（调用方负责写 \n）。
 // 上游的 [DONE] 之类的协议终止标记在这里被消费掉，由客户端适配器
 // 重新生成自己的终止标记（不同协议的 [DONE] 语义一致但位置不同）。
-func convertStreamLine(a adaptor.Adaptor, line []byte, sessionID string, m *meta.Meta) ([][]byte, error) {
+func convertStreamLine(a adaptor.Adaptor, line []byte, session adaptor.StreamSession, m *meta.Meta) ([][]byte, error) {
 	upstreamPA, ok := a.(adaptor.ProtocolAdaptor)
 	if !ok || upstreamPA.Name() == "openai" {
 		// openai 上游：原样透传（P1 行为）
 		return [][]byte{line}, nil
 	}
 
-	chunks, err := parseStreamLineWithSession(upstreamPA, line, sessionID)
+	var chunks []*canonical.StreamChunk
+	var err error
+	if session != nil {
+		chunks, err = session.ParseStreamLine(line)
+	} else {
+		chunks, err = upstreamPA.ParseStreamLine(line)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -157,19 +160,6 @@ func convertStreamLine(a adaptor.Adaptor, line []byte, sessionID string, m *meta
 	return out, nil
 }
 
-// parseStreamLineWithSession 调用上游协议适配器解析一行 SSE。
-//
-// 会话隔离：流式转换是有状态的（Claude 的 translator 要跨行记住
-// message id、块类型、用量），所以每个请求会话必须有独立的 translator。
-// 通过 SessionStreamer 接口实现：适配器可以选择实现它来获得会话级状态，
-// 没实现就退回无状态调用（单测/直接调用场景）。
-func parseStreamLineWithSession(pa adaptor.ProtocolAdaptor, line []byte, sessionID string) ([]*canonical.StreamChunk, error) {
-	if ss, ok := pa.(adaptor.SessionStreamer); ok {
-		return ss.ParseStreamLineSession(line, sessionID)
-	}
-	return pa.ParseStreamLine(line)
-}
-
 // streamDoneMarker 返回客户端协议的流结束标记。
 // OpenAI 是 "data: [DONE]"；上游的终止标记由 convertStreamLine 消费。
 func streamDoneMarker() []byte {
@@ -196,29 +186,24 @@ func relayStream(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta
 		return nil, fmt.Errorf("当前服务器不支持流式响应")
 	}
 
-	// 会话 ID：用请求 ID + 渠道 ID 组合，保证同一请求的流内所有行
-	// 共享同一个 translator，不同请求互不干扰。
-	sessionID := m.ChannelName + ":" + strconv.Itoa(m.ChannelID)
-	if rid, exists := c.Get(middleware.CtxRequestID); exists {
-		if s, ok := rid.(string); ok && s != "" {
-			sessionID = s + ":" + sessionID
-		}
+	var session adaptor.StreamSession
+	if pa, ok := a.(adaptor.SessionStreamer); ok {
+		session = pa.NewStreamSession()
 	}
-	defer releaseStreamSession(a, sessionID)
 
 	var usage *model.Usage
+	sawFinish := false
 	scanner := newStreamScanner(resp.Body)
 
 	for scanner.Scan() {
-		lines, err := convertStreamLine(a, scanner.Bytes(), sessionID, m)
+		lines, err := convertStreamLine(a, scanner.Bytes(), session, m)
 		if err != nil {
-			// 单行转换失败不中断整条流：坏行跳过，继续读后面的行。
-			// 理由：流式一旦开始就无法回退，为一行坏数据掐断整个对话
-			// 比丢一行数据的伤害大得多。
-			slog.Warn("[流式转换] 跳过无法解析的上游行", "err", err)
-			continue
+			return usage, fmt.Errorf("解析上游流失败: %w", err)
 		}
 		for _, ln := range lines {
+			if hasFinishReason(ln) {
+				sawFinish = true
+			}
 			// 从翻译后的行里顺手抽 usage（OpenAI 协议最后一条带 usage）
 			if u := usageFromSSELine(ln); u != nil {
 				usage = u
@@ -227,25 +212,23 @@ func relayStream(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta
 			// 只写单个 \n 时，很多客户端会把多个 data: 行读成「同一个事件的多行」，
 			// 从而把 chunk 拼接成一坨 JSON 而解析失败。
 			if _, err := c.Writer.Write(append(ln, '\n', '\n')); err != nil {
-				// 客户端断开是常见情况，不算错误
-				return usage, nil
+				return usage, fmt.Errorf("写入客户端流失败: %w", err)
 			}
 			flusher.Flush()
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return usage, fmt.Errorf("读取上游流失败: %w", err)
+	}
+	if !sawFinish {
+		return usage, fmt.Errorf("上游流意外结束，缺少 finish_reason")
+	}
 	// 上游流正常结束后，补发客户端协议的终止标记。
 	// 没有它，OpenAI SDK 会一直等不到流结束事件。
-	if _, err := c.Writer.Write(append(streamDoneMarker(), '\n', '\n')); err == nil {
-		flusher.Flush()
+	if _, err := c.Writer.Write(append(streamDoneMarker(), '\n', '\n')); err != nil {
+		return usage, fmt.Errorf("写入流终止标记失败: %w", err)
 	}
-	return usage, scanner.Err()
-}
-
-// releaseStreamSession 流结束后释放会话状态。
-// 通过 SessionReleaser 可选接口实现：适配器自己管理状态生命周期。
-func releaseStreamSession(a adaptor.Adaptor, sessionID string) {
-	if sr, ok := a.(adaptor.SessionReleaser); ok {
-		sr.ReleaseStreamSession(sessionID)
-	}
+	flusher.Flush()
+	return usage, nil
 }

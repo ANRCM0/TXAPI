@@ -63,7 +63,7 @@ func sseData(line []byte) (string, bool) {
 
 // buildGeminiStreamLine 把规范 chunk 写成 Gemini 的一行 SSE。
 // 未来场景（Gemini 客户端出站）用，当前项目未启用。
-// 注意 Gemini 流式是「快照」语义，不是 delta——这里按快照发。
+// 每次调用仅编码当前规范 chunk，不在适配器内部拼接跨事件状态。
 func buildGeminiStreamLine(chunk *canonical.StreamChunk) ([]byte, error) {
 	var text string
 	for _, p := range chunk.Content {

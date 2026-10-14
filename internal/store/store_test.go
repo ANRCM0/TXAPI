@@ -90,6 +90,31 @@ func TestAsyncLogFlushOnClose(t *testing.T) {
 	}
 }
 
+func TestListChannelsReturnsDetachedCacheValues(t *testing.T) {
+	st := openTestStore(t, "channel-copy")
+	defer st.Close()
+	const key = "sk-upstream-secret-0123456789"
+	if _, err := st.CreateChannel(&ChannelInput{
+		Name: "copy-test", Type: "openai", BaseURL: "http://127.0.0.1:9911",
+		Models: []string{"gpt-4o-mini"}, ModelMapping: map[string]string{"alias": "gpt-4o-mini"}, APIKey: key,
+	}); err != nil {
+		t.Fatalf("创建渠道失败: %v", err)
+	}
+
+	channels := st.ListChannels()
+	channels[0].Credentials[0].APIKey = "masked"
+	channels[0].Models[0] = "mutated"
+	channels[0].ModelMapping["alias"] = "mutated"
+
+	got := st.ListChannels()[0]
+	if got.Credentials[0].APIKey != key {
+		t.Fatalf("读取渠道列表污染凭据缓存: got %q", got.Credentials[0].APIKey)
+	}
+	if got.Models[0] != "gpt-4o-mini" || got.ModelMapping["alias"] != "gpt-4o-mini" {
+		t.Fatalf("读取渠道列表返回了共享的可变数据: %+v", got)
+	}
+}
+
 // TestLogQueryFilters 验证日志查询的过滤和分页。
 func TestLogQueryFilters(t *testing.T) {
 	st := openTestStore(t, "query")

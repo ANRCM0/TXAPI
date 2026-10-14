@@ -115,3 +115,18 @@ func fail(c *gin.Context, err error) {
 		"error": gin.H{"message": err.Error(), "type": "invalid_request"},
 	})
 }
+
+func bindJSON(c *gin.Context, dst any) bool {
+	if err := c.ShouldBindJSON(dst); err != nil {
+		status := http.StatusBadRequest
+		typ := "invalid_request"
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			status = http.StatusRequestEntityTooLarge
+			typ = "request_too_large"
+		}
+		c.JSON(status, gin.H{"error": gin.H{"message": "请求体无效或超过大小限制: " + err.Error(), "type": typ}})
+		return false
+	}
+	return true
+}

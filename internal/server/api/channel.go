@@ -40,10 +40,7 @@ func maskKey(key string) string {
 
 // GetChannel 处理 GET /api/channels/:id。
 //
-// api_key 默认返回掩码。详情接口常被人在浏览器里开着、被截图、
-// 被贴进工单——明文 Key 在这些场合会静默扩散。所以默认只看得到
-// 掩码，要看明文必须显式带 ?reveal=1，让「我要看 Key」成为一个
-// 有意识的操作而不是顺手滑过的结果。
+// api_key 始终返回掩码；已有凭据不提供明文回显接口。
 func (h *Handler) GetChannel(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok {
@@ -54,11 +51,8 @@ func (h *Handler) GetChannel(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	reveal := c.Query("reveal") == "1"
-	if !reveal {
-		for i := range ch.Credentials {
-			ch.Credentials[i].APIKey = maskKey(ch.Credentials[i].APIKey)
-		}
+	for i := range ch.Credentials {
+		ch.Credentials[i].APIKey = maskKey(ch.Credentials[i].APIKey)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": ch})
 }
@@ -66,10 +60,7 @@ func (h *Handler) GetChannel(c *gin.Context) {
 // CreateChannel 处理 POST /api/channels。
 func (h *Handler) CreateChannel(c *gin.Context) {
 	var in store.ChannelInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	ch, err := h.store.CreateChannel(&in)
@@ -79,6 +70,9 @@ func (h *Handler) CreateChannel(c *gin.Context) {
 	}
 	// 建渠道的同时刷新转发层渠道池——这一步就是「不重启就生效」的实现处
 	h.notifyChanged()
+	for i := range ch.Credentials {
+		ch.Credentials[i].APIKey = maskKey(ch.Credentials[i].APIKey)
+	}
 	c.JSON(http.StatusCreated, gin.H{"data": ch})
 }
 
@@ -89,10 +83,7 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 		return
 	}
 	var in store.ChannelInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	ch, err := h.store.UpdateChannel(id, &in)
@@ -102,6 +93,9 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 	}
 	// 渠道改了 models/status/priority 都会影响路由，必须热刷新
 	h.notifyChanged()
+	for i := range ch.Credentials {
+		ch.Credentials[i].APIKey = maskKey(ch.Credentials[i].APIKey)
+	}
 	c.JSON(http.StatusOK, gin.H{"data": ch})
 }
 

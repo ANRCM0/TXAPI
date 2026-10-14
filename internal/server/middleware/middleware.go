@@ -34,10 +34,25 @@ const (
 	CtxTokenView = "token_view"
 )
 
+const MaxRequestBodyBytes int64 = 20 << 20
+
+// RequestBodyLimit bounds both declared and chunked request bodies.
+func RequestBodyLimit(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.ContentLength > maxBytes {
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": gin.H{"message": "请求体超过大小限制", "type": "request_too_large"},
+			})
+			return
+		}
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
+		c.Next()
+	}
+}
+
 // Recovery 捕获 panic，避免一个请求的异常打挂整个网关进程。
-//
-// 网关是长驻服务，一旦进程退出，所有在途请求都会失败。
-// 所以必须把 panic 限制在单个请求内。
 func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {

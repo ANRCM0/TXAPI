@@ -50,7 +50,10 @@ func (in *ChannelInput) validate() error {
 	if len(in.Models) == 0 {
 		return fmt.Errorf("渠道 %s 没有配置任何模型", in.Name)
 	}
-	if in.Weight <= 0 {
+	if in.Weight < 0 {
+		return fmt.Errorf("渠道 %s weight 不能为负数", in.Name)
+	}
+	if in.Weight == 0 {
 		in.Weight = 1
 	}
 	if in.Type == "" {
@@ -238,7 +241,17 @@ func (s *Store) ListChannels() []model.Channel {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]model.Channel, len(s.channels))
-	copy(out, s.channels)
+	for i, ch := range s.channels {
+		out[i] = ch
+		out[i].Models = append(model.StringList(nil), ch.Models...)
+		if ch.ModelMapping != nil {
+			out[i].ModelMapping = make(model.StringMap, len(ch.ModelMapping))
+			for key, value := range ch.ModelMapping {
+				out[i].ModelMapping[key] = value
+			}
+		}
+		out[i].Credentials = append([]model.Credential(nil), ch.Credentials...)
+	}
 	return out
 }
 

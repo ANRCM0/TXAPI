@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -104,6 +105,14 @@ func TestHealthzAndAdminAuthSplit(t *testing.T) {
 	// 管理密钥不能顺手当转发令牌用
 	if code := do("/v1/models", true); code != http.StatusUnauthorized {
 		t.Fatalf("/v1/models 只带管理密钥应 401（需客户端令牌）, 实际 %d", code)
+	}
+
+	oversized := httptest.NewRequest(http.MethodPost, "/api/channels", strings.NewReader("{}"))
+	oversized.ContentLength = middleware.MaxRequestBodyBytes + 1
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, oversized)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("超限管理请求应 413，实际 %d", rec.Code)
 	}
 }
 

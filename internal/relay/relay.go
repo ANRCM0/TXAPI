@@ -68,6 +68,7 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 	}
 
 	var lastErr *model.ErrorWithStatusCode
+	responseCommitted := false
 	// 重试单元是「(渠道, 凭据) 对」，不是渠道本身：单渠道多 Key 时，
 	// 第一把 Key 失败后必须能在同一把渠道内换一把 Key 重试，否则一个
 	// 渠道挂 3 把 Key 也只等于挂 1 把。用**凭据 ID** 记已试而不是渠道
@@ -145,6 +146,15 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 		lastErr = err
 		c.Set(relayStatusKey, err.StatusCode)
 		c.Set(relayErrorKey, err.Error.Message)
+		if c.Writer.Written() {
+			// SSE headers/body are already visible; never append an error JSON or retry
+			// after the client may have consumed part of this response.
+			responseCommitted = true
+			if err.StatusCode != 499 {
+				reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
+			}
+			break
+		}
 		// 健康反馈：按状态码决定是否惩罚这把凭据（400/404/422 不罚，
 		// 见 scheduler.ShouldPenalizeCredential）。必须在 shouldRetry
 		// 判断**之后**：400 这类错误本来就不会重试，但反馈还是要做——
@@ -177,6 +187,9 @@ func Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels [
 	}
 	c.Set(relayStatusKey, lastErr.StatusCode)
 	c.Set(relayErrorKey, lastErr.Error.Message)
+	if responseCommitted {
+		return
+	}
 	writeError(c, lastErr.StatusCode, lastErr.Error.Message, lastErr.Error.Type)
 }
 
@@ -256,9 +269,14 @@ func doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout time.Duration) (
 		if m.IsStream {
 			usage, err := relayStream(c, a, resp, m)
 			if err != nil {
-				// 流已开始，无法改状态码；记日志后按「已发出的流」处理
-				slog.Warn("[流式转发] 流结束异常",
-					"channel", m.ChannelName, "model", m.ActualModel, "err", err)
+				status := http.StatusBadGateway
+				if c.Request.Context().Err() != nil || errors.Is(err, context.Canceled) {
+					status = 499
+				}
+				return usage, &model.ErrorWithStatusCode{
+					StatusCode: status,
+					Error:      model.ErrorDetail{Message: "流式转发未正常结束: " + err.Error(), Type: "stream_error"},
+				}
 			}
 			return usage, nil
 		}

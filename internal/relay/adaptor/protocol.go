@@ -57,31 +57,12 @@ type ProtocolAdaptor interface {
 	AuthHeader(apiKey string) (name, value string)
 }
 
-// SessionStreamer 是「带会话状态的流式解析」扩展接口。
-//
-// 为什么需要它：流式转换是有状态的。Claude 的 translator 要跨行记住
-// message id（message_start 才有）、每个 content block 的类型、
-// 累积的 usage（input/output tokens 拆在两个事件里）。
-// ProtocolAdaptor.ParseStreamLine 是无状态的（每次调用独立），
-// 满足不了这个需求。
-//
-// 设计取舍：不把 sessionID 直接塞进 ProtocolAdaptor.ParseStreamLine 签名——
-// 那样 OpenAI 这种无状态协议也得为一个用不到的参数改签名。
-// 用可选接口（Go 的类型断言模式）：需要状态的协议（Claude/Gemini）
-// 实现它，无状态的（OpenAI）不用管。
-//
-// 实现方的义务：sessionID 相同时必须返回同一个 translator 实例，
-// 且必须并发安全（不同会话的流可能同时进行）。
-type SessionStreamer interface {
-	// ParseStreamLineSession 在指定会话上下文里解析一行 SSE。
-	ParseStreamLineSession(line []byte, sessionID string) ([]*canonical.StreamChunk, error)
+// StreamSession 持有一条上游流的转换状态。每条请求单独创建，不能跨请求共享。
+type StreamSession interface {
+	ParseStreamLine(line []byte) ([]*canonical.StreamChunk, error)
 }
 
-// SessionReleaser 是「流结束后释放会话状态」的可选接口。
-//
-// 为什么需要：带状态的流翻译器（translator map）如果只创建不清理，
-// 长跑网关会内存泄漏。流正常结束或客户端断开时，relay 调这个接口
-// 让适配器把对应 sessionID 的 translator 从 map 里删掉。
-type SessionReleaser interface {
-	ReleaseStreamSession(sessionID string)
+// SessionStreamer 为有状态的协议创建请求本地的流解析器。
+type SessionStreamer interface {
+	NewStreamSession() StreamSession
 }

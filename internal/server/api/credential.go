@@ -23,7 +23,7 @@ func (h *Handler) ListCredentials(c *gin.Context) {
 	creds := h.store.ListCredentials(id)
 	// 列表一律打码：列表接口常被整体拉取、截图、贴进 issue，
 	// 把每把 Key 都吐出来等于把整个凭据池明文打印出去。
-	// 要看明文走 GET /api/channels/:id?reveal=1。
+	// 已有凭据的明文不通过列表接口回显。
 	for i := range creds {
 		creds[i].APIKey = maskKey(creds[i].APIKey)
 	}
@@ -40,10 +40,7 @@ func (h *Handler) CreateCredential(c *gin.Context) {
 		return
 	}
 	var in store.CredentialInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	cred, err := h.store.CreateCredential(id, &in)
@@ -71,10 +68,7 @@ func (h *Handler) UpdateCredential(c *gin.Context) {
 		return
 	}
 	var in store.CredentialInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	cred, err := h.store.UpdateCredential(id, &in)
@@ -85,6 +79,7 @@ func (h *Handler) UpdateCredential(c *gin.Context) {
 	// 换了 Key 就必须刷池子：转发层持有的是缓存里的 Key 快照，
 	// 不刷的话旧 Key 会一直用到下一次无关的渠道变更
 	h.notifyChanged()
+	cred.APIKey = maskKey(cred.APIKey)
 	c.JSON(http.StatusOK, gin.H{"data": cred})
 }
 
@@ -116,10 +111,7 @@ func (h *Handler) SetCredentialStatus(c *gin.Context) {
 	var in struct {
 		Status string `json:"status"`
 	}
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "请求体不是合法 JSON: " + err.Error(), "type": "invalid_request"},
-		})
+	if !bindJSON(c, &in) {
 		return
 	}
 	cred, err := h.store.SetCredentialStatus(id, in.Status)
@@ -128,5 +120,6 @@ func (h *Handler) SetCredentialStatus(c *gin.Context) {
 		return
 	}
 	h.notifyChanged()
+	cred.APIKey = maskKey(cred.APIKey)
 	c.JSON(http.StatusOK, gin.H{"data": cred})
 }
