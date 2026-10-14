@@ -142,7 +142,7 @@ go test -race -count=1 ./...
 go test ./internal/core -run '^$' -bench BenchmarkExecutor -benchtime=100x -benchmem
 ```
 
-首版实测：2026-10-15，Windows/amd64，Go 1.26.3，Intel i5-12500H，16 个逻辑 CPU；每场景 100 请求，假上游等待 5 ms，输入 JSON 581–582 B（user 文本 512 B），SSE 8 个文本块。测试在回环 HTTP 上包含协议转换、网络和测试 writer 的开销；慢客户端每次 Write 额外等待 1 ms。此表是基线，不是优化前后对比；100 样本的 p99 只是单次运行观察值，不能用作服务 SLA。
+首版实测（代码基线 `e10c7f7`）：2026-10-15，Windows/amd64，Go 1.26.3，Intel i5-12500H，16 个逻辑 CPU；每场景 100 请求，假上游等待 5 ms，输入 JSON 581–582 B（user 文本 512 B），SSE 8 个文本块。测试在回环 HTTP 上包含协议转换、网络和测试 writer 的开销；慢客户端每次 Write 额外等待 1 ms。此表是基线，不是优化前后对比；100 样本的 p99 只是单次运行观察值，不能用作服务 SLA。
 
 | 场景 | 并发 | 平均 ns/op | p95 ms | p99 ms | B/op | allocs/op |
 |---|---:|---:|---:|---:|---:|---:|

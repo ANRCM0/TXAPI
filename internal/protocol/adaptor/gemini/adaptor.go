@@ -18,7 +18,6 @@ import (
 	"minigateway/internal/protocol/adaptor/openai"
 	"minigateway/internal/protocol/canonical"
 	"minigateway/internal/protocol/meta"
-	"minigateway/internal/protocol/model"
 )
 
 // Adaptor 是 Gemini 协议适配器。
@@ -106,12 +105,4 @@ func (a *Adaptor) NewStreamSession() adaptor.StreamSession { return newTranslato
 // BuildStreamLine 是 ProtocolAdaptor 方法（Gemini 客户端出站用，当前项目未启用）。
 func (a *Adaptor) BuildStreamLine(chunk *canonical.StreamChunk) ([]byte, error) {
 	return buildGeminiStreamLine(chunk)
-}
-
-// upstreamError 构造上游错误。
-func upstreamError(msg string) *model.ErrorWithStatusCode {
-	return &model.ErrorWithStatusCode{
-		StatusCode: http.StatusBadGateway,
-		Error:      model.ErrorDetail{Message: msg, Type: "upstream_error"},
-	}
 }

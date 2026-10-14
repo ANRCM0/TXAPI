@@ -7,7 +7,6 @@
 package adaptor
 
 import (
-	"io"
 	"net/http"
 
 	"minigateway/internal/protocol/meta"
@@ -32,29 +31,4 @@ type Adaptor interface {
 
 	// GetChannelName 返回渠道展示名，用于日志。
 	GetChannelName() string
-}
-
-// DoRequest 是所有适配器共用的发请求逻辑。
-//
-// 为什么放在接口外面做成函数而不是接口方法：
-// 发 HTTP 请求这一步，所有厂商的做法完全一样（net/http 打过去、带上 body）。
-// 把它抽成公共函数，适配器只需要专注自己那部分差异，避免 40 个适配器
-// 抄 40 遍一模一样的代码——这正是 one-api 里可以改进的地方。
-func DoRequest(client *http.Client, url string, headers http.Header, body []byte) (*http.Response, error) {
-	var reader io.Reader
-	if body != nil {
-		reader = bytesReader(body)
-	}
-	req, err := http.NewRequest(http.MethodPost, url, reader)
-	if err != nil {
-		return nil, err
-	}
-	// 先铺公共头，再让调用方设置的头覆盖（鉴权头由 SetupRequestHeader 提供）
-	req.Header.Set("Content-Type", "application/json")
-	for k, vs := range headers {
-		for _, v := range vs {
-			req.Header.Set(k, v)
-		}
-	}
-	return client.Do(req)
 }

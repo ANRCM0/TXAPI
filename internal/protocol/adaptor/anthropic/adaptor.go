@@ -16,7 +16,6 @@ import (
 	"minigateway/internal/protocol/adaptor/openai"
 	"minigateway/internal/protocol/canonical"
 	"minigateway/internal/protocol/meta"
-	"minigateway/internal/protocol/model"
 )
 
 // openaiPA 是入站（客户端侧）协议适配器。
@@ -109,12 +108,4 @@ func (a *Adaptor) NewStreamSession() adaptor.StreamSession { return newTranslato
 // 「Claude 客户端 → 其他上游」的未来场景用到，保留实现。
 func (a *Adaptor) BuildStreamLine(chunk *canonical.StreamChunk) ([]byte, error) {
 	return buildClaudeStreamLine(chunk)
-}
-
-// upstreamError 构造上游错误。
-func upstreamError(msg string) *model.ErrorWithStatusCode {
-	return &model.ErrorWithStatusCode{
-		StatusCode: http.StatusBadGateway,
-		Error:      model.ErrorDetail{Message: msg, Type: "upstream_error"},
-	}
 }
