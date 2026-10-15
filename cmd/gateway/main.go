@@ -151,7 +151,7 @@ func main() {
 	health := scheduler.NewHealthWorker(func(u scheduler.HealthUpdate) error {
 		return st.UpdateCredentialHealth(store.HealthUpdate{
 			CredentialID:       u.CredentialID,
-			ExpectedGeneration: u.ExpectedGeneration, ExpectedUpdatedAt: u.ExpectedUpdatedAt,
+			ExpectedGeneration: u.ExpectedGeneration, ExpectedUpdatedAt: u.ExpectedUpdatedAt, ObservedAt: u.ObservedAt,
 			FailCount:     u.FailCount,
 			CooldownUntil: u.CooldownUntil,
 			Status:        u.Status,

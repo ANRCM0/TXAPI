@@ -92,14 +92,30 @@ func (h *HealthWorker) process(event healthEvent) {
 		return
 	}
 	// A late success that started before a newer failure must not undo cooling.
-	if event.success && current.FailCount > event.credential.FailCount {
+	if !event.credential.HealthObserved && event.success && current.FailCount > event.credential.FailCount {
 		return
 	}
 	next := NextFailure(&current, event.statusCode, event.message, event.now)
 	if event.success {
 		next = NextSuccess(&current, event.now)
 	}
-	if !next.Changed(&current) {
+	if event.credential.HealthObserved {
+		// The coordinator already serialized and calculated this transition.
+		// Persist that exact state, not a second calculation from a lagging DB.
+		observed := event.credential
+		if observed.HealthObservedAt <= current.HealthObservedAt {
+			return
+		}
+		next.FailCount, next.Status, next.CooldownUntil = observed.FailCount, observed.Status, observed.CooldownUntil
+		next.LastError, next.LastUsedAt = observed.LastError, observed.LastUsedAt
+		next.ObservedAt = observed.HealthObservedAt
+	} else {
+		next.ObservedAt = event.now.UnixNano()
+		if next.ObservedAt <= current.HealthObservedAt {
+			next.ObservedAt = current.HealthObservedAt + 1
+		}
+	}
+	if !next.Changed(&current) && !event.credential.HealthObserved {
 		return
 	}
 	if err := h.persist(next); err != nil {

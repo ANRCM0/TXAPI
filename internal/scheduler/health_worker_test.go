@@ -129,3 +129,42 @@ func TestHealthRefreshPanicDoesNotStopWorker(t *testing.T) {
 		t.Fatalf("refresh panic stopped worker: calls=%d", calls)
 	}
 }
+
+func TestReviewObservedHealthPreservesStateAndRejectsReorderedEvents(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		current := dbmodel.Credential{ID: 99, Status: dbmodel.CredentialActive, APIKey: "key"}
+		failure := current
+		failure.HealthObserved = true
+		failure.HealthObservedAt = 10
+		failure.FailCount = 2
+		failure.Status = dbmodel.CredentialCooldown
+		failure.CooldownUntil = 1000
+		success := current
+		success.HealthObserved = true
+		success.HealthObservedAt = 20
+		var updates []HealthUpdate
+		h := NewHealthWorker(func(u HealthUpdate) error {
+			updates = append(updates, u)
+			current.FailCount, current.Status, current.CooldownUntil, current.HealthObservedAt = u.FailCount, u.Status, u.CooldownUntil, u.ObservedAt
+			return nil
+		}, nil, func(uint) (*dbmodel.Credential, error) { copy := current; return &copy, nil })
+		if reverse {
+			h.RecordSuccess(&success, time.Now())
+			h.RecordFailure(&failure, 502, "old", time.Now())
+		} else {
+			h.RecordFailure(&failure, 502, "old", time.Now())
+			h.RecordSuccess(&success, time.Now())
+		}
+		h.Close()
+		want := 2
+		if reverse {
+			want = 1
+		}
+		if len(updates) != want || current.HealthObservedAt != 20 || current.Status != dbmodel.CredentialActive || current.FailCount != 0 {
+			t.Fatalf("reverse=%v reordered health: current=%+v updates=%+v", reverse, current, updates)
+		}
+		if !reverse && updates[0].FailCount != 2 {
+			t.Fatal("worker recomputed already observed failure count")
+		}
+	}
+}

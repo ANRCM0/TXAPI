@@ -178,6 +178,7 @@ func (s *Store) GetCredential(id uint) (*model.Credential, error) {
 // 这件事在类型上就成立——它改不了 name/api_key/weight，那三个是管理
 // 接口的地盘。
 type HealthUpdate struct {
+	ObservedAt         int64
 	ExpectedGeneration int64
 	ExpectedUpdatedAt  time.Time
 	CredentialID       uint
@@ -219,10 +220,16 @@ func (s *Store) UpdateCredentialHealth(u HealthUpdate) error {
 	// last_used_at 只在真有时才写：调度器对「状态没变」的更新会跳过它
 	// （见 scheduler.HealthUpdate.Changed），传 0 意味着「这次不动它」，
 	// 而不是「把它清成 1970」——后者会让排查时看到一把从未用过的 Key。
+	if u.ObservedAt > 0 {
+		updates["health_observed_at"] = u.ObservedAt
+	}
 	if u.LastUsedAt > 0 {
 		updates["last_used_at"] = u.LastUsedAt
 	}
 	query := s.db.Model(&model.Credential{}).Where("id = ? AND health_generation = ? AND status IN ?", u.CredentialID, u.ExpectedGeneration, []string{model.CredentialActive, model.CredentialCooldown})
+	if u.ObservedAt > 0 {
+		query = query.Where("health_observed_at < ?", u.ObservedAt)
+	}
 	if !u.ExpectedUpdatedAt.IsZero() {
 		query = query.Where("updated_at = ?", u.ExpectedUpdatedAt)
 	}

@@ -215,3 +215,40 @@ func TestS3RetryBudgetAndRouteReloadKeepAuthorization(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewSuccessfulProbeSurvivesDelayedFailureReload(t *testing.T) {
+	channels := lifecycleChannels("http://upstream.test")
+	g, err := New(Options{Channels: channels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	original := channels[0].Credentials[0]
+	g.reportCredentialHealth("test", &original, 502, "first failure")
+	g.reg.mu.RLock()
+	probe := g.reg.channels[1].credentials[0]
+	g.reg.mu.RUnlock()
+	g.reportCredentialHealth("test", &probe, 200, "")
+	// The first failure is committed after the successful runtime probe.
+	late := probe
+	late.UpdatedAt = time.Now().Add(time.Second)
+	channels[0].Credentials[0] = late
+	if err := g.Reload(channels); err != nil {
+		t.Fatal(err)
+	}
+	// Then persistence commits the successful result, which must clear cooling.
+	g.reg.mu.RLock()
+	recovered := g.reg.channels[1].credentials[0]
+	g.reg.mu.RUnlock()
+	recovered.UpdatedAt = time.Now().Add(2 * time.Second)
+	channels[0].Credentials[0] = recovered
+	if err := g.Reload(channels); err != nil {
+		t.Fatal(err)
+	}
+	g.reg.mu.RLock()
+	got := g.reg.channels[1].credentials[0]
+	g.reg.mu.RUnlock()
+	if got.Status != dbmodel.CredentialActive || got.FailCount != 0 {
+		t.Fatalf("delayed failure pinned successful credential in cooldown: %+v", got)
+	}
+}

@@ -167,7 +167,7 @@ func (g *Gateway) Reload(channels []model.Channel) error {
 		}
 		for i, incoming := range next.credentials {
 			for _, local := range old.credentials {
-				if local.ID == incoming.ID && local.HealthGeneration == incoming.HealthGeneration && local.APIKey == incoming.APIKey && (local.UpdatedAt.After(incoming.UpdatedAt) || local.FailCount > incoming.FailCount) {
+				if local.ID == incoming.ID && local.HealthGeneration == incoming.HealthGeneration && local.APIKey == incoming.APIKey && local.HealthObservedAt > incoming.HealthObservedAt {
 					next.credentials[i] = local
 				}
 			}

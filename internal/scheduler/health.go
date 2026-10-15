@@ -52,6 +52,7 @@ func ShouldPenalizeCredential(statusCode int) bool {
 
 // HealthUpdate 是一次健康状态变更的快照。
 type HealthUpdate struct {
+	ObservedAt         int64
 	ExpectedGeneration int64
 	ExpectedUpdatedAt  time.Time
 	CredentialID       uint

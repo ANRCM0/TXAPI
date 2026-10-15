@@ -69,7 +69,7 @@ type Admission interface {
 
 ### 健康回写与关闭
 
-`NewHealthWorker(persist, reload, refresh)` 创建独立队列，不再用进程级可变回调。生产入口注入读取最新凭据的 refresh，健康事件在 worker 内串行计算，凭据代次与写入版本条件保护人工变更；数据库 v3 为该规则增加内部健康代次。每个应用拥有自己的 persister/reloader；Close 幂等并排空已接收事件。回调可有界阻塞，但不能调用自身 Close 形成死锁。纯环缓存仍是调度器内部 memoization，不作为授权或租约账本。
+`NewHealthWorker(persist, reload, refresh)` 创建独立队列，不再用进程级可变回调。生产入口注入读取最新凭据的 refresh，健康事件在 worker 内串行计算，凭据代次与写入版本条件保护人工变更；数据库 v3 增加内部健康代次，v4 增加健康观察顺序标记，运行快照、worker 与数据库条件写入以同一标记识别新旧状态。每个应用拥有自己的 persister/reloader；Close 幂等并排空已接收事件。回调可有界阻塞，但不能调用自身 Close 形成死锁。纯环缓存仍是调度器内部 memoization，不作为授权或租约账本。
 
 关闭顺序：HTTP Shutdown 等在途请求 → 停止恢复/清理生产者 → Close 健康 worker/限流器/执行器 → flush 日志并关闭 store。main 由集成团队维护，功能团队不要自行在包初始化中启动 goroutine。
 

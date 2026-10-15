@@ -345,3 +345,32 @@ func TestS3ConcurrentDeleteRetainsLastCredential(t *testing.T) {
 		t.Fatalf("concurrent deletes emptied channel: count=%d", count)
 	}
 }
+
+func TestReviewHealthObservationOrderingSurvivesFreshCAS(t *testing.T) {
+	st := newCredTestStore(t)
+	defer st.Close()
+	source := st.ListCredentials(1)[0]
+	newest := HealthUpdate{CredentialID: source.ID, ExpectedGeneration: source.HealthGeneration, ExpectedUpdatedAt: source.UpdatedAt, ObservedAt: 200, Status: model.CredentialActive}
+	if err := st.UpdateCredentialHealth(newest); err != nil {
+		t.Fatal(err)
+	}
+	current, err := st.GetCredential(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	older := newest
+	older.ObservedAt = 100
+	older.ExpectedUpdatedAt = current.UpdatedAt
+	older.Status = model.CredentialCooldown
+	older.FailCount = 1
+	if err := st.UpdateCredentialHealth(older); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetCredential(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HealthObservedAt != 200 || got.Status != model.CredentialActive {
+		t.Fatalf("older observation overwrote newer despite fresh CAS: %+v", got)
+	}
+}

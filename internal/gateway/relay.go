@@ -511,11 +511,14 @@ func (g *Gateway) reportCredentialHealth(channel string, cred *dbmodel.Credentia
 	if statusCode != http.StatusOK && scheduler.ShouldPenalizeCredential(statusCode) {
 		g.metrics.RecordCredentialFailure(channel, cred.ID)
 	}
-	g.observeHealth(cred, statusCode, errMsg)
+	observed := g.observeHealth(cred, statusCode, errMsg)
+	if observed == nil {
+		return
+	}
 	if g.healthReporter == nil {
 		return
 	}
-	g.healthReporter(cred, statusCode, errMsg)
+	g.healthReporter(observed, statusCode, errMsg)
 }
 
 // SessionIDHeader 是客户端声明会话 ID 的请求头。

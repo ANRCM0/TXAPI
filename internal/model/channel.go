@@ -76,6 +76,8 @@ type Credential struct {
 	// FailCount 是连续失败次数，驱动指数退避和自动拉黑。
 	FailCount        int   `gorm:"not null;default:0" json:"fail_count"`
 	HealthGeneration int64 `gorm:"not null;default:0" json:"-"`
+	HealthObservedAt int64 `gorm:"not null;default:0" json:"-"`
+	HealthObserved   bool  `gorm:"-" json:"-"`
 	// CooldownUntil 是冷却截止时间，Unix 秒；0 表示不在冷却中。
 	CooldownUntil int64 `gorm:"not null;default:0" json:"cooldown_until"`
 	// LastUsedAt / LastError 用于排查「这个 Key 到底怎么了」。
