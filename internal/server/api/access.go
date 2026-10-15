@@ -292,7 +292,14 @@ func (h *Handler) MyModels(c *gin.Context) {
 		if !ch.IsEnabled() {
 			continue
 		}
-		for _, m := range ch.Models {
+		candidates := append([]string(nil), ch.Models...)
+		for _, name := range ch.Models {
+			if name == "*" {
+				candidates = append(candidates, policy.Models...)
+				break
+			}
+		}
+		for _, m := range candidates {
 			if m != "*" && !seen[m] && policy.Allows(m) {
 				models = append(models, m)
 				seen[m] = true

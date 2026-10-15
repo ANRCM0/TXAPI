@@ -216,3 +216,39 @@ func TestLoginRateLimitAndNoAmbientCookieAuth(t *testing.T) {
 		t.Fatal("ambient cookie authenticated")
 	}
 }
+
+func TestS2WildcardChannelKeepsPersonalAndCallModelListsConsistent(t *testing.T) {
+	f := newAccessFixture(t)
+	admin := f.login(t, "admin")
+	f.createUser(t, admin, "alice", []string{"m1"})
+	alice := f.login(t, "alice")
+	_, key := f.issue(t, alice)
+	channel, err := f.store.GetChannel(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(store.ChannelInput{Name: channel.Name, Type: channel.Type, BaseURL: channel.BaseURL, Models: []string{"*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _, raw := f.request(t, "PUT", "/api/admin/channels/1", string(body), admin); code != 200 {
+		t.Fatalf("wildcard configuration: %d %s", code, raw)
+	}
+	code, out, raw := f.request(t, "GET", "/api/me/models", "", alice)
+	var models []string
+	if err := json.Unmarshal(out["data"], &models); err != nil {
+		t.Fatal(err)
+	}
+	if code != 200 || len(models) != 1 || models[0] != "m1" {
+		t.Fatalf("personal model list disagrees with authorization: %d %s", code, raw)
+	}
+	if code, _, raw := f.request(t, "GET", "/v1/models", "", key); code != 200 || !strings.Contains(raw, `"id":"m1"`) || strings.Contains(raw, `"id":"m2"`) {
+		t.Fatalf("call model list: %d %s", code, raw)
+	}
+	if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, key); code != 200 {
+		t.Fatalf("authorized wildcard call: %d %s", code, raw)
+	}
+	if code, _, _ := f.request(t, "POST", "/v1/chat/completions", `{"model":"m2","messages":[]}`, key); code != 403 {
+		t.Fatalf("wildcard broadened authorization: %d", code)
+	}
+}

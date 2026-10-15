@@ -241,3 +241,48 @@ func TestEmptyKeyAllowlistCannotBecomeAll(t *testing.T) {
 		t.Fatalf("empty list became all: %+v", view)
 	}
 }
+
+func TestConcurrentAdminDemotionKeepsOneActiveAdministrator(t *testing.T) {
+	st := openTestStore(t, "concurrent-admin-demotion")
+	defer st.Close()
+	first, err := st.BootstrapAdmin("first-admin", "first-admin-password-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateUser(&UserInput{Username: "second-admin", Password: "second-admin-password-123", Role: model.RoleAdmin, ModelMode: access.All})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, user := range []*model.User{first, second} {
+		go func(user *model.User) {
+			<-start
+			_, err := st.UpdateUser(user.ID, &UserInput{Username: user.Username, Role: model.RoleUser, Status: model.UserStatusActive, ModelMode: access.All})
+			results <- err
+		}(user)
+	}
+	close(start)
+	success := 0
+	for i := 0; i < 2; i++ {
+		if err := <-results; err == nil {
+			success++
+		}
+	}
+	if success != 1 {
+		t.Fatalf("successful demotions=%d, want exactly one", success)
+	}
+	users, err := st.ListUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	admins := 0
+	for _, user := range users {
+		if user.Role == model.RoleAdmin && user.Status == model.UserStatusActive {
+			admins++
+		}
+	}
+	if admins != 1 {
+		t.Fatalf("active administrators=%d, want one", admins)
+	}
+}
