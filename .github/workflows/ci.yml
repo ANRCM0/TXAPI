@@ -71,6 +71,15 @@ jobs:
       - name: 构建
         run: go build ./...
 
+      - name: S4 原生控制台语法与行为
+        # Node is available on the hosted runner; no install or asset build is needed.
+        run: |
+          node --version
+          node --check web/assets/app.mjs
+          node --check web/assets/api.mjs
+          node --check tests/browser/navigation.cjs
+          node --test web/assets/api.test.mjs
+
       - name: go vet
         # vet 抓的是「能编译但几乎一定是 bug」的写法：Printf 格式串与
         # 参数不匹配、锁拷贝、不可达的代码、结构体标签拼错。

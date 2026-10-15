@@ -98,6 +98,8 @@ func (h *Handler) RegisterAccess(r *gin.RouterGroup) {
 	me.GET("/logs", h.MyLogs)
 	me.GET("/usage", h.MyUsage)
 	admin := r.Group("/api/admin", h.session(true))
+	admin.GET("/config-status", h.ConfigurationStatus)
+	admin.POST("/config-status/apply", h.configurationWrite(), h.ApplyConfiguration)
 	admin.GET("/users", h.Users)
 	admin.POST("/users", h.CreateUser)
 	admin.GET("/users/:id", h.User)

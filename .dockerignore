@@ -17,6 +17,12 @@
 .github
 
 # ---- 数据与本地产物（可能含真实流量/密钥）----
+/config.yaml
+/config.local.yaml
+/.env
+/.env.*
+/.local/
+/tmp/
 data/
 *.db
 *.db-wal

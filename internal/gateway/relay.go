@@ -247,7 +247,9 @@ func (g *Gateway) doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout tim
 		return core.Result{StatusCode: err.StatusCode, Error: err, Termination: core.UpstreamError}
 	}
 	input.Timeout = timeout
-	return g.executor.Execute(c.Request.Context(), c.Writer, input)
+	result := g.executor.Execute(c.Request.Context(), c.Writer, input)
+	g.metrics.RecordAttempt(state(c).ChannelName, string(result.Termination), result.StatusCode, result.Duration)
+	return result
 }
 
 // buildMeta 把渠道配置和选中的凭据组装成一次转发的上下文。

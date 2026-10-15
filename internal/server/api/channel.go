@@ -48,7 +48,7 @@ func (h *Handler) GetChannel(c *gin.Context) {
 	}
 	ch, err := h.store.GetChannel(id)
 	if err != nil {
-		fail(c, err)
+		h.failConfiguration(c, err)
 		return
 	}
 	for i := range ch.Credentials {
@@ -65,11 +65,11 @@ func (h *Handler) CreateChannel(c *gin.Context) {
 	}
 	ch, err := h.store.CreateChannel(&in)
 	if err != nil {
-		fail(c, err)
+		h.failConfiguration(c, err)
 		return
 	}
 	// 建渠道的同时刷新转发层渠道池——这一步就是「不重启就生效」的实现处
-	h.notifyChanged()
+	h.notifyChanged(c)
 	for i := range ch.Credentials {
 		ch.Credentials[i].APIKey = maskKey(ch.Credentials[i].APIKey)
 	}
@@ -88,11 +88,11 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 	}
 	ch, err := h.store.UpdateChannel(id, &in)
 	if err != nil {
-		fail(c, err)
+		h.failConfiguration(c, err)
 		return
 	}
 	// 渠道改了 models/status/priority 都会影响路由，必须热刷新
-	h.notifyChanged()
+	h.notifyChanged(c)
 	for i := range ch.Credentials {
 		ch.Credentials[i].APIKey = maskKey(ch.Credentials[i].APIKey)
 	}
@@ -106,29 +106,25 @@ func (h *Handler) DeleteChannel(c *gin.Context) {
 		return
 	}
 	if err := h.store.DeleteChannel(id); err != nil {
-		fail(c, err)
+		h.failConfiguration(c, err)
 		return
 	}
-	h.notifyChanged()
+	h.notifyChanged(c)
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": id})
 }
 
 // notifyChanged 触发转发层渠道池刷新。
 //
 // 判空是为了让 api.Handler 在单元测试里可以不带 reload 依赖直接用。
-func (h *Handler) notifyChanged() {
-	if h.onChannelsChanged != nil {
-		h.onChannelsChanged()
-	}
+func (h *Handler) notifyChanged(c *gin.Context) {
+	publicationHeaders(c, h.channels.publish(true))
 }
 
 // notifyPricesChanged 让计费引擎重读价格表和分组倍率。
 //
 // 判空同理：计费未启用（billingEngine 为 nil）时管理接口照常工作。
-func (h *Handler) notifyPricesChanged() {
-	if h.onPricesChanged != nil {
-		h.onPricesChanged()
-	}
+func (h *Handler) notifyPricesChanged(c *gin.Context) {
+	publicationHeaders(c, h.prices.publish(true))
 }
 
 // parseID 从路径参数解析 uint ID。

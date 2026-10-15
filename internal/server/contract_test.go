@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"minigateway/internal/model"
+	"minigateway/internal/server/api"
 	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
 )
@@ -153,7 +154,7 @@ func TestOpenAPIContainsEveryRouteAndSecurityBoundary(t *testing.T) {
 }
 func TestOpenAPIMetadataFieldsMatchPublicDTOs(t *testing.T) {
 	c := loadContract(t)
-	cases := map[string]any{"User": model.User{}, "APIKey": model.Token{}, "Channel": model.Channel{}, "Credential": model.Credential{}, "Log": model.RequestLog{}, "Price": model.ModelPrice{}, "Ability": model.Ability{}, "UsageSummary": store.LogSummary{}, "ModelStat": store.ModelStat{}, "ChannelStat": store.ChannelStat{}}
+	cases := map[string]any{"User": model.User{}, "APIKey": model.Token{}, "Channel": model.Channel{}, "Credential": model.Credential{}, "Log": model.RequestLog{}, "Price": model.ModelPrice{}, "Ability": model.Ability{}, "UsageSummary": store.LogSummary{}, "ModelStat": store.ModelStat{}, "ChannelStat": store.ChannelStat{}, "PublicationStatus": api.PublicationStatus{}, "ConfigStatus": api.ConfigStatus{}}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
 			typ := reflect.TypeOf(value)
@@ -268,6 +269,8 @@ func TestOpenAPIControlPlaneSuccessShapes(t *testing.T) {
 		{"GET", "/api/admin/users", "", admin, "200"},
 		{"GET", "/api/admin/model-policy", "", admin, "200"},
 		{"GET", "/api/admin/channels", "", admin, "200"},
+		{"GET", "/api/admin/config-status", "", admin, "200"},
+		{"POST", "/api/admin/config-status/apply", "", admin, "200"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {

@@ -36,6 +36,30 @@ type CredentialInput struct {
 	Weight int    `json:"weight"`
 }
 
+// SavedConfigurationError distinguishes a committed save from a validation or
+// transaction failure. The HTTP layer must still account for its publication.
+type SavedConfigurationError struct{ Err error }
+
+func (e *SavedConfigurationError) Error() string {
+	return "configuration saved, but management cache refresh failed"
+}
+func (e *SavedConfigurationError) Unwrap() error { return e.Err }
+
+func (s *Store) refreshSavedConfiguration() error {
+	if err := s.reloadCache(); err != nil {
+		return &SavedConfigurationError{Err: err}
+	}
+	return nil
+}
+
+func (s *Store) savedChannel(id uint) (*model.Channel, error) {
+	ch, err := s.GetChannel(id)
+	if err != nil {
+		return nil, &SavedConfigurationError{Err: err}
+	}
+	return ch, nil
+}
+
 // validate 在落库前拦住不合理的渠道配置。
 //
 // 宁可在这里报错，也不要等转发时才发现 base_url 是空的——
@@ -120,10 +144,10 @@ func (s *Store) CreateChannel(in *ChannelInput) (*model.Channel, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.reloadCache(); err != nil {
+	if err := s.refreshSavedConfiguration(); err != nil {
 		return nil, err
 	}
-	return s.GetChannel(ch.ID)
+	return s.savedChannel(ch.ID)
 }
 
 // UpdateChannel 更新渠道。
@@ -185,10 +209,10 @@ func (s *Store) UpdateChannel(id uint, in *ChannelInput) (*model.Channel, error)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.reloadCache(); err != nil {
+	if err := s.refreshSavedConfiguration(); err != nil {
 		return nil, err
 	}
-	return s.GetChannel(id)
+	return s.savedChannel(id)
 }
 
 // DeleteChannel 删除渠道，连带删掉它的凭据和能力表条目。
@@ -217,7 +241,7 @@ func (s *Store) DeleteChannel(id uint) error {
 	}
 	// 必须刷缓存：缓存是列表接口和转发热更新的数据源，
 	// 漏了这一步会出现「库里删了、列表还显示、请求还能路由过去」的静默故障
-	return s.reloadCache()
+	return s.refreshSavedConfiguration()
 }
 
 // GetChannel 按 ID 读渠道（含凭据池）。
@@ -231,6 +255,25 @@ func (s *Store) GetChannel(id uint) (*model.Channel, error) {
 		return nil, fmt.Errorf("读取渠道 %d 失败: %w", id, err)
 	}
 	return &ch, nil
+}
+
+// ChannelSnapshot reads one consistent database snapshot for publication,
+// independently of the best-effort management cache.
+func (s *Store) ChannelSnapshot() ([]model.Channel, error) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	var channels []model.Channel
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		return tx.Preload("Credentials", func(db *gorm.DB) *gorm.DB {
+			return db.Order("weight DESC, id ASC")
+		}).Order("priority DESC, id ASC").Find(&channels).Error
+	})
+	if err == nil {
+		s.mu.Lock()
+		s.channels = channels
+		s.mu.Unlock()
+	}
+	return channels, err
 }
 
 // ListChannels 列出所有渠道。

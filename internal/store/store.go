@@ -36,6 +36,7 @@ type Store struct {
 	logs *asyncLogWriter
 
 	mu       sync.RWMutex
+	cacheMu  sync.Mutex
 	channels []model.Channel
 	tokens   map[string]*model.Token
 }
@@ -115,10 +116,8 @@ func (s *Store) AutoMigrate() error {
 
 // Close 先 flush 异步日志再关闭连接池。
 //
-// 顺序是「不丢日志」承诺的兑现处：优雅关闭时 main 先 srv.Shutdown
-// （等在途请求写完并结束日志入队），再走到这里——先排空 channel
-// 落最后一批，数据库才允许关闭。反过来的话 flush 会撞上已关闭的
-// 连接，整批日志丢失。
+// 正常关闭时 main 先 srv.Shutdown，再排空已接收日志后关库。
+// 队列满/关闭时的新记录与最终写库失败均可能丢失，分别计数。
 func (s *Store) Close() error {
 	if s.logs != nil {
 		s.logs.Close()
@@ -143,6 +142,8 @@ var ErrNotFound = errors.New("记录不存在")
 // 全量重读一次是微秒级；而增量更新要维护复杂的失效逻辑，容易漏。
 // 写多读多的场景才值得上增量。
 func (s *Store) reloadCache() error {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	var channels []model.Channel
 	// Preload 凭据池：一次 JOIN 拿全，避免 N+1 查询
 	if err := s.db.Preload("Credentials", func(db *gorm.DB) *gorm.DB {

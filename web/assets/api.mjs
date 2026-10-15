@@ -1,0 +1,105 @@
+export const list = value => Array.isArray(value) ? value : [];
+export const models = value => [...new Set(String(value || "").split(/[\s,]+/).filter(Boolean))];
+
+export function policyInput(values) {
+  return { model_mode: values.model_mode, models: values.model_mode === "all" ? [] : models(values.models) };
+}
+
+function limit(value, integer = false) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number < 0 || (integer && !Number.isSafeInteger(number))) {
+    throw new Error("Limits must be finite, non-negative numbers; request and concurrency limits must be integers.");
+  }
+  return number;
+}
+
+export function userInput(values) {
+  return {
+    username: values.username.trim(), password: values.password || "",
+    role: values.role, status: values.status, ...policyInput(values),
+    quota: limit(values.quota), rpm_limit: limit(values.rpm_limit, true),
+    tpm_limit: limit(values.tpm_limit, true), concurrency_limit: limit(values.concurrency_limit, true),
+  };
+}
+
+export function keyInput(values) {
+  return {
+    name: values.name, status: values.status, ...policyInput(values),
+    quota: limit(values.quota), rpm_limit: limit(values.rpm_limit, true),
+    tpm_limit: limit(values.tpm_limit, true), concurrency_limit: limit(values.concurrency_limit, true),
+    expires_in_seconds: values.expiry_action === "keep" ? 0 : limit(values.expires_in_seconds, true),
+    preserve_expiry: values.expiry_action === "keep",
+  };
+}
+
+export function channelInput(values) {
+  const mapping = JSON.parse(values.model_mapping || "{}");
+  if (!mapping || Array.isArray(mapping) || typeof mapping !== "object" ||
+      Object.values(mapping).some(value => typeof value !== "string")) {
+    throw new Error("Model mapping must be a JSON object with string values.");
+  }
+  const priority = Number(values.priority || 0);
+  if (!Number.isSafeInteger(priority)) throw new Error("Priority must be an integer.");
+  const result = {
+    name: values.name.trim(), type: values.type, base_url: values.base_url.trim(),
+    models: models(values.models), model_mapping: mapping, group_name: values.group_name || "default",
+    priority, weight: limit(values.weight, true), status: values.status,
+  };
+  // An edited channel must not send its masked key back or replace the pool.
+  if (values.api_key) result.api_key = values.api_key;
+  return result;
+}
+
+export function createClient({ onUnauthorized = () => {}, onPending = () => {}, fetcher = fetch } = {}) {
+  let session = "";
+  const pending = new Set();
+  return {
+    setSession(value) {
+      for (const controller of pending) controller.abort();
+      pending.clear();
+      session = value;
+    },
+    async request(path, { method = "GET", body, callKey, signal, timeout = 20000 } = {}) {
+      if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Only same-origin API paths are allowed.");
+      const controller = new AbortController();
+      const capturedSession = session;
+      const abort = () => controller.abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) controller.abort();
+      pending.add(controller);
+      const timer = setTimeout(abort, timeout);
+      try {
+        const headers = { Accept: "application/json" };
+        const token = callKey === undefined ? capturedSession : callKey;
+        if (token) headers.Authorization = `Bearer ${token}`;
+        if (body !== undefined) headers["Content-Type"] = "application/json";
+        const response = await fetcher(path, {
+          method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+          cache: "no-store", credentials: "omit", redirect: "error", signal: controller.signal,
+        });
+        const text = await response.text();
+        let value;
+        try { value = text ? JSON.parse(text) : {}; }
+        catch { throw new Error(`Unexpected server response (HTTP ${response.status}).`); }
+        if (!response.ok) {
+          if (response.status === 401 && callKey === undefined && capturedSession && capturedSession === session) {
+            onUnauthorized();
+          }
+          const error = new Error(value.error?.message || `Request failed (HTTP ${response.status}).`);
+          error.status = response.status;
+          error.data = value.data;
+          throw error;
+        }
+        if (response.headers.get("X-TXAPI-Publication-State") === "pending") onPending();
+        return value;
+      } catch (error) {
+        if (controller.signal.aborted) throw new Error("Request canceled or timed out.");
+        throw error;
+      } finally {
+        clearTimeout(timer);
+        pending.delete(controller);
+        signal?.removeEventListener("abort", abort);
+      }
+    },
+  };
+}

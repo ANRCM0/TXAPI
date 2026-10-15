@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.1.0",
-    "description": "Collaboration baseline after S2. Route and auth coverage is checked against Gin in tests. This describes currently implemented wire behavior, not S3 concurrency, S4 UI or S5 reliable accounting. New control-plane UI uses session Bearer only; model clients use API Key Bearer. Legacy root-key routes remain protected but are deprecated for new consumers. Non-streaming requests are bounded to 20 MiB. Authentication uses current DB state; existing streams are not force-canceled on user disable."
+    "version": "0.2.0",
+    "description": "TXAPI S4 control console contracts. Management uses session Bearer; model calls use API-key Bearer. Legacy root-key APIs remain deprecated. Publication revisions are per-process, scoped by epoch, and cover channel/credential and price/rate snapshots only. HTTP mutation success means database save; X-TXAPI-Publication-State distinguishes applied from pending. User/key/model-policy changes take effect at next authentication. No S5 reliable ledger is promised."
   },
   "servers": [
     {
@@ -2030,6 +2030,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -2058,6 +2082,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -2178,6 +2212,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -2206,6 +2264,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -2268,6 +2336,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -2296,6 +2388,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -2427,6 +2529,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -2455,6 +2581,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -2513,6 +2649,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -2544,6 +2704,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2563,7 +2733,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialInput"
+                "$ref": "#/components/schemas/CredentialUpdateInput"
               }
             }
           }
@@ -2603,6 +2773,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -2631,6 +2825,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -2679,6 +2883,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -2707,6 +2935,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -3208,6 +3446,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -3290,6 +3552,30 @@
                   }
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -3363,6 +3649,30 @@
                     "data"
                   ]
                 }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
               }
             }
           },
@@ -3579,6 +3889,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -3597,6 +3931,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -3715,6 +4059,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -3733,6 +4101,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -3799,6 +4177,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -3817,6 +4219,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -3946,6 +4358,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -3964,6 +4400,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -4026,6 +4472,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -4044,6 +4514,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -4066,7 +4546,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialInput"
+                "$ref": "#/components/schemas/CredentialUpdateInput"
               }
             }
           }
@@ -4110,6 +4590,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -4128,6 +4632,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -4180,6 +4694,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -4198,6 +4736,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database commit succeeded but cache/readback failed. saved=true; inspect publication state before retrying the save. Publication headers still describe the attempted revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedConfigurationError"
                 }
               }
             }
@@ -4673,6 +5221,30 @@
                   ]
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -4749,6 +5321,30 @@
                   }
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
+              }
             }
           },
           "default": {
@@ -4816,6 +5412,30 @@
                     "data"
                   ]
                 }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Desired-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Saved revision in the current epoch"
+              },
+              "X-TXAPI-Applied-Revision": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Last applied revision"
+              },
+              "X-TXAPI-Publication-State": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "pending"
+                  ]
+                },
+                "description": "pending means saved but not applied; inspect /api/admin/config-status"
               }
             }
           },
@@ -5296,6 +5916,210 @@
         },
         "deprecated": true
       }
+    },
+    "/api/admin/config-status": {
+      "get": {
+        "operationId": "get_config_status",
+        "summary": "Read saved/applied configuration revisions",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current process publication state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ConfigStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/config-status/apply": {
+      "post": {
+        "operationId": "apply_config_status",
+        "summary": "Retry publishing the current saved configuration without creating a new revision",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Both resources applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ConfigStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "At least one publication failed; previous snapshot retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ConfigStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "operationId": "get_console",
+        "summary": "Embedded console (no external assets or build runtime)",
+        "tags": [
+          "console"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "HTML, CSS or ES module; CSP and no-cache headers"
+          },
+          "404": {
+            "description": "Unknown asset; never falls back to the console"
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_console",
+        "summary": "Embedded console (no external assets or build runtime)",
+        "tags": [
+          "console"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "HTML, CSS or ES module; CSP and no-cache headers"
+          },
+          "404": {
+            "description": "Unknown asset; never falls back to the console"
+          }
+        }
+      }
+    },
+    "/ui/{asset}": {
+      "get": {
+        "operationId": "get_console_asset",
+        "summary": "Embedded console (no external assets or build runtime)",
+        "tags": [
+          "console"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "HTML, CSS or ES module; CSP and no-cache headers"
+          },
+          "404": {
+            "description": "Unknown asset; never falls back to the console"
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "app.css",
+                "app.mjs",
+                "api.mjs"
+              ]
+            }
+          }
+        ]
+      },
+      "head": {
+        "operationId": "head_console_asset",
+        "summary": "Embedded console (no external assets or build runtime)",
+        "tags": [
+          "console"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "HTML, CSS or ES module; CSP and no-cache headers"
+          },
+          "404": {
+            "description": "Unknown asset; never falls back to the console"
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "app.css",
+                "app.mjs",
+                "api.mjs"
+              ]
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -5753,6 +6577,11 @@
             "minimum": 0,
             "maximum": 315360000,
             "description": "Relative expiry from this create/update call; 0 means no expiry."
+          },
+          "preserve_expiry": {
+            "type": "boolean",
+            "default": false,
+            "description": "On key update, preserve the existing exact expiry (including already expired keys). Default false keeps legacy replace-from-now semantics; ignored on creation."
           }
         },
         "description": "Server generates the key. Do not send key. Self-service owner must be absent or equal to the signed-in user. Omitted model policy inherits effective owner/system policy on create; omitted on PUT preserves prior key policy. Zero limits inherit owner limits. PUT is a full resource update for other fields."
@@ -5816,6 +6645,11 @@
             "minimum": 0,
             "maximum": 315360000,
             "description": "Relative expiry from this create/update call; 0 means no expiry."
+          },
+          "preserve_expiry": {
+            "type": "boolean",
+            "default": false,
+            "description": "On key update, preserve the existing exact expiry (including already expired keys). Default false keeps legacy replace-from-now semantics; ignored on creation."
           }
         },
         "required": [
@@ -6429,6 +7263,92 @@
           "input"
         ],
         "additionalProperties": true
+      },
+      "PublicationStatus": {
+        "type": "object",
+        "required": [
+          "desired_revision",
+          "applied_revision",
+          "last_error",
+          "updated_at"
+        ],
+        "properties": {
+          "desired_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "applied_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_error": {
+            "type": "string",
+            "description": "Safe publication failure reason; no loader error or secret."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ConfigStatus": {
+        "type": "object",
+        "required": [
+          "epoch",
+          "channels",
+          "prices"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "string",
+            "description": "Changes at process start. Revisions must not be compared across epochs."
+          },
+          "channels": {
+            "$ref": "#/components/schemas/PublicationStatus"
+          },
+          "prices": {
+            "$ref": "#/components/schemas/PublicationStatus"
+          }
+        }
+      },
+      "CredentialUpdateInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "api_key": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Omitted or empty preserves the existing key. Never send a masked key back."
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          }
+        }
+      },
+      "SavedConfigurationError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Error"
+          },
+          {
+            "type": "object",
+            "required": [
+              "saved"
+            ],
+            "properties": {
+              "saved": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            }
+          }
+        ]
       }
     }
   }

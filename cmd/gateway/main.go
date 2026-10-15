@@ -93,7 +93,7 @@ func main() {
 		os.Exit(1)
 	}
 	// defer 保证任何退出路径都 flush 异步日志：Close 先排空日志队列
-	// 再关连接，进程退出不丢日志（SPEC 2.4）
+	// 再关连接；普通日志可能因队列满/写库失败而丢弃并计数。
 	defer st.Close()
 	if *initAdmin {
 		user, err := st.BootstrapAdmin(os.Getenv("TXAPI_ADMIN_USERNAME"), os.Getenv("TXAPI_ADMIN_PASSWORD"))
@@ -159,11 +159,7 @@ func main() {
 			LastUsedAt:    u.LastUsedAt,
 		})
 	}, func() {
-		if err := gw.Reload(st.Channels()); err != nil {
-			// 重载失败必须告警：状态改了但转发层没看到，等于这次健康
-			// 反馈白做，坏 Key 还会继续被选中
-			slog.Error("[调度] 凭据状态变更后刷新渠道池失败", "err", err)
-		}
+		gw.RefreshHealth(st.Channels())
 	}, func(id uint) (*model.Credential, error) {
 		return st.GetCredential(id)
 	})
@@ -203,7 +199,7 @@ func main() {
 	stopRecovery := scheduler.StartRecovery(func() (int, error) {
 		n, err := st.RecoverCooledDownCredentials()
 		if err == nil && n > 0 {
-			err = gw.Reload(st.Channels())
+			gw.RefreshHealth(st.Channels())
 		}
 		return n, err
 	}, scheduler.RecoveryInterval)
@@ -284,14 +280,18 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:    cfg.Server.Addr,
-		Handler: httpEngine,
+		Addr:              cfg.Server.Addr,
+		Handler:           httpEngine,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// 7. 优雅关闭：收到信号后先停止接收新请求，给在途请求 10 秒收尾时间。
 	//    网关持有上游连接，硬杀会导致客户端拿到半截响应。
 	//    在途请求全部结束后 main 返回，defer 依次执行：st.Close() 先
-	//    flush 异步日志（此时已无新日志入队）再关数据库——日志一条不丢。
+	//    flush 已接收的异步日志后再关数据库；失败与强制退出不保证日志完整。
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("HTTP 服务异常退出", "err", err)

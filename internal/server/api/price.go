@@ -68,7 +68,7 @@ func (h *Handler) UpsertPrice(c *gin.Context) {
 		return
 	}
 	// 改价立即失效缓存——这就是「不重启网关就生效」的那一环
-	h.notifyPricesChanged()
+	h.notifyPricesChanged(c)
 	c.JSON(http.StatusOK, gin.H{"data": price})
 }
 
@@ -82,7 +82,7 @@ func (h *Handler) DeletePrice(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	h.notifyPricesChanged()
+	h.notifyPricesChanged(c)
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "model": modelName})
 }
 
@@ -98,7 +98,7 @@ func (h *Handler) SetGroupRates(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	h.notifyPricesChanged()
+	h.notifyPricesChanged(c)
 	c.JSON(http.StatusOK, gin.H{"data": rates})
 }
 

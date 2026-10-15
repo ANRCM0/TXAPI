@@ -58,7 +58,7 @@ func (s *Store) CreateCredential(channelID uint, in *CredentialInput) (*model.Cr
 	}
 	// 与渠道 CRUD 同样的纪律：写后即刷缓存。漏了这一步会出现
 	// 「API 显示加成功了、转发还在用旧凭据池」的静默故障。
-	if err := s.reloadCache(); err != nil {
+	if err := s.refreshSavedConfiguration(); err != nil {
 		return nil, err
 	}
 	return cred, nil
@@ -79,6 +79,9 @@ func (s *Store) UpdateCredential(id uint, in *CredentialInput) (*model.Credentia
 		return nil, fmt.Errorf("读取凭据 %d 失败: %w", id, err)
 	}
 	// excludeID 传自己：更新时 api_key 没变（等于自己的旧值）不能算重复
+	if in.APIKey == "" {
+		in.APIKey = existing.APIKey
+	}
 	if err := s.validateCredentialInput(existing.ChannelID, in, id); err != nil {
 		return nil, err
 	}
@@ -91,10 +94,10 @@ func (s *Store) UpdateCredential(id uint, in *CredentialInput) (*model.Credentia
 	if err := s.db.Model(&model.Credential{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("更新凭据失败: %w", err)
 	}
-	if err := s.reloadCache(); err != nil {
+	if err := s.refreshSavedConfiguration(); err != nil {
 		return nil, err
 	}
-	return s.GetCredential(id)
+	return s.savedCredential(id)
 }
 
 // DeleteCredential 删除凭据。
@@ -123,7 +126,7 @@ func (s *Store) DeleteCredential(id uint) error {
 	if err != nil {
 		return err
 	}
-	return s.reloadCache()
+	return s.refreshSavedConfiguration()
 }
 
 // SetCredentialStatus 手动设置凭据状态，用于「重置为 active」和「解除拉黑」。
@@ -153,10 +156,18 @@ func (s *Store) SetCredentialStatus(id uint, status string) (*model.Credential, 
 	if res.RowsAffected == 0 {
 		return nil, fmt.Errorf("凭据 %d: %w", id, ErrNotFound)
 	}
-	if err := s.reloadCache(); err != nil {
+	if err := s.refreshSavedConfiguration(); err != nil {
 		return nil, err
 	}
-	return s.GetCredential(id)
+	return s.savedCredential(id)
+}
+
+func (s *Store) savedCredential(id uint) (*model.Credential, error) {
+	cred, err := s.GetCredential(id)
+	if err != nil {
+		return nil, &SavedConfigurationError{Err: err}
+	}
+	return cred, nil
 }
 
 // GetCredential 按 ID 读单个凭据。

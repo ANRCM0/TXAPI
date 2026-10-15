@@ -29,7 +29,7 @@ def ports():
         return [sock.getsockname()[1] for sock in sockets]
 
 
-def request(url, key=None, payload=None):
+def request(url, key=None, payload=None, method=None):
     headers = {}
     if key:
         headers["Authorization"] = "Bearer " + key
@@ -37,7 +37,7 @@ def request(url, key=None, payload=None):
     if payload is not None:
         headers["Content-Type"] = "application/json"
         data = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data, headers=headers)
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with HTTP.open(req, timeout=10) as response:
             return response.status, response.read()
@@ -60,9 +60,9 @@ def ready(process, port):
 
 
 @contextlib.contextmanager
-def service(command, log_path):
-    with log_path.open("w+") as log:
-        process = subprocess.Popen(command, cwd=ROOT, stdout=log, stderr=log)
+def service(command, log_path, env=None):
+    with log_path.open("w+", encoding="utf-8", errors="replace") as log:
+        process = subprocess.Popen(command, cwd=ROOT, stdout=log, stderr=log, env=env)
         try:
             yield process
         except BaseException:
@@ -80,10 +80,77 @@ def service(command, log_path):
                     process.wait(timeout=5)
 
 
+def control_workflow(base, upstream_port):
+    """Exercise the actual console APIs without using the legacy admin key."""
+    def api(path, session=None, payload=None, method=None, expected=200):
+        status, raw = request(base + path, session, payload, method)
+        assert status == expected, (path, status, raw)
+        return json.loads(raw) if raw else {}
+
+    with HTTP.open(base + "/", timeout=10) as response:
+        assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+        assert b"TXAPI / Control Room" in response.read()
+    for asset in ["app.mjs", "api.mjs", "app.css"]:
+        status, _ = request(base + "/ui/" + asset)
+        assert status == 200
+    assert request(base + "/ui/api.test.mjs")[0] == 404
+    admin = api("/api/auth/login", payload={
+        "username": "smoke-admin", "password": "smoke-admin-password-only"
+    })["session_token"]
+    initial = api("/api/admin/config-status", admin)["data"]
+    for name in ["console-user", "console-other"]:
+        api("/api/admin/users", admin, {
+            "username": name, "password": name + "-test-password", "role": "user",
+            "model_mode": "allowlist", "models": ["console-model"],
+        }, expected=201)
+    channel = api("/api/admin/channels", admin, {
+        "name": "console-upstream", "type": "openai",
+        "base_url": f"http://127.0.0.1:{upstream_port}", "api_key": "test-upstream-console-only",
+        "models": ["console-model"], "model_mapping": {"console-model": "mapped-model"},
+    }, expected=201)["data"]
+    after = api("/api/admin/config-status", admin)["data"]
+    assert after["epoch"] == initial["epoch"]
+    assert after["channels"]["desired_revision"] > initial["channels"]["desired_revision"]
+    assert after["channels"]["applied_revision"] == after["channels"]["desired_revision"]
+    session = api("/api/auth/login", payload={
+        "username": "console-user", "password": "console-user-test-password"
+    })["session_token"]
+    other = api("/api/auth/login", payload={
+        "username": "console-other", "password": "console-other-test-password"
+    })["session_token"]
+    api("/api/admin/config-status", session, expected=403)
+    assert api("/api/me/models", session)["data"] == ["console-model"]
+    key = api("/api/me/keys", session, {
+        "name": "console-client", "model_mode": "allowlist", "models": ["console-model"],
+    }, expected=201)["data"]
+    assert "key" not in api("/api/me/keys", session)["data"][0]
+    api(f"/api/me/keys/{key['id']}", other, expected=404)
+    api("/v1/chat/completions", key["key"], {
+        "model": "console-model", "messages": [{"role": "user", "content": "hello"}],
+    })
+    deadline = time.monotonic() + 5
+    while api("/api/me/usage", session)["data"]["usage"]["total_requests"] != 1:
+        assert time.monotonic() < deadline, "owner usage did not settle"
+        time.sleep(0.05)
+    assert api("/api/me/logs", other)["data"] in [None, []]
+    # Credential metadata edits preserve the existing upstream secret.
+    credential = channel["credentials"][0]
+    api(f"/api/admin/credentials/{credential['id']}", admin,
+        {"name": "renamed", "weight": 2}, method="PUT")
+    api("/api/admin/config-status/apply", admin, method="POST")
+    assert "gateway_attempts_total" in request(base + "/metrics")[1].decode()
+    api("/api/auth/logout", session, method="POST", expected=204)
+    api("/api/me", session, expected=401)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--go", default="go", help="Go executable")
+    parser.add_argument("--preview", action="store_true", help="Keep isolated services running after checks for manual console QA")
     args = parser.parse_args()
+    # Never inherit a real deployment's database path, bind address or secrets.
+    clean_env = {key: value for key, value in os.environ.items()
+                 if not key.startswith(("GATEWAY_", "TXAPI_ADMIN_"))}
     with tempfile.TemporaryDirectory(prefix="gateway-smoke-") as directory:
         work = Path(directory)
         gateway, upstream = work / "gateway", work / "upstream"
@@ -106,13 +173,13 @@ def main():
         # JSON is a YAML subset; this avoids a separate Python YAML dependency.
         config_path = work / "config.json"
         config_path.write_text(json.dumps(config))
-        env = dict(os.environ, TXAPI_ADMIN_USERNAME="smoke-admin", TXAPI_ADMIN_PASSWORD="smoke-admin-password-only")
+        env = dict(clean_env, TXAPI_ADMIN_USERNAME="smoke-admin", TXAPI_ADMIN_PASSWORD="smoke-admin-password-only")
         subprocess.run([str(gateway), "-config", str(config_path), "-init-admin"], env=env, cwd=ROOT, check=True, timeout=30)
-        subprocess.run([str(gateway), "-config", str(config_path), "-seed-only"], cwd=ROOT, check=True, timeout=30)
-        subprocess.run([str(gateway), "-config", str(config_path), "-claim-token", "1", "-owner-user", "1"], cwd=ROOT, check=True, timeout=30)
-        with service([str(upstream), f"127.0.0.1:{upstream_port}"], work / "upstream.log") as up:
+        subprocess.run([str(gateway), "-config", str(config_path), "-seed-only"], env=clean_env, cwd=ROOT, check=True, timeout=30)
+        subprocess.run([str(gateway), "-config", str(config_path), "-claim-token", "1", "-owner-user", "1"], env=clean_env, cwd=ROOT, check=True, timeout=30)
+        with service([str(upstream), f"127.0.0.1:{upstream_port}"], work / "upstream.log", clean_env) as up:
             ready(up, upstream_port)
-            with service([str(gateway), "-config", str(config_path)], work / "gateway.log") as gw:
+            with service([str(gateway), "-config", str(config_path)], work / "gateway.log", clean_env) as gw:
                 ready(gw, gateway_port)
                 base = f"http://127.0.0.1:{gateway_port}"
                 status, body = request(base + "/healthz")
@@ -144,7 +211,17 @@ def main():
                 assert text == "你好，这是流式响应。", text
                 assert any(choice.get("finish_reason") == "stop" for choice in choices)
                 assert any(chunk.get("usage", {}).get("total_tokens") == 18 for chunk in chunks)
-    print("PASS: startup, authentication, model list/mapping, normal response, complete SSE text/finish/usage")
+                control_workflow(base, upstream_port)
+                if args.preview:
+                    print(f"PASS: all smoke checks; isolated console preview at {base}", flush=True)
+                    print("Test login: smoke-admin / smoke-admin-password-only. Ctrl+C stops and removes test data.", flush=True)
+                    try:
+                        input("Press Enter to stop preview: ")
+                    except KeyboardInterrupt:
+                        pass
+                    except EOFError:
+                        print("Preview needs interactive stdin; isolated services stopped.", flush=True)
+    print("PASS: startup, auth, model mapping, normal/SSE response, embedded console, S4 admin-user-publication-call-usage workflow")
 
 
 if __name__ == "__main__":

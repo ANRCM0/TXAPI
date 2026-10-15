@@ -43,6 +43,9 @@ services:
       # -p 映射的端口根本连不上（流量到不了容器的回环接口）。
       # 所以这里显式覆盖，端口暴露范围由下面的 ports 决定。
       GATEWAY_ADDR: 0.0.0.0:8080
+      # Keep the database on the named volume even with the local YAML template.
+      # Existing installations must back up/move their actual DB before switching.
+      GATEWAY_DATABASE_PATH: /app/data/gateway.db
       GATEWAY_LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-info}
       GATEWAY_LOG_RETENTION_DAYS: ${GATEWAY_LOG_RETENTION_DAYS:-30}
       # 渠道上游 Key。下面的 1/2 与 config.yaml 里的渠道 id 对应；

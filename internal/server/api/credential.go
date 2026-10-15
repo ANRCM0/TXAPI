@@ -45,13 +45,13 @@ func (h *Handler) CreateCredential(c *gin.Context) {
 	}
 	cred, err := h.store.CreateCredential(id, &in)
 	if err != nil {
-		fail(c, err)
+		h.failConfiguration(c, err)
 		return
 	}
 	// 凭据进池子就是转发层的事：必须刷渠道池，否则新 Key 要等下次
 	// 渠道变更才生效——「加了 Key 但流量不打过去」是最容易误判成
 	// 「Key 无效」的故障
-	h.notifyChanged()
+	h.notifyChanged(c)
 	// 创建响应**不**打码：这是调用方唯一一次能拿到完整 Key 的机会，
 	// 和 CreateToken 同理。打码在这里等于让用户没法用刚建的凭据。
 	c.JSON(http.StatusCreated, gin.H{"data": cred})
@@ -73,12 +73,12 @@ func (h *Handler) UpdateCredential(c *gin.Context) {
 	}
 	cred, err := h.store.UpdateCredential(id, &in)
 	if err != nil {
-		fail(c, err)
+		h.failConfiguration(c, err)
 		return
 	}
 	// 换了 Key 就必须刷池子：转发层持有的是缓存里的 Key 快照，
 	// 不刷的话旧 Key 会一直用到下一次无关的渠道变更
-	h.notifyChanged()
+	h.notifyChanged(c)
 	cred.APIKey = maskKey(cred.APIKey)
 	c.JSON(http.StatusOK, gin.H{"data": cred})
 }
@@ -90,10 +90,10 @@ func (h *Handler) DeleteCredential(c *gin.Context) {
 		return
 	}
 	if err := h.store.DeleteCredential(id); err != nil {
-		fail(c, err)
+		h.failConfiguration(c, err)
 		return
 	}
-	h.notifyChanged()
+	h.notifyChanged(c)
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": id})
 }
 
@@ -116,10 +116,10 @@ func (h *Handler) SetCredentialStatus(c *gin.Context) {
 	}
 	cred, err := h.store.SetCredentialStatus(id, in.Status)
 	if err != nil {
-		fail(c, err)
+		h.failConfiguration(c, err)
 		return
 	}
-	h.notifyChanged()
+	h.notifyChanged(c)
 	cred.APIKey = maskKey(cred.APIKey)
 	c.JSON(http.StatusOK, gin.H{"data": cred})
 }
