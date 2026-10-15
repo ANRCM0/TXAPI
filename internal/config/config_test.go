@@ -22,6 +22,20 @@ func writeCfg(t *testing.T, body string) string {
 // minimalCfg 是能通过 validate 的最小配置（必填 admin_key）。
 const minimalCfg = "admin_key: test-key\n"
 
+func TestSessionAffinityDefaultsOffAndCanBeEnabled(t *testing.T) {
+	cfg, err := Load(writeCfg(t, minimalCfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.SessionAffinity {
+		t.Fatal("session affinity must be opt-in")
+	}
+	cfg, err = Load(writeCfg(t, minimalCfg+"server:\n  session_affinity: true\n"))
+	if err != nil || !cfg.Server.SessionAffinity {
+		t.Fatalf("session affinity config: %v %+v", err, cfg.Server)
+	}
+}
+
 func TestRetryTimesZeroDisablesRetries(t *testing.T) {
 	cfg, err := Load(writeCfg(t, "admin_key: test-key\nserver:\n  retry_times: 0\n"))
 	if err != nil {

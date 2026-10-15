@@ -27,7 +27,15 @@ func PickWithAffinity(creds []dbmodel.Credential, sessionID string, exclude map[
 	if len(usable) == 0 {
 		return nil, false
 	}
-	return affinityTarget(usable, sessionID)
+	if len(usable) > 4096 {
+		return Pick(usable, exclude, now)
+	}
+	sort.Slice(usable, func(i, j int) bool { return usable[i].ID < usable[j].ID })
+	target, ok := affinityTarget(usable, sessionID)
+	if ok {
+		return target, true
+	}
+	return Pick(usable, exclude, now)
 }
 
 // vnodeScale 是每单位权重放大出的虚拟节点数。
@@ -123,15 +131,29 @@ func getRing(usable []dbmodel.Credential, key string) *credRing {
 }
 
 // buildRing 构建一致性哈希环。
+const ringMaxNodes = 32768
+
 func buildRing(usable []dbmodel.Credential) *credRing {
-	nodes := make([]ringNode, 0, len(usable)*vnodeScale)
-	for i := range usable {
-		replicas := effectiveWeight(usable[i].Weight) * vnodeScale
+	total := float64(0)
+	for _, c := range usable {
+		total += float64(effectiveWeight(c.Weight))
+	}
+	nodes := make([]ringNode, 0, ringMaxNodes)
+	for i, c := range usable {
+		replicas := int(float64(effectiveWeight(c.Weight)) * vnodeScale)
+		if total*vnodeScale > ringMaxNodes {
+			replicas = int(float64(ringMaxNodes-len(usable))*float64(effectiveWeight(c.Weight))/total) + 1
+		}
 		for r := 0; r < replicas; r++ {
-			nodes = append(nodes, ringNode{pos: ringPos(usable[i].ID, r), idx: uint32(i)})
+			nodes = append(nodes, ringNode{pos: ringPos(c.ID, r), idx: uint32(i)})
 		}
 	}
-	sort.Slice(nodes, func(a, b int) bool { return nodes[a].pos < nodes[b].pos })
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].pos == nodes[j].pos {
+			return nodes[i].idx < nodes[j].idx
+		}
+		return nodes[i].pos < nodes[j].pos
+	})
 	return &credRing{nodes: nodes}
 }
 

@@ -58,10 +58,8 @@ func StartRecovery(scan RecoveryScan, interval time.Duration) func() {
 	}()
 	// 返回的停止函数等 goroutine 真正退出才返回：main 的优雅关闭链路
 	// 随后会关数据库，不等的话恢复任务可能在库已关闭后还去读它
-	return func() {
-		close(stop)
-		wg.Wait()
-	}
+	var once sync.Once
+	return func() { once.Do(func() { close(stop); wg.Wait() }) }
 }
 
 // recoverOnce 跑一轮恢复。失败只告警不中断：扫描失败（比如库正忙）

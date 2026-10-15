@@ -33,13 +33,10 @@ import (
 // window 是限流窗口长度。RPM/TPM 的「每分钟」就是 60 秒。
 const window = time.Minute
 
-// maxKeys 是内存表的最大条目数。
-//
-// 为什么要有上限：令牌级限流的 key 是令牌 ID，数量天然有界；
-// 但 IP 级限流的 key 是客户端 IP，一个扫描器换着 IP 打就能把表撑爆。
-// 超限时按「最久未更新」淘汰（见 evictOldest），宁可让老 IP 的计数
-// 归零重来，也不要让网关被自己的限流表打挂。
+// maxKeys and maxBucketEvents bound limiter memory. Live windows are never
+// evicted to admit a new identity; full tables reject conservatively.
 const maxKeys = 4096
+const maxBucketEvents = 4096
 
 // ErrLimiterClosed 表示限流器已关闭，拒绝继续计数。
 //
@@ -123,10 +120,16 @@ func (m *memoryLimiter) AllowRequest(ctx context.Context, key string, limit int,
 		return false, 0
 	}
 	b := m.touch(key, now)
-	b.prune(now.Add(-m.window))
-	if len(b.events) >= limit {
+	if b == nil {
+		return false, 1
+	}
+	b.prune(now.Add(-m.windowDuration()))
+	if len(b.events) >= limit || len(b.events) >= maxBucketEvents {
 		// 窗口满了。还要等多久 = 最旧那条记录滑出窗口的时间。
-		oldest := b.events[len(b.events)-limit]
+		oldest := b.events[0]
+		if len(b.events) >= limit {
+			oldest = b.events[len(b.events)-limit]
+		}
 		return false, m.retryAfter(oldest.at, now)
 	}
 	b.events = append(b.events, event{at: now, n: 1})
@@ -155,7 +158,13 @@ func (m *memoryLimiter) AllowTokens(ctx context.Context, key string, limit, toke
 		return false, 0
 	}
 	b := m.touch(key, now)
-	b.prune(now.Add(-m.window))
+	if b == nil {
+		return false, 1
+	}
+	b.prune(now.Add(-m.windowDuration()))
+	if len(b.events) >= maxBucketEvents {
+		return false, m.retryAfter(b.events[0].at, now)
+	}
 	used := 0
 	for _, e := range b.events {
 		used += e.n
@@ -164,6 +173,9 @@ func (m *memoryLimiter) AllowTokens(ctx context.Context, key string, limit, toke
 		// 预估量已经超了。等多久要看「哪条记录滑出后能腾出足够的量」，
 		// 但逐个试算是 O(n)；自用场景下统一按最旧记录的过期时间给，
 		// 客户端在这个时间之后重试大概率能过（窗口是滚动的）。
+		if len(b.events) == 0 {
+			return false, 1
+		}
 		oldest := b.events[0]
 		return false, m.retryAfter(oldest.at, now)
 	}
@@ -186,8 +198,17 @@ func (m *memoryLimiter) AddTokens(ctx context.Context, key string, delta int, no
 		return
 	}
 	b := m.touch(key, now)
-	b.prune(now.Add(-m.window))
-	b.events = append(b.events, event{at: now, n: delta})
+	if b == nil {
+		slog.Warn("token usage tracker full")
+		return
+	}
+	b.prune(now.Add(-m.windowDuration()))
+	if len(b.events) >= maxBucketEvents {
+		b.events[len(b.events)-1].n += delta
+		b.events[len(b.events)-1].at = now
+	} else {
+		b.events = append(b.events, event{at: now, n: delta})
+	}
 }
 
 // touch 取（或建）一个 key 的窗口，并更新它的最近访问时间。
@@ -195,10 +216,13 @@ func (m *memoryLimiter) AddTokens(ctx context.Context, key string, delta int, no
 func (m *memoryLimiter) touch(key string, now time.Time) *bucket {
 	b, ok := m.buckets[key]
 	if !ok {
-		// 建新条目前先淘汰：否则一次突发的新 key 洪水
+		// 建新条目前先清理过期桶：否则一次突发的新 key 洪水
 		// （换着 IP 扫描）就能把内存表撑到 maxKeys 之外。
 		if len(m.buckets) >= maxKeys {
-			m.evictOldest(now)
+			m.evictExpired(now)
+			if len(m.buckets) >= maxKeys {
+				return nil
+			}
 		}
 		b = &bucket{}
 		m.buckets[key] = b
@@ -207,24 +231,15 @@ func (m *memoryLimiter) touch(key string, now time.Time) *bucket {
 	return b
 }
 
-// evictOldest 淘汰最久未更新的 key。
-//
-// 为什么是「最久未更新」而不是随机：随机淘汰会命中正在活跃计数的 key，
-// 让它瞬间丢掉全部历史记录、限流形同虚设；最久未更新的 key 大概率
-// 已经是死连接/扫描器换掉的 IP，淘汰它没有代价。
-// 调用方必须已持有锁。
-func (m *memoryLimiter) evictOldest(now time.Time) {
-	var oldestKey string
-	var oldestAt time.Time
-	first := true
-	for k, at := range m.lastSeen {
-		if first || at.Before(oldestAt) {
-			oldestKey, oldestAt, first = k, at, false
+// evictExpired only reclaims expired windows; evicting a live identity would
+// silently reset its limit. If all windows are live, admission fails closed.
+func (m *memoryLimiter) evictExpired(now time.Time) {
+	for key, b := range m.buckets {
+		b.prune(now.Add(-m.windowDuration()))
+		if len(b.events) == 0 {
+			delete(m.buckets, key)
+			delete(m.lastSeen, key)
 		}
-	}
-	if !first {
-		delete(m.buckets, oldestKey)
-		delete(m.lastSeen, oldestKey)
 	}
 }
 
@@ -237,7 +252,7 @@ func (b *bucket) prune(cutoff time.Time) {
 	// 大多数调用 prune 时一条都不用删（窗口远未满），
 	// 这个循环的开销就是一次比较。
 	i := 0
-	for i < len(b.events) && b.events[i].at.Before(cutoff) {
+	for i < len(b.events) && !b.events[i].at.After(cutoff) {
 		i++
 	}
 	if i > 0 {
@@ -252,8 +267,14 @@ func (b *bucket) prune(cutoff time.Time) {
 //
 // 做成 memoryLimiter 的方法而不是自由函数：窗口长度是实例属性
 // （测试里会用短窗口），自由函数拿不到它。
+func (m *memoryLimiter) windowDuration() time.Duration {
+	if m.window <= 0 {
+		return window
+	}
+	return m.window
+}
 func (m *memoryLimiter) retryAfter(target, now time.Time) int {
-	d := target.Add(m.window).Sub(now)
+	d := target.Add(m.windowDuration()).Sub(now)
 	secs := int(d.Seconds())
 	if secs < 1 {
 		return 1
@@ -406,17 +427,24 @@ func tokenViewFromContext(c *gin.Context) (model.TokenView, bool) {
 // 限流只需要一个量级正确的数，不值得为它引入真 tokenizer。
 // 读不到 body（已经消费过/不是 JSON）时按 0 计——只影响 TPM
 // 的这一次判定，RPM 仍然生效。
+type replayedBody struct {
+	io.Reader
+	io.Closer
+}
+
 func estimatePromptTokens(c *gin.Context) int {
 	if c.Request.Body == nil {
 		return 0
 	}
-	body, err := io.ReadAll(io.LimitReader(c.Request.Body, estimateBodyLimit))
+	original := c.Request.Body
+	body, err := io.ReadAll(io.LimitReader(original, estimateBodyLimit))
+	c.Request.Body = &replayedBody{Reader: io.MultiReader(bytes.NewReader(body), original), Closer: original}
 	if err != nil {
 		return 0
 	}
 	// 把读走的字节装回去：relay 的 handler 还要原样透传 body，
 	// 中间件把它吃掉等于破坏了「透明代理」这个基本承诺。
-	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+
 	return billing.EstimateTokens(billing.PromptTextFromBody(body))
 }
 

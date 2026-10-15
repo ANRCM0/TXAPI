@@ -60,3 +60,72 @@ func TestHealthWorkerContainsCallbackPanics(t *testing.T) {
 		t.Fatalf("callback panic killed health worker: calls=%d", calls.Load())
 	}
 }
+func TestHealthWorkerSerializesConcurrentFailures(t *testing.T) {
+	current := dbmodel.Credential{ID: 77, Status: dbmodel.CredentialActive, APIKey: "sk"}
+	stale := current
+	calls := 0
+	h := NewHealthWorker(func(u HealthUpdate) error {
+		calls++
+		current.FailCount, current.Status, current.CooldownUntil = u.FailCount, u.Status, u.CooldownUntil
+		return nil
+	}, nil, func(uint) (*dbmodel.Credential, error) { copy := current; return &copy, nil })
+	var group sync.WaitGroup
+	group.Add(8)
+	for range 8 {
+		go func() { defer group.Done(); h.RecordFailure(&stale, 502, "upstream", time.Now()) }()
+	}
+	group.Wait()
+	h.Close()
+	if calls != BanThreshold || current.FailCount != BanThreshold || current.Status != dbmodel.CredentialBanned {
+		t.Fatalf("lost failure transitions or continued after ban: calls=%d current=%+v", calls, current)
+	}
+}
+func TestHealthWorkerIgnoresStaleManualGenerationAndLateSuccess(t *testing.T) {
+	for _, scenario := range []string{"manual reset", "rotation", "disable", "ban", "late success"} {
+		t.Run(scenario, func(t *testing.T) {
+			original := dbmodel.Credential{ID: 88, Status: dbmodel.CredentialActive, APIKey: "old"}
+			current := original
+			switch scenario {
+			case "manual reset":
+				current.HealthGeneration++
+			case "rotation":
+				current.HealthGeneration++
+				current.APIKey = "new"
+			case "disable":
+				current.Status = dbmodel.CredentialDisabled
+			case "ban":
+				current.Status = dbmodel.CredentialBanned
+			case "late success":
+				current.FailCount = 2
+				current.Status = dbmodel.CredentialCooldown
+			}
+			calls := 0
+			h := NewHealthWorker(func(HealthUpdate) error { calls++; return nil }, nil, func(uint) (*dbmodel.Credential, error) { return &current, nil })
+			if scenario == "late success" {
+				h.RecordSuccess(&original, time.Now())
+			} else {
+				h.RecordFailure(&original, 502, "upstream", time.Now())
+			}
+			h.Close()
+			if calls != 0 {
+				t.Fatal("stale observation overwrote current state")
+			}
+		})
+	}
+}
+func TestHealthRefreshPanicDoesNotStopWorker(t *testing.T) {
+	calls := 0
+	h := NewHealthWorker(func(HealthUpdate) error { calls++; return nil }, nil, func(id uint) (*dbmodel.Credential, error) {
+		if id == 1 {
+			panic("refresh")
+		}
+		return &dbmodel.Credential{ID: id, Status: dbmodel.CredentialActive}, nil
+	})
+	for id := uint(1); id <= 2; id++ {
+		h.RecordFailure(&dbmodel.Credential{ID: id, Status: dbmodel.CredentialActive}, 502, "upstream", time.Now())
+	}
+	h.Close()
+	if calls != 1 {
+		t.Fatalf("refresh panic stopped worker: calls=%d", calls)
+	}
+}

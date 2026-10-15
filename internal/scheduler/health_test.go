@@ -38,8 +38,9 @@ func TestErrorClassification(t *testing.T) {
 	}
 
 	notPenalize := []int{
-		http.StatusBadRequest,          // 400 参数错误
-		http.StatusNotFound,            // 404 模型不存在
+		http.StatusBadRequest, // 400 参数错误
+		http.StatusNotFound,   // 404 模型不存在
+		499, 200, 413, 409,
 		http.StatusUnprocessableEntity, // 422 语义错误
 	}
 	for _, code := range notPenalize {

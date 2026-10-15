@@ -120,5 +120,8 @@ func effectiveWeight(w int) int {
 	if w <= 0 {
 		return 1
 	}
+	if w > 1_000_000 {
+		return 1_000_000
+	}
 	return w
 }

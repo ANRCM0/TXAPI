@@ -83,9 +83,10 @@ func (s *Store) UpdateCredential(id uint, in *CredentialInput) (*model.Credentia
 		return nil, err
 	}
 	updates := map[string]any{
-		"name":    in.Name,
-		"api_key": in.APIKey,
-		"weight":  in.Weight,
+		"name":              in.Name,
+		"api_key":           in.APIKey,
+		"weight":            in.Weight,
+		"health_generation": gorm.Expr("health_generation + 1"),
 	}
 	if err := s.db.Model(&model.Credential{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("更新凭据失败: %w", err)
@@ -102,22 +103,25 @@ func (s *Store) UpdateCredential(id uint, in *CredentialInput) (*model.Credentia
 // 转发必然 401，而这种故障在列表里看不出异常（渠道状态还是
 // enabled）。要停用整个渠道应该改渠道 status，语义更准确。
 func (s *Store) DeleteCredential(id uint) error {
-	var cred model.Credential
-	if err := s.db.First(&cred, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("凭据 %d: %w", id, ErrNotFound)
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var cred model.Credential
+		if err := tx.First(&cred, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("credential %d: %w", id, ErrNotFound)
+			}
+			return err
 		}
-		return fmt.Errorf("读取凭据 %d 失败: %w", id, err)
-	}
-	var total int64
-	if err := s.db.Model(&model.Credential{}).Where("channel_id = ?", cred.ChannelID).Count(&total).Error; err != nil {
-		return fmt.Errorf("统计渠道 %d 的凭据数失败: %w", cred.ChannelID, err)
-	}
-	if total <= 1 {
-		return fmt.Errorf("渠道 %d 只剩最后一个凭据，不能删除（否则渠道变成没有 Key 的空壳）；要停用渠道请改用 status=disabled", cred.ChannelID)
-	}
-	if err := s.db.Delete(&model.Credential{}, id).Error; err != nil {
-		return fmt.Errorf("删除凭据失败: %w", err)
+		var count int64
+		if err := tx.Model(&model.Credential{}).Where("channel_id=?", cred.ChannelID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count <= 1 {
+			return fmt.Errorf("channel %d must retain at least one credential; disable the channel instead", cred.ChannelID)
+		}
+		return tx.Delete(&model.Credential{}, id).Error
+	})
+	if err != nil {
+		return err
 	}
 	return s.reloadCache()
 }
@@ -135,7 +139,7 @@ func (s *Store) SetCredentialStatus(id uint, status string) (*model.Credential, 
 		return nil, fmt.Errorf("未知的凭据状态 %q（可选: %s/%s/%s/%s）",
 			status, model.CredentialActive, model.CredentialCooldown, model.CredentialBanned, model.CredentialDisabled)
 	}
-	updates := map[string]any{"status": status}
+	updates := map[string]any{"status": status, "health_generation": gorm.Expr("health_generation + 1")}
 	if status == model.CredentialActive {
 		// 人工解封 = 「这个 Key 我确认是好的」，调度状态一并清零，
 		// 否则下次转发还会被旧的 cooldown_until 挡住
@@ -174,8 +178,10 @@ func (s *Store) GetCredential(id uint) (*model.Credential, error) {
 // 这件事在类型上就成立——它改不了 name/api_key/weight，那三个是管理
 // 接口的地盘。
 type HealthUpdate struct {
-	CredentialID uint
-	FailCount    int
+	ExpectedGeneration int64
+	ExpectedUpdatedAt  time.Time
+	CredentialID       uint
+	FailCount          int
 	// CooldownUntil 是冷却截止时间，Unix 秒；0 表示不在冷却中。
 	CooldownUntil int64
 	Status        string
@@ -190,7 +196,7 @@ type HealthUpdate struct {
 // 表建了、字段定义了、IsUsable 也读它们，但没有任何代码写过。
 //
 // 为什么保留 fail_count 而不是每次覆盖式写入：调度器传什么就写什么，
-// 退避的连续性由调度器负责（见 scheduler.backoff），这里不做额外判断。
+// 退避由 worker 从最新状态计算；此处用健康代次和 updated_at 条件拒绝过时写入。
 //
 // 写后即刷缓存（与其它写方法同一纪律）：漏了这一步会出现「库里已经
 // cooldown、转发还在用它」的窗口，那个窗口里每个请求都会重复踩同一个
@@ -216,7 +222,11 @@ func (s *Store) UpdateCredentialHealth(u HealthUpdate) error {
 	if u.LastUsedAt > 0 {
 		updates["last_used_at"] = u.LastUsedAt
 	}
-	res := s.db.Model(&model.Credential{}).Where("id = ?", u.CredentialID).Updates(updates)
+	query := s.db.Model(&model.Credential{}).Where("id = ? AND health_generation = ? AND status IN ?", u.CredentialID, u.ExpectedGeneration, []string{model.CredentialActive, model.CredentialCooldown})
+	if !u.ExpectedUpdatedAt.IsZero() {
+		query = query.Where("updated_at = ?", u.ExpectedUpdatedAt)
+	}
+	res := query.Updates(updates)
 	if res.Error != nil {
 		return fmt.Errorf("更新凭据 %d 健康状态失败: %w", u.CredentialID, res.Error)
 	}
