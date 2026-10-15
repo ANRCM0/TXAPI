@@ -94,7 +94,7 @@ SDK 与假上游只覆盖模拟路径。Gemini 按官方 streamGenerateContent �
 
 ## F0 多团队协作框架收口（S2 之后）
 
-独立于业务阶段：typed 身份/TPM 结算边界、gateway.Admission 请求/attempt 租约接入、协议实例注册、健康 worker 实例隔离、统一迁移 runner、70 路由 OpenAPI 与 CI 契约/依赖检查。目录责任和 PR/迁移协调规则见 [COLLABORATION.md](COLLABORATION.md)。实现与针对性测试已加入功能分支，待最终 CI 与审查合并后作为共同开发基线。
+独立于业务阶段：typed 身份/TPM 结算边界、gateway.Admission 请求/attempt 租约接入、协议实例注册、健康 worker 实例隔离、统一迁移 runner、70 路由 OpenAPI 与 CI 契约/依赖检查。目录责任和 PR/迁移协调规则见 [COLLABORATION.md](COLLABORATION.md)。实现与回归测试已在 `feat/team-foundation` 的 `bd322c0` 通过 [Verify #38703566885](https://github.com/ANRCM0/TXAPI/actions/runs/38703566885) 完整 CI；待审查合并后作为共同开发基线。
 
 F0 不将 S3 的并发/公平调度、S4 UI 或 S5 账本标成完成。功能团队可从该基线并行开发，通过各自阶段验收后集成。
 
