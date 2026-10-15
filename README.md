@@ -13,6 +13,9 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 
 ---
 
+多团队功能开发先阅读 [协作框架](docs/COLLABORATION.md) 和 [贡献约定](CONTRIBUTING.md)。
+前后端契约见 [OpenAPI 0.1.0](docs/openapi.json)；框架接口与业务阶段分别验收。
+
 ## 架构
 
 ```
@@ -382,6 +385,8 @@ gofmt -l .            # 应无输出
 
 | 文档 | 内容 |
 |------|------|
+| [docs/COLLABORATION.md](docs/COLLABORATION.md) | 多团队目录边界、扩展接口、迁移与验收流程 |
+| [docs/openapi.json](docs/openapi.json) | 可导入前端工具的 HTTP 契约，CI 检查路由/鉴权/DTO |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 目标架构：模块边界、管理员—用户模型、接口原则 |
 | [docs/PLAN.md](docs/PLAN.md) | 开发基线与分阶段任务（S0–S5）、验收标准 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 构建、测试、配置和目录约定 |

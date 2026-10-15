@@ -1,0 +1,66 @@
+package store
+
+import (
+	"fmt"
+	"time"
+
+	"gorm.io/gorm"
+	"minigateway/internal/model"
+)
+
+// Integrator assigns each version once. Append new steps; never edit a released
+// step, reorder it, or let feature packages run independent startup migrations.
+const latestMigrationVersion = 2
+
+type dataMigration struct {
+	Version int
+	Apply   func(*gorm.DB) error
+}
+
+var dataMigrations = []dataMigration{{Version: 2, Apply: migrateAccessV2}}
+
+func checkMigrationVersion(db *gorm.DB, supported int) error {
+	if !db.Migrator().HasTable(&model.SchemaMigration{}) {
+		return nil
+	}
+	var newest int
+	if err := db.Model(&model.SchemaMigration{}).Select("COALESCE(MAX(version),0)").Scan(&newest).Error; err != nil {
+		return err
+	}
+	if newest > supported {
+		return fmt.Errorf("database schema version %d is newer than supported version %d; restore a compatible backup instead of downgrading in place", newest, supported)
+	}
+	return nil
+}
+func applyDataMigrations(db *gorm.DB, steps []dataMigration) error {
+	// Validate the entire registry before executing even its first step.
+	previous := 0
+	for _, step := range steps {
+		if step.Version <= previous || step.Apply == nil {
+			return fmt.Errorf("migration versions must be positive and strictly increasing")
+		}
+		previous = step.Version
+	}
+	if err := checkMigrationVersion(db, previous); err != nil {
+		return err
+	}
+	for _, step := range steps {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var count int64
+			if err := tx.Model(&model.SchemaMigration{}).Where("version = ?", step.Version).Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return nil
+			}
+			if err := step.Apply(tx); err != nil {
+				return err
+			}
+			return tx.Create(&model.SchemaMigration{Version: step.Version, AppliedAt: time.Now()}).Error
+		})
+		if err != nil {
+			return fmt.Errorf("data migration v%d failed: %w", step.Version, err)
+		}
+	}
+	return nil
+}

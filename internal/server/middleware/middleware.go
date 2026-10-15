@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/access"
 	"minigateway/internal/model"
 )
 
@@ -91,6 +92,7 @@ func RequestID() gin.HandlerFunc {
 				id = hex.EncodeToString(buf)
 			}
 		}
+		c.Request = c.Request.WithContext(access.WithRequestID(c.Request.Context(), id))
 		c.Set(CtxRequestID, id)
 		c.Writer.Header().Set("X-Request-Id", id)
 		c.Next()
@@ -163,6 +165,9 @@ func (a *Auth) Handle() gin.HandlerFunc {
 		// 整个投影也存一份：限流中间件要按令牌 ID 分桶并读 RPM/TPM
 		// 阈值，只给它散落的字段会让「加一个令牌字段」变成三处改动。
 		c.Set(CtxTokenView, view)
+		c.Request = c.Request.WithContext(access.WithPrincipal(c.Request.Context(), access.Principal{
+			UserID: view.UserID, TokenID: view.ID, TokenName: view.Name, Policy: view.Policy, RPMLimit: view.RPMLimit, TPMLimit: view.TPMLimit,
+		}))
 		c.Next()
 	}
 }

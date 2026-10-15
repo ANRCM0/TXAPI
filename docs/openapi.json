@@ -1,0 +1,6347 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "TXAPI HTTP contracts",
+    "version": "0.1.0",
+    "description": "Collaboration baseline after S2. Route and auth coverage is checked against Gin in tests. This describes currently implemented wire behavior, not S3 concurrency, S4 UI or S5 reliable accounting. New control-plane UI uses session Bearer only; model clients use API Key Bearer. Legacy root-key routes remain protected but are deprecated for new consumers. Non-streaming requests are bounded to 20 MiB. Authentication uses current DB state; existing streams are not force-canceled on user disable."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8080",
+      "description": "Local development; production requires HTTPS termination"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "get_healthz",
+        "summary": "Liveness",
+        "tags": [
+          "operations"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "get_metrics",
+        "summary": "Prometheus exposition",
+        "tags": [
+          "operations"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "operationId": "get_v1_models",
+        "summary": "Models available to the verified Key",
+        "tags": [
+          "model-calls"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "object": {
+                            "type": "string"
+                          },
+                          "owned_by": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "operationId": "post_v1_chat_completions",
+        "summary": "Chat completion or SSE stream",
+        "tags": [
+          "model-calls"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate/admission limit; Retry-After is seconds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/embeddings": {
+      "post": {
+        "operationId": "post_v1_embeddings",
+        "summary": "Embeddings",
+        "tags": [
+          "model-calls"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "post_api_auth_login",
+        "summary": "Create a management session",
+        "tags": [
+          "auth"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session_token": {
+                      "type": "string"
+                    },
+                    "token_type": {
+                      "type": "string",
+                      "enum": [
+                        "Bearer"
+                      ]
+                    },
+                    "expires_in": {
+                      "type": "integer",
+                      "example": 86400
+                    },
+                    "user": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "session_token",
+                    "token_type",
+                    "expires_in",
+                    "user"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Five attempts per TCP-peer IP per minute; Retry-After: 60",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password",
+                    "writeOnly": true
+                  }
+                },
+                "required": [
+                  "username",
+                  "password"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "post_api_auth_logout",
+        "summary": "Destroy the current management session",
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "operationId": "get_api_me",
+        "summary": "Current login profile",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/keys": {
+      "get": {
+        "operationId": "get_api_me_keys",
+        "summary": "Own Key metadata only",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/APIKey"
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_me_keys",
+        "summary": "Generate own Key (shown once)",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKeyCreated"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/keys/{id}": {
+      "get": {
+        "operationId": "get_api_me_keys_id",
+        "summary": "Own Key metadata; cross-owner is 404",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKey"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_me_keys_id",
+        "summary": "Update own Key limits; full PUT",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKey"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_me_keys_id",
+        "summary": "Revoke own Key; cross-owner is 404",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ]
+      }
+    },
+    "/api/me/models": {
+      "get": {
+        "operationId": "get_api_me_models",
+        "summary": "Allowed user models with available routing configuration",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "policy": {
+                      "$ref": "#/components/schemas/ModelPolicy"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "policy"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/logs": {
+      "get": {
+        "operationId": "get_api_me_logs",
+        "summary": "Own request logs; owner always comes from session",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Log"
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ]
+      }
+    },
+    "/api/me/usage": {
+      "get": {
+        "operationId": "get_api_me_usage",
+        "summary": "Own budget and log-based usage",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PersonalUsage"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "get_api_admin_users",
+        "summary": "All user profiles",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/User"
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_admin_users",
+        "summary": "Create a user",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{id}": {
+      "get": {
+        "operationId": "get_api_admin_users_id",
+        "summary": "User profile",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_admin_users_id",
+        "summary": "Update user; last active administrator is protected",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/keys": {
+      "get": {
+        "operationId": "get_api_admin_keys",
+        "summary": "All Key metadata",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/APIKey"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_admin_keys",
+        "summary": "Generate Key for an active owner",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKeyCreated"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminKeyInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/keys/{id}": {
+      "put": {
+        "operationId": "put_api_admin_keys_id",
+        "summary": "Update Key metadata/restrictions; never expose existing secret",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKey"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_admin_keys_id",
+        "summary": "Revoke a Key",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/keys/{id}/claim": {
+      "post": {
+        "operationId": "post_api_admin_keys_id_claim",
+        "summary": "Explicitly claim one unowned legacy Key",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKey"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "user_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/model-policy": {
+      "get": {
+        "operationId": "get_api_admin_model_policy",
+        "summary": "System model policy",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelPolicy"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_admin_model_policy",
+        "summary": "Set system model policy",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelPolicy"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelPolicy"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/channels": {
+      "get": {
+        "operationId": "get_api_admin_channels",
+        "summary": "List channels; upstream keys masked",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Channel"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_admin_channels",
+        "summary": "Create channel",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/channels/{id}": {
+      "get": {
+        "operationId": "get_api_admin_channels_id",
+        "summary": "Channel detail; existing keys always masked",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_admin_channels_id",
+        "summary": "Update channel",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_admin_channels_id",
+        "summary": "Delete channel and credentials",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/channels/{id}/credentials": {
+      "get": {
+        "operationId": "get_api_admin_channels_id_credentials",
+        "summary": "List upstream credentials (masked)",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Credential"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_admin_channels_id_credentials",
+        "summary": "Add upstream credential",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Credential"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/credentials/{id}": {
+      "put": {
+        "operationId": "put_api_admin_credentials_id",
+        "summary": "Update upstream credential (masked result)",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Credential"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_admin_credentials_id",
+        "summary": "Remove upstream credential",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/credentials/{id}/status": {
+      "post": {
+        "operationId": "post_api_admin_credentials_id_status",
+        "summary": "Change credential status",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Credential"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "cooldown",
+                      "banned",
+                      "disabled"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/logs": {
+      "get": {
+        "operationId": "get_api_admin_logs",
+        "summary": "Global request logs (admin only)",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Log"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "format": "int64"
+            }
+          },
+          {
+            "name": "channel_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "format": "int64"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "format": "int64"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/stats/summary": {
+      "get": {
+        "operationId": "get_api_admin_stats_summary",
+        "summary": "Global usage summary",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/UsageSummary"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "7d"
+            },
+            "description": "all, positive hours (e.g. 24h), or positive days (e.g. 7d); invalid range returns 400."
+          }
+        ]
+      }
+    },
+    "/api/admin/stats/by-model": {
+      "get": {
+        "operationId": "get_api_admin_stats_by_model",
+        "summary": "Global usage by-model",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ModelStat"
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "7d"
+            },
+            "description": "all, positive hours (e.g. 24h), or positive days (e.g. 7d); invalid range returns 400."
+          }
+        ]
+      }
+    },
+    "/api/admin/stats/by-channel": {
+      "get": {
+        "operationId": "get_api_admin_stats_by_channel",
+        "summary": "Global usage by-channel",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ChannelStat"
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "7d"
+            },
+            "description": "all, positive hours (e.g. 24h), or positive days (e.g. 7d); invalid range returns 400."
+          }
+        ]
+      }
+    },
+    "/api/admin/prices": {
+      "get": {
+        "operationId": "get_api_admin_prices",
+        "summary": "Model prices and group rates",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Price"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    },
+                    "group_rates": {
+                      "$ref": "#/components/schemas/GroupRates"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "total",
+                    "group_rates"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/prices/{model}": {
+      "put": {
+        "operationId": "put_api_admin_prices_model",
+        "summary": "Upsert model price",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Price"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_admin_prices_model",
+        "summary": "Delete model price",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "model": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/group-rates": {
+      "put": {
+        "operationId": "put_api_admin_group_rates",
+        "summary": "Replace group rate table",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/GroupRates"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRates"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/abilities": {
+      "get": {
+        "operationId": "get_api_admin_abilities",
+        "summary": "Routing ability rows; not an authorization table",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Ability"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or model permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channels": {
+      "get": {
+        "operationId": "get_api_channels",
+        "summary": "List channels; upstream keys masked",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Channel"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      },
+      "post": {
+        "operationId": "post_api_channels",
+        "summary": "Create channel",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelInput"
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/channels/{id}": {
+      "get": {
+        "operationId": "get_api_channels_id",
+        "summary": "Channel detail; existing keys always masked",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "deprecated": true
+      },
+      "put": {
+        "operationId": "put_api_channels_id",
+        "summary": "Update channel",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Channel"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelInput"
+              }
+            }
+          }
+        },
+        "deprecated": true
+      },
+      "delete": {
+        "operationId": "delete_api_channels_id",
+        "summary": "Delete channel and credentials",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "deprecated": true
+      }
+    },
+    "/api/channels/{id}/credentials": {
+      "get": {
+        "operationId": "get_api_channels_id_credentials",
+        "summary": "List upstream credentials (masked)",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Credential"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "deprecated": true
+      },
+      "post": {
+        "operationId": "post_api_channels_id_credentials",
+        "summary": "Add upstream credential",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Credential"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialInput"
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/credentials/{id}": {
+      "put": {
+        "operationId": "put_api_credentials_id",
+        "summary": "Update upstream credential (masked result)",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Credential"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialInput"
+              }
+            }
+          }
+        },
+        "deprecated": true
+      },
+      "delete": {
+        "operationId": "delete_api_credentials_id",
+        "summary": "Remove upstream credential",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "deprecated": true
+      }
+    },
+    "/api/credentials/{id}/status": {
+      "post": {
+        "operationId": "post_api_credentials_id_status",
+        "summary": "Change credential status",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Credential"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "cooldown",
+                      "banned",
+                      "disabled"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/logs": {
+      "get": {
+        "operationId": "get_api_logs",
+        "summary": "Global request logs (admin only)",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Log"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "format": "int64"
+            }
+          },
+          {
+            "name": "channel_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "format": "int64"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "format": "int64"
+            }
+          }
+        ]
+      }
+    },
+    "/api/stats/summary": {
+      "get": {
+        "operationId": "get_api_stats_summary",
+        "summary": "Global usage summary",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/UsageSummary"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "7d"
+            },
+            "description": "all, positive hours (e.g. 24h), or positive days (e.g. 7d); invalid range returns 400."
+          }
+        ]
+      }
+    },
+    "/api/stats/by-model": {
+      "get": {
+        "operationId": "get_api_stats_by_model",
+        "summary": "Global usage by-model",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ModelStat"
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "7d"
+            },
+            "description": "all, positive hours (e.g. 24h), or positive days (e.g. 7d); invalid range returns 400."
+          }
+        ]
+      }
+    },
+    "/api/stats/by-channel": {
+      "get": {
+        "operationId": "get_api_stats_by_channel",
+        "summary": "Global usage by-channel",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ChannelStat"
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "7d"
+            },
+            "description": "all, positive hours (e.g. 24h), or positive days (e.g. 7d); invalid range returns 400."
+          }
+        ]
+      }
+    },
+    "/api/prices": {
+      "get": {
+        "operationId": "get_api_prices",
+        "summary": "Model prices and group rates",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Price"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    },
+                    "group_rates": {
+                      "$ref": "#/components/schemas/GroupRates"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "total",
+                    "group_rates"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/prices/{model}": {
+      "put": {
+        "operationId": "put_api_prices_model",
+        "summary": "Upsert model price",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Price"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceInput"
+              }
+            }
+          }
+        },
+        "deprecated": true
+      },
+      "delete": {
+        "operationId": "delete_api_prices_model",
+        "summary": "Delete model price",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "model": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "deprecated": true
+      }
+    },
+    "/api/group-rates": {
+      "put": {
+        "operationId": "put_api_group_rates",
+        "summary": "Replace group rate table",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/GroupRates"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRates"
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/abilities": {
+      "get": {
+        "operationId": "get_api_abilities",
+        "summary": "Routing ability rows; not an authorization table",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Ability"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/tokens": {
+      "get": {
+        "operationId": "get_api_tokens",
+        "summary": "Legacy global Key list",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/APIKey"
+                      },
+                      "nullable": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      },
+      "post": {
+        "operationId": "post_api_tokens",
+        "summary": "Legacy Key creation; server generates material, active user_id required",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKeyCreated"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminKeyInput"
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/tokens/{id}": {
+      "put": {
+        "operationId": "put_api_tokens_id",
+        "summary": "Legacy Key update",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKey"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyInput"
+              }
+            }
+          }
+        },
+        "deprecated": true
+      },
+      "delete": {
+        "operationId": "delete_api_tokens_id",
+        "summary": "Legacy Key revocation",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "deprecated": true
+      }
+    },
+    "/api/tokens/{id}/quota": {
+      "post": {
+        "operationId": "post_api_tokens_id_quota",
+        "summary": "Set Key total quota without resetting usage",
+        "tags": [
+          "legacy"
+        ],
+        "security": [
+          {
+            "AdminKey": []
+          },
+          {
+            "LegacyAdminBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/APIKey"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure; model-stream errors after commit use stream termination without a fabricated success marker. HTTP status may already be 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired, revoked or wrong credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quota": {
+                    "type": "number",
+                    "format": "double",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "quota"
+                ]
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "SessionBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Only a session- token returned by /api/auth/login; 24h TTL; no Cookie authentication."
+      },
+      "CallBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Only an owned active model-calling API Key; shown once on creation."
+      },
+      "AdminKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Admin-Key",
+        "description": "Legacy root credential GATEWAY_ADMIN_KEY; cannot replace a login session."
+      },
+      "LegacyAdminBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Legacy root credential; X-Admin-Key takes precedence if supplied."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "code": {}
+            },
+            "required": [
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "ModelPolicy": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "allowlist"
+            ],
+            "description": "allowlist plus [] denies every model; all must not have a nonempty models list."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "user"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ]
+          },
+          "model_mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "allowlist"
+            ],
+            "description": "allowlist plus [] denies every model; all must not have a nonempty models list."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "used_quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "rpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "tpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "role",
+          "status",
+          "model_mode"
+        ]
+      },
+      "UserCreate": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "user"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ]
+          },
+          "model_mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "allowlist"
+            ],
+            "description": "allowlist plus [] denies every model; all must not have a nonempty models list."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "rpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "tpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "writeOnly": true,
+            "description": "12 to 72 UTF-8 bytes on creation/change. Never returned. Omit on PUT to preserve the current hash."
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "UserUpdate": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "user"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ]
+          },
+          "model_mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "allowlist"
+            ],
+            "description": "allowlist plus [] denies every model; all must not have a nonempty models list."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "rpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "tpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "writeOnly": true,
+            "description": "12 to 72 UTF-8 bytes on creation/change. Never returned. Omit on PUT to preserve the current hash."
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "description": "Full PUT: omitted role/status/model_mode default to user/active/allowlist. Submit the complete desired state."
+      },
+      "APIKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "user_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "model_mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "allowlist"
+            ],
+            "description": "allowlist plus [] denies every model; all must not have a nonempty models list."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "used_quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "rpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "tpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Unix seconds; 0 means no expiry."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "key_prefix",
+          "model_mode"
+        ],
+        "description": "Metadata only. No key_hash, password_hash or existing plaintext key is exposed."
+      },
+      "APIKeyCreated": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/APIKey"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "readOnly": true,
+                "description": "Only this creation response returns the generated secret. Store it now; it cannot be fetched again."
+              }
+            },
+            "required": [
+              "key"
+            ]
+          }
+        ]
+      },
+      "KeyInput": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "model_mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "allowlist"
+            ],
+            "description": "allowlist plus [] denies every model; all must not have a nonempty models list."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "rpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "tpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ]
+          },
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 315360000,
+            "description": "Relative expiry from this create/update call; 0 means no expiry."
+          }
+        },
+        "description": "Server generates the key. Do not send key. Self-service owner must be absent or equal to the signed-in user. Omitted model policy inherits effective owner/system policy on create; omitted on PUT preserves prior key policy. Zero limits inherit owner limits. PUT is a full resource update for other fields."
+      },
+      "AdminKeyInput": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "model_mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "allowlist"
+            ],
+            "description": "allowlist plus [] denies every model; all must not have a nonempty models list."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "rpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "tpm_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ]
+          },
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 315360000,
+            "description": "Relative expiry from this create/update call; 0 means no expiry."
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "description": "Generated key for the specified active owner. Model/limit restrictions cannot exceed effective owner policy."
+      },
+      "Credential": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "channel_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "api_key": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "cooldown",
+              "banned",
+              "disabled"
+            ]
+          },
+          "fail_count": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "cooldown_until": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "last_used_at": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "channel_id"
+        ],
+        "description": "Existing api_key is masked. Credential creation may echo newly supplied upstream api_key once. Upstream credentials are not client API Keys."
+      },
+      "CredentialInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "api_key": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          }
+        },
+        "required": [
+          "api_key"
+        ]
+      },
+      "Channel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "model_mapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "group_name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ]
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Credential"
+            },
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "base_url",
+          "status"
+        ]
+      },
+      "ChannelInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "model_mapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "group_name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ]
+          },
+          "api_key": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Required on creation; supplying on PUT replaces the complete credential pool. Prefer dedicated credential CRUD."
+          }
+        },
+        "required": [
+          "name",
+          "base_url",
+          "models"
+        ]
+      },
+      "Log": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "user_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "token_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "channel_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "credential_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "latency_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "origin_model": {
+            "type": "string"
+          },
+          "actual_model": {
+            "type": "string"
+          },
+          "is_stream": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "cost": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "is_estimated": {
+            "type": "boolean"
+          },
+          "price_missing": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UsageSummary": {
+        "type": "object",
+        "properties": {
+          "total_requests": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "success_requests": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "error_requests": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "estimated_count": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "total_cost": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "avg_latency_ms": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          }
+        }
+      },
+      "PersonalUsage": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "used_quota": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageSummary"
+          }
+        },
+        "required": [
+          "user_id",
+          "quota",
+          "used_quota",
+          "usage"
+        ]
+      },
+      "Price": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "input_price_per_1k": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "output_price_per_1k": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PriceInput": {
+        "type": "object",
+        "properties": {
+          "input_price_per_1k": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "output_price_per_1k": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          }
+        }
+      },
+      "GroupRates": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "number",
+          "format": "double",
+          "minimum": 0
+        }
+      },
+      "ModelStat": {
+        "type": "object",
+        "properties": {
+          "success_requests": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "estimated_count": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "total_cost": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "avg_latency_ms": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ChannelStat": {
+        "type": "object",
+        "properties": {
+          "success_requests": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "total_cost": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "avg_latency_ms": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0
+          },
+          "requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "channel_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "channel_name": {
+            "type": "string"
+          }
+        }
+      },
+      "Ability": {
+        "type": "object",
+        "properties": {
+          "group_name": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "stream": {
+            "type": "boolean",
+            "default": false
+          },
+          "max_tokens": {
+            "type": "integer"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "additionalProperties": true,
+        "description": "OpenAI wire body is passed through on same-protocol requests. Cross-protocol support is defined by adaptor capabilities; the gateway does not claim support for every OpenAI extension."
+      },
+      "EmbeddingRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "input": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "model",
+          "input"
+        ],
+        "additionalProperties": true
+      }
+    }
+  }
+}

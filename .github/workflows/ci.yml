@@ -13,7 +13,7 @@ name: Verify
 
 on:
   push:
-    branches: [main, master, "feat/**"]
+    branches: ["**"]
   pull_request:
   # 允许在 Actions 页面手动触发：排查「本地能过 CI 红」时有用
   workflow_dispatch:
@@ -62,6 +62,11 @@ jobs:
             echo "::error::core/protocol 不得依赖 HTTP 框架或业务/存储层"
             exit 1
           fi
+
+      - name: 协作框架依赖与 API 契约
+        run: |
+          go test -count=1 ./internal/architecture
+          go test -count=1 ./internal/server -run TestOpenAPI
 
       - name: 构建
         run: go build ./...

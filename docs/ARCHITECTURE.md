@@ -2,6 +2,8 @@
 
 状态：目标设计，尚未全部实现。任务状态以 [PLAN.md](PLAN.md) 为准，命令和目录操作以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准。
 
+S0–S2 已落地，S3–S5 仍有未实现能力。多团队协作基线 F0 的接口、目录分工与验收见 [COLLABORATION.md](COLLABORATION.md)；机器可读 HTTP 契约见 [openapi.json](openapi.json)。新增框架接口须有实际调用或行为回归，不能用空目录/空接口代替功能交付。
+
 ## 1. 确定的边界
 
 身份只有 `admin` 和 `user`。所有渠道由管理员统一配置；普通用户获得模型使用权并创建自己的访问密钥。不建设组织、工作空间、成员关系或多级角色系统，不引入 `tenant_id`。

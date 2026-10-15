@@ -19,8 +19,6 @@ import (
 	"minigateway/internal/scheduler"
 )
 
-// Temporary legacy instance; production moves to gateway.New in S1.
-
 // Relay 执行一次完整的转发，失败时换渠道重试。
 //
 // 这是网关的主流程，对应 one-api 的 controller/relay.go。
@@ -41,6 +39,28 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 		result.Committed = c.Writer.Written()
 		result.HTTPStatus = c.Writer.Status()
 	}()
+
+	// This exported coordinator also guards policy when called outside the HTTP
+	// handler; an extension must never acquire capacity for an unauthorized model.
+	if result.Identity.Policy != nil && !result.Identity.Policy.Allows(req.Model) {
+		result.StatusCode = http.StatusForbidden
+		result.Error = &core.Error{StatusCode: http.StatusForbidden, Error: core.ErrorDetail{Message: "model is not authorized", Type: "forbidden"}}
+		result.ErrorMessage = result.Error.Error.Message
+		writeError(c, result.StatusCode, result.ErrorMessage, "forbidden")
+		return
+	}
+
+	// The request lease spans the complete retry loop; each attempt has a
+	// nested lease acquired only after selecting an authorized model target.
+	requestLease, admitErr := g.acquire(ctx, c.Writer, AdmissionScope{Level: RequestAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model})
+	if admitErr != nil {
+		result.StatusCode = admitErr.StatusCode
+		result.Error = admitErr
+		result.ErrorMessage = admitErr.Error.Message
+		writeError(c, admitErr.StatusCode, admitErr.Error.Message, admitErr.Error.Type)
+		return
+	}
+	defer requestLease()
 
 	// 1. 筛选出能服务这个模型的渠道
 	candidates := g.pickChannels(req.Model, allowedModels)
@@ -129,7 +149,16 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 			"session_id", sessionID,
 			"attempt", attempt)
 
-		attemptResult := g.doRelay(c, m, body, timeout)
+		attemptLease, admitErr := g.acquire(ctx, c.Writer, AdmissionScope{Level: AttemptAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: m.ActualModel, ChannelID: uint(ch.id), CredentialID: cred.ID, Attempt: attempt + 1})
+		if admitErr != nil {
+			lastErr = admitErr
+			break
+		}
+		attemptResult := func() core.Result {
+			defer attemptLease()
+			return g.doRelay(c, m, body, timeout)
+		}()
+
 		result.Attempts = append(result.Attempts, AttemptResult{ChannelID: uint(ch.id), CredentialID: cred.ID, Model: m.ActualModel, Result: attemptResult})
 		result.Result = attemptResult
 		usage, err := attemptResult.Usage, attemptResult.Error

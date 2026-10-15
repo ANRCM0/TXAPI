@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"time"
 
@@ -12,18 +13,21 @@ import (
 	"minigateway/internal/core"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
-	"minigateway/internal/server/middleware"
+	"minigateway/internal/protocol/adaptor"
 )
 
 // Options fixes instance dependencies before it starts serving requests.
 type Options struct {
+	Admission Admission
+	// Adaptors extends the built-in protocols during construction, not at runtime.
+	Adaptors       map[string]adaptor.Adaptor
 	Channels       []dbmodel.Channel
 	Client         *http.Client
 	RetryTimes     int
 	AttemptTimeout time.Duration
 	TotalTimeout   time.Duration
 	Billing        *billing.Engine
-	Limiter        middleware.Limiter
+	Limiter        access.Limiter
 	Metrics        *metrics.Registry
 	LogRecorder    func(*dbmodel.RequestLog)
 	Picker         func([]dbmodel.Credential, map[uint]bool, string, time.Time) (*dbmodel.Credential, bool)
@@ -31,13 +35,15 @@ type Options struct {
 }
 
 type Gateway struct {
+	admission      Admission
+	adaptors       map[string]adaptor.Adaptor
 	reg            *registry
 	executor       *core.Executor
 	retryTimes     int
 	attemptTimeout time.Duration
 	totalTimeout   time.Duration
 	billing        *billing.Engine
-	limiter        middleware.Limiter
+	limiter        access.Limiter
 	metrics        *metrics.Registry
 	logRecorder    func(*dbmodel.RequestLog)
 	picker         credentialPicker
@@ -54,10 +60,15 @@ func New(opts Options) (*Gateway, error) {
 	if opts.TotalTimeout <= 0 {
 		opts.TotalTimeout = opts.AttemptTimeout
 	}
+	for name, a := range opts.Adaptors {
+		if name == "" || a == nil {
+			return nil, fmt.Errorf("invalid adaptor registration %q", name)
+		}
+	}
 	if opts.Metrics == nil {
 		opts.Metrics = metrics.New()
 	}
-	g := &Gateway{executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout,
+	g := &Gateway{admission: opts.Admission, adaptors: maps.Clone(opts.Adaptors), executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout,
 		billing: opts.Billing, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter}
 	if err := g.initRegistry(opts.Channels); err != nil {
 		g.Close()
@@ -113,17 +124,17 @@ func state(c *gin.Context) *RequestResult {
 	if result := ResultFromContext(c.Request.Context()); result != nil {
 		return result
 	}
-	allowed, _ := c.Get(middleware.CtxAllowedModel)
-	models, _ := allowed.([]string)
-	result := &RequestResult{Result: core.Result{StatusCode: 500}, Identity: Identity{
-		TokenID: ctxUint(c, middleware.CtxTokenID), UserID: ctxUint(c, middleware.CtxUserID), TokenName: c.GetString(middleware.CtxTokenName), RequestID: c.GetString(middleware.CtxRequestID), AllowedModels: append([]string(nil), models...),
-	}}
-	if value, ok := c.Get(middleware.CtxTokenView); ok {
-		if view, ok := value.(dbmodel.TokenView); ok && view.Policy.Mode != "" {
-			p := view.Policy
-			result.Identity.Policy = &p
-		}
+	identity := Identity{RequestID: access.RequestID(c.Request.Context())}
+	if p, ok := access.PrincipalFromContext(c.Request.Context()); ok {
+		identity.UserID = p.UserID
+		identity.TokenID = p.TokenID
+		identity.TokenName = p.TokenName
+		identity.AllowedModels = append([]string(nil), p.Policy.Models...)
+		policy := p.Policy
+		identity.Policy = &policy
 	}
+	result := &RequestResult{Result: core.Result{StatusCode: 500}, Identity: identity}
+
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), resultContextKey{}, result))
 	return result
 }

@@ -257,12 +257,13 @@ func TestChangedIgnoresLastFields(t *testing.T) {
 // 而静默不落库的后果（状态不生效）有日志可查。
 func TestRecordWithoutPersister(t *testing.T) {
 	// 确保没有 persister（测试间可能互相影响，显式清掉）
-	SetHealthPersister(nil)
+	h := NewHealthWorker(nil, nil)
+	defer h.Close()
 	cred := &dbmodel.Credential{ID: 21, Weight: 1, Status: dbmodel.CredentialActive, APIKey: "sk-test"}
 
 	// 不该 panic
-	RecordFailure(cred, http.StatusUnauthorized, "401", time.Now())
-	RecordSuccess(cred, time.Now())
+	h.RecordFailure(cred, http.StatusUnauthorized, "401", time.Now())
+	h.RecordSuccess(cred, time.Now())
 
 	// RecordSuccess 后状态机算出的结果是全绿（提交的是 next 的语义，
 	// 这里验证调用没炸且 cred 未被原地修改——改 cred 会造成 data race）
@@ -274,21 +275,18 @@ func TestRecordWithoutPersister(t *testing.T) {
 // TestRecordSuccessPersisted 验证注入 persister 后成功会被落库。
 func TestRecordSuccessPersisted(t *testing.T) {
 	got := make(chan HealthUpdate, 4)
-	SetHealthPersister(func(u HealthUpdate) error {
+	h := NewHealthWorker(func(u HealthUpdate) error {
 		got <- u
 		return nil
-	})
-	defer func() {
-		Stop()
-		SetHealthPersister(nil)
-	}()
+	}, nil)
+	defer h.Close()
 
 	cred := &dbmodel.Credential{
 		ID: 31, Weight: 1, Status: dbmodel.CredentialCooldown,
 		FailCount: 2, CooldownUntil: time.Now().Add(time.Hour).Unix(),
 		APIKey: "sk-test",
 	}
-	RecordSuccess(cred, time.Now())
+	h.RecordSuccess(cred, time.Now())
 
 	select {
 	case u := <-got:
@@ -306,18 +304,15 @@ func TestRecordSuccessPersisted(t *testing.T) {
 // TestRecordFailurePersisted 验证失败落库时带上了退避后的冷却时间。
 func TestRecordFailurePersisted(t *testing.T) {
 	got := make(chan HealthUpdate, 4)
-	SetHealthPersister(func(u HealthUpdate) error {
+	h := NewHealthWorker(func(u HealthUpdate) error {
 		got <- u
 		return nil
-	})
-	defer func() {
-		Stop()
-		SetHealthPersister(nil)
-	}()
+	}, nil)
+	defer h.Close()
 
 	now := time.Now()
 	cred := &dbmodel.Credential{ID: 41, Weight: 1, Status: dbmodel.CredentialActive, APIKey: "sk-test"}
-	RecordFailure(cred, http.StatusTooManyRequests, "429 rate limited", now)
+	h.RecordFailure(cred, http.StatusTooManyRequests, "429 rate limited", now)
 
 	select {
 	case u := <-got:
