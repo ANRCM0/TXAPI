@@ -221,3 +221,23 @@ func TestLoginSessionDigestExpiryAndLogout(t *testing.T) {
 		t.Fatal("expired session reused")
 	}
 }
+
+func TestEmptyKeyAllowlistCannotBecomeAll(t *testing.T) {
+	st := openTestStore(t, "explicit-key-mode")
+	defer st.Close()
+	user, err := st.BootstrapAdmin("admin", "admin-password-123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := st.IssueToken(user.ID, &TokenInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateToken(key.ID, &TokenInput{Models: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	view, ok := st.LookupToken(key.Key)
+	if !ok || view.Policy.Mode != access.Allowlist || view.Policy.Allows("anything") {
+		t.Fatalf("empty list became all: %+v", view)
+	}
+}

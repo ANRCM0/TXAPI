@@ -108,9 +108,7 @@ func (s *Store) UpdateToken(id uint, in *TokenInput) (*model.Token, error) {
 			in.ModelMode = old.ModelMode
 			in.Models = []string(old.Models)
 		} else {
-			p := access.Legacy(in.Models)
-			in.ModelMode = p.Mode
-			in.Models = p.Models
+			in.ModelMode = access.Allowlist
 		}
 	}
 	if err := (access.Policy{Mode: in.ModelMode, Models: in.Models}).Validate(); err != nil {
