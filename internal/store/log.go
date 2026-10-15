@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -26,6 +27,8 @@ const (
 
 // LogQuery 是查询日志的过滤条件。
 type LogQuery struct {
+	UserID    uint
+	OwnerOnly bool
 	// Limit 是返回条数上限，0 表示用 DefaultLogLimit。
 	Limit int
 	// Offset 是分页偏移，配合 Limit 做翻页。
@@ -55,6 +58,12 @@ func (s *Store) ListLogs(q LogQuery) ([]model.RequestLog, error) {
 		limit = MaxLogLimit
 	}
 	db := s.db.Model(&model.RequestLog{})
+	if q.OwnerOnly {
+		if q.UserID == 0 {
+			return nil, errors.New("owner required")
+		}
+		db = db.Where("user_id = ?", q.UserID)
+	}
 	if q.ChannelID != 0 {
 		db = db.Where("channel_id = ?", q.ChannelID)
 	}

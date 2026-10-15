@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/core"
 	"minigateway/internal/metrics"
@@ -68,6 +69,7 @@ func (g *Gateway) Close()                     { g.executor.Close() }
 func (g *Gateway) Metrics() *metrics.Registry { return g.metrics }
 
 type Identity struct {
+	Policy        *access.Policy
 	TokenID       uint
 	UserID        uint
 	TokenName     string
@@ -116,6 +118,12 @@ func state(c *gin.Context) *RequestResult {
 	result := &RequestResult{Result: core.Result{StatusCode: 500}, Identity: Identity{
 		TokenID: ctxUint(c, middleware.CtxTokenID), UserID: ctxUint(c, middleware.CtxUserID), TokenName: c.GetString(middleware.CtxTokenName), RequestID: c.GetString(middleware.CtxRequestID), AllowedModels: append([]string(nil), models...),
 	}}
+	if value, ok := c.Get(middleware.CtxTokenView); ok {
+		if view, ok := value.(dbmodel.TokenView); ok && view.Policy.Mode != "" {
+			p := view.Policy
+			result.Identity.Policy = &p
+		}
+	}
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), resultContextKey{}, result))
 	return result
 }

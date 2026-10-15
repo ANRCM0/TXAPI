@@ -7,6 +7,7 @@ provider. Cross-provider compatibility is outside this smoke check's scope.
 import argparse
 import contextlib
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -105,6 +106,10 @@ def main():
         # JSON is a YAML subset; this avoids a separate Python YAML dependency.
         config_path = work / "config.json"
         config_path.write_text(json.dumps(config))
+        env = dict(os.environ, TXAPI_ADMIN_USERNAME="smoke-admin", TXAPI_ADMIN_PASSWORD="smoke-admin-password-only")
+        subprocess.run([str(gateway), "-config", str(config_path), "-init-admin"], env=env, cwd=ROOT, check=True, timeout=30)
+        subprocess.run([str(gateway), "-config", str(config_path), "-seed-only"], cwd=ROOT, check=True, timeout=30)
+        subprocess.run([str(gateway), "-config", str(config_path), "-claim-token", "1", "-owner-user", "1"], cwd=ROOT, check=True, timeout=30)
         with service([str(upstream), f"127.0.0.1:{upstream_port}"], work / "upstream.log") as up:
             ready(up, upstream_port)
             with service([str(gateway), "-config", str(config_path)], work / "gateway.log") as gw:

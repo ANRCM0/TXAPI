@@ -59,6 +59,9 @@ func main() {
 	// seedOnly 用于「只导种子数据不启动服务」的场景：先在初始化容器里
 	// 跑一次把库建好，再由正式进程启动，避免两个进程抢同一个库。
 	seedOnly := flag.Bool("seed-only", false, "只导入 YAML 种子数据后退出，不启动服务")
+	initAdmin := flag.Bool("init-admin", false, "create the first admin from TXAPI_ADMIN_USERNAME/TXAPI_ADMIN_PASSWORD and exit")
+	claimToken := flag.Uint("claim-token", 0, "claim one unowned legacy token ID and exit")
+	claimOwner := flag.Uint("owner-user", 0, "active user ID for -claim-token")
 	flag.Parse()
 
 	// 1. 加载配置
@@ -91,6 +94,24 @@ func main() {
 	// defer 保证任何退出路径都 flush 异步日志：Close 先排空日志队列
 	// 再关连接，进程退出不丢日志（SPEC 2.4）
 	defer st.Close()
+	if *initAdmin {
+		user, err := st.BootstrapAdmin(os.Getenv("TXAPI_ADMIN_USERNAME"), os.Getenv("TXAPI_ADMIN_PASSWORD"))
+		if err != nil {
+			slog.Error("admin initialization failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("administrator initialized", "user_id", user.ID)
+		return
+	}
+	if *claimToken != 0 {
+		token, err := st.ClaimToken(*claimToken, *claimOwner)
+		if err != nil {
+			slog.Error("legacy key claim failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("legacy key claimed", "token_id", token.ID, "user_id", token.UserID)
+		return
+	}
 
 	// 3. 空库时从 YAML 导入种子数据（幂等：非空库直接跳过）
 	if _, err := st.SeedFromConfig(cfg); err != nil {

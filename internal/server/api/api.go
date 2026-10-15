@@ -26,7 +26,8 @@ import (
 // 把回调作为依赖注入，api 包就不需要反向 import relay/billing
 // （那会形成 server → api → relay → server 的环）。
 type Handler struct {
-	store *store.Store
+	loginGate loginGate
+	store     *store.Store
 	// onChannelsChanged 在渠道发生任何写操作后调用，用于刷新 relay 渠道池。
 	onChannelsChanged func()
 	// onPricesChanged 在价格/倍率发生任何写操作后调用，用于让计费引擎
@@ -55,23 +56,7 @@ func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
 	group := r.Group("/api")
 	group.Use(adminAuth)
 
-	// 渠道 CRUD
-	group.GET("/channels", h.ListChannels)
-	group.POST("/channels", h.CreateChannel)
-	group.GET("/channels/:id", h.GetChannel)
-	group.PUT("/channels/:id", h.UpdateChannel)
-	group.DELETE("/channels/:id", h.DeleteChannel)
-
-	// 凭据 CRUD（渠道下的上游 Key）
-	// 路由分两种形态：挂在 /channels/:id 下的走「渠道视角」（列、增），
-	// 凭据自身的改删状态走 /credentials/:id——凭据 ID 全局唯一，
-	// 不需要再带一层渠道 ID
-	group.GET("/channels/:id/credentials", h.ListCredentials)
-	group.POST("/channels/:id/credentials", h.CreateCredential)
-	group.PUT("/credentials/:id", h.UpdateCredential)
-	group.DELETE("/credentials/:id", h.DeleteCredential)
-	group.POST("/credentials/:id/status", h.SetCredentialStatus)
-
+	h.registerResources(group)
 	// 令牌（增删查 + 单独的额度设置端点）
 	group.GET("/tokens", h.ListTokens)
 	group.POST("/tokens", h.CreateToken)
@@ -79,22 +64,6 @@ func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
 	group.DELETE("/tokens/:id", h.DeleteToken)
 	group.POST("/tokens/:id/quota", h.SetTokenQuota)
 
-	// 日志查询
-	group.GET("/logs", h.ListLogs)
-
-	// 用量统计
-	group.GET("/stats/summary", h.StatsSummary)
-	group.GET("/stats/by-model", h.StatsByModel)
-	group.GET("/stats/by-channel", h.StatsByChannel)
-
-	// 价格表与分组倍率
-	group.GET("/prices", h.ListPrices)
-	group.PUT("/prices/:model", h.UpsertPrice)
-	group.DELETE("/prices/:model", h.DeletePrice)
-	group.PUT("/group-rates", h.SetGroupRates)
-
-	// 能力表：路由加速器的可视化，排查「为什么这个模型路由不到某渠道」时看它
-	group.GET("/abilities", h.ListAbilities)
 }
 
 // fail 统一错误出口。
@@ -129,4 +98,40 @@ func bindJSON(c *gin.Context, dst any) bool {
 		return false
 	}
 	return true
+}
+
+func (h *Handler) registerResources(group *gin.RouterGroup) {
+	// 渠道 CRUD
+	group.GET("/channels", h.ListChannels)
+	group.POST("/channels", h.CreateChannel)
+	group.GET("/channels/:id", h.GetChannel)
+	group.PUT("/channels/:id", h.UpdateChannel)
+	group.DELETE("/channels/:id", h.DeleteChannel)
+
+	// 凭据 CRUD（渠道下的上游 Key）
+	// 路由分两种形态：挂在 /channels/:id 下的走「渠道视角」（列、增），
+	// 凭据自身的改删状态走 /credentials/:id——凭据 ID 全局唯一，
+	// 不需要再带一层渠道 ID
+	group.GET("/channels/:id/credentials", h.ListCredentials)
+	group.POST("/channels/:id/credentials", h.CreateCredential)
+	group.PUT("/credentials/:id", h.UpdateCredential)
+	group.DELETE("/credentials/:id", h.DeleteCredential)
+	group.POST("/credentials/:id/status", h.SetCredentialStatus)
+
+	// 日志查询
+	group.GET("/logs", h.ListLogs)
+
+	// 用量统计
+	group.GET("/stats/summary", h.StatsSummary)
+	group.GET("/stats/by-model", h.StatsByModel)
+	group.GET("/stats/by-channel", h.StatsByChannel)
+
+	// 价格表与分组倍率
+	group.GET("/prices", h.ListPrices)
+	group.PUT("/prices/:model", h.UpsertPrice)
+	group.DELETE("/prices/:model", h.DeletePrice)
+	group.PUT("/group-rates", h.SetGroupRates)
+
+	// 能力表：路由加速器的可视化，排查「为什么这个模型路由不到某渠道」时看它
+	group.GET("/abilities", h.ListAbilities)
 }
