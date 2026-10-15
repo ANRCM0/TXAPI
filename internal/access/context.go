@@ -6,12 +6,15 @@ import "context"
 // boundary constructs it; HTTP parameters must never supply its IDs or Policy.
 // Fields are snapshots for one request, never mutable cached user/Key objects.
 type Principal struct {
-	UserID    uint
-	TokenID   uint
-	TokenName string
-	Policy    Policy
-	RPMLimit  int
-	TPMLimit  int
+	UserID               uint
+	TokenID              uint
+	TokenName            string
+	Policy               Policy
+	RPMLimit             int
+	TPMLimit             int
+	UserRPMLimit         int
+	UserConcurrencyLimit int
+	KeyConcurrencyLimit  int
 }
 
 type principalKey struct{}

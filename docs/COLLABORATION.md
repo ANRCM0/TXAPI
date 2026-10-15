@@ -64,7 +64,7 @@ type Admission interface {
 - Request lease 覆盖整个重试循环；attempt lease 覆盖单次网络执行。两者在取消、失败和 panic 路径释放，嵌套释放顺序是 attempt → request。请求租约不把响应后日志落库与结算变成受限网络并发的一部分。
 - Acquire 必须遵守 ctx 截止时间，不能无限排队。成功必须返回非 nil 的 release；异常/取消时若已拿到租约也必须可释放。release 必须快速、并发安全，不依赖已取消的请求 context；不要在 release 内发起无限期网络请求。
 - 拒绝返回 `AdmissionError`：429 为配置限额，503 为暂时容量不可用，可附 RetryAfterSeconds。Message 必须能安全对外显示；普通后端 error 不向客户端回显。准入拒绝不发上游请求、不惩罚凭据。
-- 默认 Admission 为 nil（未启用）；这表示扩展接入点可用，不表示并发控制已实现。多实例全局公平性、用户跨 Key 聚合、队列与租约算法属于 S3 团队。
+- `gateway.New` 的可选 Admission 默认仍为 nil，供隔离测试/自定义组装；生产 main 已注入 `gateway.CapacityAdmission`，实现单进程四级并发和用户跨 Key RPM 聚合。服务器上限、拒绝行为、状态表容量和本批限制见 [S3 运行约定](DEVELOPMENT.md#s3-并发准入与用户请求速率)。当前立即拒绝，不排队；多实例全局限额、用户 TPM 聚合与严格结算不在本批实现范围。
 - 原有速率实现通过 `access.Limiter` 复用；TPM 预留在 `WithTokenReservation` 记录，`FinishTokens` 只调整一次。取消后用独立、最多 2 秒的 context 释放计数，避免每个业务模块再实现一套收尾。
 
 ### 健康回写与关闭
@@ -130,7 +130,7 @@ make smoke
 - [x] 统一数据迁移注册、失败回滚、重启幂等与旧二进制拒绝更高版本的回归。
 - [x] 团队目录边界、公共接线、接口变更流程和独立测试入口清晰。
 - [x] 框架提交 `bd322c0` 通过 Linux CI：构建、vet、gofmt、依赖与契约、race 全量测试、启动/迁移冒烟和性能基准。
-- [ ] 维护者审查合并到 master 后，作为团队共同开发基线。
+- [x] 维护者已于 2026-10-15 合并到 master（`3534086`），作为团队共同开发基线；合并后 Verify #38706751863 通过。
 
 F0 可以让团队开始各自的协议/API/页面/限额实现；生产准入能力、管理 UI、配置发布版本与严格计费仍要按 S3、S4、S5 的验收门槛交付。
 

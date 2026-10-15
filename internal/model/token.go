@@ -108,8 +108,11 @@ type TokenView struct {
 	// RPMLimit/TPMLimit 是限流阈值，0 表示不限。
 	// 限流中间件挂在 Auth 之后、只看上下文，所以阈值必须随投影一起
 	// 带过来——让它自己回库查会把一次请求变成两次查库。
-	RPMLimit int
-	TPMLimit int
+	RPMLimit             int
+	TPMLimit             int
+	UserRPMLimit         int
+	UserConcurrencyLimit int
+	KeyConcurrencyLimit  int
 }
 
 // IsActive 判断令牌当前是否可用（启用且未过期）。

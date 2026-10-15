@@ -190,16 +190,18 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 			// SSE headers/body are already visible; never append an error JSON or retry
 			// after the client may have consumed part of this response.
 			responseCommitted = true
-			if err.StatusCode != 499 && attemptResult.Termination != core.ClientWriteError {
+			if ctx.Err() == nil && err.StatusCode != 499 && attemptResult.Termination != core.ClientWriteError {
 				g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
 			}
 			break
 		}
 		// 健康反馈：按状态码决定是否惩罚这把凭据（400/404/422 不罚，
 		// 见 scheduler.ShouldPenalizeCredential）。必须在 shouldRetry
-		// 判断**之后**：400 这类错误本来就不会重试，但反馈还是要做——
+		// 判断之前：400 这类错误本来就不会重试，但反馈还是要做——
 		// 「不重试」和「不惩罚」是两件独立的事。
-		g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
+		if ctx.Err() == nil && attemptResult.Termination != core.ClientWriteError {
+			g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
+		}
 
 		// 只有「可重试的错误」才换渠道。
 		// 比如 400 参数错误，换渠道也没用，反而浪费一次请求。

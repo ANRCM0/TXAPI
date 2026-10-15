@@ -34,6 +34,7 @@ import (
 	"syscall"
 	"time"
 
+	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
 	"minigateway/internal/gateway"
@@ -139,6 +140,13 @@ func main() {
 	engine := billing.New(st.DB(), priceTable)
 
 	limiter := middleware.NewMemoryLimiter()
+	ceilings := cfg.Server.Concurrency
+	capacity, err := access.NewCapacity(access.CapacityConfig{Instance: ceilings.Instance, User: ceilings.User, Key: ceilings.Key, Channel: ceilings.Channel})
+	if err != nil {
+		slog.Error("capacity admission initialization failed", "err", err)
+		os.Exit(1)
+	}
+	defer capacity.Close()
 	var gw *gateway.Gateway
 	health := scheduler.NewHealthWorker(func(u scheduler.HealthUpdate) error {
 		return st.UpdateCredentialHealth(store.HealthUpdate{
@@ -158,7 +166,8 @@ func main() {
 	})
 	defer health.Close()
 	gw, err = gateway.New(gateway.Options{
-		Channels: st.Channels(), RetryTimes: cfg.Server.RetryTimes,
+		Admission: gateway.CapacityAdmission{Capacity: capacity},
+		Channels:  st.Channels(), RetryTimes: cfg.Server.RetryTimes,
 		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
 		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
 		Billing:        engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
