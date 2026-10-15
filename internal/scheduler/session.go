@@ -3,17 +3,18 @@ package scheduler
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 )
 
 // SessionID 派生本次请求的会话标识，供凭据亲和用。
 //
 // 取值优先级：
-//  1. 请求头 X-Session-Id —— 客户端（Cherry Studio、NextChat 这类）显式
+//  1. 请求头 X-Session-Id —— 客户端（Cherry Studio、NextChat 这类）显式（服务端只取摘要，并加可信用户范围）
 //     声明，最可靠；
-//  2. 令牌 ID + 首条 user 消息内容的哈希 —— 客户端不传时的兜底。
+//  2. 可信用户 ID + 令牌 ID + 首条 user 消息内容的哈希 —— 客户端不传时的兜底。
 //     为什么用「首条 user 消息」：多轮对话的第一条消息就是整个对话的
 //     主题，同一对话的每一轮请求都带着它，所以它是个稳定的会话指纹。
-//     带上令牌 ID 是为了让两个令牌问同一个问题时落到不同凭据，
+//     带上用户和令牌 ID 是为了让不同用户/令牌问同一个问题时落到不同凭据，
 //     否则它们会互相挤占同一把 Key 的缓存。
 //
 // 返回空字符串表示算不出会话标识（没有 user 消息）——调用方据此降级到
@@ -25,16 +26,17 @@ import (
 // 保持「透明代理」只解析了 model/stream/max_tokens 三个字段，再为会话
 // 亲和多解析一个 messages 会让那个刻意的边界变模糊。在 relay 里算，
 // handler 的「只解析路由必需字段」约定保持不变。
-func SessionID(header string, tokenID uint, messages []Message) string {
+func SessionID(header string, userID, tokenID uint, messages []Message) string {
 	if header != "" {
-		return "h:" + header
+		sum := sha256.Sum256([]byte(strings.TrimSpace(header)))
+		return "h:" + strconvToken(userID) + ":" + hex.EncodeToString(sum[:])
 	}
 	first := firstUserContent(messages)
 	if first == "" {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(strconvToken(tokenID) + "\x00" + first))
-	return "t:" + hex.EncodeToString(sum[:8])
+	sum := sha256.Sum256([]byte(strconvToken(userID) + "\x00" + strconvToken(tokenID) + "\x00" + first))
+	return "t:" + hex.EncodeToString(sum[:])
 }
 
 // Message 是请求体 messages 数组里本包唯一关心的投影。

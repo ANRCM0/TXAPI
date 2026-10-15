@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"log/slog"
-	"net/http"
 	"time"
 
 	dbmodel "minigateway/internal/model"
@@ -48,22 +47,16 @@ const (
 // 畸形请求就被拖进冷却、进而被拉黑。表现是「网关突然说没有可用渠道」，
 // 而真正的病因在客户端——这类故障极难排查，因为凭据本身根本没坏。
 func ShouldPenalizeCredential(statusCode int) bool {
-	switch statusCode {
-	case http.StatusBadRequest, // 400 参数错误
-		http.StatusNotFound,            // 404 模型不存在
-		http.StatusUnprocessableEntity: // 422 语义错误
-		return false
-	}
-	// 其余一律算凭据的锅：401/403/429/408 和所有 5xx 都在这里。
-	// 网络层错误（连不上、TLS 失败）在 doRelay 里已被映射成 502，
-	// 所以不需要在这里特判「没有状态码」的情况。
-	return true
+	return statusCode == 401 || statusCode == 403 || statusCode == 408 || statusCode == 429 || (statusCode >= 500 && statusCode <= 599)
 }
 
 // HealthUpdate 是一次健康状态变更的快照。
 type HealthUpdate struct {
-	CredentialID uint
-	FailCount    int
+	ObservedAt         int64
+	ExpectedGeneration int64
+	ExpectedUpdatedAt  time.Time
+	CredentialID       uint
+	FailCount          int
 	// CooldownUntil 是冷却截止时间，Unix 秒；0 表示不在冷却中。
 	CooldownUntil int64
 	Status        string
@@ -89,7 +82,8 @@ func (u HealthUpdate) Changed(from *dbmodel.Credential) bool {
 // 跳到拉黑阈值——「解封了但没真解封」是最难排查的一类故障。
 func NextSuccess(cred *dbmodel.Credential, now time.Time) HealthUpdate {
 	return HealthUpdate{
-		CredentialID:  cred.ID,
+		CredentialID:       cred.ID,
+		ExpectedGeneration: cred.HealthGeneration, ExpectedUpdatedAt: cred.UpdatedAt,
 		FailCount:     0,
 		CooldownUntil: 0,
 		Status:        dbmodel.CredentialActive,
@@ -104,7 +98,8 @@ func NextSuccess(cred *dbmodel.Credential, now time.Time) HealthUpdate {
 // 调用方据此跳过落库。
 func NextFailure(cred *dbmodel.Credential, statusCode int, errMsg string, now time.Time) HealthUpdate {
 	next := HealthUpdate{
-		CredentialID:  cred.ID,
+		CredentialID:       cred.ID,
+		ExpectedGeneration: cred.HealthGeneration, ExpectedUpdatedAt: cred.UpdatedAt,
 		FailCount:     cred.FailCount,
 		CooldownUntil: cred.CooldownUntil,
 		Status:        cred.Status,
@@ -136,7 +131,7 @@ func (h *HealthWorker) RecordSuccess(cred *dbmodel.Credential, now time.Time) {
 	if cred == nil {
 		return
 	}
-	h.submit(NextSuccess(cred, now), cred)
+	h.submit(healthEvent{credential: *cred, now: now, success: true})
 }
 
 // RecordFailure 记录一次失败转发，按状态码决定是否惩罚这把凭据。
@@ -146,23 +141,12 @@ func (h *HealthWorker) RecordFailure(cred *dbmodel.Credential, statusCode int, e
 	if cred == nil {
 		return
 	}
-	next := NextFailure(cred, statusCode, errMsg, now)
-	if next.Changed(cred) {
-		// debug 而不是 info：状态迁移在故障期会非常密集（每个失败
-		// 请求一条），info 级别会把请求摘要冲掉；但它又是排查
-		// 「这把 Key 为什么被冷却」的唯一现场，所以不能没有。
-		slog.Debug("[凭据健康] 凭据失败，状态迁移",
-			"credential_id", cred.ID,
-			"status_code", statusCode,
-			"fail_count", next.FailCount,
-			"next_status", next.Status,
-			"cooldown_until", time.Unix(next.CooldownUntil, 0).Format(time.RFC3339),
-			"error", errMsg)
+	if ShouldPenalizeCredential(statusCode) {
+		slog.Debug("[凭据健康] 凭据失败待串行应用", "credential_id", cred.ID, "status_code", statusCode, "error", errMsg)
 	} else {
-		slog.Debug("[凭据健康] 凭据失败但属客户端错误，不惩罚",
-			"credential_id", cred.ID, "status_code", statusCode, "error", errMsg)
+		slog.Debug("[凭据健康] 凭据失败但属客户端错误，不惩罚", "credential_id", cred.ID, "status_code", statusCode, "error", errMsg)
 	}
-	h.submit(next, cred)
+	h.submit(healthEvent{credential: *cred, statusCode: statusCode, message: errMsg, now: now})
 }
 
 // backoff 算第 n 次失败（n 从 1 开始）对应的冷却时长。

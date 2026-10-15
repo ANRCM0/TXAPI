@@ -201,5 +201,8 @@ func (s *Store) LookupToken(key string) (model.TokenView, bool) {
 	view.Models = policy.Models
 	view.RPMLimit = access.MinLimit(user.RPMLimit, token.RPMLimit)
 	view.TPMLimit = access.MinLimit(user.TPMLimit, token.TPMLimit)
+	view.UserRPMLimit = user.RPMLimit
+	view.UserConcurrencyLimit = user.ConcurrencyLimit
+	view.KeyConcurrencyLimit = token.ConcurrencyLimit
 	return view, true
 }

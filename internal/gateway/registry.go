@@ -159,6 +159,20 @@ func (g *Gateway) Reload(channels []model.Channel) error {
 		g.reg.modelIndex = savedIndex
 		return err
 	}
+
+	for id, old := range saved {
+		next := g.reg.channels[id]
+		if next == nil {
+			continue
+		}
+		for i, incoming := range next.credentials {
+			for _, local := range old.credentials {
+				if local.ID == incoming.ID && local.HealthGeneration == incoming.HealthGeneration && local.APIKey == incoming.APIKey && local.HealthObservedAt > incoming.HealthObservedAt {
+					next.credentials[i] = local
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -174,7 +188,6 @@ func (r *registry) apply(channels []model.Channel) error {
 // 单独拆出来是因为 Reload 需要「先换 map 再装载，失败时回滚」，
 // 而 Init 直接装载即可。两者都要用同一套转换逻辑，不能抄两份。
 func (r *registry) applyLocked(channels []model.Channel) error {
-	now := time.Now()
 	skipped := 0
 	for _, ch := range channels {
 		if !ch.IsEnabled() {
@@ -191,17 +204,9 @@ func (r *registry) applyLocked(channels []model.Channel) error {
 			skipped++
 			continue
 		}
-		// 一把可用凭据都没有的渠道仍然跳过：路由还会命中它，但每请求
-		// 都选不出 Key，转出去必然失败，而且这种故障在渠道列表里看不出
-		// 异常（渠道状态还是 enabled）。和「没有 Key 的渠道是空壳」同理。
-		//
-		// 注意这里只做**装载时**的快照判断：冷却/拉黑在运行期会变，
-		// 一个此刻全冷却的渠道下次热更新就能回来，所以不做永久剔除。
-		if !hasUsableCredential(ch.Credentials, now) {
-			slog.Warn("[渠道装载] 渠道没有可用凭据，已跳过", "channel_id", ch.ID, "channel", ch.Name)
-			skipped++
-			continue
-		}
+		// Keep enabled channels even if every credential is temporarily cooling.
+		// Eligibility is checked per attempt, so expiry does not require a reload.
+
 		r.channels[int(ch.ID)] = &channel{
 			id:          int(ch.ID),
 			name:        ch.Name,

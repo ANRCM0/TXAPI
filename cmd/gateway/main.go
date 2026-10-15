@@ -34,6 +34,7 @@ import (
 	"syscall"
 	"time"
 
+	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
 	"minigateway/internal/gateway"
@@ -139,10 +140,18 @@ func main() {
 	engine := billing.New(st.DB(), priceTable)
 
 	limiter := middleware.NewMemoryLimiter()
+	ceilings := cfg.Server.Concurrency
+	capacity, err := access.NewCapacity(access.CapacityConfig{Instance: ceilings.Instance, User: ceilings.User, Key: ceilings.Key, Channel: ceilings.Channel})
+	if err != nil {
+		slog.Error("capacity admission initialization failed", "err", err)
+		os.Exit(1)
+	}
+	defer capacity.Close()
 	var gw *gateway.Gateway
 	health := scheduler.NewHealthWorker(func(u scheduler.HealthUpdate) error {
 		return st.UpdateCredentialHealth(store.HealthUpdate{
-			CredentialID:  u.CredentialID,
+			CredentialID:       u.CredentialID,
+			ExpectedGeneration: u.ExpectedGeneration, ExpectedUpdatedAt: u.ExpectedUpdatedAt, ObservedAt: u.ObservedAt,
 			FailCount:     u.FailCount,
 			CooldownUntil: u.CooldownUntil,
 			Status:        u.Status,
@@ -155,15 +164,21 @@ func main() {
 			// 反馈白做，坏 Key 还会继续被选中
 			slog.Error("[调度] 凭据状态变更后刷新渠道池失败", "err", err)
 		}
+	}, func(id uint) (*model.Credential, error) {
+		return st.GetCredential(id)
 	})
 	defer health.Close()
 	gw, err = gateway.New(gateway.Options{
-		Channels: st.Channels(), RetryTimes: cfg.Server.RetryTimes,
+		Admission: gateway.CapacityAdmission{Capacity: capacity},
+		Channels:  st.Channels(), RetryTimes: cfg.Server.RetryTimes,
 		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
 		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
 		Billing:        engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
 		Picker: func(creds []model.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*model.Credential, bool) {
-			return scheduler.PickWithAffinity(creds, sessionID, exclude, now)
+			if cfg.Server.SessionAffinity {
+				return scheduler.PickWithAffinity(creds, sessionID, exclude, now)
+			}
+			return scheduler.Pick(creds, exclude, now)
 		},
 		HealthReporter: func(cred *model.Credential, statusCode int, errMsg string) {
 			// 成功/失败都走这里：scheduler 内部按状态码决定是清零还是退避，
@@ -186,7 +201,11 @@ func main() {
 	// 停止函数接在优雅关闭链路上——顺序是 srv.Shutdown → stopRecovery →
 	// health.Close → st.Close，保证恢复任务不再读库之后才关库。
 	stopRecovery := scheduler.StartRecovery(func() (int, error) {
-		return st.RecoverCooledDownCredentials()
+		n, err := st.RecoverCooledDownCredentials()
+		if err == nil && n > 0 {
+			err = gw.Reload(st.Channels())
+		}
+		return n, err
 	}, scheduler.RecoveryInterval)
 	defer stopRecovery()
 

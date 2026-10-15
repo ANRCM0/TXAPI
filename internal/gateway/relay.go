@@ -91,11 +91,11 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 	// ID——凭据 ID 全局唯一，渠道 ID 会把同渠道的其他 Key 一起误判成
 	// 「已试过」，那正是这次重构要修掉的毛病。
 	triedCred := make(map[uint]bool)
-	// 已用过但还有备用的渠道，留到最后兜底（避免「所有渠道都试过一遍就放弃」）
-	remaining := candidates
+	// 每次尝试重新读取原授权模型的渠道快照；已试凭据仍由本请求排除。
+
 	// 会话 ID 只算一次：整个请求（含重试）必须落在同一个会话上，
 	// 否则亲和会把重试打到另一把 Key 上，上游的 prompt 缓存白白作废。
-	sessionID := requestSessionID(c, state(c).Identity.TokenID, body)
+	sessionID := requestSessionID(c, state(c).Identity.UserID, state(c).Identity.TokenID, body)
 
 	for attempt := 0; attempt <= retryTimes; attempt++ {
 		if ctx.Err() != nil {
@@ -109,7 +109,7 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 			result.Termination = term
 			break
 		}
-		ch, cred := g.selectTarget(remaining, triedCred, sessionID, time.Now())
+		ch, cred := g.selectTarget(g.pickChannels(req.Model, allowedModels), triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}
@@ -190,16 +190,18 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 			// SSE headers/body are already visible; never append an error JSON or retry
 			// after the client may have consumed part of this response.
 			responseCommitted = true
-			if err.StatusCode != 499 && attemptResult.Termination != core.ClientWriteError {
+			if ctx.Err() == nil && err.StatusCode != 499 && attemptResult.Termination != core.ClientWriteError {
 				g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
 			}
 			break
 		}
 		// 健康反馈：按状态码决定是否惩罚这把凭据（400/404/422 不罚，
 		// 见 scheduler.ShouldPenalizeCredential）。必须在 shouldRetry
-		// 判断**之后**：400 这类错误本来就不会重试，但反馈还是要做——
+		// 判断之前：400 这类错误本来就不会重试，但反馈还是要做——
 		// 「不重试」和「不惩罚」是两件独立的事。
-		g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
+		if ctx.Err() == nil && attemptResult.Termination != core.ClientWriteError {
+			g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
+		}
 
 		// 只有「可重试的错误」才换渠道。
 		// 比如 400 参数错误，换渠道也没用，反而浪费一次请求。
@@ -287,7 +289,6 @@ func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest, m
 // 返回 (nil, nil) 表示没有可试的目标了（所有凭据都试过或都不可用）。
 func (g *Gateway) selectTarget(candidates []*channel, triedCred map[uint]bool, sessionID string, now time.Time) (*channel, *dbmodel.Credential) {
 	pool := make([]*channel, 0, len(candidates))
-	total := 0
 	// 未试过的候选里的最高优先级。只在这一层里选，低优先级渠道留作兜底。
 	maxPriority := 0
 	first := true
@@ -305,21 +306,11 @@ func (g *Gateway) selectTarget(candidates []*channel, triedCred map[uint]bool, s
 			continue
 		}
 		pool = append(pool, ch)
-		total += ch.weight
 	}
 	if len(pool) == 0 {
 		return nil, nil
 	}
-	// 加权随机：在 [0, total) 里掷一个点，落在谁的区间就是谁
-	n := rand.Intn(total)
-	ch := pool[len(pool)-1]
-	for _, c := range pool {
-		n -= c.weight
-		if n < 0 {
-			ch = c
-			break
-		}
-	}
+	ch := chooseWeightedChannel(pool, rand.Intn)
 	cred := g.pickCredentialWithSession(ch, triedCred, sessionID, now)
 	if cred == nil {
 		// hasUntriedCredential 已经保证有，防御性返回：真出现说明两个
@@ -327,6 +318,34 @@ func (g *Gateway) selectTarget(candidates []*channel, triedCred map[uint]bool, s
 		return nil, nil
 	}
 	return ch, cred
+}
+
+func effectiveChannelWeight(weight int) int {
+	if weight <= 0 {
+		return 1
+	}
+	if weight > 1_000_000 {
+		return 1_000_000
+	}
+	return weight
+}
+
+func chooseWeightedChannel(pool []*channel, randIntn func(int) int) *channel {
+	if len(pool) == 0 {
+		return nil
+	}
+	total := 0
+	for _, ch := range pool {
+		total += effectiveChannelWeight(ch.weight)
+	}
+	n := randIntn(total)
+	for _, ch := range pool {
+		n -= effectiveChannelWeight(ch.weight)
+		if n < 0 {
+			return ch
+		}
+	}
+	return pool[len(pool)-1]
 }
 
 // hasUntriedCredential 判断渠道里是否还有「没试过且当前可用」的凭据。
@@ -362,22 +381,26 @@ func countAvailableCredentials(candidates []*channel, now time.Time) int {
 
 func (g *Gateway) pickCredentialWithSession(ch *channel, triedCred map[uint]bool, sessionID string, now time.Time) *dbmodel.Credential {
 	if g.picker != nil {
-		if cred, ok := g.picker(ch.credentials, triedCred, sessionID, now); ok {
-			return cred
+		// The extension receives copies and only selects an ID; it cannot mutate
+		// our snapshot, exclusions or substitute arbitrary key material.
+		excluded := make(map[uint]bool, len(triedCred))
+		for id, tried := range triedCred {
+			excluded[id] = tried
 		}
+		chosen, ok := g.picker(append([]dbmodel.Credential(nil), ch.credentials...), excluded, sessionID, now)
+		if ok && chosen != nil {
+			for _, candidate := range ch.credentials {
+				if candidate.ID == chosen.ID && !triedCred[candidate.ID] && candidate.IsUsable(now) && candidate.APIKey != "" {
+					return &candidate
+				}
+			}
+		}
+	}
+	selected, ok := scheduler.Pick(ch.credentials, triedCred, now)
+	if !ok {
 		return nil
 	}
-	var best *dbmodel.Credential
-	for i := range ch.credentials {
-		c := &ch.credentials[i]
-		if triedCred[c.ID] || !c.IsUsable(now) || c.APIKey == "" {
-			continue
-		}
-		if best == nil || c.Weight > best.Weight || (c.Weight == best.Weight && c.ID < best.ID) {
-			best = c
-		}
-	}
-	return best
+	return selected
 }
 
 // pickChannels 从渠道池里筛出能服务该模型、且令牌有权限的渠道。
@@ -440,13 +463,14 @@ func modelAllowed(modelName string, allowedModels []string) bool {
 // shouldRetry 判断这个状态码是否值得换渠道重试。
 //
 // 分类依据：
-//   - 4xx 客户端错误（400/401/403/404）：请求本身有问题，换渠道也一样错，不重试
+//   - 400/404/422 等客户端错误不重试；上游 401/403 属于所选凭据，可换 Key。
 //   - 429 限流：换渠道很可能成功，重试
 //   - 5xx 上游故障：换渠道重试
 //   - 408 超时：重试
 func shouldRetry(statusCode int) bool {
 	switch statusCode {
-	case http.StatusTooManyRequests, // 429
+	case http.StatusUnauthorized, http.StatusForbidden,
+		http.StatusTooManyRequests,     // 429
 		http.StatusRequestTimeout,      // 408
 		http.StatusInternalServerError, // 500
 		http.StatusBadGateway,          // 502
@@ -487,10 +511,14 @@ func (g *Gateway) reportCredentialHealth(channel string, cred *dbmodel.Credentia
 	if statusCode != http.StatusOK && scheduler.ShouldPenalizeCredential(statusCode) {
 		g.metrics.RecordCredentialFailure(channel, cred.ID)
 	}
+	observed := g.observeHealth(cred, statusCode, errMsg)
+	if observed == nil {
+		return
+	}
 	if g.healthReporter == nil {
 		return
 	}
-	g.healthReporter(cred, statusCode, errMsg)
+	g.healthReporter(observed, statusCode, errMsg)
 }
 
 // SessionIDHeader 是客户端声明会话 ID 的请求头。
@@ -506,11 +534,11 @@ const SessionIDHeader = "X-Session-Id"
 // 「透明代理」只解析了 model/stream/max_tokens 三个字段，再为会话亲和
 // 多解析一个 messages 会让那个刻意的边界变模糊（见 handler.go 的说明）。
 //
-// 取值优先级：X-Session-Id 请求头 > 令牌 ID + 首条 user 消息哈希。
+// 取值优先级：X-Session-Id 请求头 > 用户 ID + 令牌 ID + 首条 user 消息哈希；亲和 ID 在服务端按用户隔离。
 // 都取不到时返回空串，选择逻辑据此降级到纯加权随机。
-func requestSessionID(c *gin.Context, tokenID uint, body []byte) string {
+func requestSessionID(c *gin.Context, userID, tokenID uint, body []byte) string {
 	if h := c.GetHeader(SessionIDHeader); h != "" {
-		return scheduler.SessionID(h, tokenID, nil)
+		return scheduler.SessionID(h, userID, tokenID, nil)
 	}
 	var envelope struct {
 		Messages []scheduler.Message `json:"messages"`
@@ -518,5 +546,5 @@ func requestSessionID(c *gin.Context, tokenID uint, body []byte) string {
 	if err := json.Unmarshal(body, &envelope); err != nil || len(envelope.Messages) == 0 {
 		return ""
 	}
-	return scheduler.SessionID("", tokenID, envelope.Messages)
+	return scheduler.SessionID("", userID, tokenID, envelope.Messages)
 }

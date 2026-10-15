@@ -31,6 +31,9 @@ type ServerConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds"`
 	// TotalTimeoutSeconds bounds the entire request, including all retries.
 	TotalTimeoutSeconds int `yaml:"total_timeout_seconds"`
+	// SessionAffinity is an opt-in optimization. Keep it disabled until an
+	// operator has measured a real upstream cache/latency benefit.
+	SessionAffinity bool `yaml:"session_affinity"`
 	// IPRPMLimit 是 IP 级限流的每分钟请求数上限，0 表示不限。
 	//
 	// 为什么和令牌级限流分开：令牌级限流挂在鉴权之后，管得住
@@ -42,7 +45,17 @@ type ServerConfig struct {
 	// 默认 0（不限）：自用场景下访问来源就是本机或内网，没有
 	// 探测流量，开了反而可能挡掉正常的并发压测。暴露到公网时
 	// 一定要配上（比如 120，即平均每秒 2 次）。
-	IPRPMLimit int `yaml:"ip_rpm_limit"`
+	IPRPMLimit  int               `yaml:"ip_rpm_limit"`
+	Concurrency ConcurrencyConfig `yaml:"concurrency"`
+}
+
+// ConcurrencyConfig sets per-process ceilings; zero selects finite defaults.
+// Individual user/Key settings can further restrict these ceilings.
+type ConcurrencyConfig struct {
+	Instance int `yaml:"instance"`
+	User     int `yaml:"user"`
+	Key      int `yaml:"key"`
+	Channel  int `yaml:"channel"`
 }
 
 // DatabaseConfig 是存储层配置。
@@ -213,6 +226,18 @@ func (c *Config) applyChannelKeyEnv() {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Server.Concurrency.Instance == 0 {
+		c.Server.Concurrency.Instance = 256
+	}
+	if c.Server.Concurrency.User == 0 {
+		c.Server.Concurrency.User = 32
+	}
+	if c.Server.Concurrency.Key == 0 {
+		c.Server.Concurrency.Key = 16
+	}
+	if c.Server.Concurrency.Channel == 0 {
+		c.Server.Concurrency.Channel = 64
+	}
 	if c.Server.Addr == "" {
 		c.Server.Addr = "127.0.0.1:8080"
 	}
@@ -274,6 +299,15 @@ func (c *Config) applyDefaults() {
 // 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
 // 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	limits := c.Server.Concurrency
+	for _, n := range []int{limits.Instance, limits.User, limits.Key, limits.Channel} {
+		if n < 1 || n > 1_000_000 {
+			return fmt.Errorf("concurrency ceilings must be between 1 and 1000000")
+		}
+	}
+	if limits.User >= limits.Instance || limits.Key > limits.User {
+		return fmt.Errorf("concurrency ceilings require key <= user < instance")
+	}
 	if strings.TrimSpace(c.AdminKey) == "" {
 		return fmt.Errorf("缺少管理密钥：请设置环境变量 %s，或在配置文件的 admin_key 字段里配置", EnvAdminKey)
 	}

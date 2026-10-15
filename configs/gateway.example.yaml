@@ -7,9 +7,18 @@ server:
   timeout_seconds: 120
   # 包含全部重试的总请求预算；未填写时与 timeout_seconds 相同。
   total_timeout_seconds: 120
+  # 可选会话亲和。默认关闭；确认上游缓存/延迟有实际收益后再开启。
+  session_affinity: false
   # IP 级限流的每分钟请求数上限，0 表示不限。
   # 自用（本机/内网访问）保持 0；暴露到公网时务必配上，比如 120。
   ip_rpm_limit: 0
+  # S3：单进程转发并发上限。0/省略使用下列默认值，不表示无限。
+  # 要求 key <= user < instance，确保单用户不能占满所有实例名额。
+  concurrency:
+    instance: 256
+    user: 32
+    key: 16
+    channel: 64
 
 # 管理 API（/api/*）的访问密钥，**必填**——缺失时网关拒绝启动。
 # 生产部署优先用环境变量 GATEWAY_ADMIN_KEY（密钥不该写进会进 git 的文件）。

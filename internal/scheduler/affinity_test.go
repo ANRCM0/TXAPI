@@ -264,3 +264,22 @@ func randomSession(i int) string {
 func sessionName(i int) string {
 	return "session-" + strconv.Itoa(i)
 }
+
+func TestAffinityCanonicalOrderAndBoundedRing(t *testing.T) {
+	pool := creds(1, 3, 2)
+	now := time.Now()
+	for i := 0; i < 300; i++ {
+		session := randomSession(i)
+		before, _ := PickWithAffinity(pool, session, nil, now)
+		reordered := []dbmodel.Credential{pool[2], pool[0], pool[1]}
+		after, _ := PickWithAffinity(reordered, session, nil, now)
+		if before.ID != after.ID {
+			t.Fatalf("cached indices depended on snapshot order: %d %d", before.ID, after.ID)
+		}
+	}
+	huge := creds(1000000, 1000000, 1)
+	ring := buildRing(huge)
+	if len(ring.nodes) > ringMaxNodes || len(ring.nodes) == 0 {
+		t.Fatalf("unbounded ring nodes: %d", len(ring.nodes))
+	}
+}

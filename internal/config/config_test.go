@@ -22,6 +22,20 @@ func writeCfg(t *testing.T, body string) string {
 // minimalCfg 是能通过 validate 的最小配置（必填 admin_key）。
 const minimalCfg = "admin_key: test-key\n"
 
+func TestSessionAffinityDefaultsOffAndCanBeEnabled(t *testing.T) {
+	cfg, err := Load(writeCfg(t, minimalCfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.SessionAffinity {
+		t.Fatal("session affinity must be opt-in")
+	}
+	cfg, err = Load(writeCfg(t, minimalCfg+"server:\n  session_affinity: true\n"))
+	if err != nil || !cfg.Server.SessionAffinity {
+		t.Fatalf("session affinity config: %v %+v", err, cfg.Server)
+	}
+}
+
 func TestRetryTimesZeroDisablesRetries(t *testing.T) {
 	cfg, err := Load(writeCfg(t, "admin_key: test-key\nserver:\n  retry_times: 0\n"))
 	if err != nil {
@@ -278,5 +292,29 @@ func TestTotalTimeoutDefaultAndValidation(t *testing.T) {
 		if err != nil || cfg.Server.TotalTimeoutSeconds != tc.want {
 			t.Fatalf("total timeout=%+v err=%v", cfg, err)
 		}
+	}
+}
+
+func TestConcurrencyDefaultsAndValidation(t *testing.T) {
+	cfg, err := Load(writeCfg(t, minimalCfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Server.Concurrency; got != (ConcurrencyConfig{Instance: 256, User: 32, Key: 16, Channel: 64}) {
+		t.Fatalf("defaults: %+v", got)
+	}
+	for _, values := range []string{
+		"instance: -1", "user: -1", "key: -1", "channel: -1",
+		"instance: 1000001", "user: 256", "key: 33",
+	} {
+		t.Run(values, func(t *testing.T) {
+			if _, err := Load(writeCfg(t, minimalCfg+"server:\n  concurrency:\n    "+values+"\n")); err == nil {
+				t.Fatal("invalid ceilings accepted")
+			}
+		})
+	}
+	cfg, err = Load(writeCfg(t, minimalCfg+"server:\n  concurrency:\n    instance: 8\n    user: 4\n    key: 2\n    channel: 3\n"))
+	if err != nil || cfg.Server.Concurrency != (ConcurrencyConfig{Instance: 8, User: 4, Key: 2, Channel: 3}) {
+		t.Fatalf("explicit config: %+v %v", cfg, err)
 	}
 }

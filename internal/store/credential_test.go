@@ -2,6 +2,8 @@ package store
 
 import (
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -257,5 +259,118 @@ func TestCredentialNotFoundPaths(t *testing.T) {
 	// 不存在渠道的凭据列表返回空而不是报错：「没东西可列」不是错误
 	if creds := st.ListCredentials(9999); len(creds) != 0 {
 		t.Fatalf("不存在渠道的凭据列表应为空, 实际 %d", len(creds))
+	}
+}
+func TestCredentialHealthCannotOverwriteManualStatus(t *testing.T) {
+	st := newCredTestStore(t)
+	defer st.Close()
+	id := st.ListCredentials(1)[0].ID
+	if _, err := st.SetCredentialStatus(id, model.CredentialDisabled); err != nil {
+		t.Fatal(err)
+	}
+	err := st.UpdateCredentialHealth(HealthUpdate{CredentialID: id, Status: model.CredentialCooldown, FailCount: 2, CooldownUntil: time.Now().Add(time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetCredential(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.CredentialDisabled {
+		t.Fatalf("stale health update overwrote manual disable: %+v", got)
+	}
+}
+
+func TestCredentialHealthGenerationFencesManualEdits(t *testing.T) {
+	st := newCredTestStore(t)
+	defer st.Close()
+	source := st.ListCredentials(1)[0]
+	if _, err := st.SetCredentialStatus(source.ID, model.CredentialActive); err != nil {
+		t.Fatal(err)
+	}
+	stale := HealthUpdate{CredentialID: source.ID, Status: model.CredentialCooldown, FailCount: 3, CooldownUntil: time.Now().Add(time.Hour).Unix(), ExpectedGeneration: source.HealthGeneration, ExpectedUpdatedAt: source.UpdatedAt}
+	if err := st.UpdateCredentialHealth(stale); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := st.GetCredential(source.ID)
+	if current.Status != model.CredentialActive || current.FailCount != 0 || current.HealthGeneration != source.HealthGeneration+1 {
+		t.Fatalf("stale event crossed manual reset: %+v", current)
+	}
+	stale.ExpectedGeneration = current.HealthGeneration
+	stale.ExpectedUpdatedAt = current.UpdatedAt
+	if err := st.UpdateCredentialHealth(stale); err != nil {
+		t.Fatal(err)
+	}
+	cooled, _ := st.GetCredential(source.ID)
+	if cooled.Status != model.CredentialCooldown || cooled.FailCount != 3 {
+		t.Fatalf("current event not applied: %+v", cooled)
+	}
+	stale.Status = model.CredentialActive
+	stale.FailCount = 0
+	if err := st.UpdateCredentialHealth(stale); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, _ := st.GetCredential(source.ID)
+	if unchanged.Status != model.CredentialCooldown {
+		t.Fatal("stale update raced past compare-and-swap")
+	}
+}
+
+func TestS3ConcurrentDeleteRetainsLastCredential(t *testing.T) {
+	st := newCredTestStore(t)
+	defer st.Close()
+	first := st.ListCredentials(1)[0]
+	second, err := st.CreateCredential(1, &CredentialInput{APIKey: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var group sync.WaitGroup
+	var success atomic.Int64
+	group.Add(2)
+	for _, id := range []uint{first.ID, second.ID} {
+		go func(id uint) {
+			defer group.Done()
+			if st.DeleteCredential(id) == nil {
+				success.Add(1)
+			}
+		}(id)
+	}
+	group.Wait()
+	if success.Load() != 1 {
+		t.Fatalf("deleted=%d", success.Load())
+	}
+	var count int64
+	st.DB().Model(&model.Credential{}).Where("channel_id=1").Count(&count)
+	if count != 1 {
+		t.Fatalf("concurrent deletes emptied channel: count=%d", count)
+	}
+}
+
+func TestReviewHealthObservationOrderingSurvivesFreshCAS(t *testing.T) {
+	st := newCredTestStore(t)
+	defer st.Close()
+	source := st.ListCredentials(1)[0]
+	newest := HealthUpdate{CredentialID: source.ID, ExpectedGeneration: source.HealthGeneration, ExpectedUpdatedAt: source.UpdatedAt, ObservedAt: 200, Status: model.CredentialActive}
+	if err := st.UpdateCredentialHealth(newest); err != nil {
+		t.Fatal(err)
+	}
+	current, err := st.GetCredential(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	older := newest
+	older.ObservedAt = 100
+	older.ExpectedUpdatedAt = current.UpdatedAt
+	older.Status = model.CredentialCooldown
+	older.FailCount = 1
+	if err := st.UpdateCredentialHealth(older); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetCredential(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HealthObservedAt != 200 || got.Status != model.CredentialActive {
+		t.Fatalf("older observation overwrote newer despite fresh CAS: %+v", got)
 	}
 }

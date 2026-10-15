@@ -10,14 +10,22 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 2
+const latestMigrationVersion = 4
 
 type dataMigration struct {
 	Version int
 	Apply   func(*gorm.DB) error
 }
 
-var dataMigrations = []dataMigration{{Version: 2, Apply: migrateAccessV2}}
+var dataMigrations = []dataMigration{
+	{Version: 2, Apply: migrateAccessV2},
+	{Version: 3, Apply: func(tx *gorm.DB) error {
+		return tx.Exec("UPDATE credentials SET health_generation = 0 WHERE health_generation IS NULL").Error
+	}},
+	{Version: 4, Apply: func(tx *gorm.DB) error {
+		return tx.Exec("UPDATE credentials SET health_observed_at = 0 WHERE health_observed_at IS NULL").Error
+	}},
+}
 
 func checkMigrationVersion(db *gorm.DB, supported int) error {
 	if !db.Migrator().HasTable(&model.SchemaMigration{}) {

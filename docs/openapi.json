@@ -216,11 +216,39 @@
             }
           },
           "429": {
-            "description": "Rate/admission limit; Retry-After is seconds",
+            "description": "Rate or admission limit exceeded, or upstream rate limiting after bounded retries. Admission rejection makes no upstream call.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Suggested seconds before retry; not a capacity reservation.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No usable upstream target, instance/tracker capacity exhausted, or upstream unavailable after bounded retries. Admission rejection makes no upstream call.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Suggested seconds before retry; not a capacity reservation.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
                 }
               }
             }
@@ -235,7 +263,18 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional, used only when server.session_affinity is enabled (default false). The gateway hashes the value and namespaces it using the authenticated user ID. Affinity never expands model permissions.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/v1/embeddings": {
@@ -291,6 +330,44 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Rate or admission limit exceeded, or upstream rate limiting after bounded retries. Admission rejection makes no upstream call.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Suggested seconds before retry; not a capacity reservation.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No usable upstream target, instance/tracker capacity exhausted, or upstream unavailable after bounded retries. Admission rejection makes no upstream call.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Suggested seconds before retry; not a capacity reservation.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -302,7 +379,18 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional, used only when server.session_affinity is enabled (default false). The gateway hashes the value and namespaces it using the authenticated user ID. Affinity never expands model permissions.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/auth/login": {
@@ -5344,7 +5432,7 @@
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
           },
           "created_at": {
             "type": "string",
@@ -5416,7 +5504,7 @@
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
           },
           "password": {
             "type": "string",
@@ -5483,7 +5571,7 @@
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
           },
           "password": {
             "type": "string",
@@ -5554,7 +5642,7 @@
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
           },
           "expires_at": {
             "type": "integer",
@@ -5650,7 +5738,7 @@
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
           },
           "status": {
             "type": "string",
@@ -5713,7 +5801,7 @@
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
           },
           "status": {
             "type": "string",

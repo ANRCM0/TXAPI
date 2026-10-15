@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -584,5 +585,44 @@ func TestRateLimitCanceledContextDoesNotCount(t *testing.T) {
 	lim.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("取消的请求不该计数，实际记了 %d 笔", n)
+	}
+}
+
+func TestS3TPMEmptyWindowAndLargeBodyPreserved(t *testing.T) {
+	limiter := NewMemoryLimiter()
+	if allowed, retry := limiter.AllowTokens(context.Background(), "empty", 1, 100, time.Now()); allowed || retry < 1 {
+		t.Fatal("oversized first prompt must reject without panic")
+	}
+	e := gin.New()
+	body := `{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("x", estimateBodyLimit+100) + `"}]}`
+	e.POST("/", func(c *gin.Context) { c.Set(CtxTokenView, model.TokenView{ID: 1, TPMLimit: 1000000}) }, TokenRateLimit(limiter), func(c *gin.Context) {
+		got, _ := io.ReadAll(c.Request.Body)
+		if string(got) != body {
+			t.Errorf("TPM sampling truncated body: got=%d want=%d", len(got), len(body))
+		}
+		c.Status(200)
+	})
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, httptest.NewRequest("POST", "/", strings.NewReader(body)))
+	if w.Code != 200 {
+		t.Fatalf("body verification did not execute: %d", w.Code)
+	}
+}
+func TestS3LiveRateBucketsCannotBeEvictedToBypassLimits(t *testing.T) {
+	limiter := NewMemoryLimiter()
+	now := time.Now()
+	for i := 0; i < maxKeys; i++ {
+		if ok, _ := limiter.AllowRequest(context.Background(), fmt.Sprint(i), 1, now); !ok {
+			t.Fatal(i)
+		}
+	}
+	if ok, _ := limiter.AllowRequest(context.Background(), "overflow", 1, now); ok {
+		t.Fatal("full tracker admitted new identity")
+	}
+	if ok, _ := limiter.AllowRequest(context.Background(), "0", 1, now); ok {
+		t.Fatal("old identity window evicted")
+	}
+	if ok, _ := limiter.AllowRequest(context.Background(), "overflow", 1, now.Add(time.Minute)); !ok {
+		t.Fatal("expired rate windows not reclaimed")
 	}
 }

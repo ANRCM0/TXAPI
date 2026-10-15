@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"minigateway/internal/access"
 	"minigateway/internal/config"
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
@@ -21,9 +23,10 @@ import (
 )
 
 type accessFixture struct {
-	engine *gin.Engine
-	store  *store.Store
-	hits   *atomic.Int64
+	engine   *gin.Engine
+	store    *store.Store
+	hits     *atomic.Int64
+	capacity *access.Capacity
 }
 
 func newAccessFixture(t *testing.T) *accessFixture {
@@ -46,13 +49,20 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	if _, err := st.CreateChannel(&store.ChannelInput{Name: "test", Type: "openai", BaseURL: upstream.URL, Models: []string{"m1", "m2"}, APIKey: "upstream-secret"}); err != nil {
 		t.Fatal(err)
 	}
-	gw, err := gateway.New(gateway.Options{Channels: st.Channels(), LogRecorder: st.WriteLog})
+	capacity, err := access.NewCapacity(access.CapacityConfig{Instance: 8, User: 4, Key: 2, Channel: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(capacity.Close)
+	limiter := middleware.NewMemoryLimiter()
+	t.Cleanup(limiter.(interface{ Close() }).Close)
+	gw, err := gateway.New(gateway.Options{Channels: st.Channels(), LogRecorder: st.WriteLog, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: capacity}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(gw.Close)
-	engine := NewEngine(Deps{Gateway: gw, Cfg: &config.Config{}, Store: st, AdminAuth: middleware.AdminAuth(testSecret)})
-	return &accessFixture{engine: engine, store: st, hits: &hits}
+	engine := NewEngine(Deps{Gateway: gw, Cfg: &config.Config{}, Store: st, RateLimiter: limiter, AdminAuth: middleware.AdminAuth(testSecret)})
+	return &accessFixture{engine: engine, store: st, hits: &hits, capacity: capacity}
 }
 func (f *accessFixture) request(t *testing.T, method, path, body, token string) (int, map[string]json.RawMessage, string) {
 	t.Helper()
@@ -250,5 +260,133 @@ func TestS2WildcardChannelKeepsPersonalAndCallModelListsConsistent(t *testing.T)
 	}
 	if code, _, _ := f.request(t, "POST", "/v1/chat/completions", `{"model":"m2","messages":[]}`, key); code != 403 {
 		t.Fatalf("wildcard broadened authorization: %d", code)
+	}
+}
+
+func TestS3AuthenticatedLimitsAggregateAcrossKeysAndRefresh(t *testing.T) {
+	f := newAccessFixture(t)
+	admin := f.login(t, "admin")
+	aliceID := f.createUser(t, admin, "alice", []string{"m1"})
+	f.createUser(t, admin, "bob", []string{"m1"})
+	alice, bob := f.login(t, "alice"), f.login(t, "bob")
+	_, key1 := f.issue(t, alice)
+	_, key2 := f.issue(t, alice)
+	_, key3 := f.issue(t, alice)
+	_, bobKey := f.issue(t, bob)
+	in := store.UserInput{Username: "alice", Role: "user", ModelMode: "allowlist", Models: []string{"m1"}, RPMLimit: 2, ConcurrencyLimit: 2}
+	if _, err := f.store.UpdateUser(aliceID, &in); err != nil {
+		t.Fatal(err)
+	}
+	view, ok := f.store.LookupToken(key1)
+	if !ok || view.UserRPMLimit != 2 || view.UserConcurrencyLimit != 2 || view.KeyConcurrencyLimit != 0 {
+		t.Fatalf("limits not projected from current owner: %+v", view)
+	}
+	for _, key := range []string{key1, key2} {
+		if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, key); code != 200 {
+			t.Fatalf("admitted key: %d %s", code, raw)
+		}
+	}
+	before := f.hits.Load()
+	if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","user_id":9999,"messages":[]}`, key3); code != 429 || !strings.Contains(raw, "user request rate") {
+		t.Fatalf("third Key bypassed owner's RPM: %d %s", code, raw)
+	}
+	if f.hits.Load() != before {
+		t.Fatal("rate rejection reached upstream")
+	}
+	if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, bobKey); code != 200 {
+		t.Fatalf("user isolation: %d %s", code, raw)
+	}
+	// Raising a user limit applies to the next request without resetting the
+	// existing window. Previously rejected attempts must not consume user RPM.
+	in.RPMLimit = 3
+	if _, err := f.store.UpdateUser(aliceID, &in); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, key3); code != 200 {
+		t.Fatalf("limit change not applied: %d %s", code, raw)
+	}
+	if code, _, _ := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, key2); code != 429 {
+		t.Fatalf("raising limit reset existing window: %d", code)
+	}
+	if s := f.capacity.Snapshot(); s.Requests != 0 || s.Attempts != 0 || s.Users != 0 || s.Keys != 0 || s.Channels != 0 {
+		t.Fatalf("API leaked concurrency: %+v", s)
+	}
+}
+
+func TestS3KeyLimitsApplyWithoutBlockingOtherOwners(t *testing.T) {
+	f := newAccessFixture(t)
+	admin := f.login(t, "admin")
+	aliceID := f.createUser(t, admin, "alice", []string{"m1"})
+	f.createUser(t, admin, "bob", []string{"m1"})
+	alice, bob := f.login(t, "alice"), f.login(t, "bob")
+	keyID, key := f.issue(t, alice)
+	_, otherKey := f.issue(t, alice)
+	_, bobKey := f.issue(t, bob)
+	in := store.TokenInput{Name: "limited", ModelMode: "allowlist", Models: []string{"m1"}, RPMLimit: 1, ConcurrencyLimit: 1}
+	if _, err := f.store.UpdateOwnedToken(aliceID, keyID, &in); err != nil {
+		t.Fatal(err)
+	}
+	view, ok := f.store.LookupToken(key)
+	if !ok || view.KeyConcurrencyLimit != 1 {
+		t.Fatalf("Key limit snapshot: %+v", view)
+	}
+	for i, entry := range []struct {
+		key  string
+		want int
+	}{{key, 200}, {key, 429}, {otherKey, 200}, {bobKey, 200}} {
+		if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, entry.key); code != entry.want {
+			t.Fatalf("call %d: want=%d got=%d %s", i, entry.want, code, raw)
+		}
+	}
+}
+
+func TestS3HTTPConcurrencyUsesCurrentUserAndKeyLimits(t *testing.T) {
+	f := newAccessFixture(t)
+	admin := f.login(t, "admin")
+	aliceID := f.createUser(t, admin, "alice", []string{"m1"})
+	f.createUser(t, admin, "bob", []string{"m1"})
+	alice, bob := f.login(t, "alice"), f.login(t, "bob")
+	keyID, key1 := f.issue(t, alice)
+	_, key2 := f.issue(t, alice)
+	_, key3 := f.issue(t, alice)
+	_, bobKey := f.issue(t, bob)
+	if _, err := f.store.UpdateUser(aliceID, &store.UserInput{Username: "alice", Role: "user", ModelMode: "allowlist", Models: []string{"m1"}, ConcurrencyLimit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.UpdateOwnedToken(aliceID, keyID, &store.TokenInput{Name: "limited", ModelMode: "allowlist", Models: []string{"m1"}, ConcurrencyLimit: 1}); err != nil {
+		t.Fatal(err)
+	}
+	reserve := func(key string) func() {
+		t.Helper()
+		view, ok := f.store.LookupToken(key)
+		if !ok {
+			t.Fatal("missing verified key")
+		}
+		release, err := f.capacity.AcquireRequest(context.Background(), access.Principal{UserID: view.UserID, TokenID: view.ID, UserConcurrencyLimit: view.UserConcurrencyLimit, KeyConcurrencyLimit: view.KeyConcurrencyLimit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(release)
+		return release
+	}
+	first := reserve(key1)
+	if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, key1); code != 429 || !strings.Contains(raw, "key concurrency") {
+		t.Fatalf("Key concurrency: %d %s", code, raw)
+	}
+	second := reserve(key2)
+	before := f.hits.Load()
+	if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","user_id":9999,"messages":[]}`, key3); code != 429 || !strings.Contains(raw, "user concurrency") {
+		t.Fatalf("user concurrency: %d %s", code, raw)
+	}
+	if f.hits.Load() != before {
+		t.Fatal("concurrency rejection reached upstream")
+	}
+	if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, bobKey); code != 200 {
+		t.Fatalf("another user lost capacity: %d %s", code, raw)
+	}
+	first()
+	second()
+	if code, _, raw := f.request(t, "POST", "/v1/chat/completions", `{"model":"m1","messages":[]}`, key1); code != 200 {
+		t.Fatalf("released capacity not reusable: %d %s", code, raw)
 	}
 }
