@@ -153,3 +153,58 @@ go test ./internal/core -run '^$' -bench BenchmarkExecutor -benchtime=100x -benc
 | 并发 SSE | 4 | 1,391,771 | 6.286 | 6.832 | 105,374 | 406 |
 
 并发场景的 ns/op 是总耗时除以请求数，不是单请求延迟；p95/p99 才是逐请求延迟。基准对所有样本排序计算分位数，CI 在日志记录 runner 环境和结果；不要跨 OS/Go 版本将差异直接归因于代码。
+
+## S2 身份、权限与升级
+
+### 权限与密钥约定
+
+- 登录：`POST /api/auth/login`，JSON `username`/`password`；返回 `session_token`，24 小时过期。会话使用独立 `session-` 前缀、服务端 SHA-256 摘要和 Bearer Authorization，不使用 Cookie、不接收 URL 会话。浏览器应只在内存保留令牌；必须在 HTTPS 或本机回环上使用，不要将令牌写入 URL/日志/公开前端配置。
+- 登录限速按真实 TCP 对端计数（不信任 X-Forwarded-For）：每分钟 5 次，返回 429/Retry-After；桶数量有上限。反向代理后的用户会共享代理 IP 的登录桶，不要把未受信任请求头当绕过入口。
+- 密码用 bcrypt（成本 10）验证，12–72 字节，无默认口令。初始化命令 `-init-admin` 从 `TXAPI_ADMIN_USERNAME`/`TXAPI_ADMIN_PASSWORD` 读取，仅在尚无管理员时成功，不接受命令行明文密码。
+- 用户角色为 admin/user，状态 active/disabled。`PUT` 是完整资源更新：遗漏角色/模型策略将使用安全默认值（user/allowlist），应提交需要保留的字段。禁止停用/降级最后一个有效管理员；修改密码、角色或状态会撤销已有会话。
+- `model_mode` 只有 `all` / `allowlist`；后者的空 `models: []` 表示全部拒绝，不能用 `*` 冒充明确授权。实际调用权限 = 系统策略 ∩ 用户策略 ∩ Key 限制，管理员的调用 Key 同样受限。
+- Key 由服务端随机生成 256 位，仅创建响应含 `key`；后续只返回 `key_prefix` 等元数据，数据库 `key` 兼容列始终为空。自助创建/更新不能指定别人为 owner、提交自选密钥或放大用户允许的模型/限额；零值限额继承用户上限。
+- 状态与权限在下一次鉴权时读数据库并生效，不能因为旧缓存而继续放行；现有已开始的流不会主动追杀。此阶段优先隔离正确性；按用户聚合的限流、并发租约属于 S3，当前用户速率上限与 Key 上限按更严格值用于 Key 桶。
+- 日志 user_id 取自已验证 Key 的 owner，忽略调用 body/请求头中的 user_id；个人查询始终加 owner 条件。个人用量是本人日志聚合与预算，不等于 S5 的可靠账本。
+
+### API 分区
+
+所有新接口都只使用 `Authorization: Bearer <session_token>`（登录接口除外）。
+
+| 分区 | 接口 | 说明 |
+|---|---|---|
+| auth | `POST /api/auth/login`、`POST /api/auth/logout` | 登录/销毁当前会话 |
+| me | `GET /api/me` | 当前用户资料 |
+| me | `GET/POST /api/me/keys` | 本人 Key 列表/创建；可指定 model_mode、models、expires_in_seconds、quota、rpm_limit、tpm_limit、concurrency_limit |
+| me | `GET/PUT/DELETE /api/me/keys/:id` | 本人详情、更新、吊销；跨 owner 统一返回 404 |
+| me | `GET /api/me/models`、`GET /api/me/logs`、`GET /api/me/usage` | 本人模型、日志和用量；不接受指定其他 owner |
+| admin | `GET/POST /api/admin/users`、`GET/PUT /api/admin/users/:id` | 创建/停用用户，配置角色、模型范围与上限 |
+| admin | `GET/POST /api/admin/keys`、`PUT/DELETE /api/admin/keys/:id` | 全局 Key 管理（创建必须提供有效 user_id） |
+| admin | `POST /api/admin/keys/:id/claim` | JSON user_id，显式认领旧无主 Key，只能认领一次 |
+| admin | `GET/PUT /api/admin/model-policy` | JSON `{"mode":"all"}` 或 `{"mode":"allowlist","models":["m1"]}` |
+| admin | `/api/admin/channels`、`credentials`、`logs`、`stats`、`prices`、`group-rates`、`abilities` | 复用已有管理能力，以管理员会话保护 |
+
+用户创建示例：管理员会话调用 `POST /api/admin/users`，body 为 `{"username":"alice","password":"请设置独立强密码","role":"user","model_mode":"allowlist","models":["m1","m2"]}`。Alice 登录后 `POST /api/me/keys`，body `{"name":"client","model_mode":"allowlist","models":["m1"]}`；调用 `/v1/*` 使用创建响应的 Key，而不是 session_token。
+
+旧 `/api/*` 路由暂不退役，仍要求 `GATEWAY_ADMIN_KEY`/X-Admin-Key；旧密钥是全局管理权限，必须视为 root 凭据保管。它不能代替新登录会话访问 `/api/admin/*` 或 `/api/me/*`；普通调用 Key 对新旧管理接口均无管理权限。管理密钥目前仍是启动必填项。
+
+### 从 S0/S1 数据库升级
+
+1. **先停写再备份**：停止网关，确认进程退出、异步日志已 flush；对配置中实际 database.path 以及存在的同名 `-wal`/`-shm` 做一致备份。不要只复制运行中的主库文件。将备份保存在受保护位置，备份仍可能包含旧明文 Key。
+2. 新版本首次 `store.Open` 在建表/补列后，事务执行 `schema_migrations.version=2`：哈希旧客户端 Key、填展示前缀、保留 token id/user_id/状态/到期/预算和模型限制，清空旧 key 列、替换原明文唯一索引。事务失败拒绝启动，不记录版本完成标记；建表补列可能已执行，恢复时以备份为准。
+3. 初始化管理员：用 `-init-admin`（只初始化，不导 YAML、不启动 HTTP）。已有管理员时拒绝重建；旧用户的模型范围采用 allowlist 安全默认，需要管理员明确授权。
+4. 若需要导入 YAML，单独执行 `./bin/gateway -config config.yaml -seed-only`。导入 Key 也只存摘要，且 user_id=0，因此不能直接调用。
+5. 对每个无主 Key 明确分配 owner：停机维护时 `./bin/gateway -config config.yaml -claim-token 1 -owner-user 1`，或者管理员登录后使用 `/api/admin/keys/1/claim`。参数是数据库真实 ID，不要假定现有库的管理员或 Key 一定是 1；初始化命令会输出新管理员 ID。认领不改变到期、停用或模型限制，不能重新转移已认领 Key；历史 user_id=0 的日志不反向猜测归属，只能由管理员查看。
+6. 验证：旧库无主 Key 在认领前 401，认领后按 owner 授权调用；A/B 用户无法互看 Key/日志；停用用户后其 Key 与会话立即失败；新建 Key 只显示一次。正常客户端的原 Key 值保持有效，但旧明文已不可通过管理接口恢复。
+7. **回滚限制**：旧二进制只认明文 key 列，不能直接运行于已迁移数据库。必须停新版、保留升级后数据备份，再恢复升级前一致备份后启动旧版本；回滚会丢失升级后新增用户/Key/日志/用量，需提前明确可接受窗口。严禁“重启旧二进制”当作无损回滚。
+8. 清空数据库列不等于物理安全擦除：旧 WAL、SQLite 空闲页、磁盘快照和历史备份可能仍有旧明文；需在受控停机窗口 checkpoint/整理库、保护或销毁旧介质备份，并按风险轮换 Key。本版本不宣称自动完成取证级安全擦除。
+
+S2 回归命令：
+
+```bash
+go test -count=1 ./internal/access ./internal/store ./internal/server/...
+go test -race -count=1 ./...
+make smoke
+```
+
+`make smoke` 现在会在隔离临时库中执行管理员初始化 → 导入 → 显式认领，再验证旧 OpenAI 完整链路；不接触真实库或真实凭据。

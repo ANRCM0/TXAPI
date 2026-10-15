@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"minigateway/internal/access"
 	"minigateway/internal/config"
 	"minigateway/internal/model"
 )
@@ -82,14 +83,17 @@ func (s *Store) SeedFromConfig(cfg *config.Config) (imported bool, err error) {
 		}
 
 		for _, tc := range cfg.Tokens {
+			policy := access.Legacy(tc.Models)
 			tk := &model.Token{
-				Name:     tc.Name,
-				Key:      tc.Key,
-				Models:   model.StringList(tc.Models),
-				Quota:    tc.Quota,
-				RPMLimit: tc.RPMLimit,
-				TPMLimit: tc.TPMLimit,
-				Status:   model.TokenStatusActive,
+				Name:      tc.Name,
+				KeyHash:   access.Hash(tc.Key),
+				KeyPrefix: keyPrefix(tc.Key),
+				ModelMode: policy.Mode,
+				Models:    model.StringList(policy.Models),
+				Quota:     tc.Quota,
+				RPMLimit:  tc.RPMLimit,
+				TPMLimit:  tc.TPMLimit,
+				Status:    model.TokenStatusActive,
 			}
 			if err := tx.Create(tk).Error; err != nil {
 				return fmt.Errorf("导入令牌 %s 失败: %w", tc.Name, err)

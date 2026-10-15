@@ -112,7 +112,7 @@ func newEmbeddingsGateway(t *testing.T) *embeddingsGateway {
 		t.Fatalf("建渠道失败: %v", err)
 	}
 	const tokenKey = "sk-test-token"
-	if _, err := st.CreateToken(&store.TokenInput{
+	if _, err := st.CreateToken(&store.TokenInput{UserID: fixtureOwner(t, st),
 		Key:  tokenKey,
 		Name: "测试令牌",
 	}); err != nil {
@@ -402,7 +402,7 @@ func TestEmbeddingsWithoutUsageFallsBackToEstimate(t *testing.T) {
 		t.Fatalf("建渠道失败: %v", err)
 	}
 	const tokenKey = "sk-tok"
-	if _, err := st.CreateToken(&store.TokenInput{Key: tokenKey, Name: "t"}); err != nil {
+	if _, err := st.CreateToken(&store.TokenInput{UserID: fixtureOwner(t, st), Key: tokenKey, Name: "t"}); err != nil {
 		t.Fatalf("建令牌失败: %v", err)
 	}
 	if err := gw.initRegistry(st.Channels()); err != nil {

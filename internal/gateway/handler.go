@@ -92,6 +92,7 @@ func (g *Gateway) handleRelay(c *gin.Context, mode int) {
 	}
 
 	result := state(c)
+
 	allowedModels := result.Identity.AllowedModels
 	tokenName := result.Identity.TokenName
 	requestID := result.Identity.RequestID
@@ -126,6 +127,13 @@ func (g *Gateway) handleRelay(c *gin.Context, mode int) {
 	//
 	// 必须在转发之前：超额时直接回 403，一个字节都不发给上游——
 	// 上游的 Key 是按量收费的，转发注定被拒的请求等于白烧钱（SPEC 4.2）。
+	if result.Identity.Policy != nil && !result.Identity.Policy.Allows(req.Model) {
+		result.StatusCode = http.StatusForbidden
+		result.ErrorMessage = "model is not authorized for this user and API key"
+		g.finishRequest(c, &req, startedAt, nil, body)
+		writeError(c, http.StatusForbidden, result.ErrorMessage, "forbidden")
+		return
+	}
 	pre, err := g.preRequest(c, &req)
 	if errors.Is(err, billing.ErrQuotaExceeded) {
 		// 记账先行：403 也是请求，日志里要能看到「被额度拦下」，
@@ -488,11 +496,15 @@ func (g *Gateway) ListModels(c *gin.Context) {
 	data := make([]gin.H, 0)
 
 	for _, ch := range g.reg.allChannels() {
-		for _, m := range ch.models {
+		models := append([]string(nil), ch.models...)
+		if ch.supports("*") && state(c).Identity.Policy != nil {
+			models = append(models, state(c).Identity.Policy.Models...)
+		}
+		for _, m := range models {
 			if m == "*" {
 				continue
 			}
-			if seen[m] || !modelAllowed(m, allowedModels) {
+			if seen[m] || !modelAllowed(m, allowedModels) || (state(c).Identity.Policy != nil && !state(c).Identity.Policy.Allows(m)) {
 				continue
 			}
 			seen[m] = true

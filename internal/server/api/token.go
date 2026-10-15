@@ -13,7 +13,7 @@ func (h *Handler) ListTokens(c *gin.Context) {
 	tokens := h.store.ListTokens()
 	for i := range tokens {
 		// 与渠道列表同理：key 打码，只留头尾辨认
-		tokens[i].Key = maskKey(tokens[i].Key)
+		tokens[i].Key = ""
 	}
 	c.JSON(http.StatusOK, gin.H{"data": tokens, "total": len(tokens)})
 }
@@ -24,13 +24,14 @@ func (h *Handler) CreateToken(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	tk, err := h.store.CreateToken(&in)
+	tk, err := h.store.IssueToken(in.UserID, &in)
 	if err != nil {
 		fail(c, err)
 		return
 	}
 	// 创建响应**不**打码：这把 key 是调用方第一次也是唯一一次看到完整值的机会
 	// （列表接口只给打码值），打码在这里等于让用户没法用自己刚创建的令牌
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, gin.H{"data": tk})
 }
 
@@ -49,7 +50,7 @@ func (h *Handler) UpdateToken(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	tk.Key = maskKey(tk.Key)
+	tk.Key = ""
 	c.JSON(http.StatusOK, gin.H{"data": tk})
 }
 

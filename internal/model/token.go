@@ -1,6 +1,7 @@
 package model
 
 import (
+	"minigateway/internal/access"
 	"time"
 
 	"gorm.io/gorm"
@@ -19,15 +20,20 @@ const (
 	UserStatusDisabled = "disabled"
 )
 
-// User 是网关的使用者。自用阶段只有 1 个 admin。
+// User is a login identity with explicit role, status and model policy.
 //
 // 注意与 Token 的区别：User 是「人」，Token 是「人手里的钥匙」。
 // 一个 User 可以有多把 Token（不同客户端各一把，便于单独吊销）。
 type User struct {
-	ID           uint   `gorm:"primaryKey" json:"id"`
-	Username     string `gorm:"uniqueIndex;size:64;not null" json:"username"`
-	PasswordHash string `gorm:"size:255;not null" json:"-"`
-	Role         string `gorm:"size:16;not null;default:user" json:"role"`
+	ID               uint       `gorm:"primaryKey" json:"id"`
+	Username         string     `gorm:"uniqueIndex;size:64;not null" json:"username"`
+	PasswordHash     string     `gorm:"size:255;not null" json:"-"`
+	Role             string     `gorm:"size:16;not null;default:user" json:"role"`
+	ModelMode        string     `gorm:"not null;default:allowlist" json:"model_mode"`
+	Models           StringList `gorm:"type:text" json:"models"`
+	RPMLimit         int        `gorm:"not null;default:0" json:"rpm_limit"`
+	TPMLimit         int        `gorm:"not null;default:0" json:"tpm_limit"`
+	ConcurrencyLimit int        `gorm:"not null;default:0" json:"concurrency_limit"`
 	// Quota 是总额度，UsedQuota 是已用额度。自用阶段可都设 0（不限）。
 	Quota     float64 `gorm:"not null;default:0" json:"quota"`
 	UsedQuota float64 `gorm:"not null;default:0" json:"used_quota"`
@@ -46,8 +52,12 @@ type Token struct {
 	ID     uint   `gorm:"primaryKey" json:"id"`
 	UserID uint   `gorm:"index;not null;default:0" json:"user_id"`
 	Name   string `gorm:"size:128;not null;default:''" json:"name"`
-	// Key 是客户端实际使用的 Bearer 值，全局唯一。
-	Key string `gorm:"uniqueIndex;size:255;not null" json:"key"`
+	// Key is transient creation output. The compatibility database column is empty; KeyHash verifies calls.
+	Key              string `gorm:"size:255;not null;default:''" json:"key,omitempty"`
+	KeyHash          string `gorm:"size:64;index" json:"-"`
+	KeyPrefix        string `gorm:"size:24" json:"key_prefix"`
+	ModelMode        string `gorm:"not null;default:allowlist" json:"model_mode"`
+	ConcurrencyLimit int    `gorm:"not null;default:0" json:"concurrency_limit"`
 	// Models 限制这把令牌能访问哪些模型；空数组表示不限制。
 	// 支持 "*" 通配符。
 	Models StringList `gorm:"type:text" json:"models"`
@@ -90,6 +100,7 @@ const (
 // UserID 必须带上：P5 的额度是「先扣令牌、再扣用户」的双层结构，
 // 没有它结算时找不到要扣哪个用户。
 type TokenView struct {
+	Policy access.Policy
 	ID     uint
 	UserID uint
 	Name   string
@@ -115,4 +126,22 @@ func (t *Token) View() TokenView {
 		ID: t.ID, UserID: t.UserID, Name: t.Name, Models: []string(t.Models),
 		RPMLimit: t.RPMLimit, TPMLimit: t.TPMLimit,
 	}
+}
+
+func (u *User) Policy() access.Policy {
+	return access.Policy{Mode: u.ModelMode, Models: []string(u.Models)}
+}
+func (t *Token) Policy() access.Policy {
+	return access.Policy{Mode: t.ModelMode, Models: []string(t.Models)}
+}
+
+// Session contains only a verification digest. It is distinct from an API Key.
+type Session struct {
+	Hash      string `gorm:"primaryKey;size:64" json:"-"`
+	UserID    uint   `gorm:"index;not null" json:"user_id"`
+	ExpiresAt int64  `gorm:"index;not null" json:"expires_at"`
+}
+type SchemaMigration struct {
+	Version   int `gorm:"primaryKey"`
+	AppliedAt time.Time
 }

@@ -170,6 +170,7 @@ func NewEngine(deps Deps) *gin.Engine {
 		}
 	})
 	apiHandler.Register(engine.Group(""), deps.AdminAuth)
+	apiHandler.RegisterAccess(engine.Group(""))
 
 	// 兜底：其他路径统一返回 404，格式保持 OpenAI 风格，
 	// 避免客户端因为拿到 HTML 404 页面而解析失败

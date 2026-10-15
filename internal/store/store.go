@@ -19,6 +19,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"minigateway/internal/access"
 	"minigateway/internal/config"
 	"minigateway/internal/model"
 )
@@ -76,6 +77,7 @@ func Open(cfg config.DatabaseConfig) (*Store, error) {
 
 	s := &Store{db: db}
 	if err := s.AutoMigrate(); err != nil {
+		_ = sqlDB.Close()
 		return nil, err
 	}
 	// 日志异步写入器：建好表之后再启动，保证第一批日志就能落库
@@ -86,13 +88,15 @@ func Open(cfg config.DatabaseConfig) (*Store, error) {
 	return s, nil
 }
 
-// AutoMigrate 建表。
+// AutoMigrate builds structural columns, then applies the versioned access data migration.
 //
 // 用 AutoMigrate 而不是手写 SQL 迁移：自用场景下表结构的演进靠它足够，
 // 且能保证 Go 结构体和表结构不漂移。生产上换 PG 后再引入版本化迁移工具。
 func (s *Store) AutoMigrate() error {
 	if err := s.db.AutoMigrate(
 		&model.User{},
+		&model.Session{},
+		&model.SchemaMigration{},
 		&model.Channel{},
 		&model.Credential{},
 		&model.Token{},
@@ -103,7 +107,7 @@ func (s *Store) AutoMigrate() error {
 	); err != nil {
 		return fmt.Errorf("建表失败: %w", err)
 	}
-	return nil
+	return s.migrateAccessV2()
 }
 
 // Close 先 flush 异步日志再关闭连接池。
@@ -151,7 +155,7 @@ func (s *Store) reloadCache() error {
 
 	tokenMap := make(map[string]*model.Token, len(tokens))
 	for i := range tokens {
-		tokenMap[tokens[i].Key] = &tokens[i]
+		tokenMap[tokens[i].KeyHash] = &tokens[i]
 	}
 
 	s.mu.Lock()
@@ -176,14 +180,23 @@ func (s *Store) Channels() []model.Channel {
 // 只返回「当前可用」的令牌（启用且未过期）：过期令牌在这里就过滤掉，
 // 上层不用每个调用点都记得判过期。
 func (s *Store) LookupToken(key string) (model.TokenView, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	t, ok := s.tokens[key]
-	if !ok {
+	var token model.Token
+	if err := s.db.Where("key_hash = ?", access.Hash(key)).First(&token).Error; err != nil || token.UserID == 0 || !token.IsActive(time.Now()) {
 		return model.TokenView{}, false
 	}
-	if !t.IsActive(time.Now()) {
+	user, err := s.GetUser(token.UserID)
+	if err != nil || user.Status != model.UserStatusActive {
 		return model.TokenView{}, false
 	}
-	return t.View(), true
+	system, err := s.SystemPolicy()
+	if err != nil {
+		return model.TokenView{}, false
+	}
+	policy := access.Intersect(system, user.Policy(), token.Policy())
+	view := token.View()
+	view.Policy = policy
+	view.Models = policy.Models
+	view.RPMLimit = access.MinLimit(user.RPMLimit, token.RPMLimit)
+	view.TPMLimit = access.MinLimit(user.TPMLimit, token.TPMLimit)
+	return view, true
 }

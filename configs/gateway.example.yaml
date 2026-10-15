@@ -1,3 +1,4 @@
+# S2：新客户端 Key 建议登录后通过 /api/me/keys 生成；下方 YAML token 属于旧种子导入，默认无主，必须显式认领后才能调用。
 # Copy to config.yaml (ignored by Git) and edit locally.
 # Relative database paths are resolved from the process working directory.
 server:

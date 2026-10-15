@@ -3,179 +3,160 @@ package store
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"gorm.io/gorm"
-
+	"minigateway/internal/access"
 	"minigateway/internal/model"
 )
 
-// TokenInput 是创建/更新令牌的入参。
 type TokenInput struct {
-	Name   string   `json:"name"`
-	Key    string   `json:"key"`
-	Models []string `json:"models"`
-	// ExpiresInSeconds 是「多少秒后过期」，0 表示永不过期。
-	// 用相对值而不是绝对时间戳：调用方不用关心服务器时区，也更容易表达「30 天有效」。
-	ExpiresInSeconds int64   `json:"expires_in_seconds"`
-	Quota            float64 `json:"quota"`
-	// RPMLimit/TPMLimit 是限流阈值，0 表示不限（与 Quota 的 0=不限 同语义）。
-	RPMLimit int `json:"rpm_limit"`
-	TPMLimit int `json:"tpm_limit"`
+	Name string `json:"name"`
+	// Key is only accepted by the internal seed/import compatibility method.
+	Key              string   `json:"key"`
+	UserID           uint     `json:"user_id"`
+	ModelMode        string   `json:"model_mode"`
+	Models           []string `json:"models"`
+	ExpiresInSeconds int64    `json:"expires_in_seconds"`
+	Quota            float64  `json:"quota"`
+	RPMLimit         int      `json:"rpm_limit"`
+	TPMLimit         int      `json:"tpm_limit"`
+	ConcurrencyLimit int      `json:"concurrency_limit"`
+	Status           string   `json:"status"`
 }
 
-// validate 填充默认值并校验。传进来的 in 会被就地修改。
 func (in *TokenInput) validate(now time.Time) error {
-	if in.Key == "" {
-		return errors.New("令牌 key 不能为空")
+	if in.ExpiresInSeconds < 0 || in.ExpiresInSeconds > 315360000 {
+		return errors.New("expiry must be between 0 and 10 years")
 	}
-	if in.Models == nil {
-		in.Models = []string{}
+	if in.Quota < 0 || in.RPMLimit < 0 || in.TPMLimit < 0 || in.ConcurrencyLimit < 0 {
+		return errors.New("key limits cannot be negative")
 	}
-	if in.ExpiresInSeconds < 0 {
-		return errors.New("expires_in_seconds 不能为负数")
-	}
-	if in.Quota < 0 {
-		return fmt.Errorf("quota 不能为负数: %v", in.Quota)
-	}
-	if in.RPMLimit < 0 {
-		return fmt.Errorf("rpm_limit 不能为负数: %d", in.RPMLimit)
-	}
-	if in.TPMLimit < 0 {
-		return fmt.Errorf("tpm_limit 不能为负数: %d", in.TPMLimit)
+	if in.Status != "" && in.Status != model.TokenStatusActive && in.Status != model.TokenStatusDisabled {
+		return errors.New("invalid key status")
 	}
 	return nil
 }
-
-// toModel 把入参转成实体。expires_at 在这里才算出来，保持「相对时长」的语义。
 func (in *TokenInput) toModel(now time.Time) *model.Token {
-	var expiresAt int64
+	var expires int64
 	if in.ExpiresInSeconds > 0 {
-		expiresAt = now.Add(time.Duration(in.ExpiresInSeconds) * time.Second).Unix()
+		expires = now.Unix() + in.ExpiresInSeconds
 	}
-	return &model.Token{
-		Name:      in.Name,
-		Key:       in.Key,
-		Models:    model.StringList(in.Models),
-		Quota:     in.Quota,
-		RPMLimit:  in.RPMLimit,
-		TPMLimit:  in.TPMLimit,
-		ExpiresAt: expiresAt,
-		Status:    model.TokenStatusActive,
+	status := in.Status
+	if status == "" {
+		status = model.TokenStatusActive
 	}
+	return &model.Token{UserID: in.UserID, Name: in.Name, KeyHash: access.Hash(in.Key), KeyPrefix: keyPrefix(in.Key), ModelMode: in.ModelMode, Models: model.StringList(in.Models), Quota: in.Quota, RPMLimit: in.RPMLimit, TPMLimit: in.TPMLimit, ConcurrencyLimit: in.ConcurrencyLimit, ExpiresAt: expires, Status: status}
 }
 
-// CreateToken 新建令牌。
+// CreateToken imports a known key (seed/fixtures). HTTP callers use IssueToken,
+// which generates 256 random bits. An unowned import is quarantined by LookupToken.
 func (s *Store) CreateToken(in *TokenInput) (*model.Token, error) {
-	now := time.Now()
-	if err := in.validate(now); err != nil {
+	if in.Key == "" {
+		return nil, errors.New("import key cannot be empty")
+	}
+	if err := in.validate(time.Now()); err != nil {
 		return nil, err
 	}
-	tk := in.toModel(now)
-	// 先查重再插入：SQLite 的唯一索引当然也会拦住重复 key，
-	// 但那时报的是底层约束错误，调用方拿到的是一串看不懂的 SQL 约束名。
-	//
-	// 注意 Unscoped()：Token 带软删除字段，默认查询会过滤掉已删除的行。
-	// 但唯一索引对软删除的行**仍然生效**——不查它们的话，预检通不过、
-	// 真正插入时才被数据库拦下，预检就白做了。
-	var dup int64
-	if err := s.db.Unscoped().Model(&model.Token{}).Where("key = ?", in.Key).Count(&dup).Error; err != nil {
-		return nil, fmt.Errorf("检查令牌重复失败: %w", err)
+	if in.ModelMode == "" {
+		p := access.Legacy(in.Models)
+		in.ModelMode = p.Mode
+		in.Models = p.Models
 	}
-	if dup > 0 {
-		return nil, errors.New("令牌 key 已存在")
+	if err := (access.Policy{Mode: in.ModelMode, Models: in.Models}).Validate(); err != nil {
+		return nil, err
 	}
-	if err := s.db.Create(tk).Error; err != nil {
-		return nil, fmt.Errorf("创建令牌失败: %w", err)
+	if in.UserID > 0 {
+		if err := s.EnsureActiveOwner(in.UserID); err != nil {
+			return nil, err
+		}
+	}
+	token := in.toModel(time.Now())
+	var duplicate int64
+	if err := s.db.Unscoped().Model(&model.Token{}).Where("key_hash = ?", token.KeyHash).Count(&duplicate).Error; err != nil {
+		return nil, err
+	}
+	if duplicate > 0 {
+		return nil, errors.New("key already exists")
+	}
+	if err := s.db.Create(token).Error; err != nil {
+		return nil, errors.New("could not create API key")
 	}
 	if err := s.reloadCache(); err != nil {
 		return nil, err
 	}
-	return tk, nil
+	// This copy is never the cached/persisted row.
+	token.Key = in.Key
+	return token, nil
 }
-
-// UpdateToken 更新令牌。
-//
-// key 不允许改：令牌 key 是客户端写死在配置里的，改了等于所有客户端集体失效。
-// 真要换 key 就删旧建新。
 func (s *Store) UpdateToken(id uint, in *TokenInput) (*model.Token, error) {
-	now := time.Now()
-	if err := in.validate(now); err != nil {
+	if err := in.validate(time.Now()); err != nil {
 		return nil, err
 	}
-	var tk model.Token
-	if err := s.db.First(&tk, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("令牌 %d: %w", id, ErrNotFound)
+	old, err := s.GetToken(id)
+	if err != nil {
+		return nil, err
+	}
+	if in.Key != "" && access.Hash(in.Key) != old.KeyHash {
+		return nil, errors.New("cannot change API key material")
+	}
+	if in.UserID != 0 && in.UserID != old.UserID {
+		return nil, errors.New("use the explicit legacy claim operation to assign ownership")
+	}
+	if in.ModelMode == "" {
+		if in.Models == nil {
+			in.ModelMode = old.ModelMode
+			in.Models = []string(old.Models)
+		} else {
+			in.ModelMode = access.Allowlist
 		}
-		return nil, fmt.Errorf("读取令牌 %d 失败: %w", id, err)
 	}
-	if in.Key != tk.Key {
-		return nil, errors.New("不允许修改令牌 key；如需更换请删除后重建")
+	if err := (access.Policy{Mode: in.ModelMode, Models: in.Models}).Validate(); err != nil {
+		return nil, err
 	}
-
-	updated := in.toModel(now)
-	updates := map[string]any{
-		"name":       updated.Name,
-		"models":     updated.Models,
-		"quota":      updated.Quota,
-		"rpm_limit":  updated.RPMLimit,
-		"tpm_limit":  updated.TPMLimit,
-		"expires_at": updated.ExpiresAt,
+	updated := in.toModel(time.Now())
+	changes := map[string]any{"name": in.Name, "model_mode": in.ModelMode, "models": updated.Models, "quota": in.Quota, "rpm_limit": in.RPMLimit, "tpm_limit": in.TPMLimit, "concurrency_limit": in.ConcurrencyLimit, "expires_at": updated.ExpiresAt}
+	if in.Status != "" {
+		changes["status"] = in.Status
 	}
-	if err := s.db.Model(&model.Token{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return nil, fmt.Errorf("更新令牌失败: %w", err)
+	if err := s.db.Model(&model.Token{}).Where("id = ?", id).Updates(changes).Error; err != nil {
+		return nil, err
 	}
 	if err := s.reloadCache(); err != nil {
 		return nil, err
 	}
 	return s.GetToken(id)
 }
-
-// DeleteToken 吊销令牌（物理删除）。
 func (s *Store) DeleteToken(id uint) error {
-	res := s.db.Delete(&model.Token{}, id)
-	if res.Error != nil {
-		return fmt.Errorf("删除令牌失败: %w", res.Error)
+	result := s.db.Delete(&model.Token{}, id)
+	if result.Error != nil {
+		return result.Error
 	}
-	if res.RowsAffected == 0 {
-		return fmt.Errorf("令牌 %d: %w", id, ErrNotFound)
+	if result.RowsAffected == 0 {
+		return ErrNotFound
 	}
 	return s.reloadCache()
 }
-
-// GetToken 按 ID 读令牌。
 func (s *Store) GetToken(id uint) (*model.Token, error) {
-	var tk model.Token
-	if err := s.db.First(&tk, id).Error; err != nil {
+	var token model.Token
+	if err := s.db.First(&token, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("令牌 %d: %w", id, ErrNotFound)
+			return nil, fmt.Errorf("token %d: %w", id, ErrNotFound)
 		}
-		return nil, fmt.Errorf("读取令牌 %d 失败: %w", id, err)
+		return nil, err
 	}
-	return &tk, nil
+	return &token, nil
 }
-
-// ListTokens 列出所有令牌（从缓存读）。
 func (s *Store) ListTokens() []model.Token {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]model.Token, 0, len(s.tokens))
-	for _, t := range s.tokens {
-		out = append(out, *t)
+	// Never serialize cached plaintext; the legacy column is empty after v2.
+	var tokens []model.Token
+	if err := s.db.Order("id").Find(&tokens).Error; err != nil {
+		return nil
 	}
-	// 按 ID 排序：遍历 map 的顺序是随机的，不排序的话同样的请求
-	// 两次返回不同顺序，前端 diff 会抖
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return tokens
 }
-
-// CountTokens 返回令牌总数。
 func (s *Store) CountTokens() (int64, error) {
-	var n int64
-	if err := s.db.Model(&model.Token{}).Count(&n).Error; err != nil {
-		return 0, fmt.Errorf("统计令牌数失败: %w", err)
-	}
-	return n, nil
+	var count int64
+	err := s.db.Model(&model.Token{}).Count(&count).Error
+	return count, err
 }

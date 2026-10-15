@@ -99,16 +99,17 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 | 结构化日志 | ✅ | log/slog，级别可配（debug/info/warn/error），七个统一字段 |
 | Prometheus 指标 | ✅ | `GET /metrics`，六个指标族；手写 exposition，零新依赖 |
 | 日志清理 | ✅ | `logs` 表按保留天数每日分批删除（每批 1000 行） |
-| 管理 API | ✅ | 渠道/凭据/令牌/日志/统计/价格 CRUD，`X-Admin-Key` 鉴权 |
+| 管理 API | ✅ | 新 `/api/admin/*` 使用管理员登录会话；旧 `/api/*` 继续使用独立管理密钥 |
 | Docker | ✅ | 多阶段构建 + compose + 数据卷；密钥走环境变量 |
 | CI | ✅ | build + vet + `go test -race` + `gofmt -l` |
-| 用户注册/登录 | ❌ | 自用场景「令牌即租户」，见 [docs/PLAN.md](docs/PLAN.md) 的不做清单 |
-| 支付/充值 | ❌ | 同上 |
+| 用户登录/隔离 | ✅ | 一次性管理员初始化；管理员创建用户；独立登录会话、本人 Key/日志/用量与模型权限交集 |
+| 公开注册 | ❌ | 首版只允许管理员创建用户 |
+| 支付/充值 | ❌ | 不在当前阶段范围 |
 | images/audio/rerank | ❌ | 适配器接口已留扩展位，等真有需求 |
 | Redis 限流 | ❌ | 单机内存版够自用；接口留位置，需要时替换实现 |
 | PostgreSQL | ❌ | `Open()` 对非 SQLite 直接报错，属部署阶段 |
 
-> P5/P6 的计费与请求级凭据调度已交付；S0、S1 于 2026-10-15 通过 CI 验收。下一阶段为 S2，详见
+> P5/P6 的计费与请求级凭据调度已交付；S0、S1 于 2026-10-15 通过 CI 验收。S2 已审查合并到 `master`；下一阶段为 S3，详见
 > [docs/PLAN.md](docs/PLAN.md)。
 
 ---
@@ -123,6 +124,7 @@ export PATH=$PATH:/usr/local/go/bin
 make init          # 只在缺少 config.yaml 时从 configs/ 复制模板
 # 编辑 config.yaml：填 admin_key、替换上游地址与密钥占位符
 make build
+# 首次使用先按下方说明初始化管理员
 make run
 ```
 
@@ -138,6 +140,24 @@ go build -o bin/gateway ./cmd/gateway
 **管理密钥是必填项**：`admin_key`（或环境变量 `GATEWAY_ADMIN_KEY`）缺失时
 网关拒绝启动。管理 API 能改渠道、看上游 Key，裸奔的代价是「谁连上 localhost
 就能拿走全部凭据」。
+
+### S2 管理员初始化与升级注意
+
+客户端 Key 现在只保存 SHA-256 摘要，仅创建时返回原文。旧库升级会执行版本 2 数据迁移；**`user_id=0` 的旧 Key 默认不可调用，必须由管理员显式认领，不会自动绑定为超级凭证。升级前先停止旧进程并备份数据库和 WAL。**
+
+首次管理员无默认密码，通过环境输入初始化（密码 12–72 字节）：
+
+```bash
+export TXAPI_ADMIN_USERNAME=admin
+read -rsp '管理员密码: ' TXAPI_ADMIN_PASSWORD; echo
+export TXAPI_ADMIN_PASSWORD
+./bin/gateway -config config.yaml -init-admin
+unset TXAPI_ADMIN_PASSWORD
+```
+
+之后启动服务，通过 `POST /api/auth/login` 获取 24 小时 Bearer 会话。管理员创建用户；用户登录后通过 `POST /api/me/keys` 生成自己的调用 Key。管理会话不能用于 `/v1/*`，调用 Key 也不能管理用户。
+
+新安装建议不在 YAML 中配置客户端 `tokens`，登录后生成；若仍导入 YAML Key，它们同样处于无主隔离状态。迁移认领、API 示例和回滚步骤见 [开发指南](docs/DEVELOPMENT.md#s2-身份权限与升级)。
 
 ### 方式二：Docker Compose
 

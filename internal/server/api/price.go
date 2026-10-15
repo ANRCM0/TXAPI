@@ -123,6 +123,6 @@ func (h *Handler) SetTokenQuota(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	tk.Key = maskKey(tk.Key)
+	tk.Key = ""
 	c.JSON(http.StatusOK, gin.H{"data": tk})
 }

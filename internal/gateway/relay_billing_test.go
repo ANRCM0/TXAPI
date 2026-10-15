@@ -108,7 +108,7 @@ func newTestGateway(t *testing.T, tokenQuota float64) *testGateway {
 		t.Fatalf("建渠道失败: %v", err)
 	}
 	const tokenKey = "sk-test-token"
-	if _, err := st.CreateToken(&store.TokenInput{
+	if _, err := st.CreateToken(&store.TokenInput{UserID: fixtureOwner(t, st),
 		Key:   tokenKey,
 		Name:  "测试令牌",
 		Quota: tokenQuota,
@@ -436,7 +436,7 @@ func TestUsageEstimateFallback(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("建渠道失败: %v", err)
 	}
-	if _, err := st.CreateToken(&store.TokenInput{Key: "sk-est", Name: "est"}); err != nil {
+	if _, err := st.CreateToken(&store.TokenInput{UserID: fixtureOwner(t, st), Key: "sk-est", Name: "est"}); err != nil {
 		t.Fatalf("建令牌失败: %v", err)
 	}
 	if err := gw.initRegistry(st.Channels()); err != nil {
