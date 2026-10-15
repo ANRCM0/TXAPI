@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/model"
 )
@@ -51,18 +52,7 @@ var ErrLimiterClosed = errors.New("限流器已关闭")
 //
 // 接口刻意做得很小（三个方法），因为 Redis 版的每个方法都要对应一条
 // 命令或一段 Lua；方法越多，替换实现时要对齐的语义越多。
-type Limiter interface {
-	// AllowRequest 判定一次请求能否放行，并在放行时计数。
-	// 返回 (是否放行, 需要等待多少秒)。
-	AllowRequest(ctx context.Context, key string, limit int, now time.Time) (bool, int)
-	// AllowTokens 判定带 token 预估值的请求能否放行，放行时按预估值计数。
-	// 请求前只能拿到预估值（真实 usage 要等上游响应），这是 TPM 的
-	// 固有取舍，见 TokenRateLimit 的说明。
-	AllowTokens(ctx context.Context, key string, limit, tokens int, now time.Time) (bool, int)
-	// AddTokens 在响应后把真实用量与预估值的差额补记/冲减掉。
-	// delta 可以是负数（预估多了要退回去），不能是 0。
-	AddTokens(ctx context.Context, key string, delta int, now time.Time)
-}
+type Limiter = access.Limiter
 
 // event 是滑动窗口里的一次计数记录。
 type event struct {
@@ -326,6 +316,7 @@ func TokenRateLimit(limiter Limiter) gin.HandlerFunc {
 			// 补差额。用上下文而不是闭包变量：中间件和补记逻辑
 			// 在同一个请求作用域里，上下文是这个项目既有的做法
 			// （见 relay 的 relayStatusKey 那套）。
+			c.Request = c.Request.WithContext(access.WithTokenReservation(c.Request.Context(), view.ID, est))
 			c.Set(ctxTPMEstimate, est)
 		}
 		c.Next()
@@ -340,26 +331,7 @@ func TokenRateLimit(limiter Limiter) gin.HandlerFunc {
 // 放在 relay 侧调用而不是中间件里 defer：流式响应的 usage 只在流
 // 结束时才知道，中间件的 defer 在 c.Next() 返回时就跑了，拿不到。
 func FinishTokens(c *gin.Context, limiter Limiter, actualTokens int) {
-	if limiter == nil {
-		return
-	}
-	v, ok := c.Get(ctxTPMEstimate)
-	if !ok {
-		return
-	}
-	est, ok := v.(int)
-	if !ok {
-		return
-	}
-	view, ok := tokenViewFromContext(c)
-	if !ok {
-		return
-	}
-	delta := actualTokens - est
-	if delta == 0 {
-		return
-	}
-	limiter.AddTokens(c.Request.Context(), tpmBucketKey(view.ID), delta, time.Now())
+	access.FinishTokens(c.Request.Context(), limiter, actualTokens)
 }
 
 // IPRateLimit 是 IP 级限流中间件，兜底防「没有令牌的暴力探测」。
@@ -392,7 +364,7 @@ func IPRateLimit(limiter Limiter, limit int) gin.HandlerFunc {
 // "ip:<addr>"，两种 key 在同一个内存表里，前缀把它们隔开，
 // 免得一个数字形状的令牌 ID 撞上一个数字形状的 IP。
 func tokenBucketKey(tokenID uint) string {
-	return "tok:" + strconv.FormatUint(uint64(tokenID), 10)
+	return access.TokenBucketKey(tokenID)
 }
 
 // tpmBucketKey 拼出令牌级 TPM 限流的 key（令牌桶 key + ":tpm" 后缀）。
@@ -403,7 +375,7 @@ func tokenBucketKey(tokenID uint) string {
 // 两个维度的阈值会互相挤占（详见 TokenRateLimit 里的说明）。
 // 后缀而不是前缀：tok:3:tpm 与 tok:3 同属令牌 3，肉眼可辨。
 func tpmBucketKey(tokenID uint) string {
-	return tokenBucketKey(tokenID) + ":tpm"
+	return access.TokenUsageBucketKey(tokenID)
 }
 
 // ipBucketKey 拼出 IP 级限流的 key。
@@ -416,6 +388,10 @@ const ctxTPMEstimate = "tpm_estimate"
 
 // tokenViewFromContext 取 Auth 写入的令牌投影。
 func tokenViewFromContext(c *gin.Context) (model.TokenView, bool) {
+	if p, ok := access.PrincipalFromContext(c.Request.Context()); ok {
+		return model.TokenView{ID: p.TokenID, UserID: p.UserID, Name: p.TokenName, Policy: p.Policy, Models: p.Policy.Models, RPMLimit: p.RPMLimit, TPMLimit: p.TPMLimit}, true
+	}
+
 	v, ok := c.Get(CtxTokenView)
 	if !ok {
 		return model.TokenView{}, false

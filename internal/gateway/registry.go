@@ -121,6 +121,9 @@ func (g *Gateway) initRegistry(channels []model.Channel) error {
 		},
 		modelIndex: make(map[string][]int),
 	}
+	for name, a := range g.adaptors {
+		r.adaptors[name] = a
+	}
 	if err := r.apply(channels); err != nil {
 		return err
 	}

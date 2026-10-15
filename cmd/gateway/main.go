@@ -139,7 +139,25 @@ func main() {
 	engine := billing.New(st.DB(), priceTable)
 
 	limiter := middleware.NewMemoryLimiter()
-	gw, err := gateway.New(gateway.Options{
+	var gw *gateway.Gateway
+	health := scheduler.NewHealthWorker(func(u scheduler.HealthUpdate) error {
+		return st.UpdateCredentialHealth(store.HealthUpdate{
+			CredentialID:  u.CredentialID,
+			FailCount:     u.FailCount,
+			CooldownUntil: u.CooldownUntil,
+			Status:        u.Status,
+			LastError:     u.LastError,
+			LastUsedAt:    u.LastUsedAt,
+		})
+	}, func() {
+		if err := gw.Reload(st.Channels()); err != nil {
+			// 重载失败必须告警：状态改了但转发层没看到，等于这次健康
+			// 反馈白做，坏 Key 还会继续被选中
+			slog.Error("[调度] 凭据状态变更后刷新渠道池失败", "err", err)
+		}
+	})
+	defer health.Close()
+	gw, err = gateway.New(gateway.Options{
 		Channels: st.Channels(), RetryTimes: cfg.Server.RetryTimes,
 		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
 		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
@@ -152,10 +170,10 @@ func main() {
 			// 并在状态真的变化时才落库（见 scheduler.HealthUpdate.Changed）。
 			now := time.Now()
 			if statusCode == http.StatusOK {
-				scheduler.RecordSuccess(cred, now)
+				health.RecordSuccess(cred, now)
 				return
 			}
-			scheduler.RecordFailure(cred, statusCode, errMsg, now)
+			health.RecordFailure(cred, statusCode, errMsg, now)
 		},
 	})
 	if err != nil {
@@ -163,31 +181,14 @@ func main() {
 		os.Exit(1)
 	}
 	defer gw.Close()
-	scheduler.SetHealthPersister(scheduler.HealthPersister(func(u scheduler.HealthUpdate) error {
-		return st.UpdateCredentialHealth(store.HealthUpdate{
-			CredentialID:  u.CredentialID,
-			FailCount:     u.FailCount,
-			CooldownUntil: u.CooldownUntil,
-			Status:        u.Status,
-			LastError:     u.LastError,
-			LastUsedAt:    u.LastUsedAt,
-		})
-	}))
-	scheduler.SetPoolReloader(func() {
-		if err := gw.Reload(st.Channels()); err != nil {
-			// 重载失败必须告警：状态改了但转发层没看到，等于这次健康
-			// 反馈白做，坏 Key 还会继续被选中
-			slog.Error("[调度] 凭据状态变更后刷新渠道池失败", "err", err)
-		}
-	})
+
 	// 后台恢复任务：定时把冷却到期的凭据放回 active（banned 不自动恢复）。
 	// 停止函数接在优雅关闭链路上——顺序是 srv.Shutdown → stopRecovery →
-	// scheduler.Stop → st.Close，保证恢复任务不再读库之后才关库。
+	// health.Close → st.Close，保证恢复任务不再读库之后才关库。
 	stopRecovery := scheduler.StartRecovery(func() (int, error) {
 		return st.RecoverCooledDownCredentials()
 	}, scheduler.RecoveryInterval)
 	defer stopRecovery()
-	defer scheduler.Stop()
 
 	// 8. 日志表清理任务：定时删一批过期的请求日志。
 	//

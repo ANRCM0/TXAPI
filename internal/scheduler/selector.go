@@ -7,7 +7,7 @@
 // 表上，由本包统一调度。
 //
 // 依赖方向：本包只依赖 internal/model，是叶子包。它**不**知道 store 和
-// relay 的存在——状态持久化通过注入点（SetHealthPersister）由 main 接上
+// relay 的存在——状态持久化通过注入点（NewHealthWorker）由 main 接上
 // store，与 relay 的 SetLogRecorder 同一套路。这样调度算法可以在单元
 // 测试里裸跑（不建库、不起 HTTP），而生产环境又能落库。
 package scheduler

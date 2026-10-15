@@ -12,12 +12,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/protocol/meta"
 	"minigateway/internal/protocol/model"
-	"minigateway/internal/server/middleware"
 )
 
 // captureLimit 是响应捕获缓冲的上限（64KB）。
@@ -261,7 +261,7 @@ func (g *Gateway) finishRequest(c *gin.Context, req *model.ModelRequest, started
 	// 跑了，拿不到）。失败请求也补——预估值已经占了窗口的位置，
 	// 不退回去等于失败请求白扣 TPM 配额。
 	if usage != nil {
-		middleware.FinishTokens(c, g.limiter, usage.TotalTokens)
+		access.FinishTokens(c.Request.Context(), g.limiter, usage.TotalTokens)
 	}
 
 	g.writeRequestLog(c, req, startedAt, cost, usage, isEstimated, priceMissing)
@@ -477,14 +477,6 @@ func relayChannelGroup(c *gin.Context) string {
 }
 
 // ctxUint 从上下文取一个 uint 值，取不到返回 0。
-func ctxUint(c *gin.Context, key string) uint {
-	if v, ok := c.Get(key); ok {
-		if n, ok := v.(uint); ok {
-			return n
-		}
-	}
-	return 0
-}
 
 // ListModels 处理 GET /v1/models，返回该令牌可访问的模型清单。
 //

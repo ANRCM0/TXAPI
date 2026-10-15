@@ -2,7 +2,7 @@ GO ?= go
 PYTHON ?= python3
 CONFIG ?= config.yaml
 
-.PHONY: init prepare build run test vet check smoke clean
+.PHONY: init prepare build run test vet check smoke contracts clean
 
 prepare:
 	mkdir -p bin .local/data
@@ -26,6 +26,10 @@ check:
 	$(GO) build ./...
 	$(GO) vet ./...
 	$(GO) test ./...
+
+contracts:
+	$(GO) test -count=1 ./internal/architecture
+	$(GO) test -count=1 ./internal/server -run TestOpenAPI
 
 smoke:
 	$(PYTHON) tests/smoke/local.py --go "$(GO)"

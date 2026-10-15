@@ -3,7 +3,6 @@ package scheduler
 import (
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	dbmodel "minigateway/internal/model"
@@ -133,17 +132,17 @@ func NextFailure(cred *dbmodel.Credential, statusCode int, errMsg string, now ti
 }
 
 // RecordSuccess 记录一次成功转发，把凭据状态重置回全绿。
-func RecordSuccess(cred *dbmodel.Credential, now time.Time) {
+func (h *HealthWorker) RecordSuccess(cred *dbmodel.Credential, now time.Time) {
 	if cred == nil {
 		return
 	}
-	submit(NextSuccess(cred, now), cred)
+	h.submit(NextSuccess(cred, now), cred)
 }
 
 // RecordFailure 记录一次失败转发，按状态码决定是否惩罚这把凭据。
 //
 // statusCode 不该罚时只更新 last_error，不动健康状态。
-func RecordFailure(cred *dbmodel.Credential, statusCode int, errMsg string, now time.Time) {
+func (h *HealthWorker) RecordFailure(cred *dbmodel.Credential, statusCode int, errMsg string, now time.Time) {
 	if cred == nil {
 		return
 	}
@@ -163,7 +162,7 @@ func RecordFailure(cred *dbmodel.Credential, statusCode int, errMsg string, now 
 		slog.Debug("[凭据健康] 凭据失败但属客户端错误，不惩罚",
 			"credential_id", cred.ID, "status_code", statusCode, "error", errMsg)
 	}
-	submit(next, cred)
+	h.submit(next, cred)
 }
 
 // backoff 算第 n 次失败（n 从 1 开始）对应的冷却时长。
@@ -185,183 +184,4 @@ func backoff(failCount int) time.Duration {
 		return CooldownMax
 	}
 	return d
-}
-
-// 状态变更的异步落库通道。
-//
-// 为什么要异步 + 为什么要单 worker 串行：
-//   - 异步：状态写在响应返回路径上，同步写 SQLite 会让每个失败请求多付
-//     一次事务开销（WAL 下也是 fsync 级），拖慢的是客户端的响应；
-//   - 串行：SQLite 是单写者（store 把连接池压到 1），并发写只会互相抢
-//     锁；而且串行能让「落库 → 重载渠道池」严格按序发生，不会出现
-//     后写的先重载、把新状态覆盖回旧值。
-//
-// 队列满时丢弃并告警：健康状态是优化手段不是正确性依赖，丢一条的后果
-// 是这把 Key 的冷却晚几秒生效，远好过让转发路径阻塞。
-const healthQueueSize = 256
-
-var (
-	healthCh chan HealthUpdate
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
-
-	persistMu  sync.RWMutex
-	persister  HealthPersister
-	reloadPool func()
-)
-
-// HealthPersister 把凭据的新健康状态写进存储层。
-//
-// 用函数变量而不是直接依赖 store：scheduler 是叶子包，不该知道存储层的
-// 存在（和 relay.SetLogRecorder 同一套路）。由 main 注入
-// store.UpdateCredentialHealth。未注入时（单元测试）所有状态变更只算不落。
-//
-// 返回 error 是为了让落库失败能被看见（worker 里会告警）。健康状态是
-// 优化手段不是正确性依赖，所以失败不重试、不阻塞、不影响响应——
-// 但绝不能静默：连续失败意味着整个调度状态机在空转，必须留痕。
-type HealthPersister func(u HealthUpdate) error
-
-// SetHealthPersister 注入健康状态的持久化实现，并启动后台 worker。
-//
-// 幂等：重复注入后者覆盖前者（测试里换 persister 的场景）。
-func SetHealthPersister(fn HealthPersister) {
-	persistMu.Lock()
-	persister = fn
-	started := healthCh != nil
-	persistMu.Unlock()
-	if started || fn == nil {
-		return
-	}
-	healthCh = make(chan HealthUpdate, healthQueueSize)
-	stopCh = make(chan struct{})
-	wg.Add(1)
-	go worker()
-}
-
-// SetPoolReloader 注入「状态变更后重载渠道池」的回调。
-//
-// 为什么需要：调度器改的是数据库，转发层读的是内存里的渠道快照。
-// 不重载的话会出现「库里已经 cooldown、转发还在用它」的窗口——
-// 那个窗口里的每个请求都会重复踩同一个坏 Key。
-func SetPoolReloader(fn func()) {
-	persistMu.Lock()
-	defer persistMu.Unlock()
-	reloadPool = fn
-}
-
-// submit 把一次状态变更交给后台 worker。
-//
-// 刻意**不**修改调用方传入的 cred：relay 持有的凭据快照是多请求共享
-// 只读数据，在这里原地改字段会和并发读撞成 data race（-race 必挂）。
-// 新状态统一走「落库 → 重载渠道池」这条路回到转发层，重载本身在
-// registry 的写锁内完成，是安全的发布点。
-func submit(next HealthUpdate, from *dbmodel.Credential) {
-	if !next.Changed(from) {
-		// 没有任何调度行为变化（常见于「本来就全绿的凭据又成功了一次」
-		// 和「不该罚的失败」）：不落库、不重载。last_used_at 的更新
-		// 顺延到下次真的有状态迁移时一起写。
-		return
-	}
-	persistMu.RLock()
-	ch := healthCh
-	persistMu.RUnlock()
-	if ch == nil {
-		// 没注入 persister（单元测试）：纯内存算完即止
-		return
-	}
-	select {
-	case ch <- next:
-	default:
-		// 队列满：丢弃 + 告警。见 healthQueueSize 的说明。
-		slog.Warn("[凭据健康] 状态队列已满，丢弃一次状态更新", "credential_id", next.CredentialID)
-	}
-}
-
-// worker 串行处理状态变更：落库 → 重载渠道池。
-//
-// 批量合并重载：一次排空 channel 里积压的全部更新再重载一次，而不是每条
-// 都重载。失败风暴时（比如整条上游挂了、每请求都失败）会把重载次数从
-// 「失败次数」压到「worker 轮次」，避免 reloadCache 的全表 Preload 被
-// 反复触发。
-func worker() {
-	defer wg.Done()
-	for {
-		select {
-		case u := <-healthCh:
-			batch := []HealthUpdate{u}
-			// 非阻塞排空：只合并「已经等在队列里」的，不为合并而等待
-			for len(batch) < 64 {
-				select {
-				case more := <-healthCh:
-					batch = append(batch, more)
-					continue
-				default:
-				}
-				break
-			}
-			flush(batch)
-		case <-stopCh:
-			// 退出前排空积压：进程关闭时最后一批状态变更必须落库，
-			// 否则「刚被拉黑的 Key 重启后又变回 active」，故障会复现
-			for {
-				select {
-				case u := <-healthCh:
-					flush([]HealthUpdate{u})
-					continue
-				default:
-				}
-				return
-			}
-		}
-	}
-}
-
-// flush 落一批状态变更，然后重载一次渠道池。
-func flush(batch []HealthUpdate) {
-	persistMu.RLock()
-	p := persister
-	reload := reloadPool
-	persistMu.RUnlock()
-	if p == nil {
-		return
-	}
-	for _, u := range batch {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					// 持久化的 panic 绝不能扩散：worker 死了整个健康
-					// 状态机就静默失效，而且会把进程带崩
-					slog.Error("[凭据健康] 持久化凭据状态时 panic", "credential_id", u.CredentialID, "err", r)
-				}
-			}()
-			if err := p(u); err != nil {
-				// 告警但不重试、不阻塞：状态是优化手段，响应早就发出去了。
-				// 留痕是因为连续失败意味着调度状态机在空转（库里永远是旧状态），
-				// 那种「看起来有调度其实没有」的故障只能靠日志发现。
-				slog.Warn("[凭据健康] 持久化凭据状态失败", "credential_id", u.CredentialID, "err", err)
-			}
-		}()
-	}
-	if reload != nil {
-		reload()
-	}
-}
-
-// Stop 停止后台 worker 并等积压排空。接 main 的优雅关闭链路。
-//
-// 必须在 store.Close() **之前**调用：worker 还要写库，库关了写入必然失败。
-// main 的关闭顺序是 srv.Shutdown（等在途请求）→ scheduler.Stop → st.Close。
-func Stop() {
-	persistMu.RLock()
-	ch := healthCh
-	persistMu.RUnlock()
-	if ch == nil {
-		return
-	}
-	close(stopCh)
-	wg.Wait()
-	persistMu.Lock()
-	healthCh = nil
-	stopCh = nil
-	persistMu.Unlock()
 }

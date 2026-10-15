@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strconv"
@@ -14,7 +15,7 @@ import (
 	"minigateway/internal/store"
 )
 
-const sessionUserKey = "authenticated_session_user"
+type sessionUserContextKey struct{}
 
 type loginBucket struct {
 	count int
@@ -63,8 +64,7 @@ func bearer(c *gin.Context) string {
 	return strings.TrimSpace(header[7:])
 }
 func sessionUser(c *gin.Context) *model.User {
-	v, _ := c.Get(sessionUserKey)
-	u, _ := v.(*model.User)
+	u, _ := c.Request.Context().Value(sessionUserContextKey{}).(*model.User)
 	return u
 }
 func (h *Handler) session(admin bool) gin.HandlerFunc {
@@ -79,7 +79,7 @@ func (h *Handler) session(admin bool) gin.HandlerFunc {
 			return
 		}
 		c.Header("Cache-Control", "no-store")
-		c.Set(sessionUserKey, user)
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), sessionUserContextKey{}, user))
 		c.Next()
 	}
 }

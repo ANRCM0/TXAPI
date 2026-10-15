@@ -93,6 +93,9 @@ func Open(cfg config.DatabaseConfig) (*Store, error) {
 // 用 AutoMigrate 而不是手写 SQL 迁移：自用场景下表结构的演进靠它足够，
 // 且能保证 Go 结构体和表结构不漂移。生产上换 PG 后再引入版本化迁移工具。
 func (s *Store) AutoMigrate() error {
+	if err := checkMigrationVersion(s.db, latestMigrationVersion); err != nil {
+		return err
+	}
 	if err := s.db.AutoMigrate(
 		&model.User{},
 		&model.Session{},
@@ -107,7 +110,7 @@ func (s *Store) AutoMigrate() error {
 	); err != nil {
 		return fmt.Errorf("建表失败: %w", err)
 	}
-	return s.migrateAccessV2()
+	return applyDataMigrations(s.db, dataMigrations)
 }
 
 // Close 先 flush 异步日志再关闭连接池。

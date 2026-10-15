@@ -1,0 +1,75 @@
+// Package architecture keeps module boundaries executable for independent teams.
+package architecture
+
+import (
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+func TestProductionDependencyBoundaries(t *testing.T) {
+	_, file, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), ".."))
+	allowed := map[string]map[string]bool{
+		"access": {}, "core": {}, "config": {}, "logging": {}, "metrics": {},
+		"model":     {"access": true},
+		"protocol":  {"protocol": true, "core": true},
+		"scheduler": {"model": true, "scheduler": true},
+		"billing":   {"model": true, "protocol": true, "billing": true},
+		"store":     {"model": true, "access": true, "config": true, "store": true},
+		"gateway":   {"access": true, "core": true, "protocol": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true},
+		"server":    {"access": true, "model": true, "config": true, "store": true, "billing": true, "gateway": true, "metrics": true, "server": true},
+	}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		owner := strings.Split(filepath.ToSlash(relative), "/")[0]
+		rules, ok := allowed[owner]
+		if !ok {
+			t.Errorf("register module ownership before adding %s", relative)
+			return nil
+		}
+		ast, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		for _, spec := range ast.Imports {
+			imported, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				return err
+			}
+			if strings.HasPrefix(imported, "minigateway/internal/") {
+				target := strings.Split(strings.TrimPrefix(imported, "minigateway/internal/"), "/")[0]
+				if !rules[target] {
+					t.Errorf("%s must not depend on internal/%s", relative, target)
+				}
+			}
+			if owner == "core" && strings.Contains(strings.Split(imported, "/")[0], ".") {
+				t.Errorf("core must use only standard library: %s", imported)
+			}
+			if owner != "server" && owner != "gateway" && strings.HasPrefix(imported, "github.com/gin-gonic/") {
+				t.Errorf("framework dependency escaped HTTP boundary: %s", relative)
+			}
+			if owner != "store" && owner != "billing" && owner != "model" && (strings.HasPrefix(imported, "gorm.io/") || strings.Contains(imported, "sqlite")) {
+				t.Errorf("database dependency escaped persistence/billing: %s", relative)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
