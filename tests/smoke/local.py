@@ -80,7 +80,7 @@ def service(command, log_path, env=None):
                     process.wait(timeout=5)
 
 
-def control_workflow(base, upstream_port):
+def control_workflow(base, upstream_url):
     """Exercise the actual console APIs without using the legacy admin key."""
     def api(path, session=None, payload=None, method=None, expected=200):
         status, raw = request(base + path, session, payload, method)
@@ -105,7 +105,7 @@ def control_workflow(base, upstream_port):
         }, expected=201)
     channel = api("/api/admin/channels", admin, {
         "name": "console-upstream", "type": "openai",
-        "base_url": f"http://127.0.0.1:{upstream_port}", "api_key": "test-upstream-console-only",
+        "base_url": upstream_url, "api_key": "test-upstream-console-only",
         "models": ["console-model"], "model_mapping": {"console-model": "mapped-model"},
     }, expected=201)["data"]
     after = api("/api/admin/config-status", admin)["data"]
@@ -141,6 +141,7 @@ def control_workflow(base, upstream_port):
     assert "gateway_attempts_total" in request(base + "/metrics")[1].decode()
     api("/api/auth/logout", session, method="POST", expected=204)
     api("/api/me", session, expected=401)
+    return key
 
 
 def main():
@@ -211,7 +212,7 @@ def main():
                 assert text == "你好，这是流式响应。", text
                 assert any(choice.get("finish_reason") == "stop" for choice in choices)
                 assert any(chunk.get("usage", {}).get("total_tokens") == 18 for chunk in chunks)
-                control_workflow(base, upstream_port)
+                control_workflow(base, f"http://127.0.0.1:{upstream_port}")
                 if args.preview:
                     print(f"PASS: all smoke checks; isolated console preview at {base}", flush=True)
                     print("Test login: smoke-admin / smoke-admin-password-only. Ctrl+C stops and removes test data.", flush=True)

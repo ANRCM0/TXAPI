@@ -23,6 +23,7 @@ services:
     image: minigateway:latest
     container_name: minigateway
     restart: unless-stopped
+    stop_grace_period: 30s
 
     # 配置文件用 volume 挂载而不是 COPY 进镜像：
     # 改渠道/加令牌不用重新 build；而且镜像层里不留任何一份可能含

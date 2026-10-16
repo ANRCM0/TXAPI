@@ -27,6 +27,9 @@ data/
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 gateway
 minigateway
 *.log
@@ -36,6 +39,8 @@ minigateway
 /bin/
 /dist/
 /coverage.out
+__pycache__/
+.venv/
 
 # ---- 文档与 IDE（对构建无用，只是噪音）----
 docs/

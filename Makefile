@@ -3,7 +3,7 @@ PYTHON ?= python3
 NODE ?= node
 CONFIG ?= config.yaml
 
-.PHONY: init prepare build run test vet check smoke contracts web-check clean
+.PHONY: init prepare build run test vet check smoke delivery contracts web-check clean
 
 prepare:
 	mkdir -p bin .local/data
@@ -41,6 +41,9 @@ contracts:
 
 smoke:
 	$(PYTHON) tests/smoke/local.py --go "$(GO)"
+
+delivery:
+	$(PYTHON) tests/smoke/delivery.py --go "$(GO)"
 
 # Local config and databases are deliberately preserved.
 clean:

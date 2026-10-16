@@ -35,8 +35,9 @@ func main() {
 		}
 
 		var req struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
+			Model        string `json:"model"`
+			Stream       bool   `json:"stream"`
+			ChunkDelayMS int    `json:"smoke_chunk_delay_ms"`
 		}
 		body := json.NewDecoder(r.Body)
 		body.Decode(&req)
@@ -59,10 +60,14 @@ func main() {
 			w.WriteHeader(200)
 			flusher := w.(http.Flusher)
 			chunks := []string{"你好", "，这是", "流式", "响应。"}
+			delay := 50 * time.Millisecond
+			if req.ChunkDelayMS > 0 && req.ChunkDelayMS <= 1000 {
+				delay = time.Duration(req.ChunkDelayMS) * time.Millisecond
+			}
 			for _, ch := range chunks {
 				fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", ch)
 				flusher.Flush()
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(delay)
 			}
 			// 结束帧：真实 OpenAI 会发 finish_reason，然后才是 usage 帧。
 			// 少了这一帧，客户端拿不到「为什么停」，SDK 的 finish_reason 会是 None。
