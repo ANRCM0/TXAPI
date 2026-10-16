@@ -5,7 +5,7 @@
 //  1. 本项目从 P1 起就刻意把第三方依赖压在「gin + gorm + sqlite +
 //     yaml」四个，每一个新依赖都是供应链面和升级面。可观测性属于
 //     「锦上添花」，不值得为它破例；
-//  2. 需要的六个指标全是「带标签的 counter / histogram / gauge」，
+//  2. 所需指标全是「带标签的 counter / histogram / gauge」，
 //     exposition 格式是个几十行的纯文本协议（# HELP/# TYPE +
 //     name{label="v"} value），自己写出来的代码量少于引入依赖后的
 //     API 学习和调优成本；
@@ -47,6 +47,8 @@ const (
 	MetricCostTotal       = "gateway_cost_total"
 	MetricCredentials     = "gateway_credentials"
 	MetricCredFailures    = "gateway_credential_failures_total"
+	MetricAttemptsTotal   = "gateway_attempts_total"
+	MetricAttemptDuration = "gateway_attempt_duration_seconds"
 )
 
 // TokenTypePrompt / TokenTypeCompletion 是 gateway_tokens_total 的
@@ -91,7 +93,32 @@ type Registry struct {
 	// credStats 由外部注入的凭据状态快照（SetCredentialStats）。
 	// gauge 类型的指标值只能由「当前状态」决定，不能靠增量累加，
 	// 所以这里存快照而不是累加器。
-	credStats func() []CredentialStat
+	credStats        func() []CredentialStat
+	logStats         func() LogQueueStats
+	attempts         map[string]*counter
+	attemptDurations map[string]*histogram
+}
+
+type LogQueueStats struct {
+	Depth    int
+	Capacity int
+	Dropped  uint64
+	Failed   uint64
+}
+
+func (r *Registry) SetLogStatsProvider(fn func() LogQueueStats) {
+	r.mu.Lock()
+	r.logStats = fn
+	r.mu.Unlock()
+}
+
+// Attempts count executed upstream tries, not local admission rejections.
+func (r *Registry) RecordAttempt(channel, termination string, status int, duration time.Duration) {
+	if channel == "" {
+		channel = "-"
+	}
+	r.counterFor(&r.attempts, label(MetricAttemptsTotal, "channel", channel, "termination", termination, "status", strconv.Itoa(status))).Inc()
+	r.histogramFor(&r.attemptDurations, label(MetricAttemptDuration, "channel", channel)).Observe(duration.Seconds())
 }
 
 // Default 是进程内唯一的指标注册表。
@@ -100,12 +127,14 @@ var Default = New()
 // New 建一个空注册表。
 func New() *Registry {
 	return &Registry{
-		requests:   map[string]*counter{},
-		durations:  map[string]*histogram{},
-		tokens:     map[string]*counter{},
-		costs:      map[string]*counter{},
-		credFail:   map[string]*counter{},
-		credential: map[string]*gauge{},
+		requests:         map[string]*counter{},
+		durations:        map[string]*histogram{},
+		tokens:           map[string]*counter{},
+		costs:            map[string]*counter{},
+		credFail:         map[string]*counter{},
+		credential:       map[string]*gauge{},
+		attempts:         map[string]*counter{},
+		attemptDurations: map[string]*histogram{},
 	}
 }
 
@@ -323,6 +352,26 @@ func (r *Registry) Render(w io.Writer) error {
 	}
 
 	var b strings.Builder
+
+	writeFamilyHeader(&b, MetricAttemptsTotal, "counter", "Executed upstream attempts, including retries")
+	writeCounters(&b, MetricAttemptsTotal, r.attempts, 1)
+	writeFamilyHeader(&b, MetricAttemptDuration, "histogram", "Upstream attempt duration in seconds")
+	writeHistograms(&b, MetricAttemptDuration, r.attemptDurations)
+	if r.logStats != nil {
+		queue := r.logStats()
+		for _, metric := range []struct {
+			name, kind, help string
+			value            uint64
+		}{
+			{"gateway_log_queue_depth", "gauge", "Queued access logs", uint64(queue.Depth)},
+			{"gateway_log_queue_capacity", "gauge", "Maximum queued access logs", uint64(queue.Capacity)},
+			{"gateway_logs_dropped_total", "counter", "Access logs dropped at a full or closed queue", queue.Dropped},
+			{"gateway_logs_failed_total", "counter", "Access logs that failed final database writes", queue.Failed},
+		} {
+			writeFamilyHeader(&b, metric.name, metric.kind, metric.help)
+			fmt.Fprintf(&b, "%s %d\n", metric.name, metric.value)
+		}
+	}
 
 	writeFamilyHeader(&b, MetricRequestsTotal, "counter",
 		"转发请求总数（按模型/渠道/最终状态码分标签）")

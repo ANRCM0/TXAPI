@@ -18,6 +18,7 @@ type TokenInput struct {
 	ModelMode        string   `json:"model_mode"`
 	Models           []string `json:"models"`
 	ExpiresInSeconds int64    `json:"expires_in_seconds"`
+	PreserveExpiry   bool     `json:"preserve_expiry"`
 	Quota            float64  `json:"quota"`
 	RPMLimit         int      `json:"rpm_limit"`
 	TPMLimit         int      `json:"tpm_limit"`
@@ -116,6 +117,9 @@ func (s *Store) UpdateToken(id uint, in *TokenInput) (*model.Token, error) {
 	}
 	updated := in.toModel(time.Now())
 	changes := map[string]any{"name": in.Name, "model_mode": in.ModelMode, "models": updated.Models, "quota": in.Quota, "rpm_limit": in.RPMLimit, "tpm_limit": in.TPMLimit, "concurrency_limit": in.ConcurrencyLimit, "expires_at": updated.ExpiresAt}
+	if in.PreserveExpiry {
+		changes["expires_at"] = old.ExpiresAt
+	}
 	if in.Status != "" {
 		changes["status"] = in.Status
 	}

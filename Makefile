@@ -1,8 +1,9 @@
 GO ?= go
 PYTHON ?= python3
+NODE ?= node
 CONFIG ?= config.yaml
 
-.PHONY: init prepare build run test vet check smoke contracts clean
+.PHONY: init prepare build run test vet check smoke delivery contracts web-check clean
 
 prepare:
 	mkdir -p bin .local/data
@@ -26,6 +27,13 @@ check:
 	$(GO) build ./...
 	$(GO) vet ./...
 	$(GO) test ./...
+	$(MAKE) web-check
+
+web-check:
+	$(NODE) --check web/assets/app.mjs
+	$(NODE) --check web/assets/api.mjs
+	$(NODE) --check tests/browser/navigation.cjs
+	$(NODE) --test web/assets/api.test.mjs
 
 contracts:
 	$(GO) test -count=1 ./internal/architecture
@@ -33,6 +41,9 @@ contracts:
 
 smoke:
 	$(PYTHON) tests/smoke/local.py --go "$(GO)"
+
+delivery:
+	$(PYTHON) tests/smoke/delivery.py --go "$(GO)"
 
 # Local config and databases are deliberately preserved.
 clean:

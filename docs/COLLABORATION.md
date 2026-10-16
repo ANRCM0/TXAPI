@@ -13,7 +13,7 @@ F0 是后续功能团队的接入基线，不代表 S3 的公平并发、S4 的�
 | 身份与存储团队 | `internal/access`、`internal/store/access*`、相关 API 功能切片 | 用户/Key 生命周期、权限收敛、owner 校验、迁移回归 | `internal/model`、`internal/store/migrations.go`、OpenAPI |
 | 调度与准入团队 | `internal/scheduler`、自己的准入实现包、相关测试 | S3 用户聚合限流、并发租约、调度健康策略与负载测试 | Admission 接口、gateway.Options 和限额配置/模型字段 |
 | 管理 API 团队 | `internal/server/api/<feature>.go` 与对应 store 方法 | 按资源增加真实 API、输入校验与隔离测试 | RegisterAccess/registerResources 注册点、OpenAPI |
-| 前端团队 | S4 建立后在独立 `web/` 或 `ui/` 目录开发 | 可先依据 `docs/openapi.json` 做交互、页面和联调；当前后端可运行 | 首次框架选择、静态文件嵌入和构建由集成负责人统一落地 |
+| 前端团队 | `web/` | 原生 ES Modules 控制台和真实 API 联调；Go embed 随二进制交付，无单独资产构建 | 静态资源路由、CSP、HTTP 契约与生产接线 |
 | 测试/交付团队 | `tests/`、部署脚本、恢复说明 | 模拟上游、启动/升级/恢复、API 工作流、性能基线 | CI 合并门槛和数据库迁移用例 |
 
 表内是责任角色，不是已指定人员。GitHub 成员权限、CODEOWNERS 的真实用户名、分支保护和必须评审人数需要仓库维护者配置；本次不会填入不存在的账号或声称这些设置已生效。
@@ -75,13 +75,14 @@ type Admission interface {
 
 ## 3. 前后端契约
 
-唯一机器可读 HTTP 基线：[openapi.json](openapi.json)，版本 `0.1.0`。路径沿用现有 `/api/...` 与 `/v1/...`；这个版本标识契约文档，未给现有 URL 强加新前缀。
+唯一机器可读 HTTP 基线：[openapi.json](openapi.json)，当前 S4 工作版本 `0.2.0`（F0 验收版本为 `0.1.0`）。路径沿用现有 `/api/...` 与 `/v1/...`；这个版本标识契约文档，未给现有 URL 强加新前缀。
 
 - 新前端使用 `/api/auth`、`/api/admin`、`/api/me`；旧 `/api/channels` 等路径标记 deprecated，暂保留原管理密钥鉴权。
 - `APIKey` 为无明文 metadata，`APIKeyCreated` 才有一次性 key。不要将数据库 model.Token 直接作为前端所有场景的通用类型。
 - 所有 PUT 都按文档确认完整更新语义；不假定未发送字段自动保留。policy 空 allowlist 必须全部拒绝。
 - 现有 list 在无数据时可能返回 null；契约显式 nullable。分页/status/响应封装以契约和回归为准，不能在 UI 中猜测。
 - 流错误/截止时间/取消属于终止结果；已提交的流不会伪造成功 DONE。UI/SDK 必须处理半途失败。
+- S4 渠道/凭据及价格/倍率写操作的成功码只表示已保存；响应头 `X-TXAPI-Publication-State` 为 pending 时必须展示未生效提示。管理员通过 config-status 查看/重试，版本只在同一 epoch 内比较；数据库迁移版本与发布 revision 无关。
 - OpenAPI 的 responses.default 是兼容错误封装；目前错误 type 字段不保证每条旧接口都相同。若需进一步统一错误码，先提交独立兼容方案，不静默改所有 API。
 
 CI 会校验契约与真实 Gin 路由一一匹配、匿名请求受保护、公开 DTO 字段和关键控制面响应符合约定。本仓库实现的是上述子集校验，不宣称代替完整 OpenAPI 标准验证或所有字段语义测试；复杂业务必须有行为测试。
@@ -126,7 +127,7 @@ make smoke
 
 - [x] 已验证身份与速率结算使用 typed context，不向业务层暴露 Gin 字符串键。
 - [x] 协议注册、请求/attempt 准入、健康回写通过实例依赖注入；lease 释放/取消/panic 有行为回归。
-- [x] 当前 70 个路由有可读契约，路由/鉴权/DTO 漂移进入 CI。
+- [x] F0 基线 70 个路由有可读契约；S4 扩展为 76 个操作，路由/鉴权/DTO 漂移进入 CI。
 - [x] 统一数据迁移注册、失败回滚、重启幂等与旧二进制拒绝更高版本的回归。
 - [x] 团队目录边界、公共接线、接口变更流程和独立测试入口清晰。
 - [x] 框架提交 `bd322c0` 通过 Linux CI：构建、vet、gofmt、依赖与契约、race 全量测试、启动/迁移冒烟和性能基准。

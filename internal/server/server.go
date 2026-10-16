@@ -13,9 +13,11 @@ import (
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
 	"minigateway/internal/gateway"
+	"minigateway/internal/metrics"
 	"minigateway/internal/server/api"
 	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
+	"minigateway/web"
 )
 
 // Deps 是组装引擎所需的全部依赖。
@@ -100,6 +102,10 @@ func NewEngine(deps Deps) *gin.Engine {
 	// 凭据状态 provider 在这里注入而不是 main：只有 server 层同时
 	// 看得见 relay 的渠道池，且注入点紧挨着使用处。
 	deps.Gateway.Metrics().SetCredentialStatsProvider(deps.Gateway.CredentialStats)
+	deps.Gateway.Metrics().SetLogStatsProvider(func() metrics.LogQueueStats {
+		stats := deps.Store.LogQueueStats()
+		return metrics.LogQueueStats{Depth: stats.Depth, Capacity: stats.Capacity, Dropped: stats.Dropped, Failed: stats.Failed}
+	})
 	engine.GET("/metrics", func(c *gin.Context) {
 		// Content-Type 必须带 version=0.0.4：Prometheus 按它判断
 		// 解析器，缺了会走文本兜底且告警（多数情况下仍能解析，
@@ -122,6 +128,10 @@ func NewEngine(deps Deps) *gin.Engine {
 	// 所以挂在最前面，越早拦住越省（详见 middleware.IPRateLimit）。
 	engine.Use(middleware.IPRateLimit(deps.RateLimiter, deps.IPRPMLimit))
 	engine.Use(middleware.CORS())
+	for _, path := range []string{"/", "/ui/:asset"} {
+		engine.GET(path, func(c *gin.Context) { web.ServeHTTP(c.Writer, c.Request) })
+		engine.HEAD(path, func(c *gin.Context) { web.ServeHTTP(c.Writer, c.Request) })
+	}
 
 	// 令牌鉴权：查 store 的内存缓存，改令牌不用重启
 	auth := middleware.NewAuth(deps.Store)
@@ -152,22 +162,18 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。
-	apiHandler := api.New(deps.Store, func() {
-		// 渠道变更后热刷新转发层渠道池：这就是「不重启网关就生效」的那一环
-		if err := deps.Gateway.Reload(deps.Store.Channels()); err != nil {
-			// 刷新失败不能影响 API 的返回值（数据已经落库了），
-			// 但必须响亮的告警——否则会出现「库里改了、转发还用旧的」的静默故障
-			gin.DefaultErrorWriter.Write([]byte("[热更新] 刷新渠道池失败: " + err.Error() + "\n"))
+	apiHandler := api.New(deps.Store, func() error {
+		channels, err := deps.Store.ChannelSnapshot()
+		if err != nil {
+			return err
 		}
-	}, func() {
+		return deps.Gateway.Publish(channels)
+	}, func() error {
 		// 价格/倍率变更后让计费引擎重读价格表
 		if deps.Billing != nil && deps.Billing.Prices() != nil {
-			if err := deps.Billing.Prices().ReloadPrices(); err != nil {
-				// 重读失败保留旧缓存（见 PriceTable.ReloadPrices），
-				// 但同样要告警：价格表静默用旧值等于悄悄算错账
-				gin.DefaultErrorWriter.Write([]byte("[热更新] 重读价格表失败: " + err.Error() + "\n"))
-			}
+			return deps.Billing.Prices().ReloadPrices()
 		}
+		return nil
 	})
 	apiHandler.Register(engine.Group(""), deps.AdminAuth)
 	apiHandler.RegisterAccess(engine.Group(""))

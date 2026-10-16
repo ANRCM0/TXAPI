@@ -12,6 +12,8 @@ package api
 import (
 	"errors"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -29,15 +31,21 @@ type Handler struct {
 	loginGate loginGate
 	store     *store.Store
 	// onChannelsChanged 在渠道发生任何写操作后调用，用于刷新 relay 渠道池。
-	onChannelsChanged func()
+	channels publication
 	// onPricesChanged 在价格/倍率发生任何写操作后调用，用于让计费引擎
 	// 重读价格表。nil 表示计费未启用。
-	onPricesChanged func()
+	prices          publication
+	configurationMu sync.Mutex
+	epoch           string
 }
 
 // New 创建管理 API handler。
-func New(st *store.Store, onChannelsChanged, onPricesChanged func()) *Handler {
-	return &Handler{store: st, onChannelsChanged: onChannelsChanged, onPricesChanged: onPricesChanged}
+func New(st *store.Store, onChannelsChanged, onPricesChanged func() error) *Handler {
+	h := &Handler{store: st, epoch: time.Now().UTC().Format(time.RFC3339Nano)}
+	h.channels.apply, h.prices.apply = onChannelsChanged, onPricesChanged
+	h.channels.publish(true)
+	h.prices.publish(true)
+	return h
 }
 
 // Register 把管理路由挂到引擎上。
@@ -103,20 +111,20 @@ func bindJSON(c *gin.Context, dst any) bool {
 func (h *Handler) registerResources(group *gin.RouterGroup) {
 	// 渠道 CRUD
 	group.GET("/channels", h.ListChannels)
-	group.POST("/channels", h.CreateChannel)
+	group.POST("/channels", h.configurationWrite(), h.CreateChannel)
 	group.GET("/channels/:id", h.GetChannel)
-	group.PUT("/channels/:id", h.UpdateChannel)
-	group.DELETE("/channels/:id", h.DeleteChannel)
+	group.PUT("/channels/:id", h.configurationWrite(), h.UpdateChannel)
+	group.DELETE("/channels/:id", h.configurationWrite(), h.DeleteChannel)
 
 	// 凭据 CRUD（渠道下的上游 Key）
 	// 路由分两种形态：挂在 /channels/:id 下的走「渠道视角」（列、增），
 	// 凭据自身的改删状态走 /credentials/:id——凭据 ID 全局唯一，
 	// 不需要再带一层渠道 ID
 	group.GET("/channels/:id/credentials", h.ListCredentials)
-	group.POST("/channels/:id/credentials", h.CreateCredential)
-	group.PUT("/credentials/:id", h.UpdateCredential)
-	group.DELETE("/credentials/:id", h.DeleteCredential)
-	group.POST("/credentials/:id/status", h.SetCredentialStatus)
+	group.POST("/channels/:id/credentials", h.configurationWrite(), h.CreateCredential)
+	group.PUT("/credentials/:id", h.configurationWrite(), h.UpdateCredential)
+	group.DELETE("/credentials/:id", h.configurationWrite(), h.DeleteCredential)
+	group.POST("/credentials/:id/status", h.configurationWrite(), h.SetCredentialStatus)
 
 	// 日志查询
 	group.GET("/logs", h.ListLogs)
@@ -128,9 +136,9 @@ func (h *Handler) registerResources(group *gin.RouterGroup) {
 
 	// 价格表与分组倍率
 	group.GET("/prices", h.ListPrices)
-	group.PUT("/prices/:model", h.UpsertPrice)
-	group.DELETE("/prices/:model", h.DeletePrice)
-	group.PUT("/group-rates", h.SetGroupRates)
+	group.PUT("/prices/:model", h.configurationWrite(), h.UpsertPrice)
+	group.DELETE("/prices/:model", h.configurationWrite(), h.DeletePrice)
+	group.PUT("/group-rates", h.configurationWrite(), h.SetGroupRates)
 
 	// 能力表：路由加速器的可视化，排查「为什么这个模型路由不到某渠道」时看它
 	group.GET("/abilities", h.ListAbilities)

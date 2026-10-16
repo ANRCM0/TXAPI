@@ -14,7 +14,7 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 ---
 
 多团队功能开发先阅读 [协作框架](docs/COLLABORATION.md) 和 [贡献约定](CONTRIBUTING.md)。
-前后端契约见 [OpenAPI 0.1.0](docs/openapi.json)；框架接口与业务阶段分别验收。
+前后端契约见 [OpenAPI 0.2.0](docs/openapi.json)；框架接口与业务阶段分别验收。
 
 ## 架构
 
@@ -82,6 +82,19 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 > 入口在 `cmd/gateway`，不是仓库根目录：`go run ./cmd/gateway` / `go build ./cmd/gateway`。
 > 根目录的 `config.yaml` 是个人配置，被 Git 忽略；可提交的模板在 `configs/`。
 
+### S4 控制台与交付验收
+
+启动后访问网关根路径 `/`，使用已初始化的管理员或管理员创建的用户登录。
+控制台使用原生 ES Modules，随 `go build` 嵌入二进制；**不需要 Node 构建、CDN 或额外前端服务**。
+
+- 管理员：创建/停用用户、模型授权、渠道与多凭据管理、全局日志、模型策略和价格设置。
+- 用户：创建/限制/吊销自己的 Key、查看可用模型和本人用量、发送一次真实的非流式测试请求。
+- 渠道/凭据与价格/倍率写入后展示 desired/applied 版本；发布失败保留旧运行快照，可以在设置页重试。
+- 登录会话只保存在页面内存中，刷新页面需要重新登录。调用 Key 只在创建时展示；测试调用不保存 Key。
+- 用量来自可丢弃、有保留周期的访问日志，**不是 S5 严格预算或可靠账本**。
+
+2026-10-16，收口提交 `97bdc61` 已通过 push/PR 完整 CI 和独立容器交付演练：全新安装、非 root/健康检查、数据卷重启、S3→S4 升级、在途 SSE 正常关闭及备份恢复/旧镜像回滚。验收范围和运行链接见 [开发计划 S4](docs/PLAN.md#s4-管理配置与交付)，集成状态见 [PR #4](https://github.com/ANRCM0/TXAPI/pull/4)。这不等于已经升级真实业务库或完成生产上线。
+
 ---
 
 ## 功能矩阵
@@ -94,26 +107,30 @@ OpenAI 兼容端点）收敛到一个 OpenAI 兼容入口后面，做**令牌鉴
 | 健康状态机 | ✅ | 失败分类 → 指数退避冷却（30s 起，封顶 1h）→ 连续失败拉黑 |
 | 自动恢复 | ✅ | 冷却到期自动回 active（每 30s 扫描）；banned 需人工解封 |
 | 失败重试 | ✅ | 重试单元是 (渠道, 凭据) 对；400/404/422 不重试也不罚凭据 |
-| 协议互转 | ✅ | OpenAI ↔ Anthropic ↔ Gemini（经规范格式枢纽） |
+| 协议转换 | ✅ | OpenAI 入站 → OpenAI / Anthropic / Gemini 上游（经规范格式枢纽） |
 | 流式转发 | ✅ | SSE 逐行翻译，打字机效果保留；anthropic/gemini 也支持 |
 | embeddings | ✅ | 与对话共用整条链路，只按输入 token 计费 |
-| 计费 | ✅ | 价格表（支持通配符/分组倍率）、预扣→结算、原子额度扣减 |
+| 基础计费 | ✅ | 价格表（支持通配符/分组倍率）、估算预扣→结算；不是 S5 严格预算/可靠账本 |
 | 限流 | ✅ | 令牌级 RPM/TPM（滑动窗口）+ IP 级兜底；429 + `Retry-After` |
 | 结构化日志 | ✅ | log/slog，级别可配（debug/info/warn/error），七个统一字段 |
-| Prometheus 指标 | ✅ | `GET /metrics`，六个指标族；手写 exposition，零新依赖 |
+| Prometheus 指标 | ✅ | `GET /metrics`，请求/尝试/凭据/日志队列指标；手写 exposition，零新依赖 |
 | 日志清理 | ✅ | `logs` 表按保留天数每日分批删除（每批 1000 行） |
 | 管理 API | ✅ | 新 `/api/admin/*` 使用管理员登录会话；旧 `/api/*` 继续使用独立管理密钥 |
 | Docker | ✅ | 多阶段构建 + compose + 数据卷；密钥走环境变量 |
-| CI | ✅ | build + vet + `go test -race` + `gofmt -l` |
+| CI | ✅ | build/vet/race/格式/契约/冒烟，以及独立容器安装、升级与备份恢复演练 |
 | 用户登录/隔离 | ✅ | 一次性管理员初始化；管理员创建用户；独立登录会话、本人 Key/日志/用量与模型权限交集 |
+| 内嵌管理/用户控制台 | ✅ | 使用真实会话 API，管理员与本人资源隔离；交付验收见 PLAN |
+| 配置发布可见性 | ✅ | 独立渠道/价格快照的 desired/applied 版本、失败原因及重试；版本仅在当前进程有效 |
 | 公开注册 | ❌ | 首版只允许管理员创建用户 |
 | 支付/充值 | ❌ | 不在当前阶段范围 |
 | images/audio/rerank | ❌ | 适配器接口已留扩展位，等真有需求 |
 | Redis 限流 | ❌ | 单机内存版够自用；接口留位置，需要时替换实现 |
-| PostgreSQL | ❌ | `Open()` 对非 SQLite 直接报错，属部署阶段 |
+| PostgreSQL | ❌ | 未接入；当前默认单实例 SQLite，S4 不要求外部数据库 |
 
 > P5/P6 的计费与请求级凭据调度已交付；S0、S1 于 2026-10-15 通过 CI 验收。S2 与 F0 已合并到 `master`；S3 全部实现并通过审查、完整 CI，已合并到 `master`，运行约定见 [开发指南](docs/DEVELOPMENT.md#s3-并发准入与用户请求速率)，阶段验收见
 > [docs/PLAN.md](docs/PLAN.md)。
+
+S4 已完成实现、完整 CI 和容器交付验收；S5 仍未开始。Docker、升级和恢复的通过证据来自隔离 CI 环境，不承诺真实上游兼容性或崩溃时无损恢复。
 
 ---
 
@@ -169,6 +186,7 @@ unset TXAPI_ADMIN_PASSWORD
 export GATEWAY_ADMIN_KEY=dev-secret
 export GATEWAY_CHANNEL_KEY_1=sk-your-real-key
 
+# 首次安装先按开发指南在临时容器初始化管理员，再启动
 docker compose up -d
 curl http://127.0.0.1:8080/healthz
 ```
@@ -180,6 +198,8 @@ curl http://127.0.0.1:8080/healthz
   `GATEWAY_LOG_LEVEL=debug`、`GATEWAY_LOG_RETENTION_DAYS=7`
 - 容器内监听地址由 `GATEWAY_ADDR` 覆盖为 `0.0.0.0:8080`；端口默认只绑
   `127.0.0.1`（见 `docker-compose.yml` 的注释）
+- Compose 显式设置 `GATEWAY_DATABASE_PATH=/app/data/gateway.db`，保证数据库位于命名卷。
+  **旧部署若使用其他路径，不要直接切换：先停写、一致备份并恢复到目标卷。** 新环境变量不会自动搬迁旧库。
 
 ### 配置项
 
@@ -195,6 +215,7 @@ curl http://127.0.0.1:8080/healthz
 | `log_retention_days` | `30` | `GATEWAY_LOG_RETENTION_DAYS` | `logs` 表保留天数，`0` 关闭清理 |
 | `database.driver` | `sqlite` | — | 目前只支持 sqlite |
 | `database.path` | `data/gateway.db` | — | SQLite 文件路径 |
+| `database.path` 覆盖 | — | `GATEWAY_DATABASE_PATH` | 部署环境优先路径；Compose 固定在数据卷内，不自动搬迁旧库 |
 | `channels[].key` | — | `GATEWAY_CHANNEL_KEY_<id>` | 渠道上游 Key，环境变量优先 |
 
 > **环境变量优先于 YAML** 是全局规则：部署时改配置不用重新打镜像/改文件，
@@ -254,6 +275,10 @@ HTTP 请求体上限为 20 MiB，超限请求返回 `413`。
 | `gateway_cost_total` | counter | `model,channel` |
 | `gateway_credentials` | gauge | `channel,status`(active/cooldown/banned/disabled) |
 | `gateway_credential_failures_total` | counter | `channel,credential` |
+| `gateway_attempts_total` | counter | `channel,status,termination` |
+| `gateway_attempt_duration_seconds` | histogram | `channel` |
+| `gateway_log_queue_depth` / `gateway_log_queue_capacity` | gauge | 无标签 |
+| `gateway_logs_dropped_total` / `gateway_logs_failed_total` | counter | 无标签，普通访问日志丢弃/最终写入失败 |
 
 > `/metrics` 和 `/healthz` **不鉴权也不限流**。理由：抓取方是 Prometheus，
 > 它没有也不该有客户端令牌；指标只有聚合计数和标签（模型名/渠道名），
@@ -338,7 +363,7 @@ response_format…）。用结构体反序列化再序列化，任何未声明�
 都不引第三方库。
 
 取舍：项目从 P1 起就把第三方依赖压在 gin/gorm/sqlite/yaml 四个，每一个新
-依赖都是供应链面和升级面；而需要的六个指标全是「带标签的 counter /
+依赖都是供应链面和升级面；而所需指标全是「带标签的 counter /
 histogram / gauge」，exposition 格式是个几十行的纯文本协议。手写版只覆盖
 「本网关自己埋的点」，不需要官方库的 collector 注册表、默认运行时指标、
 推送网关那些能力——等真要多协议暴露或上 Pushgateway 时再换，替换成本很低

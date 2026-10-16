@@ -17,10 +17,19 @@
 .github
 
 # ---- 数据与本地产物（可能含真实流量/密钥）----
+/config.yaml
+/config.local.yaml
+/.env
+/.env.*
+/.local/
+/tmp/
 data/
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 gateway
 minigateway
 *.log
@@ -30,6 +39,8 @@ minigateway
 /bin/
 /dist/
 /coverage.out
+__pycache__/
+.venv/
 
 # ---- 文档与 IDE（对构建无用，只是噪音）----
 docs/

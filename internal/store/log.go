@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -15,7 +16,7 @@ import (
 // 异步日志写入器的参数。
 //
 //	bufferSize    channel 容量。按「峰值并发 × 批次间隔」估，自用网关 4096 足够；
-//	              满时退回同步直写（见 asyncLogWriter.Write），不会丢
+//	              满时丢弃并计数，不把普通日志背压传给转发请求
 //	batchSize     攒够多少条落一批。批量插入把 N 次事务合并成 1 次，
 //	              SQLite 的写放大主要来自事务提交，这是异步化的主要收益
 //	flushInterval 最多攒多久。防止低流量时日志卡在 channel 里迟迟不落库
@@ -111,8 +112,8 @@ func (s *Store) CountLogs() (int64, error) {
 	return n, nil
 }
 
-// writeLogSync 同步落一条日志（异步队列满时的兜底 + 无异步器时的路径）。
-func writeLogSync(db *gorm.DB, entry *model.RequestLog) {
+// writeLogSync is used only by isolated stores without a background writer.
+func writeLogSync(db *gorm.DB, entry *model.RequestLog) bool {
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now()
 	}
@@ -120,16 +121,18 @@ func writeLogSync(db *gorm.DB, entry *model.RequestLog) {
 		// 打到标准错误日志而不是静默：丢日志的代价是账目永久对不上，
 		// 必须留痕（SPEC 2.4：异步写失败不能静默丢失）
 		slog.Error("[日志写入失败] 请求日志落库失败", "request_id", entry.RequestID, "err", err)
+		return false
 	}
+	return true
 }
 
 // writeLogBatch 批量落库。
 //
 // 失败时逐条重试：一条坏数据（比如某个字段超长）不该拖垮整批。
 // 逐条也失败的同样打到标准错误日志——宁可吵，不能静默丢。
-func writeLogBatch(db *gorm.DB, batch []*model.RequestLog) {
+func writeLogBatch(db *gorm.DB, batch []*model.RequestLog) uint64 {
 	if len(batch) == 0 {
-		return
+		return 0
 	}
 	for _, e := range batch {
 		if e.CreatedAt.IsZero() {
@@ -138,12 +141,16 @@ func writeLogBatch(db *gorm.DB, batch []*model.RequestLog) {
 	}
 	if err := db.CreateInBatches(batch, logBatchSize).Error; err != nil {
 		slog.Warn("[日志批量写入失败，降级逐条重试]", "count", len(batch), "err", err)
+		var failures uint64
 		for _, e := range batch {
 			if err := db.Create(e).Error; err != nil {
 				slog.Error("[日志写入失败] 请求日志落库失败", "request_id", e.RequestID, "err", err)
+				failures++
 			}
 		}
+		return failures
 	}
+	return 0
 }
 
 // asyncLogWriter 是日志的异步批量写入器。
@@ -152,21 +159,33 @@ func writeLogBatch(db *gorm.DB, batch []*model.RequestLog) {
 // 多付一次事务开销（WAL 下也是 fsync 级）。并发请求时，写日志的
 // 时间会叠加进客户端看到的延迟里——账本慢不该让业务慢。
 //
-// 为什么不丢：
-//  1. 入队走有界 channel，满了就同步直写兜底——宁可阻塞，不丢日志
-//  2. Close() 先置关闭标记（拒绝新入队走同步路径）、再关闭入口
-//     channel、等后台 goroutine 把积压排空并落最后一批，之后才关
-//     数据库。main 的优雅关闭流程（srv.Shutdown → Store.Close）
-//     保证进程退出前日志全部落库
-//  3. 批次写失败降级逐条重试，最终失败打标准错误日志
+// Ordinary access logs are best-effort, not a billing ledger. A full/closed
+// queue drops and counts new records. Close drains accepted entries before the
+// database closes. Failed database writes are logged and counted separately.
 type asyncLogWriter struct {
 	db   *gorm.DB
 	ch   chan *model.RequestLog
 	quit chan struct{}
 	wg   sync.WaitGroup
 
-	mu     sync.Mutex
-	closed bool
+	mu      sync.Mutex
+	closed  bool
+	dropped atomic.Uint64
+	failed  atomic.Uint64
+}
+
+type LogQueueStats struct {
+	Depth    int    `json:"depth"`
+	Capacity int    `json:"capacity"`
+	Dropped  uint64 `json:"dropped"`
+	Failed   uint64 `json:"failed"`
+}
+
+func (s *Store) LogQueueStats() LogQueueStats {
+	if s.logs == nil {
+		return LogQueueStats{}
+	}
+	return LogQueueStats{Depth: len(s.logs.ch), Capacity: cap(s.logs.ch), Dropped: s.logs.dropped.Load(), Failed: s.logs.failed.Load()}
 }
 
 // newAsyncLogWriter 创建并启动后台写入 goroutine。
@@ -181,27 +200,22 @@ func newAsyncLogWriter(db *gorm.DB) *asyncLogWriter {
 	return w
 }
 
-// Write 入队一条日志。不阻塞：channel 满时退回同步直写
-// （背压而不是丢弃——丢日志的代价是账目永久对不上）。
+// Write never waits for database IO. The mutex orders enqueue against Close.
 func (w *asyncLogWriter) Write(entry *model.RequestLog) {
 	if entry == nil {
 		return
 	}
 	w.mu.Lock()
-	closed := w.closed
-	w.mu.Unlock()
-	if closed {
-		// 已进入关闭流程：同步直写。此时数据库还没关
-		// （Store.Close 先 flush 再关库），写入是安全的
-		writeLogSync(w.db, entry)
+	defer w.mu.Unlock()
+	if w.closed {
+		w.dropped.Add(1)
 		return
 	}
+	copy := *entry
 	select {
-	case w.ch <- entry:
+	case w.ch <- &copy:
 	default:
-		// 队列满：同步直写兜底。SQLite 有 busy_timeout 等锁，
-		// 比丢一条日志好得多
-		writeLogSync(w.db, entry)
+		w.dropped.Add(1)
 	}
 }
 
@@ -216,7 +230,7 @@ func (w *asyncLogWriter) loop() {
 		if len(batch) == 0 {
 			return
 		}
-		writeLogBatch(w.db, batch)
+		w.failed.Add(writeLogBatch(w.db, batch))
 		batch = batch[:0]
 	}
 

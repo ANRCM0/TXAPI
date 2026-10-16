@@ -6,6 +6,7 @@
 
 - Go 1.23 或更高版本，以 `go.mod` 为语言基线。
 - Python 3.10+ 用于标准库冒烟脚本；可选 OpenAI SDK 检查另见下文。
+- Node 20+ 仅用于控制台语法/行为验证；编译、部署和运行网关不需要 Node，也不需要安装前端依赖。
 - Make 是便捷入口，不是程序运行依赖。
 - 所有命令从仓库根目录执行，数据库相对路径按进程工作目录解析。
 
@@ -17,6 +18,101 @@ make smoke
 ```
 
 `make init` 只在缺少配置时复制模板。`make clean` 仅移除 `bin/`，不会删除本地配置和数据库。可以用 `make GO=/path/to/go PYTHON=/path/to/python3 check` 指定工具。
+
+## S4 控制台与配置发布
+
+控制台位于 `/`，静态资源位于 `/ui/`，由 `web/embed.go` 直接嵌入二进制。原生 ES Modules/DOM 是本项目唯一前端实现，无 CDN、前端开发服务器或打包依赖。未知 API、未知资源不会回退为 HTML。
+
+先按 S2 步骤初始化管理员，再访问根路径登录。管理员用用户页创建账号并授权、渠道页配置上游及凭据；用户登录后创建自己的 Key，在模型页确认权限、测试页用调用 Key 发非流式请求，再到概览/日志刷新查看用量。测试会真实消耗所配置上游资源，管理会话不能代替调用 Key。浏览器会话只在页面内存中保存，刷新需重新登录；密码/Key 不写 localStorage、sessionStorage 或 URL。
+
+配置发布接口均要求管理员 Session Bearer：
+
+| 接口 | 行为 |
+|---|---|
+| `GET /api/admin/config-status` | 返回 epoch、channels/prices 的 desired_revision、applied_revision、last_error、updated_at |
+| `POST /api/admin/config-status/apply` | 对当前已保存配置重新发布，不增加 desired revision；任一失败返回 503 并附状态 |
+
+渠道/凭据和价格/倍率每次成功写入后同步尝试发布；修改响应头含 `X-TXAPI-Desired-Revision`、`X-TXAPI-Applied-Revision`、`X-TXAPI-Publication-State: applied/pending`。成功码表示保存，不保证已应用。失败保留旧运行快照，last_error 是不含路径/密钥的安全提示，详细原因只记服务端日志。两个资源分别发布，不承诺跨资源原子事务。单个非法启用渠道阻止整批渠道发布，可修正或停用后重试。
+
+revision 从每次进程启动重新计数，仅在同一 epoch 内可比较，不写数据库、不替代 schema 版本，不表示可用性或上游鉴权已验证。用户/Key/模型权限仍由数据库在下一次鉴权生效；YAML 的进程设置必须重启，不属于控制台快照发布。后台健康持久化和恢复只刷新已应用凭据的同代健康状态，不能顺带发布等待中的渠道配置。
+
+凭据 PUT 的 api_key 现在可以省略/为空以保留原密钥；仅修改 name/weight 不需要取回明文。不要将掩码字符串作为新 Key 提交。渠道编辑页不发送已有 api_key，避免替换整个凭据池。
+
+Key 更新可传 `preserve_expiry: true` 保留精确过期时刻（包括已过期状态）；控制台编辑默认保留，只有明确选择替换才按保存时刻计算新期限。省略/false 保持旧接口的 expires_in_seconds 完整替换语义，0 表示永不过期。
+
+渠道/凭据已提交但随后缓存刷新/读取失败时，返回 500、`saved: true` 和安全错误提示，并照常推进发布状态。此时不能把失败当成事务回滚而盲目重复创建；先查询配置状态及资源。渠道快照独立读取数据库，并串行更新管理缓存，避免旧的并发缓存重载覆盖较新的快照。
+
+### 观测与日志背压
+
+`gateway_attempts_total{channel,status,termination}` 和 `gateway_attempt_duration_seconds{channel}` 统计实际执行的 attempt（包含重试）；本地准入拒绝不算上游尝试。原请求指标仍按最终逻辑请求统计。
+
+普通访问日志队列容量 4096，批量 200，正常每 200ms flush；队列满/关闭时立即丢弃并计数，不退回请求线程同步写 SQLite。正常关闭排空已接收记录；写库失败先逐条重试，最终失败计数。指标包括 `gateway_log_queue_depth`、`gateway_log_queue_capacity`、`gateway_logs_dropped_total`、`gateway_logs_failed_total`。计数随进程重启归零，应监控增量。数据库失败和进程崩溃仍可能丢日志；本人用量是保留日志的聚合，绝非可靠账本。
+
+默认日志保留 30 天，YAML 显式 `log_retention_days: 0` 或同名环境变量为 0 均关闭自动清理。不要将停止清理等同于备份。
+
+### 本地验证与隔离预览
+
+```bash
+make check
+make smoke
+# 只检查控制台，不安装依赖
+make web-check
+# 完成全部冒烟后保留临时服务，手动检查页面；Ctrl+C 关闭并清理
+python tests/smoke/local.py --go go --preview
+```
+
+预览使用随机本地端口、临时库、假上游与固定的测试账号（命令会输出），不读个人 config.yaml。冒烟子进程会清除继承的 GATEWAY_*/TXAPI_ADMIN_* 部署变量，避免误用真实数据库、监听地址或凭据。不能把模拟兼容性当成真实厂商验收。
+
+可选浏览器竞态回归：已有 Playwright 环境中执行 `node tests/browser/navigation.cjs`（必要时用 NODE_PATH 指向其模块目录，PLAYWRIGHT_EXECUTABLE_PATH 指定本机浏览器）。脚本使用独立浏览器上下文、随机本机端口与模拟 API，不读取真实会话或调用上游；验证旧测试页的延迟模型列表不能覆盖当前页面清理逻辑，离开页面必须取消当前调用。此项不是编译/部署依赖，也没有冒充为现有 CI 已执行的检查。
+
+### 安装、容器与升级边界
+
+本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。升级 S3 不增加 schema（仍为 v4），但仍须先停写一致备份；旧库无主 Key 的认领规则不变。
+
+Compose 显式使用 `GATEWAY_DATABASE_PATH=/app/data/gateway.db`；此环境变量优先于 YAML 的 database.path。已有部署若实际库在 `/app/.local/data/` 或其他位置，直接重建可能看到空库，**不是数据自动迁移**。先停止旧进程，确认实际路径并一致备份主库及 WAL/SHM，再恢复到目标卷、检查所有权为容器 app 用户（UID 10001），验证数据后切换；切勿删除旧容器/卷或执行 down -v 来“修复”。
+
+首次容器初始化（已准备本地 config.yaml、GATEWAY_ADMIN_KEY 和新数据卷）：
+
+```bash
+docker compose build
+export TXAPI_ADMIN_USERNAME=admin
+read -rsp '管理员密码: ' TXAPI_ADMIN_PASSWORD; echo
+export TXAPI_ADMIN_PASSWORD
+docker compose run --rm --no-deps -e TXAPI_ADMIN_USERNAME -e TXAPI_ADMIN_PASSWORD \
+  gateway -config /app/config.yaml -init-admin
+unset TXAPI_ADMIN_PASSWORD
+docker compose up -d
+```
+
+使用外部反向代理终止 HTTPS，关闭流式响应缓冲并将读取超时设为大于请求总预算；应用仍限制 20 MiB body。限制 `/metrics` 的来源，不向公网直接暴露。服务端请求头超时 10 秒、请求体读取超时 30 秒、空闲连接超时 60 秒，不用全局短 WriteTimeout 截断 SSE；上游/整次请求仍受原有预算约束。
+
+SIGTERM 正常关闭等待在途请求最多 10 秒，再排空已接收日志；超过窗口的长流可能被强制退出打断，不能宣称该路径日志绝不丢失。维护前停止入口流量并等待在途请求完成。回滚前保存升级后备份，涉及更高 schema 时恢复旧一致备份；S4 普通日志改为有界丢弃，不能依赖日志重建严格账本。
+
+### Actions 容器交付演练
+
+现有 Verify workflow 保留完整 `check`，新增独立 Linux `delivery` job；push/PR 自动执行，不需要人工重复触发。开发机无需安装 Docker。具备 Linux Docker、Compose v2、Go 和完整 Git 历史的环境也可运行：
+
+```bash
+make delivery
+# 不使用 Make 时
+python3 tests/smoke/delivery.py --go go
+```
+
+脚本从仓库 Dockerfile 构建待验收镜像，并从不可变的 S3 基线 `b0a69a72039414aa1a1103a74d484d24f8123c0c` 的 Git archive 构建旧镜像；不切换或修改工作区。通过实际 Compose 配置派生独立项目，使用随机回环端口、独立命名卷、临时配置及假上游；显式不加载个人 `.env`，清除部署相关环境变量，不读取个人 config.yaml 或既有卷。
+
+验收覆盖：
+
+- 全新卷初始化管理员、拒绝重复初始化、UID 10001、镜像健康检查、内嵌静态资源和管理员→用户→Key→调用→本人用量闭环。
+- 重启容器进程，确认原 Key、用户、日志和用量仍在数据卷中；故意将 YAML database.path 指向不可写位置，验证 Compose 的卷内路径环境覆盖真实生效。
+- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用 S4 镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留，schema 仍为 v4。
+- SSE 在途时发起 Compose stop，要求完整 DONE、退出码 0 且已接收日志排空；Compose 为正常关闭和日志排空预留 30 秒，不将该时间承诺为任意负载下的恢复保证。
+- 升级后先另存一份备份，再恢复升级前主库及存在的 WAL/SHM；检查 SQLite integrity_check 和关键表逐行一致，重启原 S3 镜像验证原 Key/数据可用，升级后新增数据不在旧备份中。
+
+所有备份只在停止网关并验证正常退出后执行。恢复前确认卷属于本次演练项目，恢复后校正 UID/GID；脚本只删除自己创建的容器/卷/镜像，失败时输出测试容器日志。生产操作仍须按真实路径停写备份，不得对业务卷运行测试清理命令。
+
+本演练覆盖 S3/v4→S4/v4 的实际二进制升级与备份恢复，不将其冒充为更老 schema 的容器升级证据；v2/v3→v4 迁移与更高版本拒绝仍由现有 store 回归及完整 race CI 验证。这里的正常恢复也不等于崩溃时无损，普通日志和进程级 revision 的限制不变。
+
+本地 Windows 的页面/普通测试不代替 Linux race、完整 CI、容器实跑以及安装/升级/恢复演练。本批阶段状态见 PLAN，不因编写部署说明就标记验收通过。
 
 ## 本地配置
 

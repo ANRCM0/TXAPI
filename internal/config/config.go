@@ -154,6 +154,7 @@ const (
 	EnvLogRetentionDays = "GATEWAY_LOG_RETENTION_DAYS"
 	EnvChannelKeyPrefix = "GATEWAY_CHANNEL_KEY_"
 	EnvServerAddr       = "GATEWAY_ADDR"
+	EnvDatabasePath     = "GATEWAY_DATABASE_PATH"
 )
 
 // Load 读取并校验配置文件。
@@ -167,7 +168,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析 YAML 失败: %w", err)
 	}
 	var explicit struct {
-		Server struct {
+		LogRetentionDays *int `yaml:"log_retention_days"`
+		Server           struct {
 			RetryTimes *int `yaml:"retry_times"`
 		} `yaml:"server"`
 	}
@@ -177,6 +179,12 @@ func Load(path string) (*Config, error) {
 	cfg.applyDefaults()
 	if explicit.Server.RetryTimes != nil {
 		cfg.Server.RetryTimes = *explicit.Server.RetryTimes
+	}
+	if explicit.LogRetentionDays != nil {
+		cfg.LogRetentionDays = *explicit.LogRetentionDays
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvDatabasePath)); v != "" {
+		cfg.Database.Path = v
 	}
 	// 环境变量覆盖配置文件：部署时改配置要重新打镜像/改文件，
 	// 改环境变量不用。密钥尤其应该走环境变量（不进 git）。
