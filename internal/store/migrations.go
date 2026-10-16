@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 5
+const latestMigrationVersion = 6
 
 type dataMigration struct {
 	Version int
@@ -28,6 +28,10 @@ var dataMigrations = []dataMigration{
 	{Version: 5, Apply: func(tx *gorm.DB) error {
 		// Historical logs cannot be assigned a price version retrospectively.
 		return tx.Exec("UPDATE logs SET price_version = '' WHERE price_version IS NULL").Error
+	}},
+	{Version: 6, Apply: func(tx *gorm.DB) error {
+		// Existing decisions are never inferred from best-effort access logs.
+		return nil
 	}},
 }
 

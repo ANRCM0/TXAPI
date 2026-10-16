@@ -66,7 +66,7 @@ func (e *Engine) EnableStrict(ceiling string, lease time.Duration) error {
 	if !r.IsInt() || !r.Num().IsInt64() {
 		return errors.New("billing.max_request_cost requires at most nine decimal places and int64 units")
 	}
-	for _, table := range []any{&model.BillingBalance{}, &model.BillingReservation{}, &model.BillingAttempt{}, &model.BillingPriceVersion{}} {
+	for _, table := range []any{&model.BillingBalance{}, &model.BillingReservation{}, &model.BillingAttempt{}, &model.BillingPriceVersion{}, &model.BillingResolution{}} {
 		if !e.db.Migrator().HasTable(table) {
 			return ErrStrictUnavailable
 		}
@@ -280,27 +280,37 @@ func (e *Engine) Finish(ctx context.Context, pre *PreDeduct, u *relaymodel.Usage
 			charge, state = row.ChargeUnits, Settled
 			return nil
 		}
-		for _, target := range []struct {
-			kind string
-			id   uint
-		}{{"user", row.UserID}, {"key", row.TokenID}} {
-			res := tx.Model(&model.BillingBalance{}).
-				Where("owner_type=? AND owner_id=? AND reserved_units>=?", target.kind, target.id, row.ReservedUnits).
-				Updates(map[string]any{"reserved_units": gorm.Expr("reserved_units - ?", row.ReservedUnits), "used_units": gorm.Expr("used_units + ?", actualCost)})
-			if res.Error != nil {
-				return res.Error
-			}
-			if res.RowsAffected != 1 {
-				return errors.New("inconsistent strict budget hold")
-			}
-			if err := projectBalance(tx, target.kind, target.id); err != nil {
-				return err
-			}
+		if err := settleBalances(tx, row, actualCost); err != nil {
+			return err
 		}
 		charge, state = actualCost, Settled
 		return tx.Model(&row).Updates(map[string]any{"state": Settled, "reason": "", "charge_units": actualCost, "fingerprint": digest}).Error
 	})
 	return
+}
+
+func settleBalances(tx *gorm.DB, row model.BillingReservation, charge int64) error {
+	if charge < 0 || charge > row.ReservedUnits {
+		return errors.New("settlement exceeds strict budget hold")
+	}
+	for _, target := range []struct {
+		kind string
+		id   uint
+	}{{"user", row.UserID}, {"key", row.TokenID}} {
+		res := tx.Model(&model.BillingBalance{}).
+			Where("owner_type=? AND owner_id=? AND reserved_units>=?", target.kind, target.id, row.ReservedUnits).
+			Updates(map[string]any{"reserved_units": gorm.Expr("reserved_units - ?", row.ReservedUnits), "used_units": gorm.Expr("used_units + ?", charge)})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return errors.New("inconsistent strict budget hold")
+		}
+		if err := projectBalance(tx, target.kind, target.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func completeUsage(u *relaymodel.Usage) bool {

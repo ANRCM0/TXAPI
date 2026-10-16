@@ -33,6 +33,7 @@ web-check:
 	$(NODE) --check web/assets/app.mjs
 	$(NODE) --check web/assets/api.mjs
 	$(NODE) --check tests/browser/navigation.cjs
+	$(NODE) --check tests/browser/billing.cjs
 	$(NODE) --test web/assets/api.test.mjs
 
 contracts:

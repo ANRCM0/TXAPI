@@ -351,8 +351,9 @@ def main():
             after = upgrade.backup("after-s4")
             upgraded = snapshot(after / "gateway.db")
             assert len(upgraded["logs"]) == 4, "Graceful stop did not flush accepted access logs"
-            assert upgraded["schema_migrations"][:-1] == original["schema_migrations"], "Released migrations changed"
-            assert upgraded["schema_migrations"][-1][0] == 5, "Missing S5 price-history migration"
+            previous_steps = len(original["schema_migrations"])
+            assert upgraded["schema_migrations"][:previous_steps] == original["schema_migrations"], "Released migrations changed"
+            assert [row[0] for row in upgraded["schema_migrations"][previous_steps:]] == [5, 6], "Missing S5 billing migrations"
             with contextlib.closing(sqlite3.connect((after / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
                 history = dict(db.execute("SELECT version,payload FROM billing_price_versions").fetchall())
                 assert history, "Published price history was not persisted"
@@ -361,7 +362,7 @@ def main():
                 versions = db.execute("SELECT price_version FROM logs ORDER BY id").fetchall()
                 assert versions[:2] == [("",), ("",)], "Historical logs were assigned invented prices"
                 assert all(version in history for version, in versions[2:]), "New requests lack persisted price versions"
-            print("PASS: S3/v4 -> current/v5, original identities/keys/usage, price history, in-flight SSE and log drain", flush=True)
+            print("PASS: S3/v4 -> current/v6, original identities/keys/usage, price history, in-flight SSE and log drain", flush=True)
             upgrade.restore(before)
             restored = upgrade.backup("restored")
             assert snapshot(restored / "gateway.db") == original, "Restore did not recover the exact baseline data"

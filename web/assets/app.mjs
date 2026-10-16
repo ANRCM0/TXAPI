@@ -1,4 +1,4 @@
-import { createClient, list, policyInput, userInput, keyInput, channelInput } from "./api.mjs";
+import { createClient, list, policyInput, userInput, keyInput, channelInput, ledgerMoney, resolutionInput } from "./api.mjs";
 
 const root = document.querySelector("#app");
 let user = null;
@@ -97,9 +97,10 @@ function limitFields(value = {}) {
   ];
 }
 
-function editDialog(title, fields, save, description = "Changes are validated by the server.") {
+function editDialog(title, fields, save, description = "Changes are validated by the server.",
+  { submitLabel = "Save changes", successMessage = "Changes saved." } = {}) {
   const error = el("p", { class: "form-error", role: "alert" });
-  const submit = el("button", { type: "submit", class: "button primary" }, "Save changes");
+  const submit = el("button", { type: "submit", class: "button primary" }, submitLabel);
   const form = el("form", {},
     heading(title, description), el("div", { class: "form-grid" }, fields.map(field)), error,
     actions(button("Cancel", () => dialog.close()), submit));
@@ -115,7 +116,7 @@ function editDialog(title, fields, save, description = "Changes are validated by
       const result = await save(Object.fromEntries(new FormData(form)));
       if (epoch !== generation) return;
       dialog.close();
-      if (!pendingPublication) notice("Changes saved.");
+      if (!pendingPublication) notice(successMessage);
       if (result?.secret) showSecret(result.secret);
       await navigate();
     } catch (failure) {
@@ -201,7 +202,7 @@ const pages = [
   ["overview", "Overview", "01"], ["keys", "My API keys", "02"], ["models", "Models", "03"],
   ["playground", "Try a request", "04"], ["logs", "Request logs", "05"],
 ];
-const adminPages = [["users", "Users", "06"], ["channels", "Channels", "07"], ["settings", "Settings", "08"]];
+const adminPages = [["users", "Users", "06"], ["channels", "Channels", "07"], ["settings", "Settings", "08"], ["billing", "Billing ledger", "09"]];
 function shell() {
   const nav = [...pages, ...(user.role === "admin" ? adminPages : [])];
   root.replaceChildren(el("div", { class: "workspace" },
@@ -241,7 +242,7 @@ async function navigate() {
   const view = document.querySelector("#view");
   view.replaceChildren(text("p", "Loading live data...", "empty"));
   try {
-    const content = await ({ overview, keys, models: modelPage, playground, logs, users, channels, settings })[page]();
+    const content = await ({ overview, keys, models: modelPage, playground, logs, users, channels, settings, billing: billingLedger })[page]();
     if (epoch === generation && user) view.replaceChildren(content);
   } catch (error) {
     if (epoch === generation && user) view.replaceChildren(
@@ -396,6 +397,94 @@ async function logs() {
     panel(filter, host, actions(previous, count, next)));
 }
 
+async function billingLedger() {
+  let offset = 0;
+  let loadVersion = 0;
+  const limit = 50;
+  const host = el("div");
+  const state = el("select", { "aria-label": "Billing state" },
+    [["pending", "Pending reconciliation"], ["", "All states"], ["settled", "Settled"], ["active", "In flight"], ["reserved", "Reserved"]]
+      .map(([value, label]) => el("option", { value }, label)));
+  const owner = el("input", { "aria-label": "Billing user ID", placeholder: "User ID (optional)", inputmode: "numeric" });
+  const count = text("span", "", "muted");
+  const previous = button("Previous", () => { offset = Math.max(0, offset - limit); run(load); });
+  const next = button("Next", () => { offset += limit; run(load); });
+  const filter = el("form", { class: "filter-bar" }, state, owner, el("button", { class: "button secondary" }, "Refresh ledger"));
+  async function load() {
+    const epoch = generation;
+    const version = ++loadVersion;
+    previous.disabled = next.disabled = true;
+    const query = new URLSearchParams({ state: state.value, limit, offset });
+    if (owner.value.trim()) query.set("user_id", owner.value.trim());
+    const response = await api.request(`/api/admin/billing/reservations?${query}`);
+    if (epoch !== generation || version !== loadVersion) return;
+    const rows = list(response.data);
+    host.replaceChildren(rows.length ? table(["Reservation / owner", "Model / price version", "State", "Hold / charge", "Actions"], rows, row => [
+      el("div", {}, text("code", row.id), text("span", `User ${row.user_id} / Key ${row.token_id}`, "block")),
+      el("div", {}, row.origin_model, text("code", row.price_version, "block")),
+      el("div", {}, badge(row.state), text("span", row.reason, "block")),
+      el("div", {}, `Hold ${ledgerMoney(row.reserved_units)}`, text("span", `Charged ${ledgerMoney(row.charge_units)}`, "block")),
+      button("Inspect", () => run(() => inspectBilling(row.id)), "quiet"),
+    ]) : empty("No reservations match this filter. Pending charges remain held until verified or explicitly waived."));
+    previous.disabled = offset === 0; next.disabled = rows.length < limit;
+    count.textContent = `Rows ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;
+  }
+  filter.addEventListener("submit", event => { event.preventDefault(); offset = 0; run(load); });
+  await load();
+  return el("div", {}, pageHeader("Billing ledger", "Durable reservations and audited decisions, independent of access-log retention."),
+    panel(text("p", "Amounts use the configured currency. Pending is not free. Only expired pending holds in strict mode can be resolved.", "muted"),
+      filter, host, actions(previous, count, next)));
+}
+
+async function inspectBilling(id) {
+  const epoch = generation;
+  const response = await api.request(`/api/admin/billing/reservations/${encodeURIComponent(id)}`);
+  if (epoch !== generation || !user) return;
+  const { reservation: row, attempts, resolution, price_snapshot: snapshot } = response.data;
+  const dialog = el("dialog", { class: "editor billing-detail", "aria-label": "Billing reservation" });
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.append(heading("Billing reservation", row.id, button("Close", () => dialog.close())),
+    text("p", `${row.origin_model} / User ${row.user_id} / Key ${row.token_id}`),
+    text("p", `State: ${row.state}. Hold: ${ledgerMoney(row.reserved_units)}. Charged: ${ledgerMoney(row.charge_units)}.`, "muted"),
+    text("p", `Lease deadline: ${new Date(row.lease_until).toLocaleString()}. ${row.reason}`, "fine"),
+    heading("Upstream attempts", "Attempt cost is not an additional user charge."),
+    table(["Attempt / target", "Outcome", "Tokens", "Cost"], list(attempts), attempt => [
+      el("div", {}, `#${attempt.number} / Channel ${attempt.channel_id}`, text("span", `Credential ${attempt.credential_id} / ${attempt.actual_model} / ${attempt.group}`, "block")),
+      `${attempt.status} / ${attempt.termination || attempt.state}`, `${attempt.prompt_tokens} + ${attempt.output_tokens}`,
+      attempt.cost_known ? ledgerMoney(attempt.cost_units) : "Unknown (not free)",
+    ]));
+  if (resolution) {
+    dialog.append(heading("Final administrator decision", `${resolution.action} / Admin ${resolution.actor_id}`),
+      text("p", resolution.reason), text("p", `Evidence: ${resolution.evidence}`, "fine"),
+      text("p", `Calculated: ${resolution.cost_known ? ledgerMoney(resolution.calculated_units) : "Unknown"}. Charged: ${ledgerMoney(resolution.charge_units)}.`, "muted"));
+  } else if (row.can_resolve) {
+    dialog.append(actions(button("Resolve held charge", () => {
+      dialog.close();
+      editDialog("Resolve held charge", [
+        { name: "action", label: "Decision", value: "settle_usage", options: [
+          ["settle_usage", "Settle verified usage"], ["cap_usage", "Cap verified excess cost to the hold"], ["waive", "Waive charge and release hold"],
+        ] },
+        { name: "prompt_tokens", label: "Verified input tokens", hint: "Required for usage decisions; leave blank for waiver." },
+        { name: "completion_tokens", label: "Verified output tokens", hint: "Enter an explicit 0 if none." },
+        { name: "reason", label: "Reason", type: "textarea", required: true, full: true },
+        { name: "evidence", label: "Verification / approval reference", type: "textarea", required: true, full: true,
+          hint: "Do not include credentials or private request content." },
+        { name: "confirmation", label: "Confirm full billing ID", required: true, full: true, hint: row.id },
+      ], values => api.request(`/api/admin/billing/reservations/${encodeURIComponent(row.id)}/resolve`, {
+        method: "POST", body: resolutionInput(values, row.id),
+      }), "This final decision updates both budgets atomically and cannot be edited. Historical prices and the recorded target apply. A waiver does not mean upstream execution was free.",
+      { submitLabel: "Commit decision", successMessage: "Billing decision committed." });
+    }, "primary")));
+  } else {
+    dialog.append(text("p", "Resolution requires strict mode and an expired pending lease. Settled decisions cannot be rewritten. Refresh the ledger after the deadline.", "fine"));
+  }
+  const history = el("details", {}, text("summary", `Historical tariff / ${row.price_version}`),
+    text("pre", snapshot, "code-block"));
+  dialog.append(history);
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
 async function users() {
   const response = await api.request("/api/admin/users");
   function edit(value = {}) {
@@ -505,12 +594,12 @@ async function settings() {
         return api.request("/api/admin/model-policy", { method: "PUT", body: { mode: p.model_mode, models: p.models } });
       }, "An empty allowlist blocks all model calls, including administrator API keys."))),
       text("p", policy.data.mode === "all" ? "All models allowed by system policy" : `Allowlist: ${listText(policy.data.models)}`)),
-    panel(heading("Model pricing", "CNY per 1K tokens. This is basic usage accounting, not strict budget enforcement.",
+    panel(heading("Model pricing", "CNY per 1K tokens. Applied snapshots are immutable; strict settlement also requires its configured ledger and fee ceiling.",
       button("+ Set price", () => priceDialog())),
       table(["Model", "Input / 1K", "Output / 1K", "Actions"], list(prices.data), price => [
         text("code", price.model), fmt(price.input_price_per_1k), fmt(price.output_price_per_1k),
         actions(button("Edit", () => priceDialog(price), "quiet"), button("Delete", () => run(async () => {
-          if (!confirm(`Remove price for ${price.model}? Missing prices are counted as zero cost.`)) return;
+          if (!confirm(`Remove price for ${price.model}? Strict mode rejects new calls without a matching price; legacy may count them as zero.`)) return;
           await api.request(`/api/admin/prices/${encodeURIComponent(price.model)}`, { method: "DELETE" }); await navigate();
         }), "danger")),
       ])),

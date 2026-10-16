@@ -111,6 +111,7 @@ func (s *Store) AutoMigrate() error {
 		&model.BillingBalance{},
 		&model.BillingReservation{},
 		&model.BillingAttempt{},
+		&model.BillingResolution{},
 		&model.Setting{},
 	); err != nil {
 		return fmt.Errorf("建表失败: %w", err)

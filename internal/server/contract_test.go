@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"minigateway/internal/billing"
 	"minigateway/internal/model"
 	"minigateway/internal/server/api"
 	"minigateway/internal/server/middleware"
@@ -154,7 +155,8 @@ func TestOpenAPIContainsEveryRouteAndSecurityBoundary(t *testing.T) {
 }
 func TestOpenAPIMetadataFieldsMatchPublicDTOs(t *testing.T) {
 	c := loadContract(t)
-	cases := map[string]any{"User": model.User{}, "APIKey": model.Token{}, "Channel": model.Channel{}, "Credential": model.Credential{}, "Log": model.RequestLog{}, "Price": model.ModelPrice{}, "Ability": model.Ability{}, "UsageSummary": store.LogSummary{}, "ModelStat": store.ModelStat{}, "ChannelStat": store.ChannelStat{}, "PublicationStatus": api.PublicationStatus{}, "ConfigStatus": api.ConfigStatus{}}
+	cases := map[string]any{"User": model.User{}, "APIKey": model.Token{}, "Channel": model.Channel{}, "Credential": model.Credential{}, "Log": model.RequestLog{}, "Price": model.ModelPrice{}, "Ability": model.Ability{}, "UsageSummary": store.LogSummary{}, "ModelStat": store.ModelStat{}, "ChannelStat": store.ChannelStat{}, "PublicationStatus": api.PublicationStatus{}, "ConfigStatus": api.ConfigStatus{},
+		"BillingReservation": billing.ReservationView{}, "BillingAttempt": billing.AttemptView{}, "BillingResolution": billing.ResolutionView{}, "BillingReservationDetail": billing.ReservationDetail{}, "BillingResolutionInput": billing.ResolutionInput{}, "BillingResolutionUsage": billing.ResolutionUsage{}}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
 			typ := reflect.TypeOf(value)
@@ -194,15 +196,15 @@ func assertContractShape(t *testing.T, c *apiContract, schema map[string]any, va
 		assertContractShape(t, c, c.Components.Schemas[strings.TrimPrefix(ref, "#/components/schemas/")], value)
 		return
 	}
-	if all, ok := schema["allOf"].([]any); ok {
-		for _, part := range all {
-			assertContractShape(t, c, part.(map[string]any), value)
-		}
-		return
-	}
 	if value == nil {
 		if nullable, _ := schema["nullable"].(bool); !nullable {
 			t.Errorf("unexpected null for schema %v", schema)
+		}
+		return
+	}
+	if all, ok := schema["allOf"].([]any); ok {
+		for _, part := range all {
+			assertContractShape(t, c, part.(map[string]any), value)
 		}
 		return
 	}

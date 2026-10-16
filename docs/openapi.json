@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.2.1",
-    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only."
+    "version": "0.2.2",
+    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency)."
   },
   "servers": [
     {
@@ -6154,6 +6154,416 @@
           }
         ]
       }
+    },
+    "/api/admin/billing/reservations": {
+      "get": {
+        "operationId": "list_billing_reservations",
+        "summary": "Inspect durable billing reservations (default pending)",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; monetary units are exact decimal strings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BillingReservation"
+                      }
+                    },
+                    "unit_scale": {
+                      "type": "string",
+                      "enum": [
+                        "1000000000"
+                      ]
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "unit_scale",
+                    "limit",
+                    "offset"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifier, query, or decision input.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid login session required; API keys and legacy root key are not sessions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active administrator required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Billing component unavailable; resolving requires strict mode.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe billing error. A lost response may be retried with the identical decision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "",
+                "reserved",
+                "active",
+                "pending",
+                "settled"
+              ],
+              "default": "pending",
+              "description": "Empty selects all states."
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000,
+              "default": 0
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/billing/reservations/{id}": {
+      "get": {
+        "operationId": "get_billing_reservation",
+        "summary": "Inspect reservation, attempts, historical tariff and administrator decision",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; monetary units are exact decimal strings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingReservationDetail"
+                    },
+                    "unit_scale": {
+                      "type": "string",
+                      "enum": [
+                        "1000000000"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "unit_scale"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifier, query, or decision input.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid login session required; API keys and legacy root key are not sessions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active administrator required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Billing component unavailable; resolving requires strict mode.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe billing error. A lost response may be retried with the identical decision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Reservation does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/billing/reservations/{id}/resolve": {
+      "post": {
+        "operationId": "resolve_billing_reservation",
+        "summary": "Commit one audited decision for an expired pending budget hold",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; monetary units are exact decimal strings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingResolution"
+                    },
+                    "unit_scale": {
+                      "type": "string",
+                      "enum": [
+                        "1000000000"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "unit_scale"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifier, query, or decision input.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid login session required; API keys and legacy root key are not sessions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active administrator required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Billing component unavailable; resolving requires strict mode.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe billing error. A lost response may be retried with the identical decision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Reservation does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Lease/state not resolvable, verified cost exceeds hold without explicit cap, or a conflicting decision already exists. No balance change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingResolutionInput"
+              }
+            }
+          }
+        },
+        "description": "The reservation must be pending with an expired lease. The decision, both balances and terminal state commit together. settle_usage charges verified historical cost only within the hold. cap_usage requires verified cost above the hold, charges exactly the hold and records the excess. waive releases the hold without claiming execution was free. Reasons/evidence are immutable; identical semantic input replays the original decision/actor, conflicts never overwrite it. Existing automatically settled requests cannot be rewritten."
+      }
     }
   },
   "components": {
@@ -7413,6 +7823,317 @@
             }
           }
         ]
+      },
+      "BillingReservation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "token_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "price_version": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          },
+          "origin_model": {
+            "type": "string"
+          },
+          "reserved_units": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "Exact integer billionths of configured currency, encoded as a decimal string to preserve browser precision."
+          },
+          "charge_units": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "Exact integer billionths of configured currency, encoded as a decimal string to preserve browser precision."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "reserved",
+              "active",
+              "pending",
+              "settled"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "lease_until": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Lease deadline as Unix milliseconds."
+          },
+          "can_resolve": {
+            "type": "boolean",
+            "description": "Strict component ready, state pending and lease expired. The server rechecks in the transaction."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "token_id",
+          "price_version",
+          "origin_model",
+          "reserved_units",
+          "charge_units",
+          "state",
+          "reason",
+          "lease_until",
+          "can_resolve",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "BillingAttempt": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "channel_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "credential_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "actual_model": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "termination": {
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Raw upstream count; invalid or incomplete usage is retained for inspection and is not a verified charge."
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Raw upstream count; invalid or incomplete usage is retained for inspection and is not a verified charge."
+          },
+          "cost_units": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "Exact integer billionths of configured currency, encoded as a decimal string to preserve browser precision."
+          },
+          "cost_known": {
+            "type": "boolean",
+            "description": "False means uncertain cost, not free execution."
+          },
+          "state": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "number",
+          "channel_id",
+          "credential_id",
+          "actual_model",
+          "group",
+          "status",
+          "termination",
+          "prompt_tokens",
+          "output_tokens",
+          "cost_units",
+          "cost_known",
+          "state",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "BillingResolution": {
+        "type": "object",
+        "properties": {
+          "actor_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "settle_usage",
+              "cap_usage",
+              "waive"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cost_known": {
+            "type": "boolean"
+          },
+          "calculated_units": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "Exact integer billionths of configured currency, encoded as a decimal string to preserve browser precision."
+          },
+          "charge_units": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "Exact integer billionths of configured currency, encoded as a decimal string to preserve browser precision."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "actor_id",
+          "action",
+          "reason",
+          "evidence",
+          "prompt_tokens",
+          "output_tokens",
+          "cost_known",
+          "calculated_units",
+          "charge_units",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "BillingReservationDetail": {
+        "type": "object",
+        "properties": {
+          "reservation": {
+            "$ref": "#/components/schemas/BillingReservation"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingAttempt"
+            }
+          },
+          "resolution": {
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BillingResolution"
+              }
+            ],
+            "nullable": true
+          },
+          "price_snapshot": {
+            "type": "string",
+            "description": "Immutable historical price/rate canonical JSON; not the current tariff."
+          }
+        },
+        "required": [
+          "reservation",
+          "attempts",
+          "resolution",
+          "price_snapshot"
+        ],
+        "additionalProperties": false
+      },
+      "BillingResolutionUsage": {
+        "type": "object",
+        "properties": {
+          "prompt_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens"
+        ],
+        "additionalProperties": false
+      },
+      "BillingResolutionInput": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "settle_usage",
+              "cap_usage",
+              "waive"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Required nonblank audit rationale, at most 1000 UTF-8 bytes."
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "Required nonblank verification/approval reference, at most 2000 UTF-8 bytes. Do not include credentials or private request content."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/BillingResolutionUsage"
+          }
+        },
+        "required": [
+          "action",
+          "reason",
+          "evidence"
+        ],
+        "additionalProperties": false,
+        "description": "settle_usage/cap_usage require both nonnegative usage counts. waive forbids usage and records cost_known=false. Model, channel group, price version and actor are derived server-side; unknown fields and trailing JSON are rejected."
       }
     }
   }

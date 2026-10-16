@@ -65,9 +65,11 @@ python tests/smoke/local.py --go go --preview
 
 可选浏览器竞态回归：已有 Playwright 环境中执行 `node tests/browser/navigation.cjs`（必要时用 NODE_PATH 指向其模块目录，PLAYWRIGHT_EXECUTABLE_PATH 指定本机浏览器）。脚本使用独立浏览器上下文、随机本机端口与模拟 API，不读取真实会话或调用上游；验证旧测试页的延迟模型列表不能覆盖当前页面清理逻辑，离开页面必须取消当前调用。此项不是编译/部署依赖，也没有冒充为现有 CI 已执行的检查。
 
+账本页面回归：同一环境执行 `node tests/browser/billing.cjs`，验证精确金额、未知成本提示、历史价、完整 ID 确认、显式零用量、最终决策只读和角色菜单，以及桌面/手机布局。可选 `TXAPI_BROWSER_SCREENSHOT` 指定本地截图路径；截图不提交。现有 CI 只检查这两个浏览器脚本语法，真实浏览器通过证据单独记录，不要求生产安装 Playwright。
+
 ### 安装、容器与升级边界
 
-本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前 S5 开发代码追加 v5，见下节。旧库无主 Key 的认领规则不变。
+本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前 S5 开发代码追加 v5/v6，见下节。旧库无主 Key 的认领规则不变。
 
 Compose 显式使用 `GATEWAY_DATABASE_PATH=/app/data/gateway.db`；此环境变量优先于 YAML 的 database.path。已有部署若实际库在 `/app/.local/data/` 或其他位置，直接重建可能看到空库，**不是数据自动迁移**。先停止旧进程，确认实际路径并一致备份主库及 WAL/SHM，再恢复到目标卷、检查所有权为容器 app 用户（UID 10001），验证数据后切换；切勿删除旧容器/卷或执行 down -v 来“修复”。
 
@@ -104,19 +106,19 @@ python3 tests/smoke/delivery.py --go go
 
 - 全新卷初始化管理员、拒绝重复初始化、UID 10001、镜像健康检查、内嵌静态资源和管理员→用户→Key→调用→本人用量闭环。
 - 重启容器进程，确认原 Key、用户、日志和用量仍在数据卷中；故意将 YAML database.path 指向不可写位置，验证 Compose 的卷内路径环境覆盖真实生效。
-- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。S5 开发代码预期 v5，历史迁移记录保持原前缀、旧日志不虚构价格版本，新价格快照可核对内容摘要。
+- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。当前 S5 开发代码预期 v6，历史迁移记录保持原前缀、新增 v5/v6，旧日志不虚构价格版本，新价格快照可核对内容摘要。
 - SSE 在途时发起 Compose stop，要求完整 DONE、退出码 0 且已接收日志排空；Compose 为正常关闭和日志排空预留 30 秒，不将该时间承诺为任意负载下的恢复保证。
 - 升级后先另存一份备份，再恢复升级前主库及存在的 WAL/SHM；检查 SQLite integrity_check 和关键表逐行一致，重启原 S3 镜像验证原 Key/数据可用，升级后新增数据不在旧备份中。
 
 所有备份只在停止网关并验证正常退出后执行。恢复前确认卷属于本次演练项目，恢复后校正 UID/GID；脚本只删除自己创建的容器/卷/镜像，失败时输出测试容器日志。生产操作仍须按真实路径停写备份，不得对业务卷运行测试清理命令。
 
-S4 已有演练证据覆盖 S3/v4→S4/v4；当前脚本已适配 S5/v5，并在功能提交 `5f2ca19` 的 Verify #38838322419 实跑通过，不复用 S4 结果宣称通过。既有升级/恢复检查保留，不额外扩展旧库报错或回滚专项演练。这里的正常恢复也不等于崩溃时无损，普通日志和进程级 revision 的限制不变。
+S4 已有演练证据覆盖 S3/v4→S4/v4；S5/v5 在功能提交 `5f2ca19` 的 Verify #38838322419 实跑通过。当前脚本已适配 v6，须由本批 CI 验证，不复用旧结果宣称新代码通过。既有升级/恢复检查保留，不额外扩展旧库报错或回滚专项演练。这里的正常恢复也不等于崩溃时无损，普通日志和进程级 revision 的限制不变。
 
 本地 Windows 的页面/普通测试不代替 Linux race、完整 CI、容器实跑以及安装/升级/恢复演练。本批阶段状态见 PLAN，不因编写部署说明就标记验收通过。
 
 ## S5 定点价格与严格结算首批
 
-当前是首批后端实现，非完整收费版本验收。范围为 billing、store/model、gateway/main 接线和关联契约/观测，不改 core/协议的依赖边界，不新增支付或充值。默认模式仍为兼容模式：
+当前包含首批后端和第二批管理员对账/故障恢复实现，非完整收费版本验收。范围为 billing、store/model、gateway/main、管理 API/控制台和关联契约/观测，不改 core/协议的依赖边界，不新增支付或充值。默认模式仍为兼容模式：
 
 ```yaml
 billing:
@@ -145,11 +147,37 @@ billing:
 
 schema v5 增加 `billing_price_versions`、`billing_balances`、`billing_reservations`、`billing_attempts`；普通 logs 增加 price_version/billing_id/billing_state。整数余额是严格模式的权威值，旧 used_quota 仅投影已收费用+未释放预留，因而控制台额度占用包括 pending，个人日志聚合不是权威余额。首次建立某个余额时保守导入现有 used_quota，不把历史消费归零。初始化严格组件后写入 `billing.strict_enabled=true`，同一库禁止启动 legacy 以免浮点写入和整数余额分叉；可选择 disabled，但不会因此删除已有预留。
 
-预留采用内部随机 ID（不信任客户端 Request ID）。开始上游执行前同步记 attempt，完成后同步记已知/未知成本；最终用户收费只结算一次，不将重试成本重复收给用户。用户与 Key 的占用、收费、余量释放和预留状态在一个事务内改变；普通日志背压、丢弃和保留期不能丢弃财务记录。响应可带 `X-TXAPI-Billing-ID`、`X-TXAPI-Price-Version`，日志页展示版本和 pending 提示；没有新增公开账本查询 API。
+预留采用内部随机 ID（不信任客户端 Request ID）。开始上游执行前同步记 attempt，完成后同步记已知/未知成本；最终用户收费只结算一次，不将重试成本重复收给用户。用户与 Key 的占用、收费、余量释放和预留状态在一个事务内改变；普通日志背压、丢弃和保留期不能丢弃财务记录。响应可带 `X-TXAPI-Billing-ID`、`X-TXAPI-Price-Version`，日志页展示版本和 pending 提示；账本查询与对账仅对管理员会话开放，不向普通用户或旧 root 管理密钥开放。
 
-租约为整次请求预算+5 秒。main 每 30 秒恢复、启动时先跑一轮；只有从未开始 attempt 的预留可自动全退。最后一条完整成功回执已持久化但尚未结算时，恢复 worker 按历史价格自动幂等结算；执行过但缺 usage/回执、取消、断流或费用超上限保留 pending。收尾和恢复使用独立且有界的 context，客户端取消不等于无成本。内部 `Engine.ReconcileKnownUsage` 可按持久化版本处理已知用量，**管理员对账 API/页面、超上限处置策略、真实进程强杀故障矩阵与完整 S5 验收仍待后续批次**；当前不得据此对外收费。
+租约为整次请求预算+5 秒。main 每 30 秒恢复、启动时先跑一轮；只有从未开始 attempt 的预留可自动全退。最后一条完整成功回执已持久化但尚未结算时，恢复 worker 按历史价格自动幂等结算；执行过但缺 usage/回执、取消、断流或费用超上限保留 pending。收尾和恢复使用独立且有界的 context，客户端取消不等于无成本。内部 `Engine.ReconcileKnownUsage` 仍供可信恢复调用，外部人工决策走下列有审计的接口；**完整成本上界仍未闭环，不得据此对外收费**。
 
-定向回归可用 `go test -count=1 ./internal/billing ./internal/gateway ./internal/config ./internal/store ./internal/server/...`。本机冒烟在临时库验证 strict 缺组件/缺价拒绝、disabled 保持转发、legacy 原链路及真实 strict 非流式/SSE 结算。性能对照 `go test ./internal/billing -run '^$' -bench BenchmarkPriceCost -benchmem` 只比较固定价格快照计算与浮点公式，不是历史整网关或账本吞吐基准。实际执行结果见 [S5 批次记录](PLAN.md#s5-可选预算与结算)。
+### 管理员账本与最终决策
+
+控制台管理员菜单的 **Billing ledger** 默认列出 pending；支持状态/用户筛选及分页，详情展示逐次执行、原始价格快照、双预算占用和最终决策。金额使用十进制整数字符串传输，`unit_scale="1000000000"`；浏览器使用 BigInt 展示，不把未知成本显示为免费。字段和错误封装以 OpenAPI 0.2.2 为准。
+
+| 方法与路径 | 行为 |
+|---|---|
+| `GET /api/admin/billing/reservations` | 默认 state=pending、limit=50；state 空字符串表示全部，limit 1–100、offset 0–1000000，可按 user_id/token_id 过滤 |
+| `GET /api/admin/billing/reservations/:id` | 预留、按序 attempt、历史价和可空的最终审计记录；ID 为 32 位小写十六进制 |
+| `POST /api/admin/billing/reservations/:id/resolve` | 仅 strict 组件可用、pending 且租约已过期时能首次决策；事务内再次检查管理员角色/有效状态 |
+
+决策 body 必须提供 action、非空 reason（最多 1000 UTF-8 字节）和 evidence（最多 2000 字节）；不要填写真实密钥或私密请求内容。usage 的两项均须显式提供非负整数，0 与遗漏不同；不得传 actor_id、模型、分组或新价格，未知字段和尾随 JSON 会被拒绝。
+
+- `settle_usage`：提供 `usage: {"prompt_tokens":11,"completion_tokens":7}`，按预留历史价格及最后一次持久化目标计费，费用不超过 hold 时结算并退余。
+- `cap_usage`：同样提供核实用量，且核算费用必须超过 hold；明确只收 hold，审计保留完整核算费用和封顶收费，不静默忽略差额。不能向用户超额追扣。
+- `waive`：不提供 usage；管理员接受未知成本并释放 hold。`cost_known=false` 不等于上游没有执行，也不消除厂商成本。
+
+双余额、终态和一条不可改写的决策审计在同一事务提交；审计写入失败全部保留原占用。相同规范化 body 重试返回原决定和原操作人，不重复收费；不同决策或迟到回调不能改写终态。HTTP 409 表示状态/费用/已有决策冲突，400 表示输入错误；500/超时结果不确定时先查询、再以同一 body 重试，不能换一份决策试探。页面要求输入完整 billing ID 后提交，不能将页面确认当服务端权限校验。
+
+schema v6 仅追加 `billing_resolutions` 和迁移登记，不从普通日志推断历史决策；不级联删除历史审计。初始化 strict 时该表同样是必需组件。disabled 模式可只读查询已有账本，不能提交最终决策，也不会释放原 hold；切回 strict 后才可处理。数据库备份应覆盖这些财务表，不能只备份访问日志；更低 schema 的二进制不能直接打开 v6，既有停写备份/恢复约束不变。
+
+### 故障恢复回归
+
+定向回归可用 `go test -count=1 ./internal/billing ./internal/gateway ./internal/config ./internal/store ./internal/server/...`。`TestStrictForcedProcessDeathRecoveryMatrix` 启动独立测试进程并真实强杀，覆盖预留后未执行、执行中回执未知、成功回执落库后未结算、结算后未确认四个窗口；重启只读持久化事实，等待真实租约到期，重复恢复仍只收费一次。真实 HTTP 假上游确认是否已执行，不伪造崩溃时间戳，不增加生产崩溃钩子。
+
+`python tests/smoke/local.py --go go` 在临时库验证原链路、模式隔离、strict 非流式/SSE 结算，并在真实 gateway 二进制 SSE 中调用强杀、等待实际租约、重启恢复为 pending，再经管理员 API 幂等豁免和核对双占用释放。普通访问日志不作为恢复证据。测试只使用隔离假上游，不承诺真实厂商 exactly-once 或崩溃后零成本。
+
+性能对照 `go test ./internal/billing -run '^$' -bench BenchmarkPriceCost -benchmem` 只比较固定价格快照计算与浮点公式，不是历史整网关或账本吞吐基准。实际执行结果见 [S5 批次记录](PLAN.md#s5-可选预算与结算)。
 
 ## 本地配置
 

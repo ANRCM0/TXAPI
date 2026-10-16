@@ -50,6 +50,37 @@ export function channelInput(values) {
   return result;
 }
 
+export function ledgerMoney(value) {
+  if (!/^\d+$/.test(String(value))) throw new Error("Invalid ledger amount.");
+  const units = BigInt(value);
+  const fraction = (units % 1000000000n).toString().padStart(9, "0").replace(/0+$/, "");
+  return `${units / 1000000000n}${fraction ? `.${fraction}` : ""}`;
+}
+
+export function resolutionInput(values, id) {
+  if (values.confirmation !== id) throw new Error("Enter the full billing ID to confirm this decision.");
+  if (!["settle_usage", "cap_usage", "waive"].includes(values.action)) throw new Error("Choose a resolution action.");
+  const result = { action: values.action, reason: String(values.reason || "").trim(), evidence: String(values.evidence || "").trim() };
+  for (const [name, max] of [["reason", 1000], ["evidence", 2000]]) {
+    if (!result[name] || new TextEncoder().encode(result[name]).length > max) {
+      throw new Error(`${name} is required and must fit within ${max} UTF-8 bytes.`);
+    }
+  }
+  const prompt = String(values.prompt_tokens ?? "").trim();
+  const output = String(values.completion_tokens ?? "").trim();
+  if (values.action === "waive") {
+    if (prompt || output) throw new Error("Clear usage counts when waiving an uncertain charge.");
+  } else {
+    if (!/^\d+$/.test(prompt) || !/^\d+$/.test(output)) throw new Error("Enter both verified token counts, including explicit zeros.");
+    const counts = [Number(prompt), Number(output)];
+    if (counts.some(value => !Number.isSafeInteger(value)) || !Number.isSafeInteger(counts[0] + counts[1])) {
+      throw new Error("Token counts exceed the supported browser integer range.");
+    }
+    result.usage = { prompt_tokens: counts[0], completion_tokens: counts[1] };
+  }
+  return result;
+}
+
 export function createClient({ onUnauthorized = () => {}, onPending = () => {}, fetcher = fetch } = {}) {
   let session = "";
   const pending = new Set();

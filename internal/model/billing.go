@@ -56,3 +56,20 @@ type BillingAttempt struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
+
+// BillingResolution is the immutable, one-per-reservation administrator decision.
+// It is committed in the same transaction as both balance changes.
+type BillingResolution struct {
+	ReservationID   string `gorm:"primaryKey;size:32"`
+	ActorID         uint   `gorm:"not null"`
+	Action          string `gorm:"size:24;not null"`
+	Reason          string `gorm:"type:text;not null"`
+	Evidence        string `gorm:"type:text;not null"`
+	PromptTokens    int
+	OutputTokens    int
+	CostKnown       bool
+	CalculatedUnits int64
+	ChargeUnits     int64
+	Fingerprint     string `gorm:"size:64;not null"`
+	CreatedAt       time.Time
+}

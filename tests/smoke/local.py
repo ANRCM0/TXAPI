@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -146,6 +147,66 @@ def control_workflow(base, upstream_url):
     return key
 
 
+def strict_crash_workflow(gateway, config, config_path, work, env, gateway_port, upstream_url, admin):
+    """Kill the actual gateway during SSE; recovery must hold uncertain cost."""
+    base = f"http://127.0.0.1:{gateway_port}"
+
+    def api(path, payload=None, method=None, expected=200):
+        status, body = request(base + path, admin, payload, method)
+        assert status == expected, (path, status, body)
+        return json.loads(body)
+
+    # A short request budget gives this isolated test a real six-second lease.
+    config["server"].update(timeout_seconds=1, total_timeout_seconds=1)
+    config_path.write_text(json.dumps(config))
+    with service([str(gateway), "-config", str(config_path)], work / "strict-killed.log", env) as process:
+        ready(process, gateway_port)
+        api("/api/admin/channels", {
+            "name": "crash-fixture", "type": "openai", "base_url": upstream_url,
+            "models": ["crash-model"], "api_key": "sk-smoke-slow-upstream-only",
+        }, "POST", 201)
+        api("/api/admin/prices/crash-model", {"input_price_per_1k": 0.15, "output_price_per_1k": 0.6}, "PUT")
+        key = api("/api/me/keys", {"name": "crash-client", "model_mode": "allowlist", "models": ["crash-model"]}, "POST", 201)["data"]
+        payload = {"model": "crash-model", "max_tokens": 32, "stream": True,
+                   "messages": [{"role": "user", "content": "hi"}], "stream_options": {"include_usage": True}}
+        stream_request = urllib.request.Request(base + "/v1/chat/completions", data=json.dumps(payload).encode(),
+                                                headers={"Authorization": "Bearer " + key["key"], "Content-Type": "application/json"})
+        with HTTP.open(stream_request, timeout=10) as response:
+            billing_id = response.headers["X-TXAPI-Billing-ID"]
+            assert response.readline().startswith(b"data:"), "No upstream stream execution"
+            process.kill()  # Not SIGTERM: graceful shutdown must not settle this case.
+            assert process.wait(timeout=5) != 0
+    with contextlib.closing(sqlite3.connect((work / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
+        state, lease = db.execute("SELECT state,lease_until FROM billing_reservations WHERE id=?", (billing_id,)).fetchone()
+        assert state == "active", state
+        assert db.execute("SELECT reserved_units FROM billing_balances WHERE owner_type='key' AND owner_id=?", (key["id"],)).fetchone() == (100_000_000,)
+    time.sleep(max(0, lease / 1000 - time.time()) + 0.05)
+    with service([str(gateway), "-config", str(config_path)], work / "strict-recovered.log", env) as process:
+        ready(process, gateway_port)
+        path = "/api/admin/billing/reservations/" + billing_id
+        deadline = time.monotonic() + 5
+        while True:
+            detail = api(path)["data"]
+            if detail["reservation"]["state"] == "pending":
+                break
+            assert time.monotonic() < deadline, detail
+            time.sleep(0.05)
+        assert detail["reservation"]["can_resolve"] and detail["reservation"]["reserved_units"] == "100000000"
+        assert not detail["attempts"][0]["cost_known"] and detail["resolution"] is None
+        decision = {"action": "waive", "reason": "test operator accepts uncertain upstream cost",
+                    "evidence": "isolated forced-kill fixture; no free-execution assumption"}
+        for _ in range(2):
+            result = api(path + "/resolve", decision, "POST")["data"]
+            assert result["charge_units"] == "0" and not result["cost_known"], result
+        detail = api(path)["data"]
+        assert detail["reservation"]["state"] == "settled" and detail["resolution"]["action"] == "waive"
+        assert detail["resolution"]["actor_id"] == 1
+    with contextlib.closing(sqlite3.connect((work / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
+        assert db.execute("SELECT COUNT(*) FROM billing_resolutions WHERE reservation_id=?", (billing_id,)).fetchone() == (1,)
+        assert db.execute("SELECT used_units,reserved_units FROM billing_balances WHERE owner_type='key' AND owner_id=?", (key["id"],)).fetchone() == (0, 0)
+    print("PASS: actual gateway forced kill during SSE, restart pending hold, audited idempotent waiver", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--go", default="go", help="Go executable")
@@ -265,6 +326,8 @@ def main():
                     assert time.monotonic() < deadline, "Strict request observations did not appear"
                     time.sleep(0.05)
                 assert all(row["billing_state"] == "settled" and abs(row["cost"] - 0.00585) < 1e-12 for row in billed), billed
+            strict_crash_workflow(gateway, config, config_path, work, clean_env, gateway_port,
+                                  f"http://127.0.0.1:{upstream_port}", admin)
     print("PASS: startup, auth, normal/SSE, console, S5 mode isolation, strict missing-price rejection and durable settlement")
 
 

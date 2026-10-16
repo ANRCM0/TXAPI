@@ -128,12 +128,14 @@ select { padding-right: 25px; }
 .publication .form-error { width: 100%; }
 .content > div > .fine { margin: 18px 0 28px; overflow-wrap: anywhere; }
 .code-block { padding: 20px; background: #f0f2e9; border-radius: 4px; overflow: auto; }
-.editor { border: 1px solid var(--line); border-radius: 9px; padding: 30px; width: min(630px, calc(100% - 30px)); max-height: 90svh; color: var(--ink); background: var(--surface); box-shadow: 0 20px 100px #142c2c33; }
+.editor { border: 1px solid var(--line); border-radius: 9px; padding: 30px; width: min(630px, calc(100% - 30px)); max-height: 90svh; color: var(--ink); background: var(--surface); box-shadow: 0 20px 100px #142c2c33; overflow-wrap: anywhere; }
 .editor::backdrop { background: #172e2a88; backdrop-filter: blur(3px); }
 .editor .section-heading { margin-bottom: 27px; }
 .editor > h2 { margin: 15px 0; }
 .editor .secret { margin: 24px 0; font-family: Consolas, monospace; }
 .editor .actions { justify-content: flex-end; }
+.billing-detail > .section-heading:not(:first-child) { margin-top: 22px; }
+.billing-detail table { min-width: 460px; }
 .form-error { color: var(--danger); font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
 .form-error:empty { display: none; }
 .editor .form-error { margin-bottom: 20px; }

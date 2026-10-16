@@ -75,7 +75,7 @@ type Admission interface {
 
 ## 3. 前后端契约
 
-唯一机器可读 HTTP 基线：[openapi.json](openapi.json)，当前 S5 首批工作版本 `0.2.1`（S4 为 `0.2.0`，F0 验收版本为 `0.1.0`）。路径沿用现有 `/api/...` 与 `/v1/...`；这个版本标识契约文档，未给现有 URL 强加新前缀。
+唯一机器可读 HTTP 基线：[openapi.json](openapi.json)，当前 S5 工作版本 `0.2.2`（首批为 `0.2.1`，S4 为 `0.2.0`，F0 验收版本为 `0.1.0`）。路径沿用现有 `/api/...` 与 `/v1/...`；这个版本标识契约文档，未给现有 URL 强加新前缀。
 
 - 新前端使用 `/api/auth`、`/api/admin`、`/api/me`；旧 `/api/channels` 等路径标记 deprecated，暂保留原管理密钥鉴权。
 - `APIKey` 为无明文 metadata，`APIKeyCreated` 才有一次性 key。不要将数据库 model.Token 直接作为前端所有场景的通用类型。
@@ -83,7 +83,7 @@ type Admission interface {
 - 现有 list 在无数据时可能返回 null；契约显式 nullable。分页/status/响应封装以契约和回归为准，不能在 UI 中猜测。
 - 流错误/截止时间/取消属于终止结果；已提交的流不会伪造成功 DONE。UI/SDK 必须处理半途失败。
 - S4 渠道/凭据及价格/倍率写操作的成功码只表示已保存；响应头 `X-TXAPI-Publication-State` 为 pending 时必须展示未生效提示。管理员通过 config-status 查看/重试，版本只在同一 epoch 内比较；数据库迁移版本与发布 revision 无关。
-- S5 保持 76 个操作；日志增加 `price_version`、`billing_id`、`billing_state`，调用响应可带 `X-TXAPI-Price-Version` 和 `X-TXAPI-Billing-ID`。价格内容摘要跨重启稳定，不是配置发布 revision；pending 表示保留预算待对账，不能当成免费或已完成结算。
+- S5 第二批扩展为 79 个操作，增加管理员专用账本列表、详情和最终对账；金额单位使用精确字符串，操作人取管理员会话。日志增加 `price_version`、`billing_id`、`billing_state`，调用响应可带 `X-TXAPI-Price-Version` 和 `X-TXAPI-Billing-ID`。价格内容摘要跨重启稳定，不是配置发布 revision；pending 表示保留预算待对账，不能当成免费或已完成结算。人工对账不替代允许请求的完整成本上界。
 - OpenAPI 的 responses.default 是兼容错误封装；目前错误 type 字段不保证每条旧接口都相同。若需进一步统一错误码，先提交独立兼容方案，不静默改所有 API。
 
 CI 会校验契约与真实 Gin 路由一一匹配、匿名请求受保护、公开 DTO 字段和关键控制面响应符合约定。本仓库实现的是上述子集校验，不宣称代替完整 OpenAPI 标准验证或所有字段语义测试；复杂业务必须有行为测试。
@@ -95,6 +95,7 @@ CI 会校验契约与真实 Gin 路由一一匹配、匿名请求受保护、公
 - 模型结构集中在 `internal/model`，结构建表仍由 AutoMigrate 管理；需要的数据/索引迁移统一追加到 `internal/store/migrations.go`。
 - F0 未执行新 schema 版本；v2 仍是 S2 已发布的 Key 摘要迁移。不要因重构运行重复的数据迁移。
 - S5 首批在 S3/v4 基线上追加 v5：不可变价格历史、整数余额、请求预留和尝试成本表，以及普通日志关联字段。历史日志不猜测价格版本；普通日志清理不删这些财务记录。生产接线由 main 注入快照持久化与 billing 恢复 worker，不能另建鉴权、迁移或资源释放链路。
+- S5 第二批追加 v6：每笔预留至多一条不可改写的管理员决策，和双余额/预留终态同事务提交；历史决策不从普通日志推断，不因日志或 owner 生命周期级联删除。旧库报错/回滚不扩展专项演练，既有 CI 回归与交付门槛保留。
 - 每个版本号由集成负责人分配，同一集成周期按顺序合并；未合并分支不要自行预占同一个已发布版本。已发布步骤只追加不重写。
 - runner 在事务中执行一步并登记版本；步骤不允许 Commit/Rollback、不读写真实外部服务。失败既回滚数据也不记版本，重试可重新执行。
 - 打开数据库前检查最高版本；比当前二进制新的 schema 将被拒绝，避免先 AutoMigrate 再发现不兼容。结构 AutoMigrate 本身仍不是完整 SQL 迁移框架，备份/恢复规则继续适用。
