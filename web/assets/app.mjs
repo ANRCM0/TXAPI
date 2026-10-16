@@ -382,7 +382,10 @@ async function logs() {
     host.replaceChildren(table(["Time / request", "Model", "Status", "Tokens", "Cost / CNY", "Latency"], rows, row => [
       el("div", {}, text("span", new Date(row.created_at).toLocaleString()), text("code", row.request_id, "block")),
       row.origin_model, badge(row.status), `${fmt(row.total_tokens)}${row.is_estimated ? " (est.)" : ""}`,
-      `${fmt(row.cost)}${row.price_missing ? " / no price" : ""}`, `${fmt(row.latency_ms)} ms`,
+      el("div", {}, `${fmt(row.cost)}${row.price_missing ? " / no price" : ""}`,
+        row.billing_state ? el("span", { class: "block", title: row.billing_id }, row.billing_state === "pending" ? "Budget held / reconciliation pending" : row.billing_state) : null,
+        row.price_version ? el("code", { class: "block", title: row.price_version }, `Price ${row.price_version.slice(0, 12)}`) : null),
+      `${fmt(row.latency_ms)} ms`,
     ]));
     previous.disabled = offset === 0; next.disabled = rows.length < limit;
     count.textContent = `Rows ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;

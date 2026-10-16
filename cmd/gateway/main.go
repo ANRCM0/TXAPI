@@ -126,18 +126,27 @@ func main() {
 
 	// 5. 组装计费引擎：价格表缓存从 store 加载，管理接口改价后主动
 	// ReloadPrices 失效；额度扣减走 gorm 的原子 UPDATE（并发不丢）。
-	priceTable := billing.NewPriceTable(func() ([]model.ModelPrice, map[string]float64, error) {
-		prices, err := st.ModelPrices()
-		if err != nil {
-			return nil, nil, err
-		}
-		rates, err := st.GroupRates()
-		if err != nil {
-			return nil, nil, err
-		}
-		return prices, rates, nil
-	}, billing.DefaultPriceTTL)
+	priceTable := billing.NewPriceTableWithHistory(st.PriceData, billing.DefaultPriceTTL, st.RecordPriceSnapshot)
 	engine := billing.New(st.DB(), priceTable)
+	slog.Info("billing mode selected", "mode", cfg.Billing.Mode)
+	if cfg.Billing.Mode == string(billing.ModeLegacy) {
+		marker, err := st.GetSetting(billing.StrictEnabledSetting)
+		if err != nil || marker == "true" {
+			slog.Error("cannot enter legacy accounting after strict ledger initialization; use strict or disabled mode", "err", err)
+			os.Exit(1)
+		}
+		slog.Warn("legacy billing is availability-first, not strict budgeting or a reliable ledger")
+	}
+	if cfg.Billing.Mode == string(billing.ModeStrict) {
+		if cfg.Billing.MaxRequestCost == "" {
+			slog.Warn("strict fee ceiling is missing; model calls will be rejected")
+		} else if err := engine.EnableStrict(cfg.Billing.MaxRequestCost, time.Duration(cfg.Server.TotalTimeoutSeconds+5)*time.Second); err != nil {
+			slog.Error("strict billing initialization failed", "err", err)
+			os.Exit(1)
+		}
+	}
+	stopBillingRecovery := engine.StartRecovery(30 * time.Second)
+	defer stopBillingRecovery()
 
 	limiter := middleware.NewMemoryLimiter()
 	ceilings := cfg.Server.Concurrency
@@ -170,6 +179,7 @@ func main() {
 		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
 		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
 		Billing:        engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
+		BillingMode: billing.Mode(cfg.Billing.Mode),
 		Picker: func(creds []model.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*model.Credential, bool) {
 			if cfg.Server.SessionAffinity {
 				return scheduler.PickWithAffinity(creds, sessionID, exclude, now)

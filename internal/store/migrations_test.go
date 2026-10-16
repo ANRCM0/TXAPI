@@ -15,7 +15,8 @@ func TestMigrationFailureRollsBackAndCanBeRetried(t *testing.T) {
 	st := openTestStore(t, "migration-rollback")
 	defer st.Close()
 	attempted := 0
-	step := dataMigration{Version: 5, Apply: func(tx *gorm.DB) error {
+	version := latestMigrationVersion + 1
+	step := dataMigration{Version: version, Apply: func(tx *gorm.DB) error {
 		attempted++
 		if err := tx.Create(&model.Setting{Key: "test-transaction-marker", Value: "test"}).Error; err != nil {
 			return err
@@ -29,7 +30,7 @@ func TestMigrationFailureRollsBackAndCanBeRetried(t *testing.T) {
 		t.Fatal("failed migration accepted")
 	}
 	var ledger, changes int64
-	st.DB().Model(&model.SchemaMigration{}).Where("version=5").Count(&ledger)
+	st.DB().Model(&model.SchemaMigration{}).Where("version=?", version).Count(&ledger)
 	st.DB().Model(&model.Setting{}).Where("key=?", "test-transaction-marker").Count(&changes)
 	if ledger != 0 || changes != 0 {
 		t.Fatalf("partial migration: ledger=%d changes=%d", ledger, changes)
@@ -48,7 +49,7 @@ func TestMigrationRejectsDuplicateVersionsBeforeApplying(t *testing.T) {
 	st := openTestStore(t, "migration-registry")
 	defer st.Close()
 	calls := 0
-	step := dataMigration{Version: 5, Apply: func(*gorm.DB) error { calls++; return nil }}
+	step := dataMigration{Version: latestMigrationVersion + 1, Apply: func(*gorm.DB) error { calls++; return nil }}
 	if err := applyDataMigrations(st.DB(), []dataMigration{step, step}); err == nil || calls != 0 {
 		t.Fatalf("invalid registry executed: err=%v calls=%d", err, calls)
 	}

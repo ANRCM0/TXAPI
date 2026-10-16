@@ -67,6 +67,13 @@ type DatabaseConfig struct {
 	Path string `yaml:"path"`
 }
 
+type BillingConfig struct {
+	// Legacy preserves availability-first quota behavior. Disabled does not
+	// charge; strict requires a fee ceiling and durable settlement components.
+	Mode           string `yaml:"mode"`
+	MaxRequestCost string `yaml:"max_request_cost"`
+}
+
 // ChannelConfig 描述一个上游渠道，仅用于「从 YAML 导入空数据库」。
 //
 // 注意：这个结构体是**种子数据格式**，不是运行期渠道定义。
@@ -127,6 +134,7 @@ type Config struct {
 	// 环境变量 GATEWAY_LOG_RETENTION_DAYS 优先。
 	LogRetentionDays int             `yaml:"log_retention_days"`
 	Database         DatabaseConfig  `yaml:"database"`
+	Billing          BillingConfig   `yaml:"billing"`
 	Channels         []ChannelConfig `yaml:"channels"`
 	Tokens           []TokenConfig   `yaml:"tokens"`
 }
@@ -155,6 +163,7 @@ const (
 	EnvChannelKeyPrefix = "GATEWAY_CHANNEL_KEY_"
 	EnvServerAddr       = "GATEWAY_ADDR"
 	EnvDatabasePath     = "GATEWAY_DATABASE_PATH"
+	EnvBillingMode      = "GATEWAY_BILLING_MODE"
 )
 
 // Load 读取并校验配置文件。
@@ -197,6 +206,9 @@ func Load(path string) (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv(EnvServerAddr)); v != "" {
 		cfg.Server.Addr = v
 	}
+	if v := strings.TrimSpace(os.Getenv(EnvBillingMode)); v != "" {
+		cfg.Billing.Mode = v
+	}
 	// 保留天数走 strconv 而不是直接字符串：YAML 里已经是 int，
 	// 环境变量一律是字符串，解析失败必须报错而不是静默取 0
 	// （0 的含义是「关闭清理」，静默变 0 会让运维以为在清理）。
@@ -234,6 +246,9 @@ func (c *Config) applyChannelKeyEnv() {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Billing.Mode == "" {
+		c.Billing.Mode = "legacy"
+	}
 	if c.Server.Concurrency.Instance == 0 {
 		c.Server.Concurrency.Instance = 256
 	}
@@ -307,6 +322,11 @@ func (c *Config) applyDefaults() {
 // 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
 // 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	switch c.Billing.Mode {
+	case "legacy", "disabled", "strict":
+	default:
+		return fmt.Errorf("billing.mode must be legacy, disabled or strict")
+	}
 	limits := c.Server.Concurrency
 	for _, n := range []int{limits.Instance, limits.User, limits.Key, limits.Channel} {
 		if n < 1 || n > 1_000_000 {

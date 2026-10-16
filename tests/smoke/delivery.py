@@ -6,6 +6,7 @@ Never reads config.yaml, .env, deployment secrets or existing Docker volumes.
 
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -350,8 +351,17 @@ def main():
             after = upgrade.backup("after-s4")
             upgraded = snapshot(after / "gateway.db")
             assert len(upgraded["logs"]) == 4, "Graceful stop did not flush accepted access logs"
-            assert upgraded["schema_migrations"] == original["schema_migrations"], "S4 changed schema"
-            print("PASS: S3 -> S4, original identities/keys/credentials/usage, in-flight SSE and log drain", flush=True)
+            assert upgraded["schema_migrations"][:-1] == original["schema_migrations"], "Released migrations changed"
+            assert upgraded["schema_migrations"][-1][0] == 5, "Missing S5 price-history migration"
+            with contextlib.closing(sqlite3.connect((after / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
+                history = dict(db.execute("SELECT version,payload FROM billing_price_versions").fetchall())
+                assert history, "Published price history was not persisted"
+                for version, payload in history.items():
+                    assert hashlib.sha256(payload.encode()).hexdigest() == version
+                versions = db.execute("SELECT price_version FROM logs ORDER BY id").fetchall()
+                assert versions[:2] == [("",), ("",)], "Historical logs were assigned invented prices"
+                assert all(version in history for version, in versions[2:]), "New requests lack persisted price versions"
+            print("PASS: S3/v4 -> current/v5, original identities/keys/usage, price history, in-flight SSE and log drain", flush=True)
             upgrade.restore(before)
             restored = upgrade.backup("restored")
             assert snapshot(restored / "gateway.db") == original, "Restore did not recover the exact baseline data"

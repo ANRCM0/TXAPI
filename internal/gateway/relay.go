@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/billing"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/meta"
@@ -47,6 +48,15 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 		result.Error = &core.Error{StatusCode: http.StatusForbidden, Error: core.ErrorDetail{Message: "model is not authorized", Type: "forbidden"}}
 		result.ErrorMessage = result.Error.Error.Message
 		writeError(c, result.StatusCode, result.ErrorMessage, "forbidden")
+		return
+	}
+
+	if err := g.billingMode.CheckAvailable(g.billing.StrictReady()); err != nil ||
+		(g.billingMode == billing.ModeStrict && result.reservation.BillingID() == "") {
+		result.StatusCode = http.StatusServiceUnavailable
+		result.ErrorMessage = "strict billing is unavailable; requests cannot be charged safely"
+		result.Error = &core.Error{StatusCode: result.StatusCode, Error: core.ErrorDetail{Message: result.ErrorMessage, Type: "billing_unavailable"}}
+		writeError(c, result.StatusCode, result.ErrorMessage, "billing_unavailable")
 		return
 	}
 
@@ -186,6 +196,10 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 		lastErr = err
 		state(c).StatusCode = err.StatusCode
 		state(c).ErrorMessage = err.Error.Message
+		if err.Error.Type == "billing_unavailable" {
+			responseCommitted = attemptResult.Committed
+			break
+		}
 		if attemptResult.Committed {
 			// SSE headers/body are already visible; never append an error JSON or retry
 			// after the client may have consumed part of this response.
@@ -247,7 +261,27 @@ func (g *Gateway) doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout tim
 		return core.Result{StatusCode: err.StatusCode, Error: err, Termination: core.UpstreamError}
 	}
 	input.Timeout = timeout
+	pre := state(c).reservation
+	number := len(state(c).Attempts) + 1
+	if g.billingMode == billing.ModeStrict {
+		err := g.billing.StartAttempt(c.Request.Context(), pre, dbmodel.BillingAttempt{
+			Number: number, ChannelID: uint(m.ChannelID), CredentialID: m.CredentialIDValue,
+			ActualModel: m.ActualModel, Group: state(c).ChannelGroup,
+		})
+		if err != nil {
+			return core.Result{StatusCode: 503, Error: &core.Error{StatusCode: 503, Error: core.ErrorDetail{Message: "billing attempt could not be recorded", Type: "billing_unavailable"}}}
+		}
+	}
 	result := g.executor.Execute(c.Request.Context(), c.Writer, input)
+	if g.billingMode == billing.ModeStrict {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := g.billing.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), result.Usage)
+		cancel()
+		if err != nil {
+			result.StatusCode, result.Termination = 503, core.UpstreamError
+			result.Error = &core.Error{StatusCode: 503, Error: core.ErrorDetail{Message: "billing attempt result could not be recorded", Type: "billing_unavailable"}}
+		}
+	}
 	g.metrics.RecordAttempt(state(c).ChannelName, string(result.Termination), result.StatusCode, result.Duration)
 	return result
 }

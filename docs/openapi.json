@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.2.0",
-    "description": "TXAPI S4 control console contracts. Management uses session Bearer; model calls use API-key Bearer. Legacy root-key APIs remain deprecated. Publication revisions are per-process, scoped by epoch, and cover channel/credential and price/rate snapshots only. HTTP mutation success means database save; X-TXAPI-Publication-State distinguishes applied from pending. User/key/model-policy changes take effect at next authentication. No S5 reliable ledger is promised."
+    "version": "0.2.1",
+    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only."
   },
   "servers": [
     {
@@ -183,6 +183,22 @@
                 },
                 "example": "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
               }
+            },
+            "headers": {
+              "X-TXAPI-Billing-ID": {
+                "description": "Optional internal strict reservation ID. Consult billing state; HTTP success alone does not prove final settlement.",
+                "schema": {
+                  "type": "string",
+                  "maxLength": 32
+                }
+              },
+              "X-TXAPI-Price-Version": {
+                "description": "Optional immutable price/rate snapshot SHA-256 fixed for this request.",
+                "schema": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              }
             }
           },
           "default": {
@@ -235,7 +251,7 @@
             }
           },
           "503": {
-            "description": "No usable upstream target, instance/tracker capacity exhausted, or upstream unavailable after bounded retries. Admission rejection makes no upstream call.",
+            "description": "No channel/capacity, upstream unavailability, or strict billing dependency/price/reservation failure (error.type=billing_unavailable). Strict reservation failures make no upstream call and do not fall back to legacy accounting.",
             "content": {
               "application/json": {
                 "schema": {
@@ -274,7 +290,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "description": " Strict billing reserves the configured full user-fee ceiling before execution. Missing/invalid usage or actual cost above this ceiling retains the hold as pending; it never silently treats the call as free or supplements the budget beyond its hold. Unsupported or unpriced billing dimensions return 400 before forwarding."
       }
     },
     "/v1/embeddings": {
@@ -297,6 +314,22 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true
+                }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Billing-ID": {
+                "description": "Optional internal strict reservation ID. Consult billing state; HTTP success alone does not prove final settlement.",
+                "schema": {
+                  "type": "string",
+                  "maxLength": 32
+                }
+              },
+              "X-TXAPI-Price-Version": {
+                "description": "Optional immutable price/rate snapshot SHA-256 fixed for this request.",
+                "schema": {
+                  "type": "string",
+                  "maxLength": 64
                 }
               }
             }
@@ -351,7 +384,7 @@
             }
           },
           "503": {
-            "description": "No usable upstream target, instance/tracker capacity exhausted, or upstream unavailable after bounded retries. Admission rejection makes no upstream call.",
+            "description": "No channel/capacity, upstream unavailability, or strict billing dependency/price/reservation failure (error.type=billing_unavailable). Strict reservation failures make no upstream call and do not fall back to legacy accounting.",
             "content": {
               "application/json": {
                 "schema": {
@@ -390,7 +423,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "description": " Strict billing reserves the configured full user-fee ceiling before execution. Missing/invalid usage or actual cost above this ceiling retains the hold as pending; it never silently treats the call as free or supplements the budget beyond its hold. Unsupported or unpriced billing dimensions return 400 before forwarding."
       }
     },
     "/api/auth/login": {
@@ -6950,6 +6984,25 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "price_version": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "SHA-256 of the immutable applied fixed-point price/rate snapshot held by this request. Empty for historical, disabled or unavailable pricing. Does not make this droppable log a reliable ledger."
+          },
+          "billing_id": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "Internal durable reservation ID, also returned as X-TXAPI-Billing-ID. Empty outside strict accounting."
+          },
+          "billing_state": {
+            "type": "string",
+            "enum": [
+              "",
+              "settled",
+              "pending"
+            ],
+            "description": "Observed strict outcome. pending means the budget hold remains; cost=0 is NOT a free request. Logs may be lost and are not authoritative."
           }
         }
       },
@@ -7041,12 +7094,16 @@
           "input_price_per_1k": {
             "type": "number",
             "format": "double",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 1000000000,
+            "description": "Currency per 1K tokens. Publication converts the API decimal to integer billionths, rounding upward; request cost rounds upward once after token dimensions and group rate are combined."
           },
           "output_price_per_1k": {
             "type": "number",
             "format": "double",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 1000000000,
+            "description": "Currency per 1K tokens. Publication converts the API decimal to integer billionths, rounding upward; request cost rounds upward once after token dimensions and group rate are combined."
           },
           "updated_at": {
             "type": "string",
@@ -7060,12 +7117,16 @@
           "input_price_per_1k": {
             "type": "number",
             "format": "double",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 1000000000,
+            "description": "Currency per 1K tokens. Publication converts the API decimal to integer billionths, rounding upward; request cost rounds upward once after token dimensions and group rate are combined."
           },
           "output_price_per_1k": {
             "type": "number",
             "format": "double",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 1000000000,
+            "description": "Currency per 1K tokens. Publication converts the API decimal to integer billionths, rounding upward; request cost rounds upward once after token dimensions and group rate are combined."
           }
         }
       },
@@ -7074,8 +7135,11 @@
         "additionalProperties": {
           "type": "number",
           "format": "double",
-          "minimum": 0
-        }
+          "minimum": 0,
+          "maximum": 1000000,
+          "exclusiveMinimum": true
+        },
+        "description": "Named group multipliers in (0,1000000], normalized upward to nine fractional decimal places. Omitted groups default to 1.0; empty group names are rejected."
       },
       "ModelStat": {
         "type": "object",

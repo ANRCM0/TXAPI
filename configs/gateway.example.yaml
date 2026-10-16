@@ -35,6 +35,16 @@ database:
   driver: "sqlite"
   path: ".local/data/gateway.db"
 
+# legacy: 保留兼容额度计费，不保证严格预算；disabled: 不计费、不检查额度。
+# strict: 用户/Key 同事务预留整笔单次收费上限，再按实际用量幂等结算。
+# 缺少上限/价格/账本组件时拒绝新调用，绝不退回 legacy；未知用量保留额度待对账。
+# 环境变量 GATEWAY_BILLING_MODE 优先。计价采用 1e-9 货币单位，向上取整。
+billing:
+  mode: "legacy"
+  # 严格模式必须填写十进制字符串；预留覆盖输入、输出和倍率的合计收费。
+  # 这是本系统用户收费上限，不是厂商绝对成本保证；实际费用超过上限进入待对账。
+  # max_request_cost: "0.10"
+
 # 渠道与令牌是**种子数据**：只在数据库为空时导入一次，之后通过管理 API 增删改。
 # 真实使用时替换 base_url、模型名和两个 key 占位符；
 # 渠道上游 Key 也可用环境变量 GATEWAY_CHANNEL_KEY_<id> 覆盖（部署时更推荐）。

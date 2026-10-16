@@ -36,7 +36,7 @@ const captureLimit = 64 * 1024
 // tools、response_format…）。如果网关用结构体反序列化再序列化，
 // 任何未声明的字段都会被静默丢掉，用户会遇到「某个参数在网关后面
 // 失效了」这种极难排查的问题。透明代理是网关的基本素养。
-// max_tokens 是唯一例外——预扣额度需要它算费用上限。
+// legacy 用 max_tokens 估算输出预扣；strict 另行验证可计价字段并预留整笔上限。
 func (g *Gateway) HandleChatCompletions(c *gin.Context) {
 	g.handleRelay(c, meta.ModeChatCompletions)
 }
@@ -134,6 +134,15 @@ func (g *Gateway) handleRelay(c *gin.Context, mode int) {
 		writeError(c, http.StatusForbidden, result.ErrorMessage, "forbidden")
 		return
 	}
+	if g.billingMode == billing.ModeStrict && g.billing.StrictReady() {
+		if err := billing.ValidateStrictRequest(body, mode == meta.ModeEmbeddings); err != nil {
+			result.StatusCode = http.StatusBadRequest
+			result.ErrorMessage = err.Error()
+			g.finishRequest(c, &req, startedAt, nil, body)
+			writeError(c, result.StatusCode, result.ErrorMessage, "unsupported_billing_dimension")
+			return
+		}
+	}
 	pre, err := g.preRequest(c, &req)
 	if errors.Is(err, billing.ErrQuotaExceeded) {
 		// 记账先行：403 也是请求，日志里要能看到「被额度拦下」，
@@ -147,13 +156,28 @@ func (g *Gateway) handleRelay(c *gin.Context, mode int) {
 		return
 	}
 	if err != nil {
+		if g.billingMode == billing.ModeStrict {
+			slog.Error("strict budget reservation failed; request rejected", "request_id", requestID, "err", err)
+			result.StatusCode = http.StatusServiceUnavailable
+			result.ErrorMessage = "strict billing could not reserve the request budget"
+			g.finishRequest(c, &req, startedAt, nil, body)
+			writeError(c, result.StatusCode, result.ErrorMessage, "billing_unavailable")
+			return
+		}
 		// 额度子系统自身故障（读库失败等）：放行，不拦请求。
 		// 计费挂了不该让转发也挂——服务可用性优先，与
 		// 「价格缺失不报错」是同一条原则。但必须响亮的告警。
 		// error 级别：这是网关自身子系统的故障，不是上游问题。
 		slog.Error("[额度] 预检失败，放行本次请求",
 			"request_id", requestID, "model", req.Model, "err", err)
-		pre = nil
+		pre = pre.PriceOnly()
+	}
+	result.reservation = pre
+	if pre.BillingID() != "" {
+		c.Header("X-TXAPI-Billing-ID", pre.BillingID())
+	}
+	if pre.PriceVersion() != "" {
+		c.Header("X-TXAPI-Price-Version", pre.PriceVersion())
 	}
 
 	// 用 flag + defer 保证「无论 Relay 正常返回还是 panic，都要结算」：
@@ -186,19 +210,21 @@ func modeName(mode int) string {
 
 // preRequest 做请求前的额度检查与预扣。返回的快照要传给 finishRequest。
 //
-// tokenID/userID 为 0 时跳过对应目标（未登录/无主令牌不该让请求失败）。
+// legacy 跳过 ID=0 的目标；strict 要求可信用户与 Key 归属都存在。
 func (g *Gateway) preRequest(c *gin.Context, req *model.ModelRequest) (*billing.PreDeduct, error) {
-	if g.billing == nil {
+	if g.billingMode == billing.ModeStrict {
+		if g.billing == nil {
+			return nil, billing.ErrStrictUnavailable
+		}
+		return g.billing.Reserve(c.Request.Context(), state(c).Identity.TokenID, state(c).Identity.UserID, req.Model)
+	}
+	if g.billing == nil || g.billingMode != billing.ModeLegacy {
 		return nil, nil
 	}
 	tokenID := state(c).Identity.TokenID
 	userID := state(c).Identity.UserID
-	if tokenID == 0 && userID == 0 {
-		return nil, nil
-	}
-	// 预扣上限按「客户端请求的模型名」估：选渠道（和模型映射）发生在
-	// Relay 内部，请求前还知道不——这只是个保守上限，结算时用
-	// 实际模型的真实价格修正。
+	// legacy 只估算请求模型的输出费用，不是严格上界；选渠道后
+	// 用同一价格快照中的实际模型价格修正。
 	return g.billing.PreRequest(tokenID, userID, req.MaxTokens, req.Model)
 }
 
@@ -211,6 +237,7 @@ func (g *Gateway) finishRequest(c *gin.Context, req *model.ModelRequest, started
 	userID := state(c).Identity.UserID
 
 	usage := relayUsage(c)
+	rawUsage := usage
 	isEstimated := false
 	cost := 0.0
 	priceMissing := false
@@ -230,20 +257,19 @@ func (g *Gateway) finishRequest(c *gin.Context, req *model.ModelRequest, started
 			usage = &est
 			isEstimated = true
 		}
-		if g.billing != nil {
+		if g.billing != nil && g.billingMode == billing.ModeLegacy {
 			// PriceOf 的第二个返回值是「是否找到价格」——取反才是
 			// price_missing 标记。曾经直接把「找到」赋值给「缺失」，
 			// 导致有价格的模型全被打上缺价标记（集成测试抓到的）。
 			priceFound := false
-			cost, priceFound = g.billing.PriceOf(usage, relayActualModel(c, req.Model), req.Model, relayChannelGroup(c))
+			cost, priceFound = g.billing.PriceOfSnapshot(pre, usage, relayActualModel(c, req.Model), req.Model, relayChannelGroup(c))
 			priceMissing = !priceFound
 		}
 	}
-	// 失败请求不计费：cost 保持 0，结算时全额退回预扣。
-	// 上游返回错误时 token 通常也没被计费，网关跟着免费是合理对齐。
+	// legacy 失败时退回预扣；strict 对执行过但结果未知的请求保留占用。
 
 	// 结算：把预扣和实际的差额调整掉
-	if g.billing != nil && pre != nil {
+	if g.billing != nil && pre != nil && g.billingMode == billing.ModeLegacy {
 		if err := g.billing.Settle(tokenID, userID, pre, cost); err != nil {
 			// error：结算失败意味着预扣的钱没被修正，令牌额度会被
 			// 永久占用（表现为「没用几次就 403」）。钱相关的问题
@@ -251,6 +277,19 @@ func (g *Gateway) finishRequest(c *gin.Context, req *model.ModelRequest, started
 			slog.Error("[结算] 额度结算失败，预扣可能未释放",
 				"request_id", state(c).Identity.RequestID,
 				"token_id", tokenID, "user_id", userID, "err", err)
+		}
+	}
+	if g.billingMode == billing.ModeStrict && pre.BillingID() != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		charge, billingState, err := g.billing.Finish(ctx, pre, rawUsage, relayActualModel(c, req.Model), relayChannelGroup(c),
+			status == http.StatusOK && state(c).Termination == "success")
+		cancel()
+		state(c).BillingState = billingState
+		if err != nil {
+			state(c).BillingState = billing.Pending
+			slog.Error("strict settlement failed; durable budget hold retained", "billing_id", pre.BillingID(), "err", err)
+		} else {
+			cost = float64(charge) / float64(billing.UnitScale)
 		}
 	}
 
@@ -264,7 +303,7 @@ func (g *Gateway) finishRequest(c *gin.Context, req *model.ModelRequest, started
 		access.FinishTokens(c.Request.Context(), g.limiter, usage.TotalTokens)
 	}
 
-	g.writeRequestLog(c, req, startedAt, cost, usage, isEstimated, priceMissing)
+	g.writeRequestLog(c, req, startedAt, cost, usage, isEstimated, priceMissing, pre)
 	// 请求结果摘要 + 指标埋点放在最后：两个都只需要「最终状态」，
 	// 而且必须和 writeRequestLog 看到同一份数据——摘要是给人看的
 	// 这条日志、指标是给机器看的那条，两者对不上比缺一个更难排查。
@@ -406,10 +445,9 @@ func captureBytes(c *gin.Context) []byte {
 
 // writeRequestLog 组装并写一条请求日志。
 //
-// 刻意不阻塞主流程：记账失败只打日志，不影响已经发给客户端的响应。
-// 用户请求已经成功了，网关因为自己的账本坏了就报错是不讲道理的。
+// 普通日志允许有界丢弃，不影响已提交的响应；严格账本已单独同步持久化。
 func (g *Gateway) writeRequestLog(c *gin.Context, req *model.ModelRequest, startedAt time.Time,
-	cost float64, usage *model.Usage, isEstimated, priceMissing bool) {
+	cost float64, usage *model.Usage, isEstimated, priceMissing bool, pre *billing.PreDeduct) {
 	if g.logRecorder == nil {
 		return
 	}
@@ -439,6 +477,9 @@ func (g *Gateway) writeRequestLog(c *gin.Context, req *model.ModelRequest, start
 		ErrorMessage: errMsg,
 		LatencyMs:    time.Since(startedAt).Milliseconds(),
 		Cost:         cost,
+		PriceVersion: pre.PriceVersion(),
+		BillingID:    pre.BillingID(),
+		BillingState: state(c).BillingState,
 		IsEstimated:  isEstimated,
 		PriceMissing: priceMissing,
 	}

@@ -11,18 +11,13 @@ import (
 // newTestTable 构造一个直接给定价格和倍率的价格表（不经存储层），
 // 让计费公式的测试不依赖数据库。
 func newTestTable(prices []model.ModelPrice, rates map[string]float64) *PriceTable {
-	t := NewPriceTable(nil, 0)
-	for _, p := range prices {
-		if containsStar(p.Model) {
-			t.wild = append(t.wild, p)
-			continue
-		}
-		t.exact[p.Model] = p
+	table := NewPriceTable(nil, 0)
+	snapshot, err := buildSnapshot(prices, rates)
+	if err != nil {
+		panic(err)
 	}
-	if rates != nil {
-		t.rates = rates
-	}
-	return t
+	table.snapshot = snapshot
+	return table
 }
 
 func containsStar(s string) bool {

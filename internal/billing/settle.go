@@ -13,6 +13,9 @@ import (
 // 请求前没扣，结算时也不该动它的 used_quota——否则「不限额度」
 // 的令牌每个请求都要多写两次库，白白给 SQLite 的单写者加压。
 type PreDeduct struct {
+	// Prices is held privately so a later publication cannot reprice this request.
+	prices      *PriceSnapshot
+	reservation *Reservation
 	// TokenAmount / UserAmount 是各目标实际预扣的金额。
 	TokenAmount float64
 	UserAmount  float64
@@ -37,7 +40,8 @@ func (e *Engine) PreRequest(tokenID, userID uint, maxTokens int, modelName strin
 	// 且不含倍率：预扣在选渠道之前，还不知道走哪个分组。
 	amount := 0.0
 	if e.prices != nil {
-		amount = e.prices.EstimateUpperBound(maxTokens, modelName)
+		pre.prices = e.prices.Snapshot()
+		amount = pre.prices.estimateOutput(maxTokens, modelName)
 	}
 
 	if tokenID != 0 {
@@ -154,13 +158,45 @@ func (e *Engine) PriceOf(u *relaymodel.Usage, actualModel, originModel, group st
 	if e.prices == nil || u == nil {
 		return 0, false
 	}
-	if cost, ok := e.prices.Cost(u, actualModel, group); ok {
-		return cost, true
+	return e.PriceOfSnapshot(&PreDeduct{prices: e.prices.Snapshot()}, u, actualModel, originModel, group)
+}
+
+func (p *PreDeduct) PriceVersion() string {
+	if p == nil {
+		return ""
 	}
-	if actualModel != originModel {
-		if cost, ok := e.prices.Cost(u, originModel, group); ok {
-			return cost, true
-		}
+	return p.prices.Version()
+}
+
+func (p *PreDeduct) BillingID() string {
+	if p == nil || p.reservation == nil {
+		return ""
+	}
+	return p.reservation.id
+}
+
+// PriceOnly retains the request's price version without retrying quota changes
+// after a legacy pre-deduction failure.
+func (p *PreDeduct) PriceOnly() *PreDeduct {
+	if p == nil {
+		return nil
+	}
+	return &PreDeduct{prices: p.prices}
+}
+
+// PriceOfSnapshot never reloads prices, even if a request started without a
+// price. Publishing a missing price mid-flight must not charge retroactively.
+func (e *Engine) PriceOfSnapshot(pre *PreDeduct, u *relaymodel.Usage, actualModel, originModel, group string) (float64, bool) {
+	if pre == nil {
+		return e.PriceOf(u, actualModel, originModel, group)
+	}
+	name := actualModel
+	if _, ok := pre.prices.price(name); !ok {
+		name = originModel
+	}
+	units, err := pre.prices.CostUnits(u, name, group)
+	if err == nil {
+		return float64(units) / float64(UnitScale), true
 	}
 	return 0, false
 }

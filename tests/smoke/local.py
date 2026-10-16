@@ -133,6 +133,8 @@ def control_workflow(base, upstream_url):
         assert time.monotonic() < deadline, "owner usage did not settle"
         time.sleep(0.05)
     assert api("/api/me/logs", other)["data"] in [None, []]
+    own_logs = api("/api/me/logs", session)["data"]
+    assert len(own_logs[0]["price_version"]) == 64, "Request lost its immutable price version"
     # Credential metadata edits preserve the existing upstream secret.
     credential = channel["credentials"][0]
     api(f"/api/admin/credentials/{credential['id']}", admin,
@@ -180,6 +182,16 @@ def main():
         subprocess.run([str(gateway), "-config", str(config_path), "-claim-token", "1", "-owner-user", "1"], env=clean_env, cwd=ROOT, check=True, timeout=30)
         with service([str(upstream), f"127.0.0.1:{upstream_port}"], work / "upstream.log", clean_env) as up:
             ready(up, upstream_port)
+            base = f"http://127.0.0.1:{gateway_port}"
+            mode_payload = {"model": "smoke-model", "messages": [{"role": "user", "content": "hi"}]}
+            for mode, expected in [("strict", 503), ("disabled", 200)]:
+                mode_env = dict(clean_env, GATEWAY_BILLING_MODE=mode)
+                with service([str(gateway), "-config", str(config_path)], work / f"{mode}.log", mode_env) as mode_gw:
+                    ready(mode_gw, gateway_port)
+                    status, body = request(base + "/v1/chat/completions", key, mode_payload)
+                    assert status == expected, (mode, status, body)
+                    if mode == "strict":
+                        assert json.loads(body)["error"]["type"] == "billing_unavailable", body
             with service([str(gateway), "-config", str(config_path)], work / "gateway.log", clean_env) as gw:
                 ready(gw, gateway_port)
                 base = f"http://127.0.0.1:{gateway_port}"
@@ -222,7 +234,38 @@ def main():
                         pass
                     except EOFError:
                         print("Preview needs interactive stdin; isolated services stopped.", flush=True)
-    print("PASS: startup, auth, model mapping, normal/SSE response, embedded console, S4 admin-user-publication-call-usage workflow")
+            # Exercise actual strict wiring after all legacy checks have stopped.
+            # The permanent accounting-mode marker prevents switching back to legacy.
+            config["billing"] = {"mode": "strict", "max_request_cost": "0.10"}
+            config_path.write_text(json.dumps(config))
+            with service([str(gateway), "-config", str(config_path)], work / "strict-ledger.log", clean_env) as strict_gw:
+                ready(strict_gw, gateway_port)
+                strict_payload = {"model": "smoke-model", "max_tokens": 32,
+                                  "messages": [{"role": "user", "content": "hello"}]}
+                status, body = request(base + "/v1/chat/completions", key, strict_payload)
+                assert status == 503, (status, body)  # Missing prices must fail closed.
+                status, body = request(base + "/api/auth/login", payload={
+                    "username": "smoke-admin", "password": "smoke-admin-password-only"})
+                assert status == 200, body
+                admin = json.loads(body)["session_token"]
+                status, body = request(base + "/api/admin/prices/smoke-model", admin,
+                                       {"input_price_per_1k": 0.15, "output_price_per_1k": 0.6}, "PUT")
+                assert status == 200, body
+                for stream in [False, True]:
+                    strict_payload.update(stream=stream, stream_options={"include_usage": True})
+                    status, body = request(base + "/v1/chat/completions", key, strict_payload)
+                    assert status == 200, (status, body)
+                deadline = time.monotonic() + 5
+                while True:
+                    status, body = request(base + "/api/me/logs", admin)
+                    assert status == 200, body
+                    billed = [row for row in json.loads(body)["data"] if row["billing_id"]]
+                    if len(billed) == 2:
+                        break
+                    assert time.monotonic() < deadline, "Strict request observations did not appear"
+                    time.sleep(0.05)
+                assert all(row["billing_state"] == "settled" and abs(row["cost"] - 0.00585) < 1e-12 for row in billed), billed
+    print("PASS: startup, auth, normal/SSE, console, S5 mode isolation, strict missing-price rejection and durable settlement")
 
 
 if __name__ == "__main__":

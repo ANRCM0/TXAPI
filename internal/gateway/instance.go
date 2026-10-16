@@ -27,6 +27,7 @@ type Options struct {
 	AttemptTimeout time.Duration
 	TotalTimeout   time.Duration
 	Billing        *billing.Engine
+	BillingMode    billing.Mode
 	Limiter        access.Limiter
 	Metrics        *metrics.Registry
 	LogRecorder    func(*dbmodel.RequestLog)
@@ -43,6 +44,7 @@ type Gateway struct {
 	attemptTimeout time.Duration
 	totalTimeout   time.Duration
 	billing        *billing.Engine
+	billingMode    billing.Mode
 	limiter        access.Limiter
 	metrics        *metrics.Registry
 	logRecorder    func(*dbmodel.RequestLog)
@@ -51,6 +53,12 @@ type Gateway struct {
 }
 
 func New(opts Options) (*Gateway, error) {
+	if opts.BillingMode == "" {
+		opts.BillingMode = billing.ModeLegacy
+	}
+	if err := opts.BillingMode.Validate(); err != nil {
+		return nil, err
+	}
 	if opts.RetryTimes < 0 || opts.RetryTimes > 10 || opts.AttemptTimeout < 0 || opts.TotalTimeout < 0 {
 		return nil, fmt.Errorf("invalid gateway retry or timeout configuration")
 	}
@@ -69,7 +77,7 @@ func New(opts Options) (*Gateway, error) {
 		opts.Metrics = metrics.New()
 	}
 	g := &Gateway{admission: opts.Admission, adaptors: maps.Clone(opts.Adaptors), executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout,
-		billing: opts.Billing, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter}
+		billing: opts.Billing, billingMode: opts.BillingMode, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter}
 	if err := g.initRegistry(opts.Channels); err != nil {
 		g.Close()
 		return nil, err
@@ -96,6 +104,8 @@ type AttemptResult struct {
 }
 
 type RequestResult struct {
+	reservation   *billing.PreDeduct
+	BillingState  string
 	Identity      Identity
 	ChannelID     uint
 	CredentialID  uint

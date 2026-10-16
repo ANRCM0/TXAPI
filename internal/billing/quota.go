@@ -39,6 +39,7 @@ type quotaTarget struct {
 type Engine struct {
 	db     *gorm.DB
 	prices *PriceTable
+	strict *StrictLedger
 }
 
 // New 创建计费引擎。prices 为 nil 时退化为「不查价、不计费」

@@ -67,7 +67,7 @@ python tests/smoke/local.py --go go --preview
 
 ### 安装、容器与升级边界
 
-本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。升级 S3 不增加 schema（仍为 v4），但仍须先停写一致备份；旧库无主 Key 的认领规则不变。
+本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前 S5 开发代码追加 v5，见下节。旧库无主 Key 的认领规则不变。
 
 Compose 显式使用 `GATEWAY_DATABASE_PATH=/app/data/gateway.db`；此环境变量优先于 YAML 的 database.path。已有部署若实际库在 `/app/.local/data/` 或其他位置，直接重建可能看到空库，**不是数据自动迁移**。先停止旧进程，确认实际路径并一致备份主库及 WAL/SHM，再恢复到目标卷、检查所有权为容器 app 用户（UID 10001），验证数据后切换；切勿删除旧容器/卷或执行 down -v 来“修复”。
 
@@ -104,15 +104,52 @@ python3 tests/smoke/delivery.py --go go
 
 - 全新卷初始化管理员、拒绝重复初始化、UID 10001、镜像健康检查、内嵌静态资源和管理员→用户→Key→调用→本人用量闭环。
 - 重启容器进程，确认原 Key、用户、日志和用量仍在数据卷中；故意将 YAML database.path 指向不可写位置，验证 Compose 的卷内路径环境覆盖真实生效。
-- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用 S4 镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留，schema 仍为 v4。
+- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。S5 开发代码预期 v5，历史迁移记录保持原前缀、旧日志不虚构价格版本，新价格快照可核对内容摘要。
 - SSE 在途时发起 Compose stop，要求完整 DONE、退出码 0 且已接收日志排空；Compose 为正常关闭和日志排空预留 30 秒，不将该时间承诺为任意负载下的恢复保证。
 - 升级后先另存一份备份，再恢复升级前主库及存在的 WAL/SHM；检查 SQLite integrity_check 和关键表逐行一致，重启原 S3 镜像验证原 Key/数据可用，升级后新增数据不在旧备份中。
 
 所有备份只在停止网关并验证正常退出后执行。恢复前确认卷属于本次演练项目，恢复后校正 UID/GID；脚本只删除自己创建的容器/卷/镜像，失败时输出测试容器日志。生产操作仍须按真实路径停写备份，不得对业务卷运行测试清理命令。
 
-本演练覆盖 S3/v4→S4/v4 的实际二进制升级与备份恢复，不将其冒充为更老 schema 的容器升级证据；v2/v3→v4 迁移与更高版本拒绝仍由现有 store 回归及完整 race CI 验证。这里的正常恢复也不等于崩溃时无损，普通日志和进程级 revision 的限制不变。
+S4 已有演练证据覆盖 S3/v4→S4/v4；当前脚本已适配 S5/v5，但须等待本批 CI 实跑，不复用 S4 结果宣称通过。既有升级/恢复检查保留，不额外扩展旧库报错或回滚专项演练。这里的正常恢复也不等于崩溃时无损，普通日志和进程级 revision 的限制不变。
 
 本地 Windows 的页面/普通测试不代替 Linux race、完整 CI、容器实跑以及安装/升级/恢复演练。本批阶段状态见 PLAN，不因编写部署说明就标记验收通过。
+
+## S5 定点价格与严格结算首批
+
+当前是首批后端实现，非完整收费版本验收。范围为 billing、store/model、gateway/main 接线和关联契约/观测，不改 core/协议的依赖边界，不新增支付或充值。默认模式仍为兼容模式：
+
+```yaml
+billing:
+  mode: "legacy"  # legacy / disabled / strict
+  # strict 必填，单位与价格/额度相同，最多九位小数；必须是正数字符串。
+  # max_request_cost: "0.10"
+```
+
+`GATEWAY_BILLING_MODE` 可覆盖模式，其他 billing 配置由 YAML 提供，变更须重启。
+
+| 模式 | 实际行为 |
+|---|---|
+| legacy | 保留旧额度预扣/结算和可用性优先降级；缺价可免费，不能用于宣称严格预算 |
+| disabled | 不查额度、不扣款、不预留；鉴权、授权、RPM/TPM、并发准入与访问日志仍生效 |
+| strict | 必需组件/单次收费上限/价格/持久化预留不可用则在转发前拒绝，不能自动降级 |
+
+### 价格、收费上限与请求范围
+
+- 价格和渠道倍率从同一数据库快照读取，归一化为 `1e-9` 货币单位；每千 token 价格接口暂保留 JSON number，按其可还原十进制转换，正数不足一单位向上取整。两种 token 维度与倍率以宽整数合并后仅向上舍入一次；额度上限向下取整。显式零价有效，缺价与零价不同。
+- 价格上限每千 token `1e9`，渠道倍率须为正且不超过 `1e6`。精确模型优先，通配符按固定字符数最多、同分按字典序匹配。未配置渠道倍率按 1 计算。
+- 规范化价格/倍率 JSON 的 SHA-256 为 `price_version`；先持久化不可变历史，再发布内存快照。请求始终使用起始版本，途中改价/倍率不追溯改费，历史日志缺少版本保持空值。快照存储失败保留旧发布版本。
+- 每个严格请求原子预留完整 `max_request_cost`，同时检查用户和 Key，而非只预留 max_tokens 的输出费用。实际输入+输出+倍率费用不超过预留才结算并退余；超出则 pending，保留整笔预留，不自动补扣或记为免费。**这是本系统用户收费上界，不是上游厂商成本绝对保证**；即使零价模型也先按同一策略预留整笔上限。
+- 当前严格 chat 只接受文本消息、`n=1`，要求 `max_tokens` / `max_completion_tokens` 二者中恰好一个正数；严格 embeddings 只接受字符串或字符串数组。工具、媒体、未知扩展字段返回 400。公开模型名须有价格，实际模型有价则优先，否则回落公开模型价；不能用文本价格覆盖其他收费维度。
+
+### 持久化、恢复与可见性
+
+schema v5 增加 `billing_price_versions`、`billing_balances`、`billing_reservations`、`billing_attempts`；普通 logs 增加 price_version/billing_id/billing_state。整数余额是严格模式的权威值，旧 used_quota 仅投影已收费用+未释放预留，因而控制台额度占用包括 pending，个人日志聚合不是权威余额。首次建立某个余额时保守导入现有 used_quota，不把历史消费归零。初始化严格组件后写入 `billing.strict_enabled=true`，同一库禁止启动 legacy 以免浮点写入和整数余额分叉；可选择 disabled，但不会因此删除已有预留。
+
+预留采用内部随机 ID（不信任客户端 Request ID）。开始上游执行前同步记 attempt，完成后同步记已知/未知成本；最终用户收费只结算一次，不将重试成本重复收给用户。用户与 Key 的占用、收费、余量释放和预留状态在一个事务内改变；普通日志背压、丢弃和保留期不能丢弃财务记录。响应可带 `X-TXAPI-Billing-ID`、`X-TXAPI-Price-Version`，日志页展示版本和 pending 提示；没有新增公开账本查询 API。
+
+租约为整次请求预算+5 秒。main 每 30 秒恢复、启动时先跑一轮；只有从未开始 attempt 的预留可自动全退。最后一条完整成功回执已持久化但尚未结算时，恢复 worker 按历史价格自动幂等结算；执行过但缺 usage/回执、取消、断流或费用超上限保留 pending。收尾和恢复使用独立且有界的 context，客户端取消不等于无成本。内部 `Engine.ReconcileKnownUsage` 可按持久化版本处理已知用量，**管理员对账 API/页面、超上限处置策略、真实进程强杀故障矩阵与完整 S5 验收仍待后续批次**；当前不得据此对外收费。
+
+定向回归可用 `go test -count=1 ./internal/billing ./internal/gateway ./internal/config ./internal/store ./internal/server/...`。本机冒烟在临时库验证 strict 缺组件/缺价拒绝、disabled 保持转发、legacy 原链路及真实 strict 非流式/SSE 结算。性能对照 `go test ./internal/billing -run '^$' -bench BenchmarkPriceCost -benchmem` 只比较固定价格快照计算与浮点公式，不是历史整网关或账本吞吐基准。实际执行结果见 [S5 批次记录](PLAN.md#s5-可选预算与结算)。
 
 ## 本地配置
 
