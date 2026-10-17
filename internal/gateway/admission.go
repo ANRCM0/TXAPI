@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strconv"
 	"sync"
 
@@ -46,7 +45,7 @@ type AdmissionError struct {
 
 func (e *AdmissionError) Error() string { return e.Message }
 
-func (g *Gateway) acquire(ctx context.Context, w http.ResponseWriter, scope AdmissionScope) (func(), *core.Error) {
+func (g *Gateway) acquire(ctx context.Context, output *executionOutput, scope AdmissionScope) (func(), *core.Error) {
 	noop := func() {}
 	if err := ctx.Err(); err != nil {
 		return noop, admissionFailure(ctx, nil)
@@ -65,7 +64,7 @@ func (g *Gateway) acquire(ctx context.Context, w http.ResponseWriter, scope Admi
 		cleanup()
 		var rejection *AdmissionError
 		if errors.As(err, &rejection) && rejection.RetryAfterSeconds > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(rejection.RetryAfterSeconds))
+			output.setMetadata("Retry-After", strconv.Itoa(rejection.RetryAfterSeconds))
 		}
 		return noop, admissionFailure(ctx, err)
 	}

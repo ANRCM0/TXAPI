@@ -51,7 +51,7 @@ const (
 )
 
 // Result reports execution independently of the HTTP status already sent.
-// Committed is monotonic: once headers/body have been sent it cannot be reset.
+// Committed is monotonic: irreversible output commitment cannot be reset.
 type Result struct {
 	Phase            Phase
 	UpstreamStatus   int
@@ -132,11 +132,22 @@ func failure(status int, message string, kind string) *Error {
 }
 
 func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Input) (result Result) {
+	return e.ExecuteTo(parent, NewHTTPOutput(w), in)
+}
+
+// ExecuteTo executes one HTTP attempt with an independently owned output.
+func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (result Result) {
 	started := time.Now()
 	result.Phase = NotDispatched
 	result.Replayable = in.Replayable
 	result.Termination = UpstreamError
-	defer func() { result.Duration = time.Since(started) }()
+	defer func() {
+		result.Duration = time.Since(started)
+		if output != nil {
+			state := output.State()
+			result.Committed, result.HTTPStatus = state.Committed, state.HTTPStatus
+		}
+	}()
 	ctx := parent
 	var cancel context.CancelFunc
 	if in.Timeout > 0 {
@@ -158,9 +169,14 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 		// Never expose request URLs (Gemini credentials may be in query strings).
 		result.Error = failure(result.StatusCode, message, string(result.Termination))
 	}
-	if in.Decoder == nil {
+	if output == nil || in.Decoder == nil {
 		result.StatusCode = http.StatusInternalServerError
-		result.Error = failure(result.StatusCode, "missing response decoder", "internal_error")
+		result.Error = failure(result.StatusCode, "missing output or response decoder", "internal_error")
+		return
+	}
+	if output.State().Committed {
+		result.StatusCode = http.StatusInternalServerError
+		result.Error = failure(result.StatusCode, "execution output is already committed", "internal_error")
 		return
 	}
 	if err := ctx.Err(); err != nil {
@@ -212,34 +228,41 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 		result.Error = &Error{StatusCode: resp.StatusCode, Error: detail}
 		return
 	}
-	controller := http.NewResponseController(w)
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := controller.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			fail("failed setting downstream write deadline", err, ClientWriteError)
-			return
+	if controller, supported := output.(interface{ SetWriteDeadline(time.Time) error }); supported {
+		if deadline, ok := ctx.Deadline(); ok {
+			if err := controller.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				fail("failed setting downstream write deadline", err, ClientWriteError)
+				return
+			}
+			defer controller.SetWriteDeadline(time.Time{})
 		}
-		defer controller.SetWriteDeadline(time.Time{})
 	}
 	write := func(data []byte, stream bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !result.Committed {
+		if !output.State().Committed {
+			contentType := "application/json"
 			if stream {
-				w.Header().Set("Content-Type", "text/event-stream")
-				w.Header().Set("Cache-Control", "no-cache")
-				w.Header().Set("X-Accel-Buffering", "no")
-			} else {
-				w.Header().Set("Content-Type", "application/json")
+				contentType = "text/event-stream"
 			}
-			result.Committed = true
-			result.HTTPStatus = http.StatusOK
-			w.WriteHeader(http.StatusOK)
+			if err := output.Commit(ctx, ResponseMetadata{StatusCode: http.StatusOK, ContentType: contentType}); err != nil {
+				return err
+			}
+			if !output.State().Committed {
+				return errors.New("output did not commit the response")
+			}
 		}
-		n, err := w.Write(data)
+		n, err := output.Write(ctx, data)
+		if n < 0 || n > len(data) {
+			return errors.New("output returned an invalid write count")
+		}
 		result.BytesWritten += int64(n)
+		if err == nil && n != len(data) {
+			err = io.ErrShortWrite
+		}
 		if err == nil && stream {
-			err = controller.Flush()
+			err = output.Flush(ctx)
 		}
 		return err
 	}

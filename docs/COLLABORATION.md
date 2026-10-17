@@ -1,6 +1,6 @@
 # 多团队开发与框架基线
 
-本页定义当前团队边界、可依赖的接口与集成门槛，并保留初始协作框架 F0 的验收记录。核对日期：2026-10-17；当前主线 S5 → S6 → S7-A，以 [PLAN.md](PLAN.md) 为唯一活动计划。架构仍是模块化单体；“多个团队”指开发分工，不会给产品新增团队/组织租户模型。
+本页定义当前团队边界、可依赖的接口与集成门槛，并保留初始协作框架 F0 的验收记录。核对日期：2026-10-17；当前优先完成底层架构验收，再补全功能；S5 计费安全门槛保留，以 [PLAN.md](PLAN.md) 为唯一活动计划。架构仍是模块化单体；“多个团队”指开发分工，不会给产品新增团队/组织租户模型。
 
 F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；本轮已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；协议公共接口仍偏 Chat，独立 Responses 模型未接入生产。S6 先用现有 HTTP 消费者收口类型化执行入口并验收合并，再让 S7-A 的 Responses/任务/WS 接入。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
 
@@ -35,17 +35,17 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 
 ### 请求执行：internal/core
 
-`Executor.Execute(ctx, writer, input)` 只执行一次 HTTP 尝试，不关心用户/渠道优先级/计费。core 仅依赖标准库；protocol 不依赖 HTTP 框架、数据库、调度和计费。
+`Executor.ExecuteTo(ctx, output, input)` 只执行一次 HTTP 尝试；`Execute(ctx, writer, input)` 是 HTTP 适配入口。Output 是执行独占、同步且有界的 Commit/Write/Flush/State 端口，不关心用户/渠道优先级/计费。core 仅依赖标准库；protocol 不依赖 HTTP 框架、数据库、调度和计费。
 
-`core.Result` 的 StatusCode/Termination 是执行结果，HTTPStatus/Committed 是已经写给客户端的事实，两者不能混为一谈。流已提交后无法把 HTTP 200 改为 502，也不能重试或追加正常结束标记来假装成功。
+`core.Result` 的 StatusCode/Termination 是执行结果，HTTPStatus 是已写入的 HTTP 状态（非 HTTP 输出为 0），Committed 是不可逆输出提交事实，两者不能混为一谈。流已提交后无法把 HTTP 200 改为 502，也不能重试或追加正常结束标记来假装成功。
 
 ### 类型化协调入口（本轮实现，未阶段验收）
 
-`Gateway.Execute(ctx, writer, gateway.Execution)` 接收已验证 Principal 与独立的 operation/body，返回本次 `RequestResult`；不构造 Gin context。调用方必须在**每次生成前**重新验证身份有效性，不能复用长连接初始认证快照承诺持续授权。公开入口拒绝无 user/key 身份，HTTP 适配保留已有认证中间件。
+`Gateway.ExecuteTo(ctx, output, gateway.Execution)` 接收已验证 Principal 与独立的 operation/body，返回本次 `RequestResult`；不构造 Gin context。调用方必须在**每次生成前**重新验证身份有效性，不能复用长连接初始认证快照承诺持续授权。公开入口拒绝无 user/key 身份，HTTP 适配保留已有认证中间件。
 
-Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模型授权、请求/attempt 准入、预留、路由、重试和收尾。每次 `Execute` 屏蔽父 context 的旧 RPM/TPM 准入标记及 mutable reservation；HTTP 中间件已完成的单次准入则由适配层明确传入，避免双扣。结果与流解析状态不按外部 Request ID 共享。
+Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模型授权、请求/attempt 准入、预留、路由、重试和收尾。每次 `ExecuteTo`（旧 HTTP `Execute` 委托此入口）屏蔽父 context 的旧 RPM/TPM 准入标记及 mutable reservation；HTTP 中间件已完成的单次准入则由适配层明确传入，避免双扣。结果与流解析状态不按外部 Request ID 共享。
 
-当前 writer 是标准 `http.ResponseWriter`，并不是完整传输无关事件出口。`protocol/responses` 只提供原生请求/响应/SSE 协议与 core 样本，未注册路由，也不能被当成已存在的持久任务或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
+现有 HTTP 通过 `core.HTTPOutput` 消费输出端口，协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 只提供原生请求/响应/SSE 协议与 core 样本，未注册路由，也不能被当成已存在的持久任务或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
 
 ### 协议扩展：internal/protocol
 
@@ -155,7 +155,7 @@ make smoke
 
 ### 后续批次与上游借鉴
 
-后续任务统一以 [PLAN.md 的后续开发路线](PLAN.md#后续开发路线) 为入口，不另建互相冲突的活动计划。当前主线明确为 S5 → S6 → S7-A；S6 先完成统一兼容与协调框架，S7-A 再交付 Responses HTTP/SSE、持久会话、后台任务和 WebSocket。本轮不新增支付，S7-B/S8/S9 不作前置。不因声明扩展接口就标记功能完成。
+后续任务统一以 [PLAN.md 的后续开发路线](PLAN.md#后续开发路线) 为入口，不另建互相冲突的活动计划。当前按 PLAN 的 A1–A4 先验收底层架构；S5 成本证明不阻塞无关架构建设，strict 能力须单独验收。共同架构基线之后，S7-A 再交付 Responses HTTP/SSE、持久会话、后台任务和 WebSocket。本轮不新增支付，S7-B/S8/S9 不作前置。不因声明扩展接口就标记功能完成。
 
 每批先检查现有实现，并允许借鉴 new-api、sub2api、claude-relay-service 的同类功能。任务/PR 记录具体上游提交、文件、采用方式、许可核对、TXAPI 落点和验证；设计参考与代码移植分开说明。复制/改写代码或新增依赖不得隐去来源，也不得自动改变项目许可、Go 版本或部署承诺；具体规则见 PLAN 的“参考项目与借鉴方式”。
 

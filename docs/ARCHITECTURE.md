@@ -1,8 +1,8 @@
 # 架构设计：极简内核、统一框架与功能模块
 
-状态：2026-10-16 整理的最终目标与边界，尚未全部实现。任务状态以 [PLAN.md](PLAN.md) 为准，命令和目录操作以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准。历史验收证据见 [归档](history/acceptance-s0-s5.md)，不维护第二份活动计划。
+状态：2026-10-17 按架构优先更新的目标与边界，尚未全部实现。任务状态以 [PLAN.md](PLAN.md) 为准，命令和目录操作以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准。历史验收证据见 [归档](history/acceptance-s0-s5.md)，不维护第二份活动计划。
 
-S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。主线为 S5 → S6 → S7-A：**S6 先收口统一兼容与协调框架，S7-A 再接入 Responses HTTP/SSE、持久会话、后台任务和 WebSocket**。这些是必须开发的目标，不是已有功能；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
+S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 先收口统一兼容与协调框架，S7-A 再接入 Responses HTTP/SSE、持久会话、后台任务和 WebSocket**。这些是必须开发的目标，不是已有功能；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
 
 ## 设计总纲与当前差距
 
@@ -11,7 +11,7 @@ S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对�
 | 层次 | 最终职责 | 当前代码与缺口 |
 |---|---|---|
 | 极简执行内核 | 单次 I/O 尝试、取消/超时、响应提交事实与执行结果 | `internal/core` 已实现标准库 HTTP 执行；不含 WS |
-| 统一请求协调 | 授权、准入、路由/attempt、重试、预算、统一收尾 | `internal/gateway` 已抽离非 Gin 协调函数，Chat/embeddings HTTP 实际复用；保留 Gin 适配和具体 `billing.Engine`；无 native WS/持久 worker 入口 |
+| 统一请求协调 | 授权、准入、路由/attempt、重试、预算、统一收尾 | `internal/gateway` 已抽离非 Gin 协调函数与 `core.Output` 输出端口，现有 HTTP 实际复用；保留 HTTP/Gin 适配和具体 `billing.Engine`；无 native WS/持久 worker 入口 |
 | 统一兼容契约 | 按操作的语义模型、能力约束、usage/结果、传输边界 | Chat 的 `ProtocolAdaptor` 仍使用独立 Chat 模型；已有真实操作/传输候选过滤与独立 Responses 模型，完整矩阵未验收 |
 | 功能模块 | 身份、调度、可选计费、观测，以及后续状态型应用 | 前几项已有实现；Responses、持久会话、后台任务均待开发 |
 | 接入与基础设施 | HTTP/SSE/WS、持久实现、控制台、显式组装 | HTTP/SSE、SQLite、内嵌控制台已实现；WS transport、状态存储与 worker 待开发 |
@@ -132,11 +132,11 @@ API 目标分区：`/api/admin/*` 为管理员操作，`/api/me/*` 为个人资�
 7. gateway 根据错误分类和剩余预算决定是否重试，更新健康状态。
 8. 统一收尾：释放并发/凭据资源、保存结果、结算或可靠标记待处理。异常与取消也必须走收尾。
 
-现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。当前输出仍是标准 HTTP writer，尚未接入 worker/native WS，也未完成 S6 阶段验收。
+现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；JSON/SSE 字节未抽象为通用协议事件，尚未接入 worker/native WS，也未完成 S6 阶段验收。
 
 ## 6. 内核契约与重试边界
 
-当前 core 通过 `Executor.Execute(ctx, writer, input)` 接收单次 HTTP 输入和响应出口，返回 `core.Result`。下表为契约语义，具体字段以代码为准；未来扩展不等于全部输入项已有独立配置。采用标准库 HTTP 原语和少量必要封装，不另造一套完整 HTTP 框架。
+当前 core 通过 `Executor.ExecuteTo(ctx, output, input)` 接收单次 HTTP 输入与 `core.Output`，返回 `core.Result`；原 `Execute(ctx, writer, input)` 为 HTTP 适配入口。输出由调用者持有，一次 execution 独占，不能重复使用已提交出口。Commit 必须报告不可逆提交，Write/Flush 同步且有界、遵守取消；短写作为失败。HTTP 使用标准 ResponseController 转发 flush/write deadline；非 HTTP 输出的 HTTPStatus 保持 0。此端口仍承载已编码正文，不将 SSE 字节称为原生 WS 事件。下表为契约语义，具体字段以代码为准；未来扩展不等于全部输入项已有独立配置。采用标准库 HTTP 原语和少量必要封装，不另造一套完整 HTTP 框架。
 
 | Attempt 输入 | Result 输出 |
 |---|---|

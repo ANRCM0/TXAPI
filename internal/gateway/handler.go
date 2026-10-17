@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"minigateway/internal/core"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/meta"
 	"minigateway/internal/protocol/model"
@@ -15,6 +16,15 @@ import (
 
 func (g *Gateway) HandleChatCompletions(c *gin.Context) { g.handleRelay(c, meta.ModeChatCompletions) }
 func (g *Gateway) HandleEmbeddings(c *gin.Context)      { g.handleRelay(c, meta.ModeEmbeddings) }
+
+// Execute is the HTTP compatibility adapter for the shared execution entry.
+func (g *Gateway) Execute(ctx context.Context, w http.ResponseWriter, in Execution) RequestResult {
+	return g.ExecuteTo(ctx, core.NewHTTPOutput(w), in)
+}
+
+func newExecutionScope(ctx context.Context, w http.ResponseWriter, result *RequestResult, sessionID string) *executionScope {
+	return newOutputScope(ctx, core.NewHTTPOutput(w), result, sessionID)
+}
 
 func (g *Gateway) handleRelay(c *gin.Context, mode int) {
 	result := state(c)

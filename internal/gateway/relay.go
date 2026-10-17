@@ -37,8 +37,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 	c.ctx = ctx
 	defer func() {
 		result.TotalDuration = time.Since(started)
-		result.Committed = c.writer.Written()
-		result.HTTPStatus = c.writer.Status()
+		c.syncOutput()
 	}()
 
 	// This exported coordinator also guards policy when called outside the HTTP
@@ -63,7 +62,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 	// The request lease spans the complete retry loop; each attempt has a
 	// nested lease acquired only after selecting an authorized model target.
 	if !c.requestAdmitted {
-		requestLease, admitErr := g.acquire(ctx, c.writer, AdmissionScope{Level: RequestAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model})
+		requestLease, admitErr := g.acquire(ctx, c.output, AdmissionScope{Level: RequestAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model})
 		if admitErr != nil {
 			result.StatusCode = admitErr.StatusCode
 			result.Error = admitErr
@@ -171,7 +170,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 			"session_id", sessionID,
 			"attempt", attempt)
 
-		attemptLease, admitErr := g.acquire(ctx, c.writer, AdmissionScope{Level: AttemptAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: m.ActualModel, ChannelID: uint(ch.id), CredentialID: cred.ID, Attempt: attempt + 1})
+		attemptLease, admitErr := g.acquire(ctx, c.output, AdmissionScope{Level: AttemptAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: m.ActualModel, ChannelID: uint(ch.id), CredentialID: cred.ID, Attempt: attempt + 1})
 		if admitErr != nil {
 			lastErr = admitErr
 			break
@@ -256,7 +255,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 	result.Error = lastErr
 	c.result.StatusCode = lastErr.StatusCode
 	c.result.ErrorMessage = lastErr.Error.Message
-	if responseCommitted {
+	if responseCommitted || result.Termination == core.ClientWriteError {
 		return
 	}
 	writeError(c, lastErr.StatusCode, lastErr.Error.Message, lastErr.Error.Type)
@@ -334,7 +333,7 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout 
 	}
 	// If an injected executor/transport panics, non-execution is not established.
 	c.result.Phase = core.Dispatching
-	result := g.executor.Execute(c.ctx, c.writer, input)
+	result := g.executor.ExecuteTo(c.ctx, c.output, input)
 	if g.billingMode == billing.ModeStrict {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := g.billing.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), result.Usage)
@@ -599,15 +598,25 @@ func writeError(c *executionScope, statusCode int, message, errType string) {
 	if errType == "" {
 		errType = "gateway_error"
 	}
-	if c.writer.Written() {
+	if c.output.State().Committed {
 		return
 	}
 	c.result.StatusCode = statusCode
 	c.result.ErrorMessage = message
 	c.result.Error = &core.Error{StatusCode: statusCode, Error: core.ErrorDetail{Message: message, Type: errType}}
-	c.writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.writer.WriteHeader(statusCode)
-	_ = json.NewEncoder(c.writer).Encode(map[string]any{"error": map[string]string{"message": message, "type": errType}})
+	defer c.syncOutput()
+	if err := c.output.Commit(c.ctx, core.ResponseMetadata{StatusCode: statusCode, ContentType: "application/json; charset=utf-8"}); err != nil {
+		c.result.Termination = core.ClientWriteError
+		return
+	}
+	if !c.output.State().Committed {
+		c.result.Termination = core.ClientWriteError
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"error": map[string]string{"message": message, "type": errType}})
+	if _, err := c.output.Write(c.ctx, append(body, '\n')); err != nil {
+		c.result.Termination = core.ClientWriteError
+	}
 }
 
 type credentialPicker func(creds []dbmodel.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*dbmodel.Credential, bool)

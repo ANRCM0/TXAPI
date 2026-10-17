@@ -65,7 +65,7 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 	// 包一层 writer 记录回写给客户端的字节：只有「上游没返回 usage」
 	// 时才需要它估算 completion tokens。成本接近零（一次内存拷贝，
 	// 且封顶 64KB），比在每条响应路径上判断「这次要不要捕获」省事。
-	c.writer.captureLimit = captureLimit
+	c.output.captureLimit = captureLimit
 
 	// 请求前额度处理：检查 + 预扣。
 	//
@@ -89,7 +89,7 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 		}
 		result.strictRequest = &limits
 	}
-	requestLease, admissionErr := g.acquire(ctx, c.writer, AdmissionScope{Level: RequestAdmission,
+	requestLease, admissionErr := g.acquire(ctx, c.output, AdmissionScope{Level: RequestAdmission,
 		UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model})
 	if admissionErr != nil {
 		writeError(c, admissionErr.StatusCode, admissionErr.Error.Message, admissionErr.Error.Type)
@@ -102,7 +102,7 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 		now := time.Now()
 		if p.RPMLimit > 0 {
 			if allowed, retry := g.limiter.AllowRequest(ctx, access.TokenBucketKey(p.TokenID), p.RPMLimit, now); !allowed {
-				c.writer.Header().Set("Retry-After", strconv.Itoa(retry))
+				c.output.setMetadata("Retry-After", strconv.Itoa(retry))
 				writeError(c, 429, "API key request rate exceeded", "rate_limit_error")
 				g.finishRequest(c, &req, startedAt, nil, body)
 				return
@@ -111,7 +111,7 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 		if p.TPMLimit > 0 {
 			estimate := billing.EstimateUsage(billing.PromptTextFromBody(body), "").PromptTokens
 			if allowed, retry := g.limiter.AllowTokens(ctx, access.TokenUsageBucketKey(p.TokenID), p.TPMLimit, estimate, now); !allowed {
-				c.writer.Header().Set("Retry-After", strconv.Itoa(retry))
+				c.output.setMetadata("Retry-After", strconv.Itoa(retry))
 				writeError(c, 429, "API key token rate exceeded", "rate_limit_error")
 				g.finishRequest(c, &req, startedAt, nil, body)
 				return
@@ -151,10 +151,10 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 	}
 	result.reservation = pre
 	if pre.BillingID() != "" {
-		c.writer.Header().Set("X-TXAPI-Billing-ID", pre.BillingID())
+		c.output.setMetadata("X-TXAPI-Billing-ID", pre.BillingID())
 	}
 	if pre.PriceVersion() != "" {
-		c.writer.Header().Set("X-TXAPI-Price-Version", pre.PriceVersion())
+		c.output.setMetadata("X-TXAPI-Price-Version", pre.PriceVersion())
 	}
 
 	// 用 flag + defer 保证「无论 Relay 正常返回还是 panic，都要结算」：
@@ -372,7 +372,7 @@ func actualModelFor(c *executionScope, fallback string) string {
 	return relayActualModel(c, fallback)
 }
 
-func captureBytes(c *executionScope) []byte { return c.writer.capture.Bytes() }
+func captureBytes(c *executionScope) []byte { return c.output.capture.Bytes() }
 
 // Log recording is injected by gateway.Options.
 //

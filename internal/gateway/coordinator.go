@@ -1,9 +1,7 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"net/http"
 
 	"minigateway/internal/access"
@@ -20,12 +18,23 @@ type Execution struct {
 	SessionID string
 }
 
-// Execute owns one generation, including admission, attempts and finalization.
+// ExecuteTo owns one generation, including admission, attempts and finalization.
 // Result and decoder state are fresh even when callers reuse a parent context.
-func (g *Gateway) Execute(ctx context.Context, w http.ResponseWriter, in Execution) RequestResult {
+func (g *Gateway) ExecuteTo(ctx context.Context, output core.Output, in Execution) RequestResult {
 	ctx = access.NewGenerationContext(ctx)
 	result := newRequestResult(ctx)
-	c := newExecutionScope(ctx, w, result, in.SessionID)
+	if output == nil {
+		result.ErrorMessage = "missing execution output"
+		result.Error = &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: result.ErrorMessage, Type: "internal_error"}}
+		return *result
+	}
+	if state := output.State(); state.Committed {
+		result.Committed, result.HTTPStatus = state.Committed, state.HTTPStatus
+		result.ErrorMessage = "execution output is already committed"
+		result.Error = &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: result.ErrorMessage, Type: "internal_error"}}
+		return *result
+	}
+	c := newOutputScope(ctx, output, result, in.SessionID)
 	principal, ok := access.PrincipalFromContext(ctx)
 	if !ok || principal.UserID == 0 || principal.TokenID == 0 {
 		writeError(c, http.StatusUnauthorized, "a verified generation identity is required", "unauthorized")
@@ -36,6 +45,7 @@ func (g *Gateway) Execute(ctx context.Context, w http.ResponseWriter, in Executi
 }
 
 func (g *Gateway) execute(c *executionScope, in Execution) {
+	defer c.syncOutput()
 	defer func() {
 		notDispatched := c.result.Phase == core.NotDispatched
 		for _, attempt := range c.result.Attempts {
@@ -58,15 +68,15 @@ func (g *Gateway) execute(c *executionScope, in Execution) {
 
 type executionScope struct {
 	ctx             context.Context
-	writer          *executionWriter
+	output          *executionOutput
 	result          *RequestResult
 	sessionID       string
 	operation       protocol.Operation
 	requestAdmitted bool
 }
 
-func newExecutionScope(ctx context.Context, w http.ResponseWriter, result *RequestResult, sessionID string) *executionScope {
-	return &executionScope{ctx: ctx, writer: &executionWriter{ResponseWriter: w}, result: result, sessionID: sessionID}
+func newOutputScope(ctx context.Context, output core.Output, result *RequestResult, sessionID string) *executionScope {
+	return &executionScope{ctx: ctx, output: &executionOutput{target: output}, result: result, sessionID: sessionID}
 }
 
 func newRequestResult(ctx context.Context) *RequestResult {
@@ -80,42 +90,7 @@ func newRequestResult(ctx context.Context) *RequestResult {
 	return &RequestResult{Identity: identity, Result: core.Result{StatusCode: 500, Phase: core.NotDispatched}}
 }
 
-type executionWriter struct {
-	http.ResponseWriter
-	status       int
-	capture      bytes.Buffer
-	captureLimit int
+func (c *executionScope) syncOutput() {
+	state := c.output.State()
+	c.result.Committed, c.result.HTTPStatus = state.Committed, state.HTTPStatus
 }
-
-func (w *executionWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-func (w *executionWriter) Written() bool               { return w.status != 0 }
-func (w *executionWriter) Status() int                 { return w.status }
-func (w *executionWriter) WriteHeader(status int) {
-	if w.Written() {
-		return
-	}
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-func (w *executionWriter) Write(b []byte) (int, error) {
-	if !w.Written() {
-		w.WriteHeader(http.StatusOK)
-	}
-	n, err := w.ResponseWriter.Write(b)
-	if room := w.captureLimit - w.capture.Len(); room > 0 {
-		if room > n {
-			room = n
-		}
-		_, _ = w.capture.Write(b[:room])
-	}
-	return n, err
-}
-func (w *executionWriter) WriteString(s string) (int, error) { return w.Write([]byte(s)) }
-func (w *executionWriter) FlushError() error {
-	if !w.Written() {
-		w.WriteHeader(http.StatusOK)
-	}
-	return http.NewResponseController(w.ResponseWriter).Flush()
-}
-
-var _ io.StringWriter = (*executionWriter)(nil)
