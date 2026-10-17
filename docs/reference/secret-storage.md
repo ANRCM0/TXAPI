@@ -39,6 +39,12 @@ access only to the gateway service account (Windows ACL or Unix mode/owner),
 mount read-only, and keep keys outside the database volume and source tree.
 Configuration contains paths only; error messages do not echo secret values.
 
+Legacy YAML seed entries may still contain raw upstream/client keys. Database
+encryption does not sanitize those configuration files, shell history or old
+copies. After the one-time import, remove secret-bearing seed entries from the
+runtime configuration and protect or retire their backups under the deployment's
+approved policy. Seed writes themselves use the same encrypted store writer.
+
 ## Initial credential activation
 
 1. Stop the old process and all other database writers. This application targets
@@ -83,7 +89,9 @@ financial database or defense against an administrator rewriting the ledger.
   detected on consumption/read, return no partial plaintext and never authorize
   replay or a free financial release.
 - Content rotation writes new segments with the active ID and retains old IDs
-  until content expires or is explicitly deleted. There is no bulk content
+  until expiry cleanup or explicit deletion actually removes the ciphertext.
+  Expired but not yet cleaned rows still require their old key IDs at startup.
+  There is no bulk content
   re-encryption or automatic KMS. Rotate before any single AES key accumulates
   2^32 encrypted segments/credential writes across all instances/backups of its
   use; count reuse of the same bytes across domains, not only a single key ID.

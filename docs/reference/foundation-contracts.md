@@ -67,6 +67,13 @@ behavior tests and production-main smoke also passed. Windows process terminatio
 is not evidence of graceful SIGTERM; that and Linux race/container delivery still
 require complete CI. Historical green runs do not validate this new source.
 
+The first remote runs on `08f67a6` passed container delivery but failed Linux
+race: lease renewal captured the execution context variable while dispatch
+replaced it with an authorized wrapper. The fix passes the initial deadline
+context as an immutable goroutine argument. Local full checks were repeated;
+the failed runs are not acceptance evidence and replacement complete CI is
+required before merge.
+
 | Failure or boundary | Required observation | Regression location |
 |---|---|---|
 | Admission/claim/cancel SQL failure | Intent and original dual hold transition atomically; no partial authority | `billing/intents_test.go`, `billing/intent_execution_test.go` |

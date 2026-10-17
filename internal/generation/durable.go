@@ -115,7 +115,9 @@ func (r *DurableRunner) consume(parent context.Context, in model.GenerationInten
 	ctx, cancel := context.WithDeadline(parent, time.UnixMilli(in.Deadline))
 	defer cancel()
 	stop, joined := make(chan struct{}), make(chan struct{})
-	go func() {
+	// The heartbeat keeps the initial lease context, not the execution context
+	// variable that is enriched with the freshly resolved Principal below.
+	go func(ctx context.Context) {
 		defer func() {
 			if recover() != nil {
 				cancel()
@@ -140,7 +142,7 @@ func (r *DurableRunner) consume(parent context.Context, in model.GenerationInten
 				}
 			}
 		}
-	}()
+	}(ctx)
 	defer func() { close(stop); <-joined }()
 	var output *recordOutput
 	quarantine := false
