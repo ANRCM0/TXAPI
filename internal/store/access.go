@@ -152,9 +152,13 @@ func (s *Store) UpdateUser(id uint, in *UserInput) (*model.User, error) {
 const systemModelsSetting = "access.system_models"
 
 func (s *Store) SystemPolicy() (access.Policy, error) {
+	return systemPolicy(s.db)
+}
+
+func systemPolicy(db *gorm.DB) (access.Policy, error) {
 	// Explicit all is the documented initial system policy, not an empty allowlist.
 	var setting model.Setting
-	err := s.db.Where("key = ?", systemModelsSetting).Take(&setting).Error
+	err := db.Where("key = ?", systemModelsSetting).Take(&setting).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return access.Policy{Mode: access.All}, nil
 	}

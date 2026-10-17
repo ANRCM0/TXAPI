@@ -189,26 +189,6 @@ func (s *Store) Channels() []model.Channel {
 // 只返回「当前可用」的令牌（启用且未过期）：过期令牌在这里就过滤掉，
 // 上层不用每个调用点都记得判过期。
 func (s *Store) LookupToken(key string) (model.TokenView, bool) {
-	var token model.Token
-	if err := s.db.Where("key_hash = ?", access.Hash(key)).First(&token).Error; err != nil || token.UserID == 0 || !token.IsActive(time.Now()) {
-		return model.TokenView{}, false
-	}
-	user, err := s.GetUser(token.UserID)
-	if err != nil || user.Status != model.UserStatusActive {
-		return model.TokenView{}, false
-	}
-	system, err := s.SystemPolicy()
-	if err != nil {
-		return model.TokenView{}, false
-	}
-	policy := access.Intersect(system, user.Policy(), token.Policy())
-	view := token.View()
-	view.Policy = policy
-	view.Models = policy.Models
-	view.RPMLimit = access.MinLimit(user.RPMLimit, token.RPMLimit)
-	view.TPMLimit = access.MinLimit(user.TPMLimit, token.TPMLimit)
-	view.UserRPMLimit = user.RPMLimit
-	view.UserConcurrencyLimit = user.ConcurrencyLimit
-	view.KeyConcurrencyLimit = token.ConcurrencyLimit
-	return view, true
+	view, err := resolveTokenView(s.db.Where("key_hash = ?", access.Hash(key)))
+	return view, err == nil
 }

@@ -130,8 +130,8 @@ type TokenLookup interface {
 // Auth 校验客户端令牌。
 //
 // 令牌是「客户端访问网关」的凭证，和「网关访问上游」的渠道 key 是两回事。
-// P2 起令牌来自数据库（经 store 的内存缓存），map 查找仍是 O(1)，
-// 不产生任何 SQLite 读——管理 API 改了令牌，下一次请求就能看到。
+// 当前令牌、owner 和系统策略从同一数据库读事务投影；不缓存授权快照，
+// 管理 API 的撤销与权限修改在下一次鉴权时重新读取。
 type Auth struct {
 	lookup TokenLookup
 }
@@ -165,10 +165,7 @@ func (a *Auth) Handle() gin.HandlerFunc {
 		// 整个投影也存一份：限流中间件要按令牌 ID 分桶并读 RPM/TPM
 		// 阈值，只给它散落的字段会让「加一个令牌字段」变成三处改动。
 		c.Set(CtxTokenView, view)
-		c.Request = c.Request.WithContext(access.WithPrincipal(c.Request.Context(), access.Principal{
-			UserID: view.UserID, TokenID: view.ID, TokenName: view.Name, Policy: view.Policy, RPMLimit: view.RPMLimit, TPMLimit: view.TPMLimit,
-			UserRPMLimit: view.UserRPMLimit, UserConcurrencyLimit: view.UserConcurrencyLimit, KeyConcurrencyLimit: view.KeyConcurrencyLimit,
-		}))
+		c.Request = c.Request.WithContext(access.WithPrincipal(c.Request.Context(), view.Principal()))
 		c.Next()
 	}
 }

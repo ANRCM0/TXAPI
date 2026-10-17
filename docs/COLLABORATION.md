@@ -32,6 +32,7 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 - Request ID 使用 `access.WithRequestID` / `RequestID`。ID 只关联日志，不作为共享流状态或授权依据。
 - gateway 不再导入 `internal/server/middleware`。身份/准入团队无需依赖 Gin 的字符串上下文键；现存 Ctx* 镜像只用于旧中间件兼容，新代码不能新增依赖。
 - 管理登录会话与调用身份始终分开；普通 Bearer API Key 不能当 session 使用。会话角色/owner 的细节由 server/access 接口处理。
+- `access.Binding` 仅保存来自认证边界或可信任务记录的 user/Key 绑定，不携带原始 Key、权限快照或管理员替身。A3-01 的 `Store.ResolvePrincipal(ctx, binding)` 与 HTTP `LookupToken` 共用同一事务内的当前 owner/Key/系统权限和限额投影；失效与存储不可用可区分，但都不授权执行。事务查询不延长到上游 I/O，也不表示后续在飞请求可被瞬时撤销。
 
 ### 请求执行：internal/core
 
@@ -46,6 +47,14 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模型授权、请求/attempt 准入、预留、路由、重试和收尾。每次 `ExecuteTo`（旧 HTTP `Execute` 委托此入口）屏蔽父 context 的旧 RPM/TPM 准入标记及 mutable reservation；HTTP 中间件已完成的单次准入则由适配层明确传入，避免双扣。结果与流解析状态不按外部 Request ID 共享。协调链内部使用 `protocol.ParseRequest` 生成自持正文的 `protocol.Request`；路由/准入/attempt 与 `PrepareRequest` 使用同一操作事实，结果显式记录 Operation。每次准备只把副本交给适配器，不能修改原信封或下一次重试。`model.ModelRequest` 与整数 Mode 仅在旧 Relay/适配器边界保留；旧投影必须匹配正文，未知模式拒绝。
 
 现有 HTTP 通过 `core.HTTPOutput` 消费输出端口，协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 只提供原生请求/响应/SSE 协议与 core 样本，未注册路由，也不能被当成已存在的持久任务或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
+
+### 最小 worker 消费者：internal/generation（A3-01，未阶段验收）
+
+新增模块只允许依赖 access/core/gateway/protocol，不导入 store/GORM、Gin 或 billing 引擎；组装者注入身份解析函数与实际 `Gateway.ExecuteTo`。固定 worker 和有界队列实际消费现有 Chat/embeddings，正文副本总预算最高 64 MiB，排队起算取消期限。交接不会预占 generation/network 槽、预留预算或持久受理。每次派发重新解析可信绑定，旧 context 的身份/准入标记不能带入；排队后撤销禁止新执行，已派发轮次仍用本轮快照，尚无后台任务撤销传播服务。
+
+观察者取消不取消已交接工作；显式 `Future.Cancel`、服务关闭和期限可取消生成，均继续走 gateway 既有收尾。输出属于本次生成，结果仅一次接收；commit 后 panic 保守标记执行可能未知，不重放、不伪造未派发或清零账本。`Close` 等待所有 worker 与收尾；超时后不得提前关闭 gateway/store，同进程不合作回调无法被隔离或强杀。
+
+它没有公开路由、任务 ID、持久意图/事件或重启恢复，不在 main 隐式启动，不能替代 S7-A 的后台受理与持久 worker。架构回归用真实临时 SQLite/授权/准入/执行/财务链验证它，不把独立内存消费者当作整个 A3 已完成。HTTP 前台生命周期不变，WS 和持久消费者另划批次。
 
 ### 协议扩展：internal/protocol
 

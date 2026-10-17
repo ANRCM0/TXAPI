@@ -18,13 +18,14 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), ".."))
 	allowed := map[string]map[string]bool{
 		"access": {}, "core": {}, "config": {}, "logging": {}, "metrics": {},
-		"model":     {"access": true},
-		"protocol":  {"protocol": true, "core": true},
-		"scheduler": {"model": true, "scheduler": true},
-		"billing":   {"model": true, "protocol": true, "billing": true},
-		"store":     {"model": true, "access": true, "config": true, "store": true},
-		"gateway":   {"access": true, "core": true, "protocol": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true},
-		"server":    {"access": true, "model": true, "config": true, "store": true, "billing": true, "gateway": true, "metrics": true, "server": true},
+		"model":      {"access": true},
+		"protocol":   {"protocol": true, "core": true},
+		"scheduler":  {"model": true, "scheduler": true},
+		"billing":    {"model": true, "protocol": true, "billing": true},
+		"store":      {"model": true, "access": true, "config": true, "store": true},
+		"generation": {"access": true, "core": true, "gateway": true, "protocol": true},
+		"gateway":    {"access": true, "core": true, "protocol": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true},
+		"server":     {"access": true, "model": true, "config": true, "store": true, "billing": true, "gateway": true, "metrics": true, "server": true},
 	}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
