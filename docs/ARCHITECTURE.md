@@ -1,6 +1,6 @@
 # 架构设计：极简内核、统一框架与功能模块
 
-状态：2026-10-17 按架构优先更新的目标与边界，尚未全部实现。任务状态以 [PLAN.md](PLAN.md) 为准，命令和目录操作以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准。历史验收证据见 [归档](history/acceptance-s0-s5.md)，不维护第二份活动计划。
+状态：2026-10-17，已合并功能基线 `master/5004c57`，目标架构尚未全部实现/验收。任务状态以 [PLAN.md](PLAN.md) 为准，命令以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准；阶段证据见 [历史验收](history/acceptance-s0-s5.md)，本轮实现与实际合并见 [S5–A3 批次](history/implementation-s5-a3.md)。本页不维护第二份活动计划。
 
 S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 先收口统一兼容与协调框架，S7-A 再接入 Responses HTTP/SSE、持久会话、后台任务和 WebSocket**。这些是必须开发的目标，不是已有功能；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
 

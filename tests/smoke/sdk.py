@@ -1,7 +1,7 @@
 """Optional OpenAI SDK parsing check; defaults match tests/configs/protocols.yaml.
 
 Start the local gateway and fake providers first. This is not a complete
-cross-protocol conformance test (see docs/PLAN.md S0).
+cross-protocol conformance test (see docs/history/acceptance-s0-s5.md, S0).
 """
 import argparse
 import os

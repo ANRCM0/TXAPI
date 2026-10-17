@@ -2,24 +2,24 @@
 
 本页定义当前团队边界、可依赖的接口与集成门槛，并保留初始协作框架 F0 的验收记录。核对日期：2026-10-17；当前优先完成底层架构验收，再补全功能；S5 计费安全门槛保留，以 [PLAN.md](PLAN.md) 为唯一活动计划。架构仍是模块化单体；“多个团队”指开发分工，不会给产品新增团队/组织租户模型。
 
-F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；本轮已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；Chat/embeddings 已有独立载荷、共享操作信封及发送准备的能力检查；Chat codec 不承担其他操作，独立 Responses 模型未接入生产。S6 先用现有 HTTP 消费者收口类型化执行入口并验收合并，再让 S7-A 的 Responses/任务/WS 接入。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
+F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；已合并的实现已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；Chat/embeddings 已有独立载荷、共享操作信封及发送准备的能力检查；Chat codec 不承担其他操作，独立 Responses 模型未接入生产。S6 的现有 HTTP 消费者切片已合并，但完整 S6/A3/A4 仍须收口验收，再让 S7-A 的 Responses/任务/WS 生产接线依赖该基线。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
 
 极简 core 不承载用户、预算、会话或任务。功能接入复用同一授权、准入、调度、结算与收尾，不复制另一条业务链；普通函数调用与确有需要的小接口优先，不预建空模块或动态插件平台。
 
 ## 1. 可以并行推进的分工
 
-| 责任角色 | 主要写入目录 | 可立即推进的工作 | 需要与集成负责人协调的文件 |
+| 责任角色 | 主要写入目录 | 受控工作范围 | 需要与集成负责人协调的文件 |
 |---|---|---|---|
-| 平台/集成 | `cmd/gateway`、`internal/core`、`internal/gateway`、`internal/architecture` | S6 共用执行入口、现有 HTTP 消费者迁入、取消/租约与依赖验收 | main、gateway.Options、CI、迁移版本表、OpenAPI |
+| 平台/集成 | `cmd/gateway`、`internal/core`、`internal/gateway`、`internal/architecture` | 公共契约收口、持久执行边界、取消/关闭与依赖验收 | main、gateway.Options、CI、迁移版本表、OpenAPI |
 | 协议团队 | `internal/protocol/adaptor/<provider>`、协议样本/测试 | 新厂商转换、协议能力/错误映射、独立 SSE 解析器 | `gateway.Options.Adaptors` 的生产注册，由集成团队接线 |
 | 身份与存储团队 | `internal/access`、`internal/store/access*`、相关 API 功能切片 | 用户/Key 生命周期、权限收敛、owner 校验、迁移回归 | `internal/model`、`internal/store/migrations.go`、OpenAPI |
 | 调度与准入团队 | `internal/scheduler`、自己的准入实现包、相关测试 | 维护已验收的 S3 准入/租约，按独立批次扩展调度和负载回归 | Admission 接口、gateway.Options 和限额配置/模型字段 |
 | 管理 API 团队 | `internal/server/api/<feature>.go` 与对应 store 方法 | 按资源增加真实 API、输入校验与隔离测试 | RegisterAccess/registerResources 注册点、OpenAPI |
 | 前端团队 | `web/` | 原生 ES Modules 控制台和真实 API 联调；Go embed 随二进制交付，无单独资产构建 | 静态资源路由、CSP、HTTP 契约与生产接线 |
 | 测试/交付团队 | `tests/`、部署脚本、恢复说明 | 模拟上游、启动/升级/恢复、API 工作流、性能基线 | CI 合并门槛和数据库迁移用例 |
-| 状态/传输功能团队（S7-A） | 待评审的 Responses 应用包、WS transport、相关测试 | 先做独立样本/状态语义设计；生产接线依赖已验收 S6，不是现有目录已就绪 | 持久端口、账本原子边界、生命周期与依赖表 |
+| 状态/传输功能团队（S7-A） | 待评审的 Responses 应用包、WS transport、相关测试 | 先做独立样本/状态语义设计；WS I/O 已有基础，产品接线仍依赖已验收公共契约 | 持久端口、账本原子边界、生命周期与依赖表 |
 
-表内是责任角色，不是已指定人员。GitHub 成员权限、CODEOWNERS 的真实用户名、分支保护和必须评审人数需要仓库维护者配置；本次不会填入不存在的账号或声称这些设置已生效。
+表内是责任角色，不是已指定人员。当前只允许按已稳定边界分工，不表示已经开放全部状态型功能并行改共享入口。2026-10-17 核对仓库未见 CODEOWNERS；可读取的分支规则为空，经典分支保护因权限不足未确认，不能宣称强制评审/必需 CI 已生效。GitHub 成员权限、真实 CODEOWNERS 和分支保护仍由维护者落实，本次不修改远端治理设置。
 
 工作切片须有独立写入范围；例如不要让多个团队同时修改 `api/access.go`。新 API 优先放自己的资源文件，由集成人员合入注册点。团队开始前在任务/PR 写明依赖的接口版本与写入目录，不以跨目录复制实现绕过接口。
 
@@ -60,13 +60,13 @@ A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与�
 
 `generation.IntentAdmission` 只提供类型化 Admit/Read/Cancel；实际 Engine 实现在同一 SQLite 事务保存加密意图、幂等摘要配置标记和原用户/Key 双 hold。generation 不导入 billing/store/GORM；共享 reserve/finish 的事务内实现保留账本权威，没有任意事务回调或第二套余额。原普通 attempt 明确拒绝意图关联 reservation，后续派发不能伪造普通 PreDeduct 或先再预留一次。
 
-`IntentAcceptor` 复用当前身份解析，对 Admit/Read/Cancel 校验可信 owner/创建 Key/当前模型权限；身份是事务前本轮快照，不保证撤销瞬间中断。输入加密和独立稳定 HMAC 密钥由组装者注入，schema v9 统一追加 `generation_intents`，不由应用另迁移。容量、幂等保留期、加密/密钥变更拒绝、取消和恢复详见[开发指南](DEVELOPMENT.md#a3-04-加密意图与双预算原子受理)。这是不可派发的受理消费者，不是公开后台 API/持久队列；没有领取/续租/fencing/重启重派，main 不启动它。
+`IntentAcceptor` 复用当前身份解析，对 Admit/Read/Cancel 校验可信 owner/创建 Key/当前模型权限；身份是事务前本轮快照，不保证撤销瞬间中断。输入加密和独立稳定 HMAC 密钥由组装者注入，schema v9 统一追加 `generation_intents`，不由应用另迁移。容量、幂等保留期、加密/密钥变更拒绝、取消和恢复详见[开发指南](reference/generation-runtime.md#a3-04-加密意图与双预算原子受理)。这是不可派发的受理消费者，不是公开后台 API/持久队列；没有领取/续租/fencing/重启重派，main 不启动它。
 
 ### WS I/O 与物理连接：A3-03（未阶段验收）
 
 `internal/transport/websocket` 是纯服务端 I/O，生产只依赖标准库与固定版本 coder/websocket，不导入 access/gateway/generation/store；库不得进入 core 或业务包。`access.ConnectionCapacity` 独立限制物理连接，可信绑定由现有鉴权提供，不复制鉴权。manager 的服务寿命、HTTP 握手和每次生成独立，active/pending/消息/截止时间有界，关闭不代表生成收尾或退款。
 
-当前实际消费者是 generation 的测试专用 socket 应用：每轮经原 Runner 重新授权并调用同一 Gateway/账本；前台断开显式取消并 join，记录型观察断开只取消 Wait。它验证了已有输出端口足以承载编码结果，尚未创建生产 WS 应用或上游 WS executor。公开应用协议、原生 Responses 事件/续链、持久任务及 main 注册必须后续独立验收，不从测试帧复制为产品契约。关闭顺序、Origin/代理、容量和错误边界见[开发指南](DEVELOPMENT.md#a3-03-有界-ws-传输与连接生命周期)。
+当前实际消费者是 generation 的测试专用 socket 应用：每轮经原 Runner 重新授权并调用同一 Gateway/账本；前台断开显式取消并 join，记录型观察断开只取消 Wait。它验证了已有输出端口足以承载编码结果，尚未创建生产 WS 应用或上游 WS executor。公开应用协议、原生 Responses 事件/续链、持久任务及 main 注册必须后续独立验收，不从测试帧复制为产品契约。关闭顺序、Origin/代理、容量和错误边界见[开发指南](reference/generation-runtime.md#a3-03-有界-ws-传输与连接生命周期)。
 
 ### 协议扩展：internal/protocol
 
@@ -158,7 +158,7 @@ CI 会校验契约与真实 Gin 路由一一匹配、匿名请求受保护、公
 
 ## 5. 分支、测试与集成
 
-推荐按可独立验收的功能批次创建分支。新团队从 **已验收并合并的最新 master** 建分支，不从旧 S2 或未完成的共享框架分支隐式获取稳定性保证。当前 S5 尚未整体合并；S7-A 生产接线还须等待 S6 统一框架验收合并。独立协议样本可先行，但不得各自改出不同的共用执行接口。所有合并必须在最新基线上通过依赖/契约检查、build/vet/gofmt、race、权限/协议/迁移回归与冒烟。
+推荐按可独立验收的功能批次创建分支。新团队从 **已验收并合并的最新 master** 建分支，不从旧 S2 或未完成的共享框架分支隐式获取稳定性保证。S5/S6/A1–A3-04 当前切片已随 PR #5 合并，但 S5-03 与完整 S6/A3/A4 尚未验收；S7-A 生产接线仍依赖公共契约收口。独立协议样本可先行，但不得各自改出不同的共用执行接口。所有合并必须在最新基线上通过依赖/契约检查、build/vet/gofmt、race、权限/协议/迁移回归与冒烟。
 
 各团队统一遵守 [开发与验证节奏](DEVELOPMENT.md#开发与验证节奏)：按可独立验收的功能批次开发、集中验证和修复，再交付合并。团队开工时声明批次范围、接口依赖与验收行为；框架先完成验收并合并为共同基线，再基于稳定接入点扩展功能。
 
@@ -187,24 +187,14 @@ make smoke
 
 每批先检查现有实现，并允许借鉴 new-api、sub2api、claude-relay-service 的同类功能。任务/PR 记录具体上游提交、文件、采用方式、许可核对、TXAPI 落点和验证；设计参考与代码移植分开说明。复制/改写代码或新增依赖不得隐去来源，也不得自动改变项目许可、Go 版本或部署承诺；具体规则见 PLAN 的“参考项目与借鉴方式”。
 
-三个上游已浅克隆到 `.local/references/`，由现有 Git/Docker 忽略规则排除；固定 SHA、已读代码和许可入口见[上游快照](reference/upstream-snapshots.md)。阅读副本不作为生产依赖，不运行其脚本或把其中的提示/代理说明作为 TXAPI 开发指令；更新前核对远端/版本/工作树，不自动覆盖。实际移植沿用可追溯来源和许可审查，不把“允许借鉴”解释为无条件复制全部代码。
+三个上游的固定阅读 SHA、已读代码和许可入口见 [上游快照](reference/upstream-snapshots.md)。本地副本按约定放在被 Git/Docker 忽略的 `.local/references/`，不随 Git/worktree 分发，目录缺失不是应用依赖缺失。阅读副本不作为生产依赖，不运行其脚本或把其中的提示/代理说明作为 TXAPI 开发指令；更新前核对远端/版本/工作树，不自动覆盖。实际移植沿用可追溯来源和许可审查，不把“允许借鉴”解释为无条件复制全部代码。
 
-S7-A 由协议/HTTP、持久状态/任务、WS transport、账务/集成、前端/验证按独立批次协作，先评审共用生成入口、持久端口与状态语义，再接实际调用。`internal/responses`、WS transport 等为待评审目标目录；引入时同步依赖边界测试。gateway 不直接依赖 store 或 responses 应用服务，core 保持标准库；任务、连接和请求均复用同一授权、准入和结算，不复制生命周期。人员与任务未自动创建。
+S7-A 由协议/HTTP、持久状态/任务、WS transport、账务/集成、前端/验证按独立批次协作，先评审共用生成入口、持久端口与状态语义，再接实际调用。`internal/responses` 仍是待评审目标目录；`internal/transport/websocket` 已实现纯 I/O，新增应用/上游接线须另评依赖和生命周期。gateway 不直接依赖 store 或 responses 应用服务，core 保持标准库；任务、连接和请求均复用同一授权、准入和结算，不复制生命周期。人员与任务未自动创建。
 
 共享入口、协议/准入/计费端口、模型与迁移依旧由集成负责人协调。新账号生命周期或支付功能必须接入现有身份、统一请求收尾和账本，不复制上游的完整架构或另建鉴权/迁移流程。strict 的新协议、新工具和新计价维度在独立验收前保持拒绝，不能为了兼容客户端默认降级。
 
-## 6. F0 历史验收与后续框架门槛
+## 6. 基线与验收证据
 
-以下勾选仅对应已经完成的 F0，不新增或预先勾选 S6/S7-A。历史提交/CI 与后续 S3–S5 记录统一保留于 [历史验收](history/acceptance-s0-s5.md)。
+F0 的阶段勾选、提交和原始 CI 已归入 [S0–S5 历史验收](history/acceptance-s0-s5.md#f0-多团队协作框架收口s2-之后)。本轮 S5/S6/A1–A3 切片已通过 PR #5 合入 `master/5004c57`，合并前后完整 CI 通过，具体范围见 [S5–A3 批次记录](history/implementation-s5-a3.md#2026-10-17-合并与最终验证结果)。
 
-- [x] 已验证身份与速率结算使用 typed context，不向业务层暴露 Gin 字符串键。
-- [x] 协议注册、请求/attempt 准入、健康回写通过实例依赖注入；lease 释放/取消/panic 有行为回归。
-- [x] F0 基线 70 个路由有可读契约；S4 扩展为 76 个操作，路由/鉴权/DTO 漂移进入 CI。
-- [x] 统一数据迁移注册、失败回滚、重启幂等与旧二进制拒绝更高版本的回归。
-- [x] 团队目录边界、公共接线、接口变更流程和独立测试入口清晰。
-- [x] 框架提交 `bd322c0` 通过 Linux CI：构建、vet、gofmt、依赖与契约、race 全量测试、启动/迁移冒烟和性能基准。
-- [x] 维护者已于 2026-10-15 合并到 master（`3534086`），作为团队共同开发基线；合并后 Verify #38706751863 通过。
-
-F0 允许团队在已明确的协议/API/页面/准入边界协作；此后 S3 准入和 S4 控制台/配置发布已验收，S5 完整成本边界仍未完成。S6 的传输无关入口、操作模型和能力矩阵尚需实际消费者回归与完整 CI，不能沿用 F0 的历史通过替代。框架共同基线稳定后，再并行接入状态、后台和 WS；不是现在放开所有团队各改公共入口。
-
-验收记录：2026-10-15，功能分支 feat/team-foundation，[Verify #38703566885](https://github.com/ANRCM0/TXAPI/actions/runs/38703566885) 全部通过。本地 amd64 构建、vet、全量普通测试与冒烟通过；目前没有执行真实业务库升级或配置 GitHub 团队权限。
+切片合并不等于 S5-03 或完整 S6/A3/A4 验收。现有稳定模块可按本页边界维护和验证；状态/后台/WS 产品接线仍依赖公共契约收口，不允许团队各造一套授权、预算、任务恢复或资源释放。完整支持范围与下一步以 PLAN 为准，不以 F0 旧 CI 或目录存在替代新能力验收。

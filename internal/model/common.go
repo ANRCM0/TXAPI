@@ -1,11 +1,7 @@
-// Package model 定义网关的全部持久化实体（GORM 模型）。
-//
-// 分层位置：这是唯一同时被「存储层 store」和「转发层 relay」引用的包。
-// 它只描述数据结构，不含任何业务逻辑——所有「怎么算」的逻辑都在 store 里，
-// 所有「怎么用」的逻辑都在 relay 里。
-//
-// 表结构依据 docs/PLAN.md「2.2 表结构」。渠道与凭据分离（一个渠道挂多个 Key）
-// 是本项目区别于 One API 的核心设计，credentials 表的 channel_id 外键就是它的落点。
+// Package model defines persistent entities and neutral storage-port data.
+// Authorization, scheduling, execution, and billing behavior belong to their
+// respective modules. Model boundaries are in docs/ARCHITECTURE.md, section 3.
+// Channels and upstream credentials are separate entities, joined by channel_id.
 package model
 
 import (

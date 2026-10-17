@@ -6,7 +6,7 @@
 
 ## 当前能做什么
 
-核对日期：2026-10-17。以下区分当前代码与最终目标；唯一活动计划见 [PLAN](docs/PLAN.md)，原始验证证据见 [历史验收记录](docs/history/acceptance-s0-s5.md)。
+核对日期：2026-10-17，已合并功能基线为 `master/5004c57`。以下区分当前代码与最终目标；唯一活动计划见 [PLAN](docs/PLAN.md)，精确提交与 CI 见 [批次记录](docs/history/implementation-s5-a3.md#2026-10-17-合并与最终验证结果)。
 
 - 管理员初始化、登录、创建/停用用户，设置用户模型与限额；管理会话和模型调用 Key 分离。
 - 用户创建、限制、吊销自己的 Key，查看本人可用模型、访问日志和日志聚合用量；调用 Key 仅创建时展示，服务端摘要存储。
@@ -14,15 +14,15 @@
 - 管理渠道与多上游 API Key 凭据池，按优先级/权重调度、有限重试、健康冷却/恢复；会话亲和是默认关闭的可选优化，不是持久会话。
 - 执行实例/用户/Key/渠道并发限制、用户跨 Key RPM、Key RPM 与估算 TPM；查看请求/尝试指标和有界访问日志。
 - 通过内嵌控制台操作配置；区分“已保存/已应用”，发布失败继续使用旧运行快照。
-- 当前 S5 分支已有定点价格版本、用户/Key 双预算预留、持久账本、幂等结算、管理员对账与强杀恢复批次；**完整成本上界仍未完成**。
+- 已合并定点价格版本、用户/Key 双预算预留、持久账本、幂等结算、管理员对账与强杀恢复切片；**完整成本上界仍未完成**。
 
 | 范围 | 状态与边界 |
 |---|---|
-| S0–S4 与 F0 | 已有阶段验收并合并本地 master；F0 是初始团队接线基线，不是最终统一兼容框架 |
-| 当前代码快照 | `feat/s5-s6-mainline` 基于 `8c4a2f1` 推进 A3-04 加密任务意图与双预算原子受理；A3-03 完整 CI 已通过，本批按最终代码重新验证，远端 CI 随提交单独记录。origin/master 最近核对为 `90df76b`，尚未合并，证据见 PLAN |
-| S5 | 6 个验收项中 5 个通过，S5-03 未完成；完整阶段尚未验收/合并，不承诺已具备可靠商业收费全部条件 |
+| S0–S4 与 F0 | 已有阶段验收并合并 master；F0 是初始团队接线基线，不是最终统一兼容框架 |
+| 已合并功能基线 | PR #5 已合入 `master/5004c57`，包含 S5/S6/A1–A3-04 切片；功能头 push/PR 与合并后 master 的完整 CI 均通过。切片合并不等于完整架构验收 |
+| S5 | 6 个验收项中 5 个通过，S5-03 未完成；实现已合并，完整阶段尚未验收，不承诺已具备可靠商业收费全部条件 |
 | 统一兼容框架 | Chat/embeddings 已复用非 Gin 协调与独立输出；操作信封贯穿路由/attempt/解码，计费按小接口接入；已有进程内 worker、可选加密输出记录、独立 WS transport 和加密意图+用户/Key 预留原子事务；意图尚不能领取/派发，main 未启用这些消费者，完整 S6/A3 未验收，不等于已具备生产持久后台/原生 WS |
-| Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；目前仅独立 Responses JSON/SSE 协议与样本，未开放生产入口；输出记录和本批原子受理不是 Responses 历史/事件或完整持久任务，产品级持久会话/后台/WS 尚未实现 |
+| Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；目前仅独立 Responses JSON/SSE 协议与样本，未开放生产入口；输出记录和原子意图受理不是 Responses 历史/事件或完整持久任务，产品级持久会话/后台/WS 尚未实现 |
 | 原生 Messages/Gemini 入站、订阅账号池、支付、分布式部署 | 不属于当前已交付能力；本轮不新增支付 |
 
 现有假上游、SDK 模拟及 CI 记录不等于任意客户端/真实上游全兼容，也不等于已完成生产部署。每种能力分别记录“协议可转发、客户端实测兼容、strict 可计价”，不以品牌名称或路由存在代替验收。
@@ -107,6 +107,9 @@ internal/core/        标准库单次 HTTP 执行
 internal/gateway/     请求协调、attempt、重试、统一收尾
 internal/protocol/    操作/厂商转换与每请求流状态
 internal/access/      身份、权限与准入基础
+internal/generation/  进程内 worker、加密输出与意图受理（main 未启用）
+internal/transport/   独立 WS 传输 I/O（无生产 WS 应用/上游接线）
+internal/model/       持久化实体与中立端口数据
 internal/scheduler/   渠道/凭据选择与健康
 internal/billing/     价格、预算、持久结算与对账
 internal/store/       持久化、迁移、快照与访问日志
@@ -118,7 +121,7 @@ docs/                 现行文档、历史验收与参考资料
 .local/               被忽略的本地数据与参考仓库
 ```
 
-没有预建 Responses 应用包或 WS transport；新增目录须在真实功能批次评审依赖边界。
+WS transport 已位于 `internal/transport/websocket`；Responses 应用包尚未创建。新增目录须在真实功能批次评审依赖边界，不预建空模块。
 
 ## 文档与开发顺序
 
@@ -129,8 +132,10 @@ docs/                 现行文档、历史验收与参考资料
 | [开发指南](docs/DEVELOPMENT.md) | 运行命令、配置、验证节奏、升级和恢复 |
 | [协作约定](docs/COLLABORATION.md) | 团队目录、共享入口、契约与集成门槛 |
 | [贡献约定](CONTRIBUTING.md) / [代理约束](AGENTS.md) | 开发执行规则 |
-| [历史验收](docs/history/acceptance-s0-s5.md) | 旧批次的提交、CI 和验收证据，不另行排期 |
-| [上游固定快照](docs/reference/upstream-snapshots.md) | 三个已克隆参考库、SHA、文件与复用边界 |
+| [运行组件约定](docs/reference/generation-runtime.md) | worker、加密输出、WS I/O 与不可派发意图的端口/生命周期/容量/恢复 |
+| [阶段历史](docs/history/acceptance-s0-s5.md) / [S5–A3 批次](docs/history/implementation-s5-a3.md) | 原始提交、命令、CI、验收范围和合并事实，不另行排期 |
+| [上游固定快照](docs/reference/upstream-snapshots.md) | 历史阅读的参考库 SHA、文件与复用边界；本地副本不随 Git/worktree 分发 |
+| [早期 P6 方案](docs/history/plan-p6.md) | 已停止用于排期的历史设计，不作为现行缺陷或功能清单 |
 
 后续按 A1–A4 先完成底层架构并验收合并为团队共同基线，再按 S7-A 批次补全 Responses HTTP/SSE、持久会话、后台任务和原生 WS。S5 成本证明单独收口，不阻塞无关架构建设，strict 开放仍遵守原有门槛。本轮不新增支付，也不直接移植参考项目的整个架构。
 

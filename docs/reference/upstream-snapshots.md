@@ -1,10 +1,10 @@
 # S5–S7-A 上游参考快照
 
-核对日期：2026-10-16。本文只记录本地阅读副本、已抽查代码和参考边界；开发顺序与验收唯一入口为 [PLAN.md](../PLAN.md#后续开发路线)，不在此维护第二份执行计划。
+快照核对日期：2026-10-16；2026-10-17 仅澄清本地副本范围。本文记录当时的阅读版本、抽查代码和参考边界，不声明上游当前版本或安全状态；开发顺序与验收唯一入口为 [PLAN.md](../PLAN.md#后续开发路线)，不维护第二份执行计划。
 
 ## 本地目录与固定版本
 
-三个公开仓库已使用 `git clone --depth 1 --single-branch --no-tags` 克隆，仅用于源码阅读。未安装依赖、初始化子模块、运行上游程序、构建或测试，也未将其添加为 TXAPI 子模块或依赖。
+历史阅读在原工作目录 `D:/my-project/TXAPI/.local/references/` 使用 `git clone --depth 1 --single-branch --no-tags` 准备了三个公开仓库，仅用于源码阅读。下表列建议相对目录与当时 SHA；副本被忽略，不随 Git clone 或新 worktree 分发，当前工作区可没有这些目录。未安装依赖、初始化子模块、运行上游程序、构建或测试，也未将其添加为 TXAPI 子模块或依赖。
 
 | 项目 | 本地目录（相对 TXAPI 根目录） | 本次完整提交 SHA |
 |---|---|---|
@@ -12,7 +12,7 @@
 | [sub2api](https://github.com/Wei-Shaw/sub2api) | `.local/references/sub2api` | `f2e5b55f3e8069df1c02a9a27af537b5fdefa64e` |
 | [claude-relay-service](https://github.com/Wei-Shaw/claude-relay-service) | `.local/references/claude-relay-service` | `cf95ecc5e0ba846faaf1b11de574367de89fd00c` |
 
-三份工作树本次核对无修改；TXAPI 的 `.gitignore` 与 `.dockerignore` 已覆盖 `/.local/`，不会将参考库提交或带入镜像构建上下文。保留各自 `.git`、LICENSE 和 NOTICE，便于核对来源；浅克隆不是完整历史归档。
+三份工作树在快照核对时无修改，不代表每次文档整理重新检查。TXAPI 的 `.gitignore` 与 `.dockerignore` 已覆盖 `/.local/`，不会将参考库提交或带入镜像构建上下文。保留各自 `.git`、LICENSE 和 NOTICE，便于核对来源；浅克隆不是完整历史归档。
 
 已有目录不自动拉取、覆盖或重置。更新参考前先检查远端 URL、当前 SHA 和工作树；如有改动先确认处理方式。后续采用其他版本时，在对应批次记录新的完整 SHA、安全修复差异和文件范围。不要把会移动的 main 链接作为最终复用证据。
 
