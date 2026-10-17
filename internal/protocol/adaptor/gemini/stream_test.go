@@ -76,3 +76,41 @@ func TestStreamSessionsAreRequestLocal(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamPreservesCumulativeAndUsageOnlyEvents(t *testing.T) {
+	session := (&Adaptor{}).NewStreamSession()
+	events := []struct {
+		data   string
+		total  int
+		finish string
+	}{
+		{`data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1,"totalTokenCount":4}}`, 4, ""},
+		{`data: {"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"totalTokenCount":5}}`, 5, canonical.FinishStop},
+		{`data: {"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":4,"totalTokenCount":7}}`, 7, ""},
+	}
+	for i, event := range events {
+		chunks, err := session.ParseStreamLine([]byte(event.data))
+		if err != nil || len(chunks) == 0 {
+			t.Fatalf("event %d: chunks=%+v err=%v", i, chunks, err)
+		}
+		last := chunks[len(chunks)-1]
+		if last.Usage == nil || last.Usage.TotalTokens != event.total {
+			t.Fatalf("event %d lost usage: %+v", i, chunks)
+		}
+		var finish string
+		for _, chunk := range chunks {
+			finish += chunk.FinishReason
+		}
+		if finish != event.finish {
+			t.Fatalf("event %d finish=%q want=%q", i, finish, event.finish)
+		}
+	}
+}
+
+func TestBlockedStreamRetainsUsage(t *testing.T) {
+	session := (&Adaptor{}).NewStreamSession()
+	chunks, err := session.ParseStreamLine([]byte(`data: {"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":3,"totalTokenCount":3}}`))
+	if err != nil || len(chunks) != 2 || chunks[0].FinishReason != canonical.FinishContentFilter || chunks[1].Usage == nil || chunks[1].Usage.TotalTokens != 3 {
+		t.Fatalf("blocked stream lost termination or usage: %+v, %v", chunks, err)
+	}
+}

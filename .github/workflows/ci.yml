@@ -79,6 +79,7 @@ jobs:
           node --check web/assets/api.mjs
           node --check tests/browser/navigation.cjs
           node --check tests/browser/billing.cjs
+          node --check tests/browser/live.cjs
           node --test web/assets/api.test.mjs
 
       - name: go vet

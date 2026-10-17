@@ -36,7 +36,7 @@ func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Executio
 	ctx = access.NewGenerationContext(ctx)
 	result := newRequestResult(ctx)
 	result.Operation = in.Operation
-	if output == nil {
+	if nilInterface(output) {
 		result.ErrorMessage = "missing execution output"
 		result.Error = &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: result.ErrorMessage, Type: "internal_error"}}
 		return *result

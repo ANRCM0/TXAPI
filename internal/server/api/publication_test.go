@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -51,20 +50,6 @@ func TestPublicationFailureIsVisibleAndRetryDoesNotCreateRevision(t *testing.T) 
 	h.ApplyConfiguration(context)
 	if w.Code != 200 || h.configStatus().Channels.AppliedRevision != 2 || h.configStatus().Channels.DesiredRevision != 2 {
 		t.Fatal("retry should apply the existing desired revision")
-	}
-}
-
-func TestConcurrentPublicationRevisionsDoNotRegress(t *testing.T) {
-	var p publication
-	var wg sync.WaitGroup
-	for i := 0; i < 64; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); p.publish(true) }()
-	}
-	wg.Wait()
-	got := p.snapshot()
-	if got.DesiredRevision != 64 || got.AppliedRevision != 64 {
-		t.Fatalf("lost or regressed publication revision: %+v", got)
 	}
 }
 

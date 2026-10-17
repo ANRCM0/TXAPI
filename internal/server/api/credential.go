@@ -20,7 +20,7 @@ func (h *Handler) ListCredentials(c *gin.Context) {
 	if !ok {
 		return
 	}
-	creds := h.store.ListCredentials(id)
+	creds := h.configuration.ListCredentials(id)
 	// 列表一律打码：列表接口常被整体拉取、截图、贴进 issue，
 	// 把每把 Key 都吐出来等于把整个凭据池明文打印出去。
 	// 已有凭据的明文不通过列表接口回显。
@@ -43,15 +43,10 @@ func (h *Handler) CreateCredential(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	cred, err := h.store.CreateCredential(id, &in)
-	if err != nil {
-		h.failConfiguration(c, err)
+	cred, change, err := h.configuration.CreateCredential(id, &in)
+	if !configurationResult(c, change, err) {
 		return
 	}
-	// 凭据进池子就是转发层的事：必须刷渠道池，否则新 Key 要等下次
-	// 渠道变更才生效——「加了 Key 但流量不打过去」是最容易误判成
-	// 「Key 无效」的故障
-	h.notifyChanged(c)
 	// 创建响应**不**打码：这是调用方唯一一次能拿到完整 Key 的机会，
 	// 和 CreateToken 同理。打码在这里等于让用户没法用刚建的凭据。
 	c.JSON(http.StatusCreated, gin.H{"data": cred})
@@ -71,14 +66,10 @@ func (h *Handler) UpdateCredential(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	cred, err := h.store.UpdateCredential(id, &in)
-	if err != nil {
-		h.failConfiguration(c, err)
+	cred, change, err := h.configuration.UpdateCredential(id, &in)
+	if !configurationResult(c, change, err) {
 		return
 	}
-	// 换了 Key 就必须刷池子：转发层持有的是缓存里的 Key 快照，
-	// 不刷的话旧 Key 会一直用到下一次无关的渠道变更
-	h.notifyChanged(c)
 	cred.APIKey = maskKey(cred.APIKey)
 	c.JSON(http.StatusOK, gin.H{"data": cred})
 }
@@ -89,11 +80,10 @@ func (h *Handler) DeleteCredential(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.store.DeleteCredential(id); err != nil {
-		h.failConfiguration(c, err)
+	change, err := h.configuration.DeleteCredential(id)
+	if !configurationResult(c, change, err) {
 		return
 	}
-	h.notifyChanged(c)
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": id})
 }
 
@@ -114,12 +104,10 @@ func (h *Handler) SetCredentialStatus(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	cred, err := h.store.SetCredentialStatus(id, in.Status)
-	if err != nil {
-		h.failConfiguration(c, err)
+	cred, change, err := h.configuration.SetCredentialStatus(id, in.Status)
+	if !configurationResult(c, change, err) {
 		return
 	}
-	h.notifyChanged(c)
 	cred.APIKey = maskKey(cred.APIKey)
 	c.JSON(http.StatusOK, gin.H{"data": cred})
 }

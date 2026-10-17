@@ -44,6 +44,10 @@ func (g *Gateway) strictReady() bool {
 
 // Optional interfaces may receive typed nil pointers from application wiring.
 func nilBilling(port any) bool {
+	return nilInterface(port)
+}
+
+func nilInterface(port any) bool {
 	if port == nil {
 		return true
 	}

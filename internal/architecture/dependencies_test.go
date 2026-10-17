@@ -23,10 +23,11 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 		"scheduler":  {"model": true, "scheduler": true},
 		"billing":    {"model": true, "protocol": true, "billing": true},
 		"store":      {"model": true, "access": true, "config": true, "store": true, "secrets": true},
+		"management": {"model": true, "store": true},
 		"generation": {"access": true, "core": true, "gateway": true, "protocol": true, "model": true, "secrets": true},
 		"transport":  {"transport": true},
 		"gateway":    {"access": true, "core": true, "protocol": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true},
-		"server":     {"access": true, "model": true, "config": true, "store": true, "billing": true, "gateway": true, "metrics": true, "server": true},
+		"server":     {"access": true, "model": true, "config": true, "store": true, "billing": true, "gateway": true, "management": true, "metrics": true, "server": true},
 	}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {

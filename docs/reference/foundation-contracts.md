@@ -9,6 +9,20 @@ source/baseline and CI links. This is not complete S5/S6/S7 product acceptance. 
 checklist remains [PLAN](../PLAN.md), with prior exact-SHA evidence in
 [implementation history](../history/implementation-s5-a3.md).
 
+The 2026-10-18 responsibility clarification distinguishes the relay core,
+business services and a broader external compatibility layer. The accepted
+A1-A4 scope remains the execution/persistence/security foundation below.
+Public API, extension and frontend application contracts are the next S6-C
+acceptance scope in PLAN; they are not all accepted by this earlier matrix.
+Complete the core/compatibility framework before integrating selected features
+from peer projects or wiring new S7 product consumers.
+
+The active S6 source/consumer inventory is in
+[compatibility contracts](compatibility-contracts.md). It includes the concrete
+management configuration use case, existing API/frontend consumers and scoped
+protocol/injection fixes. Its new source is pending its own concentrated run;
+the accepted A1-A4 evidence below does not certify those changes.
+
 ## Scope and ownership
 
 | Boundary | Owner and contract | Extension rule |
