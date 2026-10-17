@@ -4,9 +4,11 @@ Source baseline: `758ad04` (fetched `origin/master` on 2026-10-18).
 Scope: S6-00 through S6-06 from [the active plan](../PLAN.md).
 The OpenAPI contract remains 0.2.3, with 79 operations. This inventory maps
 source and declared contracts; it does not replace behavior acceptance.
-Implementation and concentrated local verification are complete; exact-source
-complete CI and integration acceptance are pending. The user requested no tests
-during implementation, and tests began only after the batch was implemented.
+S6-A/B/C and M1 are accepted on `master/ca009c2` (PR #8). Exact final feature
+head `9a6eaa250099c91847fa92ffde0475af16b6e488` passed complete push/PR CI,
+and the actual merged master passed complete CI separately. The user requested
+no tests during implementation; concentrated tests and repairs began only
+after the batch was implemented.
 Commands, first-run failures, repairs and environment are in
 [S6 implementation history](../history/implementation-s6.md).
 
@@ -83,7 +85,8 @@ new tests do not expand strict permission.
 This list preserves applicable implemented A1-A4 behavior. Source review found
 no need to recreate the HTTP executor, shared generation chain, worker identity
 resolution, fencing, output cursor or financial authority. Exact source changes
-still require the concentrated verification gate; old CI is not proof of them.
+passed their own concentrated verification and exact-source complete CI;
+old CI alone is not proof of them.
 
 ## Operation and application-consumer map
 
@@ -210,8 +213,18 @@ Applicable A1-A4 source and precise historical verification are recorded in
 to unchanged behavior and explicitly recorded scope. The S6 history records
 the local concentrated run and fixes, separately from final CI and merge evidence.
 
-The late run must cover the changed package behavior, existing full checks,
-real temporary API/console chain and desktop/mobile layouts. The exact final
-source must pass existing complete CI on the latest integration baseline before
-M1 merge. Update this evidence section and the active PLAN only after results
-exist. Keep unresolved S5 cost and S7 product acceptance separate.
+The late local run covered changed package behavior, existing full checks,
+the real temporary API/console chain and desktop/mobile layouts. The exact
+feature head passed push [39062579429](https://github.com/ANRCM0/TXAPI/actions/runs/39062579429)
+and PR [39063298294](https://github.com/ANRCM0/TXAPI/actions/runs/39063298294)
+complete CI on latest fetched baseline `758ad04`.
+[PR #8](https://github.com/ANRCM0/TXAPI/pull/8) then merged that verified head
+into `ca009c2a1e3aa00bfb978f9d9e48785db979763a`; merged-master
+[39063693685](https://github.com/ANRCM0/TXAPI/actions/runs/39063693685) also
+passed complete CI. Both `check` and `delivery` passed in each run, without
+manual dispatch or admin/bypass. Exact commands, failures, environment,
+requirement-by-requirement scope and acceptance are in
+[the S6 record](../history/implementation-s6.md#2026-10-18-s6-framework-acceptance-and-m1-baseline).
+These runs certify the named source, not later documentation text. M1 is the
+accepted current compatibility framework, not unresolved S5 cost proof, new
+strict permission or S7 product acceptance.

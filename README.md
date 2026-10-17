@@ -6,7 +6,7 @@
 
 ## 当前能做什么
 
-核对日期：2026-10-18，A1–A4 基础架构已验收合并为 `master/ccbfe29`。以下区分当前代码与最终目标；唯一活动计划见 [PLAN](docs/PLAN.md)，精确提交与 CI 见 [批次记录](docs/history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)。
+核对日期：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过。精确提交与验证记录见 [PLAN](docs/PLAN.md) 和 [S6 批次记录](docs/history/implementation-s6.md)。A1–A4 的原验收基线 `master/ccbfe29` 和证据保留在 [基础层记录](docs/history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)。
 
 - 管理员初始化、登录、创建/停用用户，设置用户模型与限额；管理会话和模型调用 Key 分离。
 - 用户创建、限制、吊销自己的 Key，查看本人可用模型、访问日志和日志聚合用量；调用 Key 仅创建时展示，服务端摘要存储。
@@ -19,9 +19,9 @@
 | 范围 | 状态与边界 |
 |---|---|
 | S0–S4 与 F0 | 已有阶段验收并合并 master；F0 是初始团队接线基线，不是最终统一兼容框架 |
-| 已合并功能基线 | PR #6 已合入 `master/ccbfe29`；最终功能头及合并后 master 完整 CI 通过，A1–A4 成为共同架构基线，不代表完整 S5/S6/S7 产品完成 |
+| 已合并功能基线 | A1–A4 原基线为 PR #6 / `master/ccbfe29`；S6/M1 已由 PR #8 验收合入 `master/ca009c2`，功能头 push/PR 和合并后 master 完整 CI 均通过，不代表完整 S5/S7 产品完成 |
 | S5 | 6 个验收项中 5 个通过，S5-03 未完成；实现已合并，完整阶段尚未验收，不承诺已具备可靠商业收费全部条件 |
-| 统一兼容框架 | Chat/embeddings 的共享业务链、worker/WS 消费及持久/安全底座已有 A1–A4 验收；main 有默认关闭的加密持久 runtime。涵盖 API、扩展和前端契约的广义兼容层仍须完成 S6-A/B/C 收口，再接入新产品和同类项目能力 |
+| 统一兼容框架 | S6 已合并现有推理/管理 API、构造扩展与前端的契约闭环，以及真实 API/浏览器验收链；复用 A1–A4 共享业务链和默认关闭的加密持久 runtime。支持矩阵见兼容契约清单，M1 已完成验收，精确证据见 PLAN/批次记录 |
 | Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；目前仅独立 Responses JSON/SSE 协议与样本，未开放生产入口；输出记录和原子意图受理不是 Responses 历史/事件或完整持久任务，产品级持久会话/后台/WS 尚未实现 |
 | 原生 Messages/Gemini 入站、订阅账号池、支付、分布式部署 | 不属于当前已交付能力；本轮不新增支付 |
 
@@ -34,7 +34,7 @@
 ```text
 客户端 / 前端 / 扩展
         |
-统一兼容层                                 <- API/协议/扩展/前端契约待统一验收
+统一兼容层                                 <- S6 现有支持范围已实现并合并
   接入适配 / 应用契约 / 能力与错误映射
         |
 业务层：统一协调 gateway 与业务服务
@@ -132,10 +132,11 @@ WS transport 已位于 `internal/transport/websocket`；Responses 应用包尚�
 | [协作约定](docs/COLLABORATION.md) | 团队目录、共享入口、契约与集成门槛 |
 | [贡献约定](CONTRIBUTING.md) / [代理约束](AGENTS.md) | 开发执行规则 |
 | [运行组件约定](docs/reference/generation-runtime.md) | worker、加密意图/输出、持久领取/游标、WS I/O 的端口/寿命/恢复 |
+| [兼容契约清单](docs/reference/compatibility-contracts.md) / [S6 批次](docs/history/implementation-s6.md) | 三层实际消费者、支持/拒绝矩阵、扩展接入与精确功能/集成验收证据 |
 | [阶段历史](docs/history/acceptance-s0-s5.md) / [S5–A3 批次](docs/history/implementation-s5-a3.md) | 原始提交、命令、CI、验收范围和合并事实，不另行排期 |
 | [上游固定快照](docs/reference/upstream-snapshots.md) | 历史阅读的参考库 SHA、文件与复用边界；本地副本不随 Git/worktree 分发 |
 | [早期 P6 方案](docs/history/plan-p6.md) | 已停止用于排期的历史设计，不作为现行缺陷或功能清单 |
 
-A1–A4 已验收为现有执行/持久/安全底座；接下来先完成 S6-A/B/C 的内核接入与广义兼容框架，统一公开 API、扩展和前端契约，验收合并后再吸收同类项目能力并推进 S7-A。S5 成本证明单独收口，strict 开放仍遵守原有门槛。本轮不新增支付。
+A1–A4 底座和 S6 内核/兼容框架功能均已合并。S6/M1 已完成集成验收，下一批为 S7-A01 Responses HTTP/SSE，通过现有业务与兼容契约接入；同类项目能力按明确目标有选择地吸收。S5 成本证明单独收口，strict 开放仍遵守原有门槛。本轮不新增支付。
 
 开发遵循“批量开发 → 集中验证 → 集中修复 → 合并”；不因每次编辑/汇报重复跑全量测试，最终合并仍需通过完整现有 CI。纯说明文档整理只验证差异、链接与一致性。历史 CI 范围和日期保留在验收记录中，不写成当前未提交文档已通过 CI。

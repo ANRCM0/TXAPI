@@ -12,16 +12,18 @@ checklist remains [PLAN](../PLAN.md), with prior exact-SHA evidence in
 The 2026-10-18 responsibility clarification distinguishes the relay core,
 business services and a broader external compatibility layer. The accepted
 A1-A4 scope remains the execution/persistence/security foundation below.
-Public API, extension and frontend application contracts are the next S6-C
-acceptance scope in PLAN; they are not all accepted by this earlier matrix.
-Complete the core/compatibility framework before integrating selected features
-from peer projects or wiring new S7 product consumers.
+Public API, extension and frontend application contracts have their separate
+S6-C acceptance in PLAN; they are not inferred from this earlier matrix.
+S6 is now accepted and merged as M1, before selected peer-project features
+or new S7 product consumers are integrated.
 
 The active S6 source/consumer inventory is in
 [compatibility contracts](compatibility-contracts.md). It includes the concrete
 management configuration use case, existing API/frontend consumers and scoped
-protocol/injection fixes. Its new source is pending its own concentrated run;
-the accepted A1-A4 evidence below does not certify those changes.
+protocol/injection fixes. Its own concentrated validation, exact-head complete
+push/PR CI and merged-master CI passed for PR #8 / `master/ca009c2`, as recorded
+in [S6 history](../history/implementation-s6.md#2026-10-18-s6-framework-acceptance-and-m1-baseline).
+The A1-A4 evidence below remains scoped to its original source, not those changes.
 
 ## Scope and ownership
 

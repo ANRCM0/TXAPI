@@ -2,11 +2,11 @@
 
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
-当前已验收基础架构基线为 `master/ccbfe29`（PR #6），阶段状态统一见 [PLAN](PLAN.md)，精确源码/命令/CI 见 [最终批次验收](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)。A1–A4 已通过完整 CI 并合并；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。没有新增公开任务/会话/原生 WS 产品 API，完整 S5/S6/S7 功能仍按各自门槛验收。
+S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确源码/命令/结果统一见 [PLAN](PLAN.md) 和 [S6 批次记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29`（PR #6）及其 [完整验证](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。没有新增公开任务/会话/原生 WS 产品 API，完整 S5 和 S7 继续独立验收。
 
 ## 工具与工作目录
 
-当前开发方向按三层职责执行：core 处理中转，业务层处理授权/调度/计费/状态，兼容层统一 API/协议、扩展与前端接入。下一批先复用已有消费者完成 [S6-C 兼容契约验收](PLAN.md#s6-c统一对外兼容与扩展接入)，连同 S6-A/B 收口后再开展同类项目能力吸收和 S7 产品接线。三层是职责约束，具体实现只按真实缺口增量调整；本节命令和集中验证节奏保持适用。
+当前开发方向按三层职责执行：core 处理中转，业务层处理授权/调度/计费/状态，兼容层统一 API/协议、扩展与前端接入。S6 已通过真实消费者补齐并合并既有支持范围的契约；S6/M1 已完成集成验收，下一批为 S7-A01 Responses HTTP/SSE，并按明确目标吸收适用参考能力。接入与验证方式见 [S6 兼容框架接入与验收](#s6-兼容框架接入与验收)，只按真实缺口增量扩展。
 
 - Go 1.23 或更高版本，以 `go.mod` 为语言基线。
 - Python 3.10+ 用于标准库冒烟脚本；可选 OpenAI SDK 检查另见下文。
@@ -356,9 +356,9 @@ main 已有默认关闭的持久 runtime，可按 [A3-05](reference/generation-r
 
 ## S6 兼容框架接入与验收
 
-三层职责和当前全部 API/消费者见 [兼容契约清单](reference/compatibility-contracts.md)，活动顺序以 [S6 方案](PLAN.md#s6-实施方案从现有底座到三层闭环) 为准。配置管理实际用例位于 `internal/management`，保存、运行快照发布与 Apply 共用同一实例；HTTP 维持原 DTO、鉴权、成功码与 publication 头。`saved:true` 错误表示数据库已提交，应刷新资源并查看发布状态；仅 pending 需要重试发布，applied 不表示发布失败，未知状态先刷新确认，不重复保存。Apply 返回 503 时 `data` 仍包含最新状态。
+三层职责和当前全部 API/消费者见 [兼容契约清单](reference/compatibility-contracts.md)，精确源码/命令/结果见 [S6 批次记录](history/implementation-s6.md)，后续顺序以 [PLAN](PLAN.md) 为准。新增推理操作复用 gateway 的授权/准入/attempt/收尾，协议适配按操作与能力声明接入，前端通过既有应用 API 消费业务结果。配置管理实际用例位于 `internal/management`，保存、运行快照发布与 Apply 共用同一实例；HTTP 维持原 DTO、鉴权、成功码与 publication 头。`saved:true` 错误表示数据库已提交，应刷新资源并查看发布状态；仅 pending 需要重试发布，applied 不表示发布失败，未知状态先刷新确认，不重复保存。Apply 返回 503 时 `data` 仍包含最新状态。
 
-用户在本轮执行中要求开发期间不测试，后期统一测试修复；此要求用于本轮执行节奏，现有 CI 与最终合并门槛保持。下列是开发后期的集中验收入口，不能将新增用例已编写当作已通过：
+S6 按用户要求在开发后期集中测试与修复，实际本地、功能头 push/PR 与合并后 master 完整 CI 已通过，精确范围见批次记录；不据此推断未开发操作已通过。下列入口供后续按变更风险集中验证，适用原证据可复用，不为纯状态同步重复运行功能测试：
 
 ```bash
 make check
