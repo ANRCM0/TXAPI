@@ -3,7 +3,7 @@ PYTHON ?= python3
 NODE ?= node
 CONFIG ?= config.yaml
 
-.PHONY: init prepare build run test vet check smoke delivery contracts web-check clean
+.PHONY: init prepare build run test vet check smoke delivery compatibility contracts web-check clean
 
 prepare:
 	mkdir -p bin .local/data
@@ -34,6 +34,7 @@ web-check:
 	$(NODE) --check web/assets/api.mjs
 	$(NODE) --check tests/browser/navigation.cjs
 	$(NODE) --check tests/browser/billing.cjs
+	$(NODE) --check tests/browser/live.cjs
 	$(NODE) --test web/assets/api.test.mjs
 
 contracts:
@@ -45,6 +46,10 @@ smoke:
 
 delivery:
 	$(PYTHON) tests/smoke/delivery.py --go "$(GO)"
+
+# Requires Playwright and a local Chromium executable, like the browser checks.
+compatibility:
+	$(PYTHON) tests/smoke/compatibility.py --go "$(GO)" --node "$(NODE)"
 
 # Local config and databases are deliberately preserved.
 clean:

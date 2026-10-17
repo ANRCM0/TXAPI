@@ -79,3 +79,62 @@ test("sign out cancels in-flight requests instead of displaying the previous use
   client.setSession("");
   await assert.rejects(request, /canceled/);
 });
+
+test("saved failures retain mutation facts and publication failures retain current status", async () => {
+  let warnings = 0;
+  const saved = { saved: true, error: { type: "saved_configuration_error", message: "Saved; refresh failed." } };
+  const publication = { channels: { desired_revision: 3, applied_revision: 1, last_error: "Unavailable" }, prices: {} };
+  const client = createClient({ onPending: () => warnings++, fetcher: async path => path.endsWith("/apply")
+    ? new Response(JSON.stringify({ data: publication }), { status: 503 })
+    : new Response(JSON.stringify(saved), { status: 500, headers: { "X-TXAPI-Publication-State": "pending" } }) });
+  await assert.rejects(client.request("/api/admin/channels", { method: "POST", body: {} }), error => {
+    assert.equal(error.saved, true);
+    assert.equal(error.type, "saved_configuration_error");
+    assert.equal(error.status, 500);
+    assert.equal(error.publication, "pending");
+    assert.deepEqual(error.body, saved);
+    return true;
+  });
+  assert.equal(warnings, 1);
+  await assert.rejects(client.request("/api/admin/config-status/apply", { method: "POST" }), error => {
+    assert.deepEqual(error.data, publication);
+    return true;
+  });
+});
+
+test("saved applied and unknown failures never report pending publication", async () => {
+  for (const publication of ["applied", null]) {
+    let warnings = 0;
+    const client = createClient({ onPending: () => warnings++, fetcher: async () => new Response(
+      '{"saved":true,"error":{"type":"saved_configuration_error","message":"Saved; readback failed."}}',
+      { status: 500, headers: publication ? { "X-TXAPI-Publication-State": publication } : {} }) });
+    await assert.rejects(client.request("/api/admin/channels", { method: "POST", body: {} }), error => {
+      assert.equal(error.saved, true);
+      assert.equal(error.publication, publication);
+      assert.equal(error.status, 500);
+      return true;
+    });
+    assert.equal(warnings, 0, `saved ${publication || "unknown"} was reported as pending`);
+  }
+});
+
+test("old session responses cannot deliver data or publish warnings after a session switch", async () => {
+  let complete;
+  let warnings = 0;
+  const client = createClient({ onPending: () => warnings++, fetcher: async () => new Promise(resolve => { complete = resolve; }) });
+  client.setSession("previous");
+  const pending = client.request("/api/me");
+  client.setSession("current");
+  complete(new Response('{"data":{"role":"admin"}}', { headers: { "X-TXAPI-Publication-State": "pending" } }));
+  await assert.rejects(pending, /canceled/);
+  assert.equal(warnings, 0);
+});
+
+test("forbidden management requests preserve the login session", async () => {
+  let signedOut = 0;
+  const client = createClient({ onUnauthorized: () => signedOut++, fetcher: async () =>
+    new Response('{"error":{"type":"forbidden","message":"administrator required"}}', { status: 403 }) });
+  client.setSession("current");
+  await assert.rejects(client.request("/api/admin/users"), error => error.status === 403 && error.type === "forbidden");
+  assert.equal(signedOut, 0);
+});

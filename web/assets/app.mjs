@@ -11,7 +11,7 @@ const api = createClient({
   onUnauthorized: () => signOut("Your session has expired. Please sign in again."),
   onPending: () => {
     pendingPublication = true;
-    notice("Saved, but publication failed. Check Settings before relying on this change.", true);
+    notice("Configuration saved; publication is pending. Open Settings to retry publication.", true);
   },
 });
 
@@ -51,9 +51,18 @@ function notice(message, error = false) {
   noticeTimer = setTimeout(() => node.remove(), error ? 18000 : 6000);
 }
 
+function savedConfigurationMessage(error) {
+  if (error.publication === "applied") return "Configuration saved and published, but its readback or management cache refresh failed. Refresh this page before making another change.";
+  if (error.publication === "pending") return "Configuration saved; publication is pending. Open Settings to retry publication.";
+  return "Configuration saved, but publication status is unknown. Refresh its status before taking further action.";
+}
+
 async function run(action) {
   try { await action(); }
-  catch (error) { notice(error.message, true); }
+  catch (error) {
+    notice(error.saved ? savedConfigurationMessage(error) : error.message, true);
+    if ((error.saved || error.status === 403) && user) await navigate();
+  }
 }
 
 function field({ name, label, type = "text", value = "", options, hint, required = false, min, full = false }) {
@@ -108,6 +117,7 @@ function editDialog(title, fields, save, description = "Changes are validated by
   dialog.addEventListener("close", () => { form.reset(); dialog.remove(); });
   form.addEventListener("submit", async event => {
     event.preventDefault();
+    if (submit.disabled) return;
     submit.disabled = true;
     error.textContent = "";
     const epoch = generation;
@@ -120,6 +130,21 @@ function editDialog(title, fields, save, description = "Changes are validated by
       if (result?.secret) showSecret(result.secret);
       await navigate();
     } catch (failure) {
+      if (failure.saved) {
+        form.reset();
+        dialog.close();
+        if (epoch === generation && user) {
+          notice(savedConfigurationMessage(failure), true);
+          await navigate();
+        }
+        return;
+      }
+      if (failure.status === 403 && epoch === generation && user) {
+        dialog.close();
+        notice(failure.message, true);
+        await navigate();
+        return;
+      }
       if (dialog.isConnected) error.textContent = failure.message;
     } finally { submit.disabled = false; }
   });
@@ -227,11 +252,26 @@ function pageHeader(name, description, action) {
     el("div", {}, text("p", "TXAPI / CONTROL ROOM", "eyebrow"), text("h1", name), text("p", description, "muted")), action);
 }
 
-async function navigate() {
+async function navigate({ refreshIdentity = true, recoverForbidden = true } = {}) {
   if (!user) return;
   const epoch = ++generation;
   disposeView();
   disposeView = () => {};
+  try {
+    if (refreshIdentity) {
+      const current = await api.request("/api/me");
+      if (epoch !== generation || !user) return;
+      const changedRole = current.data.role !== user.role;
+      user = current.data;
+      if (changedRole) shell();
+      else document.querySelector(".identity").textContent = `${user.username} / ${user.role}`;
+    }
+  } catch (error) {
+    if (epoch === generation && user) {
+      document.querySelector("#view").replaceChildren(panel(text("p", error.message, "form-error"), button("Try again", () => run(navigate))));
+    }
+    return;
+  }
   const name = location.hash.slice(1) || "overview";
   const allowed = [...pages, ...(user.role === "admin" ? adminPages : [])];
   const page = allowed.find(item => item[0] === name)?.[0] || "overview";
@@ -245,6 +285,16 @@ async function navigate() {
     const content = await ({ overview, keys, models: modelPage, playground, logs, users, channels, settings, billing: billingLedger })[page]();
     if (epoch === generation && user) view.replaceChildren(content);
   } catch (error) {
+    if (error.status === 403 && recoverForbidden && epoch === generation && user) {
+      try {
+        const current = await api.request("/api/me");
+        if (epoch !== generation || !user) return;
+        user = current.data;
+        shell();
+        await navigate({ refreshIdentity: false, recoverForbidden: false });
+        return;
+      } catch (failure) { error = failure; }
+    }
     if (epoch === generation && user) view.replaceChildren(
       pageHeader("Unable to load", "The server did not complete this request."),
       panel(text("p", error.message, "form-error"), button("Try again", () => run(navigate))));
@@ -365,33 +415,45 @@ async function logs() {
   const host = el("div");
   const limit = 50;
   let offset = 0;
-  const previous = button("Previous", () => { offset = Math.max(0, offset - limit); run(load); });
-  const next = button("Next", () => { offset += limit; run(load); });
+  let loadVersion = 0;
+  let rowCount = 0;
+  const previous = button("Previous", () => run(() => load(Math.max(0, offset - limit))));
+  const next = button("Next", () => run(() => load(offset + limit)));
   const count = text("span", "", "muted");
   const model = el("input", { name: "model", placeholder: "Filter model", "aria-label": "Filter model" });
   const scope = el("select", { "aria-label": "Log scope" }, el("option", { value: "me" }, "My requests"),
     global ? el("option", { value: "admin" }, "All users (admin)") : null);
   const filter = el("form", { class: "filter-bar" }, scope, global ? model : null,
     el("button", { class: "button secondary" }, "Refresh"));
-  async function load() {
+  async function load(targetOffset = offset) {
     previous.disabled = next.disabled = true;
     const epoch = generation;
+    const version = ++loadVersion;
     const path = scope.value === "admin" ? "/api/admin/logs" : "/api/me/logs";
-    const response = await api.request(`${path}?limit=${limit}&offset=${offset}${scope.value === "admin" && model.value ? `&model=${encodeURIComponent(model.value)}` : ""}`);
-    if (epoch !== generation) return;
-    const rows = list(response.data);
-    host.replaceChildren(table(["Time / request", "Model", "Status", "Tokens", "Cost / CNY", "Latency"], rows, row => [
-      el("div", {}, text("span", new Date(row.created_at).toLocaleString()), text("code", row.request_id, "block")),
-      row.origin_model, badge(row.status), `${fmt(row.total_tokens)}${row.is_estimated ? " (est.)" : ""}`,
-      el("div", {}, `${fmt(row.cost)}${row.price_missing ? " / no price" : ""}`,
-        row.billing_state ? el("span", { class: "block", title: row.billing_id }, row.billing_state === "pending" ? "Budget held / reconciliation pending" : row.billing_state) : null,
-        row.price_version ? el("code", { class: "block", title: row.price_version }, `Price ${row.price_version.slice(0, 12)}`) : null),
-      `${fmt(row.latency_ms)} ms`,
-    ]));
-    previous.disabled = offset === 0; next.disabled = rows.length < limit;
-    count.textContent = `Rows ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;
+    try {
+      const response = await api.request(`${path}?limit=${limit}&offset=${targetOffset}${scope.value === "admin" && model.value ? `&model=${encodeURIComponent(model.value)}` : ""}`);
+      if (epoch !== generation || version !== loadVersion) return;
+      const rows = list(response.data);
+      offset = targetOffset;
+      rowCount = rows.length;
+      host.replaceChildren(table(["Time / request", "Model", "Status", "Tokens", "Cost / CNY", "Latency"], rows, row => [
+        el("div", {}, text("span", new Date(row.created_at).toLocaleString()), text("code", row.request_id, "block")),
+        row.origin_model, badge(row.status), `${fmt(row.total_tokens)}${row.is_estimated ? " (est.)" : ""}`,
+        el("div", {}, `${fmt(row.cost)}${row.price_missing ? " / no price" : ""}`,
+          row.billing_state ? el("span", { class: "block", title: row.billing_id }, row.billing_state === "pending" ? "Budget held / reconciliation pending" : row.billing_state) : null,
+          row.price_version ? el("code", { class: "block", title: row.price_version }, `Price ${row.price_version.slice(0, 12)}`) : null),
+        `${fmt(row.latency_ms)} ms`,
+      ]));
+      count.textContent = `Rows ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;
+    } catch (error) {
+      if (epoch === generation && version === loadVersion) throw error;
+    } finally {
+      if (epoch === generation && version === loadVersion) {
+        previous.disabled = offset === 0; next.disabled = rowCount < limit;
+      }
+    }
   }
-  filter.addEventListener("submit", event => { event.preventDefault(); offset = 0; run(load); });
+  filter.addEventListener("submit", event => { event.preventDefault(); run(() => load(0)); });
   await load();
   return el("div", {}, pageHeader("Request history", "Retained access logs, not a durable billing ledger. New records may take a moment to appear."),
     panel(filter, host, actions(previous, count, next)));
@@ -400,6 +462,7 @@ async function logs() {
 async function billingLedger() {
   let offset = 0;
   let loadVersion = 0;
+  let rowCount = 0;
   const limit = 50;
   const host = el("div");
   const state = el("select", { "aria-label": "Billing state" },
@@ -407,29 +470,38 @@ async function billingLedger() {
       .map(([value, label]) => el("option", { value }, label)));
   const owner = el("input", { "aria-label": "Billing user ID", placeholder: "User ID (optional)", inputmode: "numeric" });
   const count = text("span", "", "muted");
-  const previous = button("Previous", () => { offset = Math.max(0, offset - limit); run(load); });
-  const next = button("Next", () => { offset += limit; run(load); });
+  const previous = button("Previous", () => run(() => load(Math.max(0, offset - limit))));
+  const next = button("Next", () => run(() => load(offset + limit)));
   const filter = el("form", { class: "filter-bar" }, state, owner, el("button", { class: "button secondary" }, "Refresh ledger"));
-  async function load() {
+  async function load(targetOffset = offset) {
     const epoch = generation;
     const version = ++loadVersion;
     previous.disabled = next.disabled = true;
-    const query = new URLSearchParams({ state: state.value, limit, offset });
+    const query = new URLSearchParams({ state: state.value, limit, offset: targetOffset });
     if (owner.value.trim()) query.set("user_id", owner.value.trim());
-    const response = await api.request(`/api/admin/billing/reservations?${query}`);
-    if (epoch !== generation || version !== loadVersion) return;
-    const rows = list(response.data);
-    host.replaceChildren(rows.length ? table(["Reservation / owner", "Model / price version", "State", "Hold / charge", "Actions"], rows, row => [
-      el("div", {}, text("code", row.id), text("span", `User ${row.user_id} / Key ${row.token_id}`, "block")),
-      el("div", {}, row.origin_model, text("code", row.price_version, "block")),
-      el("div", {}, badge(row.state), text("span", row.reason, "block")),
-      el("div", {}, `Hold ${ledgerMoney(row.reserved_units)}`, text("span", `Charged ${ledgerMoney(row.charge_units)}`, "block")),
-      button("Inspect", () => run(() => inspectBilling(row.id)), "quiet"),
-    ]) : empty("No reservations match this filter. Pending charges remain held until verified or explicitly waived."));
-    previous.disabled = offset === 0; next.disabled = rows.length < limit;
-    count.textContent = `Rows ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;
+    try {
+      const response = await api.request(`/api/admin/billing/reservations?${query}`);
+      if (epoch !== generation || version !== loadVersion) return;
+      const rows = list(response.data);
+      offset = targetOffset;
+      rowCount = rows.length;
+      host.replaceChildren(rows.length ? table(["Reservation / owner", "Model / price version", "State", "Hold / charge", "Actions"], rows, row => [
+        el("div", {}, text("code", row.id), text("span", `User ${row.user_id} / Key ${row.token_id}`, "block")),
+        el("div", {}, row.origin_model, text("code", row.price_version, "block")),
+        el("div", {}, badge(row.state), text("span", row.reason, "block")),
+        el("div", {}, `Hold ${ledgerMoney(row.reserved_units)}`, text("span", `Charged ${ledgerMoney(row.charge_units)}`, "block")),
+        button("Inspect", () => run(() => inspectBilling(row.id)), "quiet"),
+      ]) : empty("No reservations match this filter. Pending charges remain held until verified or explicitly waived."));
+      count.textContent = `Rows ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;
+    } catch (error) {
+      if (epoch === generation && version === loadVersion) throw error;
+    } finally {
+      if (epoch === generation && version === loadVersion) {
+        previous.disabled = offset === 0; next.disabled = rowCount < limit;
+      }
+    }
   }
-  filter.addEventListener("submit", event => { event.preventDefault(); offset = 0; run(load); });
+  filter.addEventListener("submit", event => { event.preventDefault(); run(() => load(0)); });
   await load();
   return el("div", {}, pageHeader("Billing ledger", "Durable reservations and audited decisions, independent of access-log retention."),
     panel(text("p", "Amounts use the configured currency. Pending is not free. Only expired pending holds in strict mode can be resolved.", "muted"),
@@ -586,12 +658,34 @@ async function settings() {
     api.request("/api/admin/config-status"), api.request("/api/admin/model-policy"), api.request("/api/admin/prices"),
   ]);
   const policyValue = { model_mode: policy.data.mode, models: policy.data.models };
+  const publication = el("div");
+  function showPublication(value) {
+    publication.replaceChildren(publicationCard("Channels & credentials", value.channels), publicationCard("Prices & group rates", value.prices),
+      text("p", `Publication epoch: ${value.epoch}. Revisions are per-process and restart at boot, not durable schema versions.`, "fine"));
+  }
+  showPublication(status.data);
+  const retry = button("Retry publication", () => run(async () => {
+    if (retry.disabled) return;
+    retry.disabled = true;
+    const epoch = generation;
+    try {
+      const response = await api.request("/api/admin/config-status/apply", { method: "POST" });
+      if (epoch !== generation) return;
+      showPublication(response.data);
+      notice("Configuration applied.");
+    } catch (error) {
+      if (epoch !== generation) return;
+      if (error.data?.channels && error.data?.prices) showPublication(error.data);
+      else {
+        const current = await api.request("/api/admin/config-status");
+        if (epoch !== generation) return;
+        showPublication(current.data);
+      }
+      throw error;
+    } finally { retry.disabled = false; }
+  }), "primary");
   return el("div", {}, pageHeader("Settings & publication", "Saved database configuration and running snapshots are distinct.",
-    button("Retry publication", () => run(async () => {
-      await api.request("/api/admin/config-status/apply", { method: "POST" }); notice("Configuration applied."); await navigate();
-    }), "primary")),
-    publicationCard("Channels & credentials", status.data.channels), publicationCard("Prices & group rates", status.data.prices),
-    text("p", `Publication epoch: ${status.data.epoch}. Revisions are per-process and restart at boot, not durable schema versions.`, "fine"),
+    retry), publication,
     panel(heading("System model policy", "Applied directly at the next authentication; not part of snapshot revisions.",
       button("Edit policy", () => editDialog("System model policy", policyFields(policyValue), values => {
         const p = policyInput(values);

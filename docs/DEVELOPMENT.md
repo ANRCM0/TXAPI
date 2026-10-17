@@ -6,6 +6,8 @@
 
 ## 工具与工作目录
 
+当前开发方向按三层职责执行：core 处理中转，业务层处理授权/调度/计费/状态，兼容层统一 API/协议、扩展与前端接入。下一批先复用已有消费者完成 [S6-C 兼容契约验收](PLAN.md#s6-c统一对外兼容与扩展接入)，连同 S6-A/B 收口后再开展同类项目能力吸收和 S7 产品接线。三层是职责约束，具体实现只按真实缺口增量调整；本节命令和集中验证节奏保持适用。
+
 - Go 1.23 或更高版本，以 `go.mod` 为语言基线。
 - Python 3.10+ 用于标准库冒烟脚本；可选 OpenAI SDK 检查另见下文。
 - Node 20+ 仅用于控制台语法/行为验证；编译、部署和运行网关不需要 Node，也不需要安装前端依赖。
@@ -351,6 +353,25 @@ main 已有默认关闭的持久 runtime，可按 [A3-05](reference/generation-r
 | 可选加密输出记录 | [A3-02](reference/generation-runtime.md#a3-02-可选加密输出记录)；不记录可重发输入，不据此退款或重放 |
 | 有界 WS 传输 | [A3-03](reference/generation-runtime.md#a3-03-有界-ws-传输与连接生命周期)；纯服务端 I/O，不是原生 Responses 应用/上游 executor |
 | 加密意图与原子预算受理 | [A3-04](reference/generation-runtime.md#a3-04-加密意图与双预算原子受理)；A3-05 增加 fenced 持久派发，原双 hold 不重复预留 |
+
+## S6 兼容框架接入与验收
+
+三层职责和当前全部 API/消费者见 [兼容契约清单](reference/compatibility-contracts.md)，活动顺序以 [S6 方案](PLAN.md#s6-实施方案从现有底座到三层闭环) 为准。配置管理实际用例位于 `internal/management`，保存、运行快照发布与 Apply 共用同一实例；HTTP 维持原 DTO、鉴权、成功码与 publication 头。`saved:true` 错误表示数据库已提交，应刷新资源并查看发布状态；仅 pending 需要重试发布，applied 不表示发布失败，未知状态先刷新确认，不重复保存。Apply 返回 503 时 `data` 仍包含最新状态。
+
+用户在本轮执行中要求开发期间不测试，后期统一测试修复；此要求用于本轮执行节奏，现有 CI 与最终合并门槛保持。下列是开发后期的集中验收入口，不能将新增用例已编写当作已通过：
+
+```bash
+make check
+make smoke
+# 已安装 Playwright/Chromium 的测试环境；使用临时二进制、库与假上游
+make compatibility
+# Linux 完整 CI
+go test -race -count=1 ./...
+```
+
+`make compatibility` 对应 `python tests/smoke/compatibility.py --go go --node node`；沿用 `NODE_PATH` 和可选 `PLAYWRIGHT_EXECUTABLE_PATH` 定位现有测试依赖，不下载或安装前端运行依赖。启动器只操作临时 loopback 实例，通过真实 API 准备临时账号后运行 `tests/browser/live.cjs`，覆盖实际页面与桌面/移动视口。脚本不读取个人 `config.yaml`，不使用真实上游或生产数据；已有 `navigation.cjs`/`billing.cjs` 保留，用于可控失败、乱序、撤销与精确金额场景。
+
+构造注入的适配器、Admission 和 Limiter 不能是 typed nil；可选真 nil 保留原默认语义。每次执行的 Output 缺失时返回未派发错误。协议适配保留原 JSON 字符串与数组形态；usage-only Chat 输出使用空 choices 数组，累计计量保留最新快照，缺结束事件或读取失败不补造成功 DONE。新工具/厂商/传输不因构造注册而自动获得生产或 strict 许可。
 
 ## 开发与验证节奏
 

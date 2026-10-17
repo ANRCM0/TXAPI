@@ -83,9 +83,11 @@ export function resolutionInput(values, id) {
 
 export function createClient({ onUnauthorized = () => {}, onPending = () => {}, fetcher = fetch } = {}) {
   let session = "";
+  let sessionVersion = 0;
   const pending = new Set();
   return {
     setSession(value) {
+      sessionVersion++;
       for (const controller of pending) controller.abort();
       pending.clear();
       session = value;
@@ -94,6 +96,7 @@ export function createClient({ onUnauthorized = () => {}, onPending = () => {}, 
       if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Only same-origin API paths are allowed.");
       const controller = new AbortController();
       const capturedSession = session;
+      const capturedVersion = sessionVersion;
       const abort = () => controller.abort();
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) controller.abort();
@@ -109,9 +112,12 @@ export function createClient({ onUnauthorized = () => {}, onPending = () => {}, 
           cache: "no-store", credentials: "omit", redirect: "error", signal: controller.signal,
         });
         const text = await response.text();
+        if (controller.signal.aborted || capturedVersion !== sessionVersion) throw new Error("Request canceled or timed out.");
         let value;
         try { value = text ? JSON.parse(text) : {}; }
         catch { throw new Error(`Unexpected server response (HTTP ${response.status}).`); }
+        const publication = response.headers.get("X-TXAPI-Publication-State");
+        if (publication === "pending") onPending();
         if (!response.ok) {
           if (response.status === 401 && callKey === undefined && capturedSession && capturedSession === session) {
             onUnauthorized();
@@ -119,9 +125,12 @@ export function createClient({ onUnauthorized = () => {}, onPending = () => {}, 
           const error = new Error(value.error?.message || `Request failed (HTTP ${response.status}).`);
           error.status = response.status;
           error.data = value.data;
+          error.body = value;
+          error.type = value.error?.type;
+          error.saved = value.saved === true;
+          error.publication = publication;
           throw error;
         }
-        if (response.headers.get("X-TXAPI-Publication-State") === "pending") onPending();
         return value;
       } catch (error) {
         if (controller.signal.aborted) throw new Error("Request canceled or timed out.");

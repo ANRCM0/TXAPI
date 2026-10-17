@@ -15,6 +15,8 @@ const { chromium } = require("playwright");
   };
   let resolution = null;
   let role = "admin";
+  let paginated = false;
+  let failNextPage = true;
   const posted = [];
   const requests = [];
   const json = (res, value) => {
@@ -40,11 +42,23 @@ const { chromium } = require("playwright");
       } });
     } else if (url.pathname === "/api/auth/logout") {
       json(res, {});
+    } else if (url.pathname === "/api/me") {
+      json(res, { data: { id: 1, username: "fixture", role, model_mode: "all", models: [] } });
     } else if (url.pathname === "/api/me/usage") {
       json(res, { data: { quota: 1, used_quota: 0, usage: {} } });
     } else if (url.pathname === "/api/me/keys") {
       json(res, { data: [] });
     } else if (url.pathname === "/api/admin/billing/reservations") {
+      if (paginated) {
+        const offset = Number(url.searchParams.get("offset"));
+        if (offset === 50 && failNextPage) {
+          failNextPage = false;
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end('{"error":{"message":"fixture-ledger-page-failure"}}');
+        } else json(res, { data: Array.from({ length: 50 }, (_, index) => ({ ...reservation,
+          id: `ledger-page-${offset + index}`, reason: offset ? "second page" : "first page" })), unit_scale: "1000000000" });
+        return;
+      }
       const state = url.searchParams.get("state");
       json(res, { data: !state || state === reservation.state ? [reservation] : [], unit_scale: "1000000000" });
     } else if (url.pathname === `/api/admin/billing/reservations/${id}`) {
@@ -137,6 +151,15 @@ const { chromium } = require("playwright");
     await noOverflow();
     if (process.env.TXAPI_BROWSER_SCREENSHOT) await page.screenshot({ path: process.env.TXAPI_BROWSER_SCREENSHOT, fullPage: true });
     await page.getByRole("button", { name: "Close", exact: true }).click();
+    paginated = true;
+    await page.getByRole("button", { name: "Refresh ledger", exact: true }).click();
+    await page.getByText("ledger-page-0", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "fixture-ledger-page-failure" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Next", exact: true }).isEnabled(), true);
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await page.getByText("ledger-page-50", { exact: true }).waitFor();
+    await page.getByText("Rows 51-100", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await page.getByRole("heading", { name: "Welcome back." }).waitFor();
     role = "user";
