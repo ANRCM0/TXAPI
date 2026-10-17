@@ -19,7 +19,7 @@
 | 范围 | 状态与边界 |
 |---|---|
 | S0–S4 与 F0 | 已有阶段验收并合并本地 master；F0 是初始团队接线基线，不是最终统一兼容框架 |
-| 当前代码快照 | `feat/s5-s6-mainline` 基于 `0171645` 推进输入档案强制门槛；本批本地构建/vet/全量测试及进程冒烟通过，远端 CI 随提交单独记录。既有 `b793954` 完整 CI 通过不能替新代码背书；origin/master 为 `90df76b`，尚未合并，证据见 PLAN |
+| 当前代码快照 | `feat/s5-s6-mainline` 基于 `478dc7b` 推进标准 USD 费率与凭据绑定；本批本地构建/vet/全量测试及进程冒烟通过，远端 CI 随提交单独记录。上批输入门槛完整 CI 通过不能替新代码背书；origin/master 为 `90df76b`，尚未合并，证据见 PLAN |
 | S5 | 6 个验收项中 5 个通过，S5-03 未完成；完整阶段尚未验收/合并，不承诺已具备可靠商业收费全部条件 |
 | 统一兼容框架 | Chat/embeddings 已复用非 Gin 类型化协调入口，操作能力进入真实候选过滤；完整 S6 尚未验收，不等于已具备 worker/WS |
 | Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；目前仅独立 Responses JSON/SSE 协议与样本，未开放生产入口，持久状态/后台/WS 尚未实现 |
@@ -83,7 +83,7 @@ HTTP / SSE / WebSocket 接入                 <- WS 待开发
 
 strict 会复核转换后的最终正文，而非只检查入口：保留三协议文本计价白名单检查，但通过白名单不等于目标获准执行，仍必须通过输入档案门槛。工具/媒体、显式缓存或 thinking 配置、非默认服务等级及未知字段会在 attempt/网络调用前被拒绝。embeddings 不能在转换后变为 token 数组或混合批次。拒绝原因保留在管理员账本，不反馈上游健康；legacy/disabled 的透传行为保持。该白名单不证明模型默认推理、缓存或真实 Token 计量边界。
 
-strict 执行现已强制使用[已登记的输入边界档案](docs/reference/input-bound-profiles.md)：没有档案的旧契约仍可加载以支持历史读取与恢复，但新尝试返回 503 `provider_input_unproven`，不发上游、不反馈健康、不继续换凭据。当前可执行范围仅为档案登记的官方 OpenAI Chat/embeddings 目标；Anthropic/Gemini、兼容代理及未登记模型在 strict 下不再仅凭运营声明放行，legacy/disabled 的兼容路径不变。档案核对真实 URL、正文模型和整请求包络；最终正文输出限制必须与占用成本时的限制完全一致。它不替代独立最高费率、币种、失败收费依据及完整 S5 验收。
+strict 执行现已强制使用[已登记的输入边界档案](docs/reference/input-bound-profiles.md)：没有档案的旧契约仍可加载以支持历史读取与恢复，但新尝试返回 503 `provider_input_unproven`，不发上游、不反馈健康、不继续换凭据。当前可执行范围仅为档案登记的官方 OpenAI Chat/embeddings 目标；Anthropic/Gemini、兼容代理及未登记模型在 strict 下不再仅凭运营声明放行，legacy/disabled 的兼容路径不变。档案核对真实 URL、正文模型和整请求包络；最终正文输出限制必须与占用成本时的限制完全一致。发送还须通过[费率档案与凭据绑定](docs/reference/provider-tariff-profiles.md)：显式标准 USD 档案、费率不得低于已登记下限，凭据 ID 与实际发送的上游 Key 摘要必须匹配。缺费率档案返回 `provider_tariff_unproven`，换 Key/新凭据或实际鉴权头不匹配返回 `provider_credential_unproven`；已核对的标准价下限不替代逐凭据最高适用价、失败收费和未来变更依据，完整 S5 仍未验收。
 
 普通访问日志可丢弃且会过期，页面用量只是日志聚合，不是权威余额或恢复账本。客户端调用 Key 已摘要存储；**上游 API Key 当前仍明文落库**，管理 API 掩码不等于加密存储。上游凭据加密需独立安全加固；S7-A 的持久正文加密也尚未实现。部署时保护数据库、备份和 root 管理凭据，公网接入必须配置合适的 TLS 与边界防护。
 

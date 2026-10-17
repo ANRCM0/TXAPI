@@ -8,6 +8,7 @@ loopback-only network fixture; the production binary separately checks refusal.
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -170,7 +171,7 @@ def strict_crash_workflow(gateway, config, config_path, work, env, gateway_port,
         }, "POST", 201)["data"]
         api("/api/admin/prices/crash-model", {"input_price_per_1k": 0.15, "output_price_per_1k": 0.6}, "PUT")
         key = api("/api/me/keys", {"name": "crash-client", "model_mode": "allowlist", "models": ["crash-model"]}, "POST", 201)["data"]
-    config["billing"]["provider_contracts"].append(verified_provider_contract(channel["id"]))
+    config["billing"]["provider_contracts"].append(verified_provider_contract(channel, "sk-smoke-slow-upstream-only"))
     config_path.write_text(json.dumps(config))
     with service([str(gateway), "-config", str(config_path)], work / "strict-killed.log", env) as process:
         ready(process, gateway_port)
@@ -230,13 +231,15 @@ def provider_contract(channel_id, upstream_url, model):
     }
 
 
-def verified_provider_contract(channel_id):
+def verified_provider_contract(channel, key):
     return {
-        "channel_id": channel_id, "base_url": "https://api.openai.com", "protocol": "openai",
+        "channel_id": channel["id"], "base_url": "https://api.openai.com", "protocol": "openai",
         "actual_model": "gpt-4o-mini-2024-07-18", "operation": "chat",
         "output_limit_field": "max_completion_tokens", "input_token_ceiling": 128000,
         "input_bound_profile": "openai_chat_v1", "max_output_tokens": 32,
         "input_price_per_1k": "0.00015", "output_price_per_1k": "0.0006",
+        "tariff_profile": "openai_standard_usd_2026_10_17", "currency": "USD",
+        "credential_bindings": {str(channel["credentials"][0]["id"]): hashlib.sha256(key.encode()).hexdigest()},
         "evidence": "isolated smoke tariff; test-only loopback transport, no real provider request",
     }
 
@@ -366,7 +369,19 @@ def main():
                 verified_channel = json.loads(body)["data"]
             config["billing"]["max_request_cost"] = "20"
             config["billing"]["max_provider_request_cost"] = "1"
-            config["billing"]["provider_contracts"].append(verified_provider_contract(verified_channel["id"]))
+            profiled_contract = verified_provider_contract(verified_channel, "sk-verified-smoke-only")
+            config["billing"]["provider_contracts"].append({
+                field: value for field, value in profiled_contract.items()
+                if field not in {"tariff_profile", "currency", "credential_bindings"}
+            })
+            config_path.write_text(json.dumps(config))
+            with service([str(gateway), "-config", str(config_path)], work / "strict-no-tariff.log", clean_env) as strict_gw:
+                ready(strict_gw, gateway_port)
+                strict_payload = {"model": "smoke-model", "max_completion_tokens": 32, "service_tier": "default",
+                                  "messages": [{"role": "user", "content": "hello"}]}
+                status, body = request(base + "/v1/chat/completions", key, strict_payload)
+                assert status == 503 and json.loads(body)["error"]["type"] == "provider_tariff_unproven", (status, body)
+            config["billing"]["provider_contracts"][-1] = profiled_contract
             config_path.write_text(json.dumps(config))
             strict_env = dict(clean_env, TXAPI_SMOKE_MAIN="1", TXAPI_SMOKE_UPSTREAM=f"127.0.0.1:{upstream_port}")
             with service([str(strict_gateway), "-config", str(config_path)], work / "strict-profile.log", strict_env) as strict_gw:
@@ -387,9 +402,15 @@ def main():
                     assert time.monotonic() < deadline, "Strict request observations did not appear"
                     time.sleep(0.05)
                 assert all(row["billing_state"] == "settled" and abs(row["cost"] - 0.00585) < 1e-12 for row in billed), billed
+                credential_id = verified_channel["credentials"][0]["id"]
+                status, body = request(base + f"/api/admin/credentials/{credential_id}", admin,
+                                       {"api_key": "sk-rotated-smoke-only", "weight": 1}, "PUT")
+                assert status == 200, body
+                status, body = request(base + "/v1/chat/completions", key, strict_payload)
+                assert status == 503 and json.loads(body)["error"]["type"] == "provider_credential_unproven", (status, body)
             strict_crash_workflow(strict_gateway, config, config_path, work, strict_env, gateway_port,
                                   f"http://127.0.0.1:{upstream_port}", admin)
-    print("PASS: production startup/auth/normal/SSE/console, strict missing-price/unproved-input rejection; isolated main profile settlement and recovery")
+    print("PASS: production startup/auth/normal/SSE/console, strict missing-price/input/tariff rejection; isolated main settlement, credential rotation refusal and recovery")
 
 
 if __name__ == "__main__":

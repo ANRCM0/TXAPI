@@ -164,10 +164,11 @@ strict 每次发送现在还需要 `max_provider_request_cost` 和 `provider_con
 
 - 契约精确匹配渠道 ID、完整 base URL、协议、**实际映射模型**、操作与输出限制字段。无别名/通配符回落，不从售价、渠道倍率或缓存收益推导上游价格。可执行目标必须另有已登记的输入档案；当前仅官方 OpenAI Chat/embeddings 登记组合。无档案的三协议契约只可加载，不获准执行；embeddings 输出字段/上限须为空/0、输出价须为 `"0"`。
 - `input_token_ceiling` 是厂商必须保证的**整次尝试可计费输入总量上限**，包括批量 embeddings 全部条目、协议消息框架及可能收费的错误请求，不是每条消息/数组项限额，也不是本地实际计数。`max_output_tokens` 和 `output_limit_field` 必须界定所有可计费输出（包括适用的隐藏推理）；缓存/服务等级等价格必须由每千 token 的最高包络价覆盖，不能成立的组合不能配置为已支持。
-- `input_price_per_1k` / `output_price_per_1k` 是与预算同币种的非负十进制字符串，最多九位小数，显式零价与缺价不同。每次保守上限为 `ceil((整次输入上限 × 输入上界单价 + 本次显式输出限制 × 输出上界单价) / 1000)`，按 `1e-9` 单位使用宽整数计算；embeddings 输出为 0。即使请求很短，也占用完整输入包络，不采用字符平均值。
-- `evidence` 必填，记录可复核的厂商约束、模型/接口版本和价格依据；必须覆盖同渠道全部允许凭据。**非空说明不等于系统已验证该声明**。仓库没有默认真实厂商契约，样例数值仅示范语法，不能直接用于真实收费验收；不在 evidence / URL 中填写密钥或私密正文。真实模型/计价维度验证仍是 S5-C 未完成项；售价侧的发送前费用检查已接入，但同样依赖这些边界确实成立。
+- `input_price_per_1k` / `output_price_per_1k` 是与 provider 预算同币种的非负十进制字符串，最多九位小数。执行还须有 `tariff_profile: openai_standard_usd_2026_10_17`、`currency: USD` 及 `credential_bindings`。低于已登记标准费率、错币种/档案或不完整绑定拒绝启动；零价不能绕过收费模型下限。当前可执行 provider 预算与金额仅为 USD（精度 1e-9），用户售价/预算单位保持独立，不做自动换汇。每次保守上限为 `ceil((整次输入上限 × 输入上界单价 + 本次显式输出限制 × 输出上界单价) / 1000)`，按 `1e-9` 单位使用宽整数计算；embeddings 输出为 0。即使请求很短，也占用完整输入包络，不采用字符平均值。
+- `credential_bindings` 是凭据 ID 到上游 Key 小写 SHA-256 的显式绑定；新 ID、换 Key 或实际鉴权头变化不继承旧许可，配置映射在编译时复制固定。获取摘要和适用范围见[费率档案](reference/provider-tariff-profiles.md)。禁止使用真实 Key 或页面掩码；摘要不代表静态加密或价格认证。最终准备头只允许 Authorization、Content-Type、Accept，不允许通过额外项目/组织头切换计费账户。
+- `evidence` 必填，记录可复核的厂商约束、模型/接口版本和价格依据，必须逐一覆盖显式绑定凭据的实际适用费率；登记标准费率下限不替代失败收费、税/附加费或未来价格变更核查。**非空说明不等于系统已验证该声明**。仓库没有默认真实厂商契约，样例数值仅示范语法，不能直接用于真实收费验收；不在 evidence / URL 中填写密钥或私密正文。真实模型/计价维度验证仍是 S5-C 未完成项；售价侧的发送前费用检查已接入，但同样依赖这些边界确实成立。
 - 请求预留时固定成本策略；每次 attempt 前在同一事务内增加 `provider_held_units` 并插入 attempt 和带 SHA-256 的不可变 JSON 快照，超出 `provider_budget_units` 则不执行。并发/重复插入/数据库写失败不能部分消耗额度或发出未登记请求。上一尝试无论失败、缺 usage 还是成功，都不返还本请求的保守重试占用；这是有意采用的保守策略，不将未知成本记为 0。
-- 缺精确契约返回 503 `provider_cost_contract_missing`，无已登记输入档案返回 503 `provider_input_unproven`，累计包络不足返回 503 `provider_budget_exhausted`，输出超契约返回 400 `provider_cost_limit`；这些本地拒绝不罚渠道健康，也不继续换凭据试探。转换限制检查仍先执行。已执行后收到超输入/输出契约的原始用量，记录 `provider_contract_violation`、保留未知回执与 pending；响应已经提交时不能撤销或拼接错误。不能承诺远端违约时仍绝对零损失。
+- 缺精确契约返回 503 `provider_cost_contract_missing`，无已登记输入档案返回 503 `provider_input_unproven`，无费率档案返回 503 `provider_tariff_unproven`，凭据/实际鉴权头不匹配返回 503 `provider_credential_unproven`，累计包络不足返回 503 `provider_budget_exhausted`，输出超契约返回 400 `provider_cost_limit`；这些本地拒绝不罚渠道健康，也不继续换凭据试探。转换限制检查仍先执行。已执行后收到超输入/输出契约的原始用量，记录 `provider_contract_violation`、保留未知回执与 pending；响应已经提交时不能撤销或拼接错误。不能承诺远端违约时仍绝对零损失。
 
 schema v7 仅追加 reservation 的累计上游预算/占用与 attempt 的上游保守上限/契约摘要/快照字段，并登记迁移；历史行保持 0/空，不回填虚构契约。现有表仍由 store 统一迁移。管理员详情显示这些字段；它们不替代 `billing_balances`，不会因用户结算/人工豁免而清零。低版本二进制不得直接打开 v7；本批只验证隔离临时库，不操作实际运行数据库，也不另开旧库报错/回滚专项。
 
@@ -177,13 +178,13 @@ strict 执行强制要求已登记输入档案。`input_bound_profile: openai_em
 
 Chat 使用 `openai_chat_v1` 只登记官方 `gpt-4o-mini-2024-07-18` Chat 快照，整输入上界至少 128000，`max_completion_tokens` 至多 16384。请求必须显式 `service_tier: "default"`，防止项目默认付费等级改变；网关不会自动改写服务等级。其他等级、tools/media 等未计价维度继续拒绝。使用模型全上下文而非字符估算，因此短请求也可能需要很大的用户 hold 和 provider 包络；不是每次只占请求正文估计成本。完整 S5 仍未验收。
 
-成本准入的固定拒绝码会先写入现有 reservation `reason`，再返回调用方：`provider_cost_contract_missing`、`provider_input_unproven`、`provider_budget_exhausted`、`provider_cost_limit`、`billing_fee_limit`。管理员账本列表与详情沿用现有 reason 展示，无新路由或迁移。尚无任何持久 attempt 时，唯一收尾释放双预算、结算为零并保留拒绝码；已有未知执行时保留完整 hold 与 provider 包络，reason 为 `execution_or_usage_unknown:<拒绝码>`。原因写入失败返回 `billing_unavailable`，仍不执行上游。记录仅保存固定码，不保存原始错误、目标 URL、凭据或请求正文；客户端取消后诊断写入最多等待两秒，不延长上游执行。崩溃发生在记录之后、收尾之前，既有过期恢复继续保留该原因；管理员最终审计结算后 reason 仍使用既有 `admin_*` 语义。
+成本准入的固定拒绝码会先写入现有 reservation `reason`，再返回调用方：`provider_cost_contract_missing`、`provider_input_unproven`、`provider_tariff_unproven`、`provider_credential_unproven`、`provider_budget_exhausted`、`provider_cost_limit`、`billing_fee_limit`。管理员账本列表与详情沿用现有 reason 展示，无新路由或迁移。尚无任何持久 attempt 时，唯一收尾释放双预算、结算为零并保留拒绝码；已有未知执行时保留完整 hold 与 provider 包络，reason 为 `execution_or_usage_unknown:<拒绝码>`。原因写入失败返回 `billing_unavailable`，仍不执行上游。记录仅保存固定码，不保存原始错误、目标 URL、凭据或请求正文；客户端取消后诊断写入最多等待两秒，不延长上游执行。崩溃发生在记录之后、收尾之前，既有过期恢复继续保留该原因；管理员最终审计结算后 reason 仍使用既有 `admin_*` 语义。
 
 strict 现在还会在协议转换完成后、开始持久 attempt 前检查最终正文的文本计价白名单。OpenAI Chat/embeddings 复用严格入口解析；Anthropic 只允许现有文本 messages/system 和基础生成字段，Gemini 只允许文本 contents/systemInstruction 和基础 generationConfig。所有层级的重复 JSON key、未知字段、工具/媒体块、缓存控制或引用、显式 thinking/推理配置、非默认服务等级和输出媒体配置均拒绝；不先删除字段再假装验证通过。embeddings 只允许 OpenAI 文本或文本批次，禁止转换引入 token 数组或混合输入。新正文维度检查不影响 legacy/disabled 的透传行为。
 
 最终正文维度越界、输出限制变化和 embeddings 跨协议拒绝共用 `unsupported_billing_dimension` 持久原因，沿用上述零执行释放/未知执行 pending/故障拒绝规则；均不反馈上游健康、不计为持久执行，也不产生 provider 新占用。此白名单约束的是实际发送正文中的显式字段，不能证明模型默认推理行为、缓存隐含计量、真实输入 Token 数或厂商价格保证；没有新增生产厂商的可计价认证，S5-C02/C03 完整验收仍待完成。
 
-在同一个 `StartCostedAttempt` 内，除了独立上游成本，还用**请求预留时固定的售价与倍率快照**对整次输入包络和本次显式输出限制计算收费上界；整数计算、一次向上舍入与最终结算相同。实际模型存在匹配售价时优先使用（含既有确定性通配规则），否则保持现有公开模型回落规则；不以廉价上游成本价替代售价，也不因请求字符串很短而缩小厂商总输入包络。embeddings 同样检查全批输入，不因输出为 0 而跳过。
+在同一个 `StartPreparedAttempt` 内，除了独立上游成本，还用**请求预留时固定的售价与倍率快照**对整次输入包络和本次显式输出限制计算收费上界；整数计算、一次向上舍入与最终结算相同。实际模型存在匹配售价时优先使用（含既有确定性通配规则），否则保持现有公开模型回落规则；不以廉价上游成本价替代售价，也不因请求字符串很短而缩小厂商总输入包络。embeddings 同样检查全批输入，不因输出为 0 而跳过。
 
 - attempt 的更新/插入事务同时要求持久 reservation 的 `reserved_units >= 收费上界`，不是读取当前全局配置重新决定可收金额；恰好相等允许，超一单位也拒绝。超出或计算溢出返回 400 `billing_fee_limit`，不增大用户/Key hold，不发送、不记网络 attempt、不占用上游包络、不反馈渠道健康。
 - 每个重试目标都重新计算，使用该目标的实际模型与渠道分组。先前未知执行后因下一目标收费过高而停止，先前 attempt 与占用继续保留，用户 hold 仍 pending；只检查可见输出或只检查首选渠道均不满足此规则。

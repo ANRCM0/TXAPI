@@ -24,7 +24,7 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 	}{
 		{"missing", "", "provider_cost_contract_missing", false, 32, 0},
 		{"first envelope too large", "0.001", "provider_budget_exhausted", true, 32, 0},
-		{"second envelope too large", "0.001064", "provider_budget_exhausted", true, 32, 1},
+		{"second envelope too large", "0.0300192", "provider_budget_exhausted", true, 32, 1},
 		{"output above contract", "0.1", "provider_cost_limit", true, 33, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -51,7 +51,8 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 					ChannelID: channels[0].ID, BaseURL: channels[0].BaseURL, Protocol: "openai", ActualModel: verifiedChatModel,
 					Operation: "chat", OutputLimitField: "max_completion_tokens", InputTokenCeiling: 200000, MaxOutputTokens: 32,
 					InputBoundProfile: billing.OpenAIChatV1,
-					InputPricePer1K:   "0.000005", OutputPricePer1K: "0.002", Evidence: "isolated fake tariff for envelope arithmetic, not an approved provider price",
+					TariffProfile:     billing.OpenAIStandardUSD20261017, Currency: "USD", CredentialBindings: testCredentialBindings(channels[0]),
+					InputPricePer1K: "0.00015", OutputPricePer1K: "0.0006", Evidence: "isolated standard-rate fixture, no real provider call",
 				}})
 				if err != nil {
 					t.Fatal(err)
@@ -86,7 +87,7 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 			}
 			var attempts []dbmodel.BillingAttempt
 			st.DB().Where("reservation_id=?", row.ID).Find(&attempts)
-			if int64(len(attempts)) != tc.hits || row.ProviderHeldUnits != 1_064_000*tc.hits {
+			if int64(len(attempts)) != tc.hits || row.ProviderHeldUnits != 30_019_200*tc.hits {
 				t.Fatalf("nondurable budget/network mismatch: %+v %+v", row, attempts)
 			}
 			if tc.hits == 0 && (row.State != billing.Settled || row.ChargeUnits != 0) {
@@ -122,6 +123,7 @@ func TestStrictProviderEmbeddingBatchUsesIndependentInputEnvelope(t *testing.T) 
 	if err := engine.ConfigureProviderCosts("0.1", []billing.ProviderCostContract{{
 		ChannelID: channels[0].ID, BaseURL: channels[0].BaseURL, Protocol: "openai", ActualModel: "text-embedding-3-small",
 		Operation: "embeddings", InputTokenCeiling: 300000, InputBoundProfile: billing.OpenAIEmbeddingsV1,
+		TariffProfile: billing.OpenAIStandardUSD20261017, Currency: "USD", CredentialBindings: testCredentialBindings(channels[0]),
 		InputPricePer1K: "0.00002", OutputPricePer1K: "0", Evidence: "isolated whole-batch fake upstream",
 	}}); err != nil {
 		t.Fatal(err)

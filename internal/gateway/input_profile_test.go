@@ -70,6 +70,7 @@ func TestStrictEmbeddingInputProfileBindsWireAndWholeRequestCap(t *testing.T) {
 			if err := engine.ConfigureProviderCosts("0.006", []billing.ProviderCostContract{{
 				ChannelID: channels[0].ID, BaseURL: channels[0].BaseURL, Protocol: "openai", ActualModel: actual,
 				Operation: "embeddings", InputTokenCeiling: 300000, InputBoundProfile: billing.OpenAIEmbeddingsV1,
+				TariffProfile: billing.OpenAIStandardUSD20261017, Currency: "USD", CredentialBindings: testCredentialBindings(channels[0]),
 				InputPricePer1K: "0.00002", OutputPricePer1K: "0", Evidence: "isolated tariff fixture, no actual provider call",
 			}}); err != nil {
 				t.Fatal(err)

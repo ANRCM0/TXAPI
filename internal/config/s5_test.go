@@ -14,6 +14,10 @@ func TestEmbeddingInputBoundProfileConfiguration(t *testing.T) {
       actual_model: text-embedding-3-small
       operation: embeddings
       input_bound_profile: openai_embeddings_v1
+      tariff_profile: openai_standard_usd_2026_10_17
+      currency: USD
+      credential_bindings:
+        "123": "0000000000000000000000000000000000000000000000000000000000000000"
       input_token_ceiling: 300000
       input_price_per_1k: "0.00002"
       output_price_per_1k: "0"
@@ -24,6 +28,10 @@ func TestEmbeddingInputBoundProfileConfiguration(t *testing.T) {
 	}
 	if cfg.HasSeedData() || len(cfg.Billing.ProviderContracts) != 1 || cfg.Billing.ProviderContracts[0].InputBoundProfile != "openai_embeddings_v1" {
 		t.Fatalf("input bound profile lost or treated as seed: %+v", cfg)
+	}
+	c := cfg.Billing.ProviderContracts[0]
+	if c.TariffProfile != "openai_standard_usd_2026_10_17" || c.Currency != "USD" || len(c.CredentialBindings) != 1 || len(c.CredentialBindings["123"]) != 64 {
+		t.Fatalf("tariff currency/bindings lost on load: %+v", c)
 	}
 }
 

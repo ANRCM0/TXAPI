@@ -63,7 +63,7 @@ Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模
 
 跨协议支持的是共同子集，不是“所有 OpenAI 字段换名”。`stream_options` 仅接受已映射的 `include_usage=true`，本地转换返回用量而不把该字段错发给厂商；未实现的 false/扩展拒绝。`n=1` 是显式单候选，其他候选数拒绝。`tool_choice`、strict schema、parallel_tool_calls 等未映射选项不做猜测。引用上游功能逻辑不能扩大本矩阵。
 
-strict 的 `StartPreparedAttempt` 是唯一可执行成本准入入口：必须匹配已登记档案及真实 URL/正文，最终输出限制还须与本次成本占用元数据一致。无档案契约可加载用于历史读取，但不能发起新 attempt，返回持久 `provider_input_unproven`。旧 `StartCostedAttempt` 无实际正文，已弃用且不能绕过检查。billing 单测的私有声明包络夹具只覆盖算术/账本事务，不构成生产许可；网关正向测试使用实际档案与注入 loopback Transport，生产没有测试豁免配置。
+strict 的 `StartPreparedAttempt` 是唯一可执行成本准入入口：必须匹配已登记档案及真实 URL/正文，最终输出限制还须与本次成本占用元数据一致。无档案契约可加载用于历史读取，但不能发起新 attempt，返回持久 `provider_input_unproven`。旧 `StartCostedAttempt` 无实际正文，已弃用且不能绕过检查。billing 单测的私有声明包络夹具只覆盖算术/账本事务，不构成生产许可；网关正向测试使用实际档案与注入 loopback Transport，生产没有测试豁免配置。 新尝试还须有已登记费率档案、USD 币种和显式凭据 ID/Key 摘要绑定；`StartPreparedAttempt` 消费真实 Header，最终鉴权和项目/组织选择不得绕过成本许可。绑定在启动编译时复制，换 Key 或新增 ID 必须重新核实并重启加载。缺费率/凭据依据持久返回 `provider_tariff_unproven` / `provider_credential_unproven`，不重试、不罚健康；未知执行仍保留占用。来源与未覆盖假设见[费率档案](reference/provider-tariff-profiles.md)。
 
 新协议在自己的目录开发，集成人员在创建 gateway 时注册：
 

@@ -310,7 +310,7 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout 
 		err := g.billing.StartPreparedAttempt(c.ctx, pre, dbmodel.BillingAttempt{
 			Number: number, ChannelID: uint(m.ChannelID), CredentialID: m.CredentialIDValue,
 			ActualModel: m.ActualModel, Group: c.result.ChannelGroup,
-		}, billing.ProviderTarget{ChannelID: uint(m.ChannelID), BaseURL: m.BaseURL, Protocol: pa.Name(), ActualModel: m.ActualModel, Operation: operation}, *c.result.strictRequest, input.URL, input.Body)
+		}, billing.ProviderTarget{ChannelID: uint(m.ChannelID), BaseURL: m.BaseURL, Protocol: pa.Name(), ActualModel: m.ActualModel, Operation: operation}, *c.result.strictRequest, input.URL, input.Body, input.Header)
 		if err != nil {
 			code, kind, message := 503, "billing_unavailable", "billing attempt could not be recorded"
 			switch {
@@ -318,6 +318,10 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout 
 				kind, message = "provider_cost_contract_missing", err.Error()
 			case errors.Is(err, billing.ErrInputUnproven):
 				kind, message = "provider_input_unproven", err.Error()
+			case errors.Is(err, billing.ErrTariffUnproven):
+				kind, message = "provider_tariff_unproven", err.Error()
+			case errors.Is(err, billing.ErrCredentialTariff):
+				kind, message = "provider_credential_unproven", err.Error()
 			case errors.Is(err, billing.ErrProviderBudget):
 				kind, message = "provider_budget_exhausted", err.Error()
 			case errors.Is(err, billing.ErrProviderLimit):

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -19,6 +20,8 @@ import (
 var (
 	ErrProviderContract = errors.New("no matching provider cost contract")
 	ErrInputUnproven    = errors.New("provider input bound requires a verified profile")
+	ErrTariffUnproven   = errors.New("provider tariff requires a registered currency and rate profile")
+	ErrCredentialTariff = errors.New("provider credential is not covered by the tariff contract")
 	ErrProviderBudget   = errors.New("provider request budget exhausted")
 	ErrProviderLimit    = errors.New("request exceeds the provider cost contract")
 	ErrFeeBound         = errors.New("request fee bound exceeds the reserved user fee ceiling")
@@ -30,18 +33,21 @@ var (
 // Evidence must explain the provider-enforced ceilings and tariff assumptions.
 // There are deliberately no model aliases, wildcards or inferred defaults.
 type ProviderCostContract struct {
-	ChannelID         uint   `json:"channel_id"`
-	BaseURL           string `json:"base_url"`
-	Protocol          string `json:"protocol"`
-	ActualModel       string `json:"actual_model"`
-	Operation         string `json:"operation"`
-	OutputLimitField  string `json:"output_limit_field"`
-	InputTokenCeiling int64  `json:"input_token_ceiling"`
-	InputBoundProfile string `json:"input_bound_profile,omitempty"`
-	MaxOutputTokens   int64  `json:"max_output_tokens"`
-	InputPricePer1K   string `json:"input_price_per_1k"`
-	OutputPricePer1K  string `json:"output_price_per_1k"`
-	Evidence          string `json:"evidence"`
+	ChannelID          uint              `json:"channel_id"`
+	BaseURL            string            `json:"base_url"`
+	Protocol           string            `json:"protocol"`
+	ActualModel        string            `json:"actual_model"`
+	Operation          string            `json:"operation"`
+	OutputLimitField   string            `json:"output_limit_field"`
+	InputTokenCeiling  int64             `json:"input_token_ceiling"`
+	InputBoundProfile  string            `json:"input_bound_profile,omitempty"`
+	MaxOutputTokens    int64             `json:"max_output_tokens"`
+	InputPricePer1K    string            `json:"input_price_per_1k"`
+	OutputPricePer1K   string            `json:"output_price_per_1k"`
+	Evidence           string            `json:"evidence"`
+	TariffProfile      string            `json:"tariff_profile,omitempty"`
+	Currency           string            `json:"currency,omitempty"`
+	CredentialBindings map[string]string `json:"credential_bindings,omitempty"`
 }
 
 type ProviderTarget struct {
@@ -142,6 +148,15 @@ func compileProviderCosts(budget string, configs []ProviderCostContract) (*Provi
 			return nil, errors.New("invalid provider output tariff")
 		}
 		contract := providerContract{config: c, input: in, output: out}
+		if err := validateTariffProfile(contract); err != nil {
+			return nil, err
+		}
+		if c.CredentialBindings != nil {
+			contract.config.CredentialBindings = make(map[string]string, len(c.CredentialBindings))
+			for id, fingerprint := range c.CredentialBindings {
+				contract.config.CredentialBindings[id] = fingerprint
+			}
+		}
 		// Validate the entire declared envelope, not just the first request.
 		if _, err := contract.bound(c.MaxOutputTokens); err != nil {
 			return nil, err
@@ -187,16 +202,16 @@ type providerBound struct {
 // Deprecated: use StartPreparedAttempt. Metadata alone cannot prove the bounds
 // of the request actually sent, so this entry cannot admit an execution.
 func (e *Engine) StartCostedAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, target ProviderTarget, request StrictRequest) error {
-	return e.startCostedAttempt(ctx, pre, attempt, target, request, "", nil)
+	return e.startCostedAttempt(ctx, pre, attempt, target, request, "", nil, nil)
 }
 
 // StartPreparedAttempt verifies profiles against the payload and destination
 // that the executor will actually use, before occupying the attempt envelope.
-func (e *Engine) StartPreparedAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, target ProviderTarget, request StrictRequest, preparedURL string, preparedBody []byte) error {
-	return e.startCostedAttempt(ctx, pre, attempt, target, request, preparedURL, preparedBody)
+func (e *Engine) StartPreparedAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, target ProviderTarget, request StrictRequest, preparedURL string, preparedBody []byte, preparedHeader http.Header) error {
+	return e.startCostedAttempt(ctx, pre, attempt, target, request, preparedURL, preparedBody, preparedHeader)
 }
 
-func (e *Engine) startCostedAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, target ProviderTarget, request StrictRequest, preparedURL string, preparedBody []byte) (err error) {
+func (e *Engine) startCostedAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, target ProviderTarget, request StrictRequest, preparedURL string, preparedBody []byte, preparedHeader http.Header) (err error) {
 	defer func() {
 		err = e.RecordCostRefusal(ctx, pre, err)
 	}()
@@ -215,6 +230,9 @@ func (e *Engine) startCostedAttempt(ctx context.Context, pre *PreDeduct, attempt
 		return ErrProviderLimit
 	}
 	if err := checkProfileRequest(contract.config, preparedURL, preparedBody); err != nil {
+		return err
+	}
+	if err := checkTariffCredential(contract.config, attempt.CredentialID, preparedHeader); err != nil {
 		return err
 	}
 	return e.startContractAttempt(ctx, pre, attempt, contract, request)
@@ -286,6 +304,10 @@ func providerRefusalReason(err error) string {
 		return "provider_cost_contract_missing"
 	case errors.Is(err, ErrInputUnproven):
 		return "provider_input_unproven"
+	case errors.Is(err, ErrTariffUnproven):
+		return "provider_tariff_unproven"
+	case errors.Is(err, ErrCredentialTariff):
+		return "provider_credential_unproven"
 	case errors.Is(err, ErrProviderBudget):
 		return "provider_budget_exhausted"
 	case errors.Is(err, ErrProviderLimit):
@@ -302,7 +324,7 @@ func providerRefusalReason(err error) string {
 func persistedProviderRefusal(reason string) string {
 	reason = strings.TrimPrefix(reason, "execution_or_usage_unknown:")
 	switch reason {
-	case "provider_cost_contract_missing", "provider_input_unproven", "provider_budget_exhausted", "provider_cost_limit", "billing_fee_limit", "unsupported_billing_dimension":
+	case "provider_cost_contract_missing", "provider_input_unproven", "provider_tariff_unproven", "provider_credential_unproven", "provider_budget_exhausted", "provider_cost_limit", "billing_fee_limit", "unsupported_billing_dimension":
 		return reason
 	default:
 		return ""

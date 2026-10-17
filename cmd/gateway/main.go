@@ -146,7 +146,8 @@ func main() {
 					Operation: c.Operation, OutputLimitField: c.OutputLimitField,
 					InputTokenCeiling: c.InputTokenCeiling, MaxOutputTokens: c.MaxOutputTokens,
 					InputBoundProfile: c.InputBoundProfile,
-					InputPricePer1K:   c.InputPricePer1K, OutputPricePer1K: c.OutputPricePer1K, Evidence: c.Evidence,
+					TariffProfile:     c.TariffProfile, Currency: c.Currency, CredentialBindings: c.CredentialBindings,
+					InputPricePer1K: c.InputPricePer1K, OutputPricePer1K: c.OutputPricePer1K, Evidence: c.Evidence,
 				})
 			}
 			if err := engine.ConfigureProviderCosts(cfg.Billing.MaxProviderRequestCost, contracts); err != nil {

@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -64,16 +66,30 @@ func configureVerifiedChatCosts(t *testing.T, engine *billing.Engine, channels [
 	t.Helper()
 	var contracts []billing.ProviderCostContract
 	for _, ch := range channels {
-		contracts = append(contracts, billing.ProviderCostContract{
-			ChannelID: ch.ID, BaseURL: ch.BaseURL, Protocol: "openai", ActualModel: verifiedChatModel,
-			Operation: "chat", OutputLimitField: "max_completion_tokens", InputTokenCeiling: 128000, MaxOutputTokens: 4096,
-			InputBoundProfile: billing.OpenAIChatV1, InputPricePer1K: "0.00015", OutputPricePer1K: "0.0006",
-			Evidence: "isolated tariff fixture; transport never calls a real provider",
-		})
+		contracts = append(contracts, verifiedChatContract(ch))
 	}
 	if err := engine.ConfigureProviderCosts("1", contracts); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func verifiedChatContract(ch dbmodel.Channel) billing.ProviderCostContract {
+	return billing.ProviderCostContract{
+		ChannelID: ch.ID, BaseURL: ch.BaseURL, Protocol: "openai", ActualModel: verifiedChatModel,
+		Operation: "chat", OutputLimitField: "max_completion_tokens", InputTokenCeiling: 128000, MaxOutputTokens: 4096,
+		InputBoundProfile: billing.OpenAIChatV1, InputPricePer1K: "0.00015", OutputPricePer1K: "0.0006",
+		TariffProfile: billing.OpenAIStandardUSD20261017, Currency: "USD", CredentialBindings: testCredentialBindings(ch),
+		Evidence: "isolated tariff fixture; transport never calls a real provider",
+	}
+}
+
+func testCredentialBindings(ch dbmodel.Channel) map[string]string {
+	bindings := make(map[string]string, len(ch.Credentials))
+	for _, credential := range ch.Credentials {
+		digest := sha256.Sum256([]byte(credential.APIKey))
+		bindings[fmt.Sprint(credential.ID)] = hex.EncodeToString(digest[:])
+	}
+	return bindings
 }
 
 func TestUnprovedInputRefusesOnlyStrictWithoutNetworkOrHealthPenalty(t *testing.T) {

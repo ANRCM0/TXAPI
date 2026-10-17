@@ -48,6 +48,7 @@ billing:
   # 无法被这笔预留覆盖则返回 billing_fee_limit，不因上游成本低而放行。
   # strict 还需独立的所有尝试累计上游成本预算及明确成本契约。
   # 此配置不是种子，重启生效；空契约拒绝执行，不能使用售价或别名替代。
+  # 当前可执行费率档案仅 USD；此 provider 预算不是用户售价单位或自动换汇。
   # max_provider_request_cost: "0.10"
   # provider_contracts:
   #   - channel_id: 1
@@ -56,6 +57,10 @@ billing:
   #     actual_model: "text-embedding-3-small"
   #     operation: "embeddings"
   #     input_bound_profile: "openai_embeddings_v1"
+  #     tariff_profile: "openai_standard_usd_2026_10_17"
+  #     currency: "USD"
+  #     credential_bindings:
+  #       "123": "REPLACE_WITH_LOWERCASE_SHA256_OF_EXACT_UPSTREAM_KEY"
   #     input_token_ceiling: 300000
   #     input_price_per_1k: "0.00002"
   #     output_price_per_1k: "0"
@@ -68,9 +73,12 @@ billing:
   # 输出字段/上限为空/0，输出价为 "0"；详见 docs/reference/input-bound-profiles.md。
   # Chat 使用 "openai_chat_v1"，仅官方 gpt-4o-mini-2024-07-18；
   # input_token_ceiling >= 128000，max_completion_tokens <= 16384，
-  # 请求必须显式 service_tier: "default"。不自动认证本配置的费率/币种。
+  # 请求必须显式 service_tier: "default"。还须有登记费率档案、USD 币种及
+  # ID -> Key 摘要绑定；标准费率下限不足拒绝启动，缺档案/换 Key 在发送前拒绝。
+  # 摘要获取与适用范围见 docs/reference/provider-tariff-profiles.md。
   # 上述数值仅展示语法，不是任何真实模型保证！必须核实全批输入、
-  # reasoning/cache/错误请求的总可计费范围及同渠道所有凭据的最高价格。
+  # reasoning/cache/错误请求的总可计费范围及每个绑定凭据的最高适用价格；
+  # 已登记标准费率下限不替代失败收费/附加费证明或未来价格变更核查。
 
 # 渠道与令牌是**种子数据**：只在数据库为空时导入一次，之后通过管理 API 增删改。
 # 真实使用时替换 base_url、模型名和两个 key 占位符；

@@ -35,7 +35,7 @@ func TestInputProofRequiredBeforeAnyPublicAttempt(t *testing.T) {
 			for _, prepared := range []bool{false, true} {
 				if prepared {
 					err = e.StartPreparedAttempt(ctx, pre, attempt, providerTestTarget(c), request,
-						c.BaseURL+"/v1/chat/completions", []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":32}`))
+						c.BaseURL+"/v1/chat/completions", []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":32}`), nil)
 				} else {
 					err = e.StartCostedAttempt(ctx, pre, attempt, providerTestTarget(c), request)
 				}
@@ -96,6 +96,7 @@ func TestInputProofMatchesChargedLimitToActualWire(t *testing.T) {
 				ActualModel: "gpt-4o-mini-2024-07-18", Operation: "chat", InputTokenCeiling: 128000,
 				InputBoundProfile: OpenAIChatV1, OutputLimitField: "max_completion_tokens", MaxOutputTokens: 32,
 				InputPricePer1K: "0.00015", OutputPricePer1K: "0.0006", Evidence: "isolated tariff fixture"}
+			c = withTestTariff(c)
 			if err := e.ConfigureProviderCosts("1", []ProviderCostContract{c}); err != nil {
 				t.Fatal(err)
 			}
@@ -104,10 +105,10 @@ func TestInputProofMatchesChargedLimitToActualWire(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			attempt := model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: c.ActualModel}
+			attempt := model.BillingAttempt{Number: 1, ChannelID: 1, CredentialID: 1, ActualModel: c.ActualModel}
 			request := StrictRequest{tc.meta, "max_completion_tokens"}
 			body := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"service_tier":"default","max_completion_tokens":%d}`, c.ActualModel, tc.wire))
-			err = e.StartPreparedAttempt(ctx, pre, attempt, providerTestTarget(c), request, c.BaseURL+"/v1/chat/completions", body)
+			err = e.StartPreparedAttempt(ctx, pre, attempt, providerTestTarget(c), request, c.BaseURL+"/v1/chat/completions", body, tariffTestHeader())
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("wire limit admission: %v, want %v", err, tc.want)
 			}
