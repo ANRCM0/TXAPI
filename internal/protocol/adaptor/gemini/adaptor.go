@@ -23,6 +23,11 @@ import (
 // Adaptor 是 Gemini 协议适配器。
 type Adaptor struct{}
 
+func (*Adaptor) SupportsOperation(operation string, stream, tools bool) bool {
+	// Signed thinking/tool histories have no lossless canonical representation yet.
+	return operation == "chat" && !tools
+}
+
 // 编译期断言：同时满足两个接口。
 var (
 	_ adaptor.Adaptor         = (*Adaptor)(nil)

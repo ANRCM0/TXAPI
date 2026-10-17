@@ -9,7 +9,8 @@ const { chromium } = require("playwright");
   const now = new Date().toISOString();
   const reservation = {
     id, user_id: 2, token_id: 3, origin_model: "fixture-model", price_version: "a".repeat(64),
-    reserved_units: "100000001", charge_units: "0", state: "pending", reason: "usage_unknown",
+    reserved_units: "100000001", charge_units: "0", state: "pending", reason: "execution_or_usage_unknown:billing_fee_limit",
+    provider_budget_units: "100000000", provider_held_units: "5760000",
     lease_until: Date.now() - 1000, can_resolve: true, created_at: now, updated_at: now,
   };
   let resolution = null;
@@ -51,7 +52,9 @@ const { chromium } = require("playwright");
         reservation, resolution, price_snapshot: '{"version":"fixture-history"}',
         attempts: [{ number: 1, channel_id: 4, credential_id: 5, actual_model: "fixture-model",
           group: "default", status: 0, termination: "", prompt_tokens: 0, output_tokens: 0,
-          cost_units: "0", cost_known: false, state: "active", created_at: now }],
+          cost_units: "0", cost_known: false, state: "active", created_at: now,
+          provider_bound_units: "5760000", provider_contract_version: "b".repeat(64),
+          provider_contract_snapshot: '{"format":2,"selling_bound_units":"96000000"}' }],
       }, unit_scale: "1000000000" });
     } else if (url.pathname === `/api/admin/billing/reservations/${id}/resolve` && req.method === "POST") {
       let body = "";
@@ -99,9 +102,13 @@ const { chromium } = require("playwright");
     await page.getByRole("link", { name: "Billing ledger", exact: false }).click();
     await page.getByRole("button", { name: "Inspect", exact: true }).waitFor();
     assert.match(await page.locator("#view").innerText(), /Hold 0\.100000001/);
+    assert.match(await page.locator("#view").innerText(), /execution_or_usage_unknown:billing_fee_limit/);
     await noOverflow();
     await page.getByRole("button", { name: "Inspect", exact: true }).click();
     await page.getByText("Unknown (not free)", { exact: true }).waitFor();
+    await page.getByText("Provider attempt envelopes: 0.00576 / 0.1.", { exact: false }).waitFor();
+    await page.getByText(`Snapshot ${"b".repeat(12)}`, { exact: true }).click();
+    await page.getByText('{"format":2,"selling_bound_units":"96000000"}', { exact: true }).waitFor();
     await page.getByText("Historical tariff /", { exact: false }).click();
     await page.getByText('{"version":"fixture-history"}', { exact: true }).waitFor();
     await page.setViewportSize({ width: 390, height: 844 });

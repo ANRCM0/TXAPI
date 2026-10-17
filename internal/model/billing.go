@@ -24,37 +24,42 @@ type BillingBalance struct {
 }
 
 type BillingReservation struct {
-	ID            string `gorm:"primaryKey;size:32"`
-	UserID        uint   `gorm:"index;not null"`
-	TokenID       uint   `gorm:"index;not null"`
-	PriceVersion  string `gorm:"size:64;not null"`
-	OriginModel   string `gorm:"not null"`
-	ReservedUnits int64  `gorm:"not null"`
-	ChargeUnits   int64  `gorm:"not null;default:0"`
-	State         string `gorm:"index;not null"`
-	Reason        string
-	Fingerprint   string `gorm:"size:64"`
-	LeaseUntil    int64  `gorm:"index;not null"`
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                  string `gorm:"primaryKey;size:32"`
+	UserID              uint   `gorm:"index;not null"`
+	TokenID             uint   `gorm:"index;not null"`
+	PriceVersion        string `gorm:"size:64;not null"`
+	OriginModel         string `gorm:"not null"`
+	ReservedUnits       int64  `gorm:"not null"`
+	ProviderBudgetUnits int64  `gorm:"not null;default:0"`
+	ProviderHeldUnits   int64  `gorm:"not null;default:0"`
+	ChargeUnits         int64  `gorm:"not null;default:0"`
+	State               string `gorm:"index;not null"`
+	Reason              string
+	Fingerprint         string `gorm:"size:64"`
+	LeaseUntil          int64  `gorm:"index;not null"`
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type BillingAttempt struct {
-	ReservationID string `gorm:"primaryKey;size:32"`
-	Number        int    `gorm:"primaryKey"`
-	ChannelID     uint
-	CredentialID  uint
-	ActualModel   string
-	Group         string
-	Status        int
-	Termination   string
-	PromptTokens  int
-	OutputTokens  int
-	CostUnits     int64
-	CostKnown     bool
-	State         string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ReservationID            string `gorm:"primaryKey;size:32"`
+	Number                   int    `gorm:"primaryKey"`
+	ChannelID                uint
+	CredentialID             uint
+	ActualModel              string
+	Group                    string
+	Status                   int
+	Termination              string
+	PromptTokens             int
+	OutputTokens             int
+	CostUnits                int64
+	CostKnown                bool
+	ProviderBoundUnits       int64  `gorm:"not null;default:0"`
+	ProviderContractVersion  string `gorm:"size:64;not null;default:''"`
+	ProviderContractSnapshot string `gorm:"type:text;not null;default:''"`
+	State                    string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 // BillingResolution is the immutable, one-per-reservation administrator decision.

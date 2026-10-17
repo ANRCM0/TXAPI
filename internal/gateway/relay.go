@@ -3,14 +3,14 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
 	"minigateway/internal/core"
 	"net/http"
+	"strings"
 	"time"
-
-	"github.com/gin-gonic/gin"
 
 	"minigateway/internal/billing"
 	dbmodel "minigateway/internal/model"
@@ -29,16 +29,16 @@ import (
 // 一路透传到 buildMeta：适配器要靠它决定上游路径（openai 适配器的
 // /v1/embeddings 就是靠 Mode 分的支）。以前这里写死对话模式，
 // 新增端点时每个调用方都得记得改，透传让「加端点」只动 handler。
-func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowedModels []string, mode int, timeout time.Duration) {
-	result := state(c)
+func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte, allowedModels []string, mode int, timeout time.Duration) {
+	result := c.result
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(c.Request.Context(), g.totalTimeout)
+	ctx, cancel := context.WithTimeout(c.ctx, g.totalTimeout)
 	defer cancel()
-	c.Request = c.Request.WithContext(ctx)
+	c.ctx = ctx
 	defer func() {
 		result.TotalDuration = time.Since(started)
-		result.Committed = c.Writer.Written()
-		result.HTTPStatus = c.Writer.Status()
+		result.Committed = c.writer.Written()
+		result.HTTPStatus = c.writer.Status()
 	}()
 
 	// This exported coordinator also guards policy when called outside the HTTP
@@ -52,7 +52,7 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 	}
 
 	if err := g.billingMode.CheckAvailable(g.billing.StrictReady()); err != nil ||
-		(g.billingMode == billing.ModeStrict && result.reservation.BillingID() == "") {
+		(g.billingMode == billing.ModeStrict && (result.reservation.BillingID() == "" || result.strictRequest == nil)) {
 		result.StatusCode = http.StatusServiceUnavailable
 		result.ErrorMessage = "strict billing is unavailable; requests cannot be charged safely"
 		result.Error = &core.Error{StatusCode: result.StatusCode, Error: core.ErrorDetail{Message: result.ErrorMessage, Type: "billing_unavailable"}}
@@ -62,23 +62,35 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 
 	// The request lease spans the complete retry loop; each attempt has a
 	// nested lease acquired only after selecting an authorized model target.
-	requestLease, admitErr := g.acquire(ctx, c.Writer, AdmissionScope{Level: RequestAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model})
-	if admitErr != nil {
-		result.StatusCode = admitErr.StatusCode
-		result.Error = admitErr
-		result.ErrorMessage = admitErr.Error.Message
-		writeError(c, admitErr.StatusCode, admitErr.Error.Message, admitErr.Error.Type)
-		return
+	if !c.requestAdmitted {
+		requestLease, admitErr := g.acquire(ctx, c.writer, AdmissionScope{Level: RequestAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model})
+		if admitErr != nil {
+			result.StatusCode = admitErr.StatusCode
+			result.Error = admitErr
+			result.ErrorMessage = admitErr.Error.Message
+			writeError(c, admitErr.StatusCode, admitErr.Error.Message, admitErr.Error.Type)
+			return
+		}
+		defer requestLease()
 	}
-	defer requestLease()
 
 	// 1. 筛选出能服务这个模型的渠道
-	candidates := g.pickChannels(req.Model, allowedModels)
+	candidates := g.capableChannels(req.Model, allowedModels, mode, body)
 	if len(candidates) == 0 {
+		if len(g.pickChannels(req.Model, allowedModels)) > 0 {
+			if g.billingMode == billing.ModeStrict {
+				rejected := g.rejectUnpricedAttempt(c, result.reservation)
+				result.Result = rejected
+				writeError(c, rejected.StatusCode, rejected.Error.Error.Message, rejected.Error.Error.Type)
+			} else {
+				writeError(c, http.StatusBadRequest, "no authorized target supports the requested operation", "unsupported_operation")
+			}
+			return
+		}
 		// 记账先行：这个提前返回的分支最容易漏掉状态码记录，
 		// 漏了就会把一次彻底失败的请求记成 status=200，账本失去意义
-		state(c).StatusCode = http.StatusServiceUnavailable
-		state(c).ErrorMessage = fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model)
+		c.result.StatusCode = http.StatusServiceUnavailable
+		c.result.ErrorMessage = fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model)
 		writeError(c, http.StatusServiceUnavailable,
 			fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model), "no_channel")
 		return
@@ -105,7 +117,7 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 
 	// 会话 ID 只算一次：整个请求（含重试）必须落在同一个会话上，
 	// 否则亲和会把重试打到另一把 Key 上，上游的 prompt 缓存白白作废。
-	sessionID := requestSessionID(c, state(c).Identity.UserID, state(c).Identity.TokenID, body)
+	sessionID := requestSessionID(c, c.result.Identity.UserID, c.result.Identity.TokenID, body)
 
 	for attempt := 0; attempt <= retryTimes; attempt++ {
 		if ctx.Err() != nil {
@@ -119,7 +131,7 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 			result.Termination = term
 			break
 		}
-		ch, cred := g.selectTarget(g.pickChannels(req.Model, allowedModels), triedCred, sessionID, time.Now())
+		ch, cred := g.selectTarget(g.capableChannels(req.Model, allowedModels, mode, body), triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}
@@ -132,34 +144,34 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 		//
 		// 存 uint 而不是 int：RequestLog.ChannelID 是 uint，类型不匹配会让
 		// 类型断言静默失败，日志里 channel_id 全是 0，事后查不出走了哪条渠道。
-		state(c).ChannelID = uint(ch.id)
+		c.result.ChannelID = uint(ch.id)
 		// 指标用的渠道名。channel_id 是数字，作为 Prometheus 标签
 		// 可读性差（「哪个渠道在报错」要反查数据库），指标一律用
 		// 人可读的名字；logs 表仍然存 ID（要 join）。
-		state(c).ChannelName = ch.name
+		c.result.ChannelName = ch.name
 		if credID, ok := m.CredentialID(); ok {
-			state(c).CredentialID = credID
+			c.result.CredentialID = credID
 		}
-		state(c).ActualModel = m.ActualModel
+		c.result.ActualModel = m.ActualModel
 		// 记账用：命中的渠道分组。重试会不断覆盖它，最终值是
 		// 「最后一次尝试的渠道」——和 status/channel_id 一样，
 		// 账本只该记录实际服务了这次请求的那个渠道。
 		// 分组决定计费倍率，必须等选完渠道才有意义。
-		state(c).ChannelGroup = ch.groupName
+		c.result.ChannelGroup = ch.groupName
 
 		// 选目标的结果用 debug：正常流量下这是纯噪音（每个请求一条），
 		// 但排查「为什么这把 Key 一直不被选中」「亲和有没有生效」
 		// 时它是唯一现场——配合 AddSource 还能看到走的是哪条选择
 		// 分支（亲和命中 / 加权随机 / 降级）。
 		slog.Debug("[调度] 选中转发目标",
-			"request_id", state(c).Identity.RequestID,
+			"request_id", c.result.Identity.RequestID,
 			"channel", ch.name, "channel_id", ch.id,
 			"credential_id", cred.ID, "credential_weight", cred.Weight,
 			"model", m.ActualModel,
 			"session_id", sessionID,
 			"attempt", attempt)
 
-		attemptLease, admitErr := g.acquire(ctx, c.Writer, AdmissionScope{Level: AttemptAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: m.ActualModel, ChannelID: uint(ch.id), CredentialID: cred.ID, Attempt: attempt + 1})
+		attemptLease, admitErr := g.acquire(ctx, c.writer, AdmissionScope{Level: AttemptAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: m.ActualModel, ChannelID: uint(ch.id), CredentialID: cred.ID, Attempt: attempt + 1})
 		if admitErr != nil {
 			lastErr = admitErr
 			break
@@ -174,7 +186,7 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 		usage, err := attemptResult.Usage, attemptResult.Error
 		if err == nil {
 			if usage != nil {
-				state(c).Usage = usage
+				c.result.Usage = usage
 				// debug 而不是 info：上游返回的原始用量在 info 级别
 				// 会和请求摘要重复（摘要里也有 token 数），而真正需要
 				// 它的场景是「usage 数字对不上」的排查——那时会开
@@ -189,14 +201,14 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 			// 健康反馈：成功即清零。让这把 Key 的冷却/拉黑状态立刻回到
 			// 全绿，下一次选择就不会再跳过它。
 			g.reportCredentialHealth(ch.name, cred, http.StatusOK, "")
-			state(c).StatusCode = http.StatusOK
-			state(c).ErrorMessage = ""
+			c.result.StatusCode = http.StatusOK
+			c.result.ErrorMessage = ""
 			return
 		}
 		lastErr = err
-		state(c).StatusCode = err.StatusCode
-		state(c).ErrorMessage = err.Error.Message
-		if err.Error.Type == "billing_unavailable" {
+		c.result.StatusCode = err.StatusCode
+		c.result.ErrorMessage = err.Error.Message
+		if err.Error.Type == "billing_unavailable" || err.Error.Type == "billing_fee_limit" || err.Error.Type == "unsupported_billing_dimension" || strings.HasPrefix(err.Error.Type, "provider_") {
 			responseCommitted = attemptResult.Committed
 			break
 		}
@@ -242,8 +254,8 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 		}
 	}
 	result.Error = lastErr
-	state(c).StatusCode = lastErr.StatusCode
-	state(c).ErrorMessage = lastErr.Error.Message
+	c.result.StatusCode = lastErr.StatusCode
+	c.result.ErrorMessage = lastErr.Error.Message
 	if responseCommitted {
 		return
 	}
@@ -251,39 +263,97 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 }
 
 // doRelay 向单个渠道发一次请求。
-func (g *Gateway) doRelay(c *gin.Context, m *meta.Meta, body []byte, timeout time.Duration) core.Result {
+func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout time.Duration) core.Result {
 	a, ok := g.reg.getAdaptor(m.ChannelType)
 	if !ok {
-		return core.Result{StatusCode: 500, Error: &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "no upstream adaptor", Type: "no_adaptor"}}}
+		return core.Result{Phase: core.NotDispatched, StatusCode: 500, Error: &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "no upstream adaptor", Type: "no_adaptor"}}}
+	}
+	if g.billingMode == billing.ModeStrict && m.Mode == meta.ModeEmbeddings {
+		pa, known := a.(interface{ Name() string })
+		if !known || pa.Name() != "openai" {
+			return g.rejectUnpricedAttempt(c, c.result.reservation)
+		}
 	}
 	input, err := protocol.Prepare(a, body, m)
 	if err != nil {
-		return core.Result{StatusCode: err.StatusCode, Error: err, Termination: core.UpstreamError}
+		if g.billingMode == billing.ModeStrict {
+			return g.rejectUnpricedAttempt(c, c.result.reservation)
+		}
+		return core.Result{Phase: core.NotDispatched, StatusCode: err.StatusCode, Error: err, Termination: core.UpstreamError}
 	}
 	input.Timeout = timeout
-	pre := state(c).reservation
-	number := len(state(c).Attempts) + 1
+	pre := c.result.reservation
+	number := len(c.result.Attempts) + 1
 	if g.billingMode == billing.ModeStrict {
-		err := g.billing.StartAttempt(c.Request.Context(), pre, dbmodel.BillingAttempt{
+		pa, known := a.(interface{ Name() string })
+		if !known || billing.ValidatePreparedRequest(input.Body, pa.Name(), m.Mode == meta.ModeEmbeddings) != nil {
+			return g.rejectUnpricedAttempt(c, pre)
+		}
+		if m.Mode == meta.ModeChatCompletions {
+			limits := c.result.strictRequest
+			if limits == nil {
+				return core.Result{Phase: core.NotDispatched, StatusCode: 503, Error: &core.Error{StatusCode: 503, Error: core.ErrorDetail{
+					Message: "strict request limits are unavailable", Type: "billing_unavailable",
+				}}}
+			}
+			if err := protocol.CheckOutputLimit(a, input.Body, limits.OutputLimit, limits.OutputLimitField); err != nil {
+				return g.rejectUnpricedAttempt(c, pre)
+			}
+		}
+		if !known || c.result.strictRequest == nil {
+			return core.Result{Phase: core.NotDispatched, StatusCode: 503, Error: &core.Error{StatusCode: 503, Error: core.ErrorDetail{Message: "provider cost contract is unavailable", Type: "provider_cost_contract_missing"}}}
+		}
+		operation := "chat"
+		if m.Mode == meta.ModeEmbeddings {
+			operation = "embeddings"
+		}
+		err := g.billing.StartPreparedAttempt(c.ctx, pre, dbmodel.BillingAttempt{
 			Number: number, ChannelID: uint(m.ChannelID), CredentialID: m.CredentialIDValue,
-			ActualModel: m.ActualModel, Group: state(c).ChannelGroup,
-		})
+			ActualModel: m.ActualModel, Group: c.result.ChannelGroup,
+		}, billing.ProviderTarget{ChannelID: uint(m.ChannelID), BaseURL: m.BaseURL, Protocol: pa.Name(), ActualModel: m.ActualModel, Operation: operation}, *c.result.strictRequest, input.URL, input.Body)
 		if err != nil {
-			return core.Result{StatusCode: 503, Error: &core.Error{StatusCode: 503, Error: core.ErrorDetail{Message: "billing attempt could not be recorded", Type: "billing_unavailable"}}}
+			code, kind, message := 503, "billing_unavailable", "billing attempt could not be recorded"
+			switch {
+			case errors.Is(err, billing.ErrProviderContract):
+				kind, message = "provider_cost_contract_missing", err.Error()
+			case errors.Is(err, billing.ErrProviderBudget):
+				kind, message = "provider_budget_exhausted", err.Error()
+			case errors.Is(err, billing.ErrProviderLimit):
+				code, kind, message = 400, "provider_cost_limit", err.Error()
+			case errors.Is(err, billing.ErrFeeBound):
+				code, kind, message = 400, "billing_fee_limit", err.Error()
+			}
+			return core.Result{Phase: core.NotDispatched, StatusCode: code, Error: &core.Error{StatusCode: code, Error: core.ErrorDetail{Message: message, Type: kind}}}
 		}
 	}
-	result := g.executor.Execute(c.Request.Context(), c.Writer, input)
+	// If an injected executor/transport panics, non-execution is not established.
+	c.result.Phase = core.Dispatching
+	result := g.executor.Execute(c.ctx, c.writer, input)
 	if g.billingMode == billing.ModeStrict {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := g.billing.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), result.Usage)
 		cancel()
 		if err != nil {
 			result.StatusCode, result.Termination = 503, core.UpstreamError
-			result.Error = &core.Error{StatusCode: 503, Error: core.ErrorDetail{Message: "billing attempt result could not be recorded", Type: "billing_unavailable"}}
+			kind, message := "billing_unavailable", "billing attempt result could not be recorded"
+			if errors.Is(err, billing.ErrProviderLimit) {
+				kind, message = "provider_contract_violation", "upstream usage violates the pinned provider cost contract"
+			}
+			result.Error = &core.Error{StatusCode: 503, Error: core.ErrorDetail{Message: message, Type: kind}}
 		}
 	}
-	g.metrics.RecordAttempt(state(c).ChannelName, string(result.Termination), result.StatusCode, result.Duration)
+	g.metrics.RecordAttempt(c.result.ChannelName, string(result.Termination), result.StatusCode, result.Duration)
 	return result
+}
+
+func (g *Gateway) rejectUnpricedAttempt(c *executionScope, pre *billing.PreDeduct) core.Result {
+	code, kind, message := 400, "unsupported_billing_dimension", "prepared request has no verified text-only billing shape or output limit"
+	if err := g.billing.RecordCostRefusal(c.ctx, pre, billing.ErrUnpricedDimension); !errors.Is(err, billing.ErrUnpricedDimension) {
+		code, kind, message = 503, "billing_unavailable", "billing refusal could not be recorded"
+	}
+	return core.Result{Phase: core.NotDispatched, StatusCode: code, Error: &core.Error{StatusCode: code, Error: core.ErrorDetail{
+		Message: message, Type: kind,
+	}}, Termination: core.UpstreamError}
 }
 
 // buildMeta 把渠道配置和选中的凭据组装成一次转发的上下文。
@@ -519,11 +589,19 @@ func shouldRetry(statusCode int) bool {
 }
 
 // writeError 按 OpenAI 的错误格式回给客户端。
-func writeError(c *gin.Context, statusCode int, message, errType string) {
+func writeError(c *executionScope, statusCode int, message, errType string) {
 	if errType == "" {
 		errType = "gateway_error"
 	}
-	c.JSON(statusCode, gin.H{"error": gin.H{"message": message, "type": errType}})
+	if c.writer.Written() {
+		return
+	}
+	c.result.StatusCode = statusCode
+	c.result.ErrorMessage = message
+	c.result.Error = &core.Error{StatusCode: statusCode, Error: core.ErrorDetail{Message: message, Type: errType}}
+	c.writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	c.writer.WriteHeader(statusCode)
+	_ = json.NewEncoder(c.writer).Encode(map[string]any{"error": map[string]string{"message": message, "type": errType}})
 }
 
 type credentialPicker func(creds []dbmodel.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*dbmodel.Credential, bool)
@@ -572,8 +650,8 @@ const SessionIDHeader = "X-Session-Id"
 //
 // 取值优先级：X-Session-Id 请求头 > 用户 ID + 令牌 ID + 首条 user 消息哈希；亲和 ID 在服务端按用户隔离。
 // 都取不到时返回空串，选择逻辑据此降级到纯加权随机。
-func requestSessionID(c *gin.Context, userID, tokenID uint, body []byte) string {
-	if h := c.GetHeader(SessionIDHeader); h != "" {
+func requestSessionID(c *executionScope, userID, tokenID uint, body []byte) string {
+	if h := c.sessionID; h != "" {
 		return scheduler.SessionID(h, userID, tokenID, nil)
 	}
 	var envelope struct {
@@ -583,4 +661,21 @@ func requestSessionID(c *gin.Context, userID, tokenID uint, body []byte) string 
 		return ""
 	}
 	return scheduler.SessionID("", userID, tokenID, envelope.Messages)
+}
+
+func (g *Gateway) capableChannels(model string, allowed []string, mode int, body []byte) []*channel {
+	operation := protocol.Chat
+	if mode == meta.ModeEmbeddings {
+		operation = protocol.Embeddings
+	}
+	requirements := protocol.RequirementsFor(operation, body)
+	candidates := g.pickChannels(model, allowed)
+	filtered := make([]*channel, 0, len(candidates))
+	for _, ch := range candidates {
+		a, ok := g.reg.getAdaptor(ch.typ)
+		if ok && protocol.Supports(a, requirements) {
+			filtered = append(filtered, ch)
+		}
+	}
+	return filtered
 }

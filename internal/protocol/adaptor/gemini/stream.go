@@ -3,6 +3,7 @@ package gemini
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"minigateway/internal/protocol/canonical"
 )
@@ -22,9 +23,10 @@ import (
 // 单条 chunk 里 candidates 可能有多个（候选数 > 1），本项目只处理
 // 第一个候选（和 OpenAI 单候选假设一致）。
 type translator struct {
-	id       string
-	model    string
-	finished bool
+	nextToolIndex int
+	id            string
+	model         string
+	finished      bool
 	// usageSent 防止重复发 usage 帧
 	usageSent bool
 	// roleSent 首帧是否已发过 role（OpenAI 约定首帧 delta.role="assistant"）
@@ -108,26 +110,35 @@ func (t *translator) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, err
 	//（不是碎片流）。整条发出，客户端按完整工具调用处理。
 	for _, p := range cand.Content.Parts {
 		if p.FunctionCall != nil {
+			id := p.FunctionCall.ID
+			if id == "" {
+				id = fmt.Sprintf("call_%d", t.nextToolIndex)
+			}
 			chunks = append(chunks, &canonical.StreamChunk{
 				ID:    t.id,
 				Model: t.model,
 				ToolCalls: []canonical.ToolCallDelta{{
-					Index:     0,
-					ID:        p.FunctionCall.Name,
+					Index:     t.nextToolIndex,
+					ID:        id,
 					Name:      p.FunctionCall.Name,
 					Arguments: string(p.FunctionCall.Args),
 				}},
 			})
+			t.nextToolIndex++
 		}
 	}
 
 	// finishReason：结束帧（必须排在 usage 帧之前）
 	if cand.FinishReason != "" && !t.finished {
 		t.finished = true
+		reason := mapFinishReason(cand.FinishReason)
+		if t.nextToolIndex > 0 && reason == canonical.FinishStop {
+			reason = canonical.FinishToolCalls
+		}
 		chunks = append(chunks, &canonical.StreamChunk{
 			ID:           t.id,
 			Model:        t.model,
-			FinishReason: mapFinishReason(cand.FinishReason),
+			FinishReason: reason,
 		})
 	}
 

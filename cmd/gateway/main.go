@@ -138,6 +138,24 @@ func main() {
 		slog.Warn("legacy billing is availability-first, not strict budgeting or a reliable ledger")
 	}
 	if cfg.Billing.Mode == string(billing.ModeStrict) {
+		if cfg.Billing.MaxProviderRequestCost != "" || len(cfg.Billing.ProviderContracts) > 0 {
+			contracts := make([]billing.ProviderCostContract, 0, len(cfg.Billing.ProviderContracts))
+			for _, c := range cfg.Billing.ProviderContracts {
+				contracts = append(contracts, billing.ProviderCostContract{
+					ChannelID: c.ChannelID, BaseURL: c.BaseURL, Protocol: c.Protocol, ActualModel: c.ActualModel,
+					Operation: c.Operation, OutputLimitField: c.OutputLimitField,
+					InputTokenCeiling: c.InputTokenCeiling, MaxOutputTokens: c.MaxOutputTokens,
+					InputBoundProfile: c.InputBoundProfile,
+					InputPricePer1K:   c.InputPricePer1K, OutputPricePer1K: c.OutputPricePer1K, Evidence: c.Evidence,
+				})
+			}
+			if err := engine.ConfigureProviderCosts(cfg.Billing.MaxProviderRequestCost, contracts); err != nil {
+				slog.Error("provider cost contract initialization failed", "err", err)
+				os.Exit(1)
+			}
+		} else {
+			slog.Warn("strict provider cost contracts are missing; model calls will be rejected before upstream execution")
+		}
 		if cfg.Billing.MaxRequestCost == "" {
 			slog.Warn("strict fee ceiling is missing; model calls will be rejected")
 		} else if err := engine.EnableStrict(cfg.Billing.MaxRequestCost, time.Duration(cfg.Server.TotalTimeoutSeconds+5)*time.Second); err != nil {

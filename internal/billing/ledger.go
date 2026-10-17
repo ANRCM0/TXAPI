@@ -35,35 +35,40 @@ const (
 // Monetary units are decimal strings on the wire, preserving int64 precision
 // in browsers. These DTOs intentionally exclude internal fingerprints.
 type ReservationView struct {
-	ID            string    `json:"id"`
-	UserID        uint      `json:"user_id"`
-	TokenID       uint      `json:"token_id"`
-	PriceVersion  string    `json:"price_version"`
-	OriginModel   string    `json:"origin_model"`
-	ReservedUnits string    `json:"reserved_units"`
-	ChargeUnits   string    `json:"charge_units"`
-	State         string    `json:"state"`
-	Reason        string    `json:"reason"`
-	LeaseUntil    int64     `json:"lease_until"`
-	CanResolve    bool      `json:"can_resolve"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	UserID              uint      `json:"user_id"`
+	TokenID             uint      `json:"token_id"`
+	PriceVersion        string    `json:"price_version"`
+	OriginModel         string    `json:"origin_model"`
+	ReservedUnits       string    `json:"reserved_units"`
+	ChargeUnits         string    `json:"charge_units"`
+	ProviderBudgetUnits string    `json:"provider_budget_units"`
+	ProviderHeldUnits   string    `json:"provider_held_units"`
+	State               string    `json:"state"`
+	Reason              string    `json:"reason"`
+	LeaseUntil          int64     `json:"lease_until"`
+	CanResolve          bool      `json:"can_resolve"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type AttemptView struct {
-	Number       int       `json:"number"`
-	ChannelID    uint      `json:"channel_id"`
-	CredentialID uint      `json:"credential_id"`
-	ActualModel  string    `json:"actual_model"`
-	Group        string    `json:"group"`
-	Status       int       `json:"status"`
-	Termination  string    `json:"termination"`
-	PromptTokens int       `json:"prompt_tokens"`
-	OutputTokens int       `json:"output_tokens"`
-	CostUnits    string    `json:"cost_units"`
-	CostKnown    bool      `json:"cost_known"`
-	State        string    `json:"state"`
-	CreatedAt    time.Time `json:"created_at"`
+	Number                   int       `json:"number"`
+	ChannelID                uint      `json:"channel_id"`
+	CredentialID             uint      `json:"credential_id"`
+	ActualModel              string    `json:"actual_model"`
+	Group                    string    `json:"group"`
+	Status                   int       `json:"status"`
+	Termination              string    `json:"termination"`
+	PromptTokens             int       `json:"prompt_tokens"`
+	OutputTokens             int       `json:"output_tokens"`
+	CostUnits                string    `json:"cost_units"`
+	CostKnown                bool      `json:"cost_known"`
+	ProviderBoundUnits       string    `json:"provider_bound_units"`
+	ProviderContractVersion  string    `json:"provider_contract_version"`
+	ProviderContractSnapshot string    `json:"provider_contract_snapshot"`
+	State                    string    `json:"state"`
+	CreatedAt                time.Time `json:"created_at"`
 }
 
 type ResolutionView struct {
@@ -109,6 +114,7 @@ func reservationView(row model.BillingReservation, ready bool) ReservationView {
 		ID: row.ID, UserID: row.UserID, TokenID: row.TokenID,
 		PriceVersion: row.PriceVersion, OriginModel: row.OriginModel,
 		ReservedUnits: strconv.FormatInt(row.ReservedUnits, 10), ChargeUnits: strconv.FormatInt(row.ChargeUnits, 10),
+		ProviderBudgetUnits: strconv.FormatInt(row.ProviderBudgetUnits, 10), ProviderHeldUnits: strconv.FormatInt(row.ProviderHeldUnits, 10),
 		State: row.State, Reason: row.Reason, LeaseUntil: row.LeaseUntil,
 		CanResolve: ready && row.State == Pending && row.LeaseUntil <= time.Now().UnixMilli(),
 		CreatedAt:  row.CreatedAt, UpdatedAt: row.UpdatedAt,
@@ -183,6 +189,8 @@ func (e *Engine) ReservationDetail(ctx context.Context, id string) (*Reservation
 				Number: a.Number, ChannelID: a.ChannelID, CredentialID: a.CredentialID, ActualModel: a.ActualModel, Group: a.Group,
 				Status: a.Status, Termination: a.Termination, PromptTokens: a.PromptTokens, OutputTokens: a.OutputTokens,
 				CostUnits: strconv.FormatInt(a.CostUnits, 10), CostKnown: a.CostKnown, State: a.State, CreatedAt: a.CreatedAt,
+				ProviderBoundUnits:      strconv.FormatInt(a.ProviderBoundUnits, 10),
+				ProviderContractVersion: a.ProviderContractVersion, ProviderContractSnapshot: a.ProviderContractSnapshot,
 			})
 		}
 		var decision model.BillingResolution

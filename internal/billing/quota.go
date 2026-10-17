@@ -3,6 +3,7 @@ package billing
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"gorm.io/gorm"
 )
@@ -37,9 +38,10 @@ type quotaTarget struct {
 // UPDATE」这个能力，整个 store 包对它来说太重；billing 也不该
 // 依赖存储层的缓存实现。
 type Engine struct {
-	db     *gorm.DB
-	prices *PriceTable
-	strict *StrictLedger
+	db            *gorm.DB
+	prices        *PriceTable
+	strict        *StrictLedger
+	providerCosts atomic.Pointer[ProviderCosts]
 }
 
 // New 创建计费引擎。prices 为 nil 时退化为「不查价、不计费」

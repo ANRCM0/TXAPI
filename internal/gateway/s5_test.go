@@ -169,6 +169,7 @@ func TestS5StrictGatewaySettlesWithoutOrdinaryLogs(t *testing.T) {
 			if err := engine.EnableStrict("0.1", time.Second*10); err != nil {
 				t.Fatal(err)
 			}
+			configureTestProviderCosts(t, engine, st.Channels())
 			gw, err := New(Options{Channels: st.Channels(), Billing: engine, BillingMode: billing.ModeStrict})
 			if err != nil {
 				t.Fatal(err)
@@ -220,6 +221,7 @@ func TestS5StrictGatewayMissingUsageHoldsBudget(t *testing.T) {
 	if err := engine.EnableStrict("0.1", time.Second*10); err != nil {
 		t.Fatal(err)
 	}
+	configureTestProviderCosts(t, engine, channels)
 	var entry *dbmodel.RequestLog
 	gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict, LogRecorder: func(row *dbmodel.RequestLog) { entry = row }})
 	if err != nil {

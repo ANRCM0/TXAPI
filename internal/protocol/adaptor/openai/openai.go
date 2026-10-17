@@ -26,6 +26,10 @@ import (
 // Adaptor 是 OpenAI 兼容协议的适配器实现。
 type Adaptor struct{}
 
+func (*Adaptor) SupportsOperation(operation string, stream, tools bool) bool {
+	return operation == "chat" || (operation == "embeddings" && !stream && !tools)
+}
+
 // 编译期断言：同时满足两个接口。
 var (
 	_ adaptor.Adaptor         = (*Adaptor)(nil)

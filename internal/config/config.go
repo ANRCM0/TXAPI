@@ -70,8 +70,26 @@ type DatabaseConfig struct {
 type BillingConfig struct {
 	// Legacy preserves availability-first quota behavior. Disabled does not
 	// charge; strict requires a fee ceiling and durable settlement components.
-	Mode           string `yaml:"mode"`
-	MaxRequestCost string `yaml:"max_request_cost"`
+	Mode                   string                   `yaml:"mode"`
+	MaxRequestCost         string                   `yaml:"max_request_cost"`
+	MaxProviderRequestCost string                   `yaml:"max_provider_request_cost"`
+	ProviderContracts      []ProviderContractConfig `yaml:"provider_contracts"`
+}
+
+// Startup-only, independently priced provider envelopes; never seed data.
+type ProviderContractConfig struct {
+	ChannelID         uint   `yaml:"channel_id"`
+	BaseURL           string `yaml:"base_url"`
+	Protocol          string `yaml:"protocol"`
+	ActualModel       string `yaml:"actual_model"`
+	Operation         string `yaml:"operation"`
+	OutputLimitField  string `yaml:"output_limit_field"`
+	InputTokenCeiling int64  `yaml:"input_token_ceiling"`
+	InputBoundProfile string `yaml:"input_bound_profile"`
+	MaxOutputTokens   int64  `yaml:"max_output_tokens"`
+	InputPricePer1K   string `yaml:"input_price_per_1k"`
+	OutputPricePer1K  string `yaml:"output_price_per_1k"`
+	Evidence          string `yaml:"evidence"`
 }
 
 // ChannelConfig 描述一个上游渠道，仅用于「从 YAML 导入空数据库」。

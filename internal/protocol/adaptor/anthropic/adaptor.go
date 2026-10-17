@@ -25,6 +25,10 @@ var openaiPA = &openai.Adaptor{}
 // Adaptor 是 Anthropic 协议适配器。
 type Adaptor struct{}
 
+func (*Adaptor) SupportsOperation(operation string, stream, tools bool) bool {
+	return operation == "chat"
+}
+
 // 编译期断言：同时满足两个接口。
 var (
 	_ adaptor.Adaptor         = (*Adaptor)(nil)

@@ -2,7 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
 	"strings"
 
 	"minigateway/internal/protocol/canonical"
@@ -27,7 +27,7 @@ func extractExtra(body []byte, modeled ...string) map[string]json.RawMessage {
 }
 
 // mergeExtra 把未建模字段合并回出站请求体。
-// 白名单外的字段记日志丢弃（不静默）。
+// Unsupported fields fail before dispatch instead of silently changing semantics.
 func mergeExtra(body []byte, extra map[string]json.RawMessage, supported map[string]bool) ([]byte, error) {
 	if len(extra) == 0 {
 		return body, nil
@@ -44,7 +44,7 @@ func mergeExtra(body []byte, extra map[string]json.RawMessage, supported map[str
 			all[k] = v
 			continue
 		}
-		log.Printf("[gemini] 丢弃 Gemini 不支持的请求字段: %s", k)
+		return nil, fmt.Errorf("%w: field %q cannot be preserved", ErrUnsupported, k)
 	}
 	return json.Marshal(all)
 }

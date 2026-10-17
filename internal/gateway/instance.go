@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/core"
@@ -105,6 +104,7 @@ type AttemptResult struct {
 
 type RequestResult struct {
 	reservation   *billing.PreDeduct
+	strictRequest *billing.StrictRequest
 	BillingState  string
 	Identity      Identity
 	ChannelID     uint
@@ -122,29 +122,5 @@ type resultContextKey struct{}
 
 func ResultFromContext(ctx context.Context) *RequestResult {
 	result, _ := ctx.Value(resultContextKey{}).(*RequestResult)
-	return result
-}
-
-// state is an HTTP boundary helper. Relay bookkeeping lives in a typed context
-// value, never in Gin's string map. Authentication is read once at this boundary.
-func state(c *gin.Context) *RequestResult {
-	if c.Request == nil {
-		c.Request = &http.Request{Header: make(http.Header)}
-	}
-	if result := ResultFromContext(c.Request.Context()); result != nil {
-		return result
-	}
-	identity := Identity{RequestID: access.RequestID(c.Request.Context())}
-	if p, ok := access.PrincipalFromContext(c.Request.Context()); ok {
-		identity.UserID = p.UserID
-		identity.TokenID = p.TokenID
-		identity.TokenName = p.TokenName
-		identity.AllowedModels = append([]string(nil), p.Policy.Models...)
-		policy := p.Policy
-		identity.Policy = &policy
-	}
-	result := &RequestResult{Result: core.Result{StatusCode: 500}, Identity: identity}
-
-	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), resultContextKey{}, result))
 	return result
 }

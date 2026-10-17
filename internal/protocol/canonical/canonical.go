@@ -168,7 +168,7 @@ type ToolCallDelta struct {
 func TextOf(msg Message) string {
 	var parts []string
 	for _, p := range msg.Content {
-		if p.Type == PartText && p.Text != "" {
+		if (p.Type == PartText || p.Type == PartToolResult) && p.Text != "" {
 			parts = append(parts, p.Text)
 		}
 	}

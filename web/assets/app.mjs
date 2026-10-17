@@ -446,12 +446,16 @@ async function inspectBilling(id) {
   dialog.append(heading("Billing reservation", row.id, button("Close", () => dialog.close())),
     text("p", `${row.origin_model} / User ${row.user_id} / Key ${row.token_id}`),
     text("p", `State: ${row.state}. Hold: ${ledgerMoney(row.reserved_units)}. Charged: ${ledgerMoney(row.charge_units)}.`, "muted"),
+    text("p", `Provider attempt envelopes: ${ledgerMoney(row.provider_held_units)} / ${ledgerMoney(row.provider_budget_units)}. Cumulative upper bounds, not actual provider invoices or user holds.`, "muted"),
     text("p", `Lease deadline: ${new Date(row.lease_until).toLocaleString()}. ${row.reason}`, "fine"),
-    heading("Upstream attempts", "Attempt cost is not an additional user charge."),
-    table(["Attempt / target", "Outcome", "Tokens", "Cost"], list(attempts), attempt => [
+    heading("Upstream attempts", "Receipt cost uses the selling-price snapshot; provider envelopes use independent contracts. Neither is an additional user charge."),
+    table(["Attempt / target", "Outcome", "Tokens", "Receipt cost", "Provider envelope"], list(attempts), attempt => [
       el("div", {}, `#${attempt.number} / Channel ${attempt.channel_id}`, text("span", `Credential ${attempt.credential_id} / ${attempt.actual_model} / ${attempt.group}`, "block")),
       `${attempt.status} / ${attempt.termination || attempt.state}`, `${attempt.prompt_tokens} + ${attempt.output_tokens}`,
       attempt.cost_known ? ledgerMoney(attempt.cost_units) : "Unknown (not free)",
+      el("div", {}, attempt.provider_contract_version ? ledgerMoney(attempt.provider_bound_units) : "No historical contract",
+        attempt.provider_contract_version ? el("details", {}, el("summary", {}, `Snapshot ${attempt.provider_contract_version.slice(0, 12)}`),
+          text("pre", attempt.provider_contract_snapshot)) : null),
     ]));
   if (resolution) {
     dialog.append(heading("Final administrator decision", `${resolution.action} / Admin ${resolution.actor_id}`),

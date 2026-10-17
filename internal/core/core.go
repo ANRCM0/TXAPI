@@ -33,6 +33,15 @@ type Error struct {
 
 type Termination string
 
+// Phase records local observations, never proof that the provider did not run.
+type Phase string
+
+const (
+	NotDispatched    Phase = "not_dispatched"
+	Dispatching      Phase = "dispatching"
+	ResponseReceived Phase = "response_received"
+)
+
 const (
 	Success          Termination = "success"
 	UpstreamError    Termination = "upstream_error"
@@ -44,15 +53,18 @@ const (
 // Result reports execution independently of the HTTP status already sent.
 // Committed is monotonic: once headers/body have been sent it cannot be reset.
 type Result struct {
-	StatusCode   int
-	HTTPStatus   int
-	Committed    bool
-	Replayable   bool
-	Termination  Termination
-	Usage        *Usage
-	Error        *Error
-	Duration     time.Duration
-	BytesWritten int64
+	Phase            Phase
+	UpstreamStatus   int
+	ProtocolComplete bool
+	StatusCode       int
+	HTTPStatus       int
+	Committed        bool
+	Replayable       bool
+	Termination      Termination
+	Usage            *Usage
+	Error            *Error
+	Duration         time.Duration
+	BytesWritten     int64
 }
 
 type Frame struct {
@@ -74,6 +86,7 @@ type Decoder interface {
 }
 
 type Input struct {
+	Method     string
 	URL        string
 	Header     http.Header
 	Body       []byte
@@ -120,6 +133,7 @@ func failure(status int, message string, kind string) *Error {
 
 func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Input) (result Result) {
 	started := time.Now()
+	result.Phase = NotDispatched
 	result.Replayable = in.Replayable
 	result.Termination = UpstreamError
 	defer func() { result.Duration = time.Since(started) }()
@@ -153,7 +167,11 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 		fail("request canceled before upstream execution", err, Canceled)
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, in.URL, bytes.NewReader(in.Body))
+	method := in.Method
+	if method == "" {
+		method = http.MethodPost
+	}
+	req, err := http.NewRequestWithContext(ctx, method, in.URL, bytes.NewReader(in.Body))
 	if err != nil {
 		result.StatusCode = 400
 		result.Error = failure(400, "invalid upstream request", "invalid_request")
@@ -167,12 +185,16 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 	if in.Stream {
 		req.Header.Set("Accept", "text/event-stream")
 	}
+	// Once Do starts, a transport error cannot establish non-execution.
+	result.Phase = Dispatching
 	resp, err := e.client.Do(req)
 	if err != nil {
 		fail("upstream request failed", err, UpstreamError)
 		return
 	}
 	defer resp.Body.Close()
+	result.Phase = ResponseReceived
+	result.UpstreamStatus = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		body, readErr := readBounded(resp.Body, e.maxResponseBytes)
 		if readErr != nil {
@@ -233,6 +255,7 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 			fail("failed decoding upstream response", err, UpstreamError)
 			return
 		}
+		result.ProtocolComplete = true
 		if err = write(out, false); err != nil {
 			fail("failed writing downstream response", err, ClientWriteError)
 			return
@@ -291,6 +314,7 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 			fail("upstream stream ended prematurely", err, UpstreamError)
 			return
 		}
+		result.ProtocolComplete = true
 		if err = emit(frames); err != nil {
 			fail("failed writing stream terminator", err, ClientWriteError)
 			return

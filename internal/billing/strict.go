@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -46,9 +47,10 @@ type StrictLedger struct {
 }
 
 type Reservation struct {
-	id     string
-	prices *PriceSnapshot
-	origin string
+	id            string
+	prices        *PriceSnapshot
+	origin        string
+	providerCosts *ProviderCosts
 }
 
 func (e *Engine) EnableStrict(ceiling string, lease time.Duration) error {
@@ -98,6 +100,10 @@ func (e *Engine) Reserve(ctx context.Context, tokenID, userID uint, origin strin
 	id := hex.EncodeToString(raw[:])
 	row := model.BillingReservation{ID: id, UserID: userID, TokenID: tokenID, OriginModel: origin,
 		PriceVersion: prices.Version(), ReservedUnits: s.ceiling, State: Reserved, LeaseUntil: time.Now().Add(s.lease).UnixMilli()}
+	providerCosts := e.providerCosts.Load()
+	if providerCosts != nil {
+		row.ProviderBudgetUnits = providerCosts.budget
+	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// The owner relation is a budget invariant, never a caller-supplied ID.
 		var token model.Token
@@ -124,7 +130,7 @@ func (e *Engine) Reserve(ctx context.Context, tokenID, userID uint, origin strin
 	if err != nil {
 		return nil, err
 	}
-	reservation := &Reservation{id: id, prices: prices, origin: origin}
+	reservation := &Reservation{id: id, prices: prices, origin: origin, providerCosts: providerCosts}
 	return &PreDeduct{prices: prices, reservation: reservation}, nil
 }
 
@@ -183,17 +189,49 @@ func projectBalance(tx *gorm.DB, kind string, id uint) error {
 }
 
 func (e *Engine) StartAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt) error {
+	// A configured production policy cannot be bypassed via the ledger-only API.
+	if (e != nil && e.providerCosts.Load() != nil) ||
+		(pre != nil && pre.reservation != nil && pre.reservation.providerCosts != nil) {
+		return ErrProviderContract
+	}
+	return e.startAttempt(ctx, pre, attempt, nil)
+}
+
+func (e *Engine) startAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, bound *providerBound) error {
 	if !e.StrictReady() || pre == nil || pre.reservation == nil {
 		return ErrStrictUnavailable
 	}
 	return e.strict.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&model.BillingReservation{}).
-			Where("id=? AND state IN ? AND lease_until>?", pre.BillingID(), []string{Reserved, Active}, time.Now().UnixMilli()).
-			Updates(map[string]any{"state": Active})
+		query := tx.Model(&model.BillingReservation{}).
+			Where("id=? AND state IN ? AND lease_until>?", pre.BillingID(), []string{Reserved, Active}, time.Now().UnixMilli())
+		updates := map[string]any{"state": Active}
+		if bound != nil {
+			// Never release prior attempt envelopes, even on a failed/unknown
+			// receipt. Admission and durable attempt creation commit together.
+			query = query.Where("reserved_units >= ? AND provider_budget_units >= ? AND provider_held_units <= provider_budget_units - ?", bound.feeUnits, bound.units, bound.units)
+			updates["provider_held_units"] = gorm.Expr("provider_held_units + ?", bound.units)
+			attempt.ProviderBoundUnits = bound.units
+			attempt.ProviderContractVersion = bound.version
+			attempt.ProviderContractSnapshot = bound.snapshot
+		}
+		res := query.Updates(updates)
 		if res.Error != nil {
 			return res.Error
 		}
 		if res.RowsAffected != 1 {
+			if bound != nil {
+				var row model.BillingReservation
+				if err := tx.First(&row, "id=?", pre.BillingID()).Error; err != nil {
+					return err
+				}
+				if (row.State != Reserved && row.State != Active) || row.LeaseUntil <= time.Now().UnixMilli() {
+					return ErrStrictUnavailable
+				}
+				if row.ReservedUnits < bound.feeUnits {
+					return ErrFeeBound
+				}
+				return ErrProviderBudget
+			}
 			return ErrStrictUnavailable
 		}
 		attempt.ReservationID, attempt.State = pre.BillingID(), Active
@@ -201,11 +239,15 @@ func (e *Engine) StartAttempt(ctx context.Context, pre *PreDeduct, attempt model
 	})
 }
 
-func snapshotCost(s *PriceSnapshot, u *relaymodel.Usage, actual, origin, group string) (int64, error) {
+func snapshotPriceModel(s *PriceSnapshot, actual, origin string) string {
 	if _, found := s.price(actual); !found {
-		actual = origin
+		return origin
 	}
-	return s.CostUnits(u, actual, group)
+	return actual
+}
+
+func snapshotCost(s *PriceSnapshot, u *relaymodel.Usage, actual, origin, group string) (int64, error) {
+	return s.CostUnits(u, snapshotPriceModel(s, actual, origin), group)
 }
 
 func (e *Engine) EndAttempt(ctx context.Context, pre *PreDeduct, number, status int, termination string, u *relaymodel.Usage) error {
@@ -218,14 +260,28 @@ func (e *Engine) EndAttempt(ctx context.Context, pre *PreDeduct, number, status 
 		return err
 	}
 	attempt.State, attempt.Status, attempt.Termination = "finished", status, termination
+	var contractErr error
+	if u != nil && attempt.ProviderContractVersion != "" {
+		var snapshot providerAttemptSnapshot
+		hash := sha256.Sum256([]byte(attempt.ProviderContractSnapshot))
+		if json.Unmarshal([]byte(attempt.ProviderContractSnapshot), &snapshot) != nil ||
+			hex.EncodeToString(hash[:]) != attempt.ProviderContractVersion || (snapshot.Format != 1 && snapshot.Format != 2) || snapshot.UnitScale != UnitScale ||
+			int64(u.PromptTokens) > snapshot.Contract.InputTokenCeiling || int64(u.CompletionTokens) > snapshot.OutputLimit {
+			contractErr = ErrProviderLimit
+			attempt.Termination = "provider_contract_violation"
+		}
+	}
 	if u != nil {
 		attempt.PromptTokens, attempt.OutputTokens = u.PromptTokens, u.CompletionTokens
 		cost, err := snapshotCost(pre.prices, u, attempt.ActualModel, pre.reservation.origin, attempt.Group)
 		if err == nil && completeUsage(u) {
-			attempt.CostUnits, attempt.CostKnown = cost, termination == "success" && status == 200
+			attempt.CostUnits, attempt.CostKnown = cost, termination == "success" && status == 200 && contractErr == nil
 		}
 	}
-	return db.Save(&attempt).Error
+	if err := db.Save(&attempt).Error; err != nil {
+		return err
+	}
+	return contractErr
 }
 
 // Finish is idempotent, including across lost acknowledgments and restarts.
@@ -245,9 +301,13 @@ func (e *Engine) Finish(ctx context.Context, pre *PreDeduct, u *relaymodel.Usage
 			return err
 		}
 		actualCost, reason := int64(0), ""
+		refusal := persistedProviderRefusal(row.Reason)
 		if attempts > 0 {
 			if !complete || !completeUsage(u) {
 				reason = "execution_or_usage_unknown"
+				if refusal != "" {
+					reason += ":" + refusal
+				}
 			} else {
 				var costErr error
 				actualCost, costErr = snapshotCost(pre.prices, u, actual, row.OriginModel, group)
@@ -284,7 +344,10 @@ func (e *Engine) Finish(ctx context.Context, pre *PreDeduct, u *relaymodel.Usage
 			return err
 		}
 		charge, state = actualCost, Settled
-		return tx.Model(&row).Updates(map[string]any{"state": Settled, "reason": "", "charge_units": actualCost, "fingerprint": digest}).Error
+		if attempts > 0 {
+			refusal = ""
+		}
+		return tx.Model(&row).Updates(map[string]any{"state": Settled, "reason": refusal, "charge_units": actualCost, "fingerprint": digest}).Error
 	})
 	return
 }

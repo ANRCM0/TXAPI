@@ -191,12 +191,21 @@ func (s *PriceSnapshot) CostUnits(u *relaymodel.Usage, name, group string) (int6
 	if u == nil || u.PromptTokens < 0 || u.CompletionTokens < 0 {
 		return 0, errors.New("missing or negative token usage")
 	}
+	return s.costUnits(int64(u.PromptTokens), int64(u.CompletionTokens), name, group)
+}
+
+// Bounds use int64 counts directly, without narrowing a provider's declared
+// ceiling to the host's int width or changing the settlement rounding rule.
+func (s *PriceSnapshot) costUnits(inputTokens, outputTokens int64, name, group string) (int64, error) {
+	if inputTokens < 0 || outputTokens < 0 {
+		return 0, errors.New("negative token counts")
+	}
 	p, ok := s.price(name)
 	if !ok {
 		return 0, fmt.Errorf("no price for model %q", name)
 	}
-	input := new(big.Int).Mul(big.NewInt(int64(u.PromptTokens)), big.NewInt(p.InputUnitsPer1K))
-	output := new(big.Int).Mul(big.NewInt(int64(u.CompletionTokens)), big.NewInt(p.OutputUnitsPer1K))
+	input := new(big.Int).Mul(big.NewInt(inputTokens), big.NewInt(p.InputUnitsPer1K))
+	output := new(big.Int).Mul(big.NewInt(outputTokens), big.NewInt(p.OutputUnitsPer1K))
 	numerator := new(big.Int).Mul(input.Add(input, output), big.NewInt(s.rate(group)))
 	denominator := big.NewInt(1000 * UnitScale)
 	units, rem := new(big.Int), new(big.Int)

@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"minigateway/internal/protocol/canonical"
 	"minigateway/internal/protocol/model"
@@ -138,12 +139,16 @@ func (t *translator) onContentBlockStart(ev claudeStreamEvent) ([]*canonical.Str
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
-	if len(ev.Delta) > 0 {
-		// content_block_start 的 data 里 content_block 是对象，
-		// 但事件结构里我们把它放在 Delta 字段（RawMessage）
-		if err := json.Unmarshal(ev.Delta, &blk); err == nil {
+	if len(ev.ContentBlock) > 0 {
+		if err := json.Unmarshal(ev.ContentBlock, &blk); err == nil {
+			if _, exists := t.blockTypes[ev.Index]; exists {
+				return nil, fmt.Errorf("duplicate content block index %d", ev.Index)
+			}
 			t.blockTypes[ev.Index] = blk.Type
 			if blk.Type == "tool_use" {
+				if blk.ID == "" || blk.Name == "" {
+					return nil, fmt.Errorf("tool block has no id or name")
+				}
 				idx := t.nextToolIndex
 				t.nextToolIndex++
 				t.toolCallIndex[ev.Index] = idx
@@ -186,10 +191,7 @@ func (t *translator) onContentBlockDelta(ev claudeStreamEvent) ([]*canonical.Str
 		// 工具参数碎片：归到对应的 tool_calls 下标
 		idx, ok := t.toolCallIndex[ev.Index]
 		if !ok {
-			// 没记录过这个块的起始事件（异常情况）：按新工具调用处理
-			idx = t.nextToolIndex
-			t.nextToolIndex++
-			t.toolCallIndex[ev.Index] = idx
+			return nil, fmt.Errorf("tool delta without a matching start at index %d", ev.Index)
 		}
 		chunk := &canonical.StreamChunk{
 			ID:    t.id,

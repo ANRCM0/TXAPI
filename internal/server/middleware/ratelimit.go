@@ -340,6 +340,7 @@ func TokenRateLimit(limiter Limiter) gin.HandlerFunc {
 			c.Request = c.Request.WithContext(access.WithTokenReservation(c.Request.Context(), view.ID, est))
 			c.Set(ctxTPMEstimate, est)
 		}
+		c.Request = c.Request.WithContext(access.WithRateAdmission(c.Request.Context(), view.ID))
 		c.Next()
 	}
 }

@@ -64,6 +64,7 @@ type geminiInlineData struct {
 
 // geminiFunctionCall 是模型发起的函数调用。
 type geminiFunctionCall struct {
+	ID   string          `json:"id,omitempty"`
 	Name string          `json:"name"`
 	Args json.RawMessage `json:"args,omitempty"`
 }
@@ -71,6 +72,7 @@ type geminiFunctionCall struct {
 // geminiFunctionResponse 是函数执行结果。
 // Gemini 没有 tool_use_id 概念——靠 name 匹配调用。
 type geminiFunctionResponse struct {
+	ID       string          `json:"id,omitempty"`
 	Name     string          `json:"name"`
 	Response json.RawMessage `json:"response,omitempty"`
 }
@@ -290,9 +292,6 @@ func BuildRequest(req *canonical.ChatRequest, modelName string) ([]byte, error) 
 			// 这里直接用它；为空说明映射失败，明确报错。
 			name := m.Name
 			if name == "" {
-				name = m.ToolUseID
-			}
-			if name == "" {
 				return nil, fmt.Errorf("%w: 工具结果缺少函数名（Gemini 的 functionResponse 要求 name）", ErrUnsupported)
 			}
 			resp := json.RawMessage(`{}`)
@@ -301,7 +300,7 @@ func BuildRequest(req *canonical.ChatRequest, modelName string) ([]byte, error) 
 				resp = json.RawMessage(`{"result":` + jsonString(t) + `}`)
 			}
 			appendUserPart(&out, geminiPart{
-				FunctionResponse: &geminiFunctionResponse{Name: name, Response: resp},
+				FunctionResponse: &geminiFunctionResponse{ID: m.ToolUseID, Name: name, Response: resp},
 			})
 		case canonical.RoleUser:
 			parts, err := contentParts(m)
@@ -369,7 +368,7 @@ func contentParts(m canonical.Message) ([]geminiPart, error) {
 				args = json.RawMessage(`{}`)
 			}
 			parts = append(parts, geminiPart{
-				FunctionCall: &geminiFunctionCall{Name: p.Name, Args: args},
+				FunctionCall: &geminiFunctionCall{ID: p.ToolUseID, Name: p.Name, Args: args},
 			})
 		case canonical.PartToolResult:
 			// tool_result 出现在 assistant 消息里是异常情况
@@ -436,18 +435,27 @@ func ParseResponse(body []byte) (*canonical.ChatResponse, error) {
 	resp.Model = "" // Gemini 响应不带模型名，由上层（relay）用请求时的模型名填充
 	resp.FinishReason = mapFinishReason(cand.FinishReason)
 
+	toolIndex := 0
 	for _, p := range cand.Content.Parts {
 		switch {
 		case p.Text != "":
 			resp.Content = append(resp.Content, canonical.ContentPart{Type: canonical.PartText, Text: p.Text})
 		case p.FunctionCall != nil:
+			id := p.FunctionCall.ID
+			if id == "" {
+				id = fmt.Sprintf("call_%d", toolIndex)
+			}
 			resp.Content = append(resp.Content, canonical.ContentPart{
 				Type:      canonical.PartToolUse,
-				ToolUseID: p.FunctionCall.Name,
+				ToolUseID: id,
 				Name:      p.FunctionCall.Name,
 				Input:     p.FunctionCall.Args,
 			})
+			toolIndex++
 		}
+	}
+	if toolIndex > 0 && resp.FinishReason == canonical.FinishStop {
+		resp.FinishReason = canonical.FinishToolCalls
 	}
 	return resp, nil
 }
