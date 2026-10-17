@@ -12,10 +12,12 @@ after the batch was implemented.
 Commands, first-run failures, repairs and environment are in
 [S6 implementation history](../history/implementation-s6.md).
 
-The current S7-A01 working tree extends the contract to 0.3.0 / 80 operations.
-Its opt-in foreground Responses route, receipt/replay consumer and separate
-verification status are specified in [Responses HTTP](responses-http.md);
-the S6 evidence below does not validate that extension.
+S7-A01 separately extends the accepted contract to 0.3.0 / 80 operations.
+PR #10 merged final feature head `3195d09` into `master/a925140`; its own complete
+push/PR/master CI passed. Its opt-in foreground Responses route and receipt/replay
+consumer are specified in [Responses HTTP](responses-http.md), with
+[exact A01 evidence](../history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance).
+The historical S6 inventory and evidence below do not validate that extension.
 
 ## Responsibilities and actual consumers
 
@@ -64,7 +66,8 @@ the S6 evidence below does not validate that extension.
 | Chat JSON/SSE / Anthropic | Representable text/function tools, ID/result round trip and per-stream increments; unsupported options reject before send | No registered input profile; execution rejected |
 | Chat JSON/SSE / Gemini | Text subset, cumulative usage; tool definitions/history reject | No registered input profile; execution rejected |
 | Non-stream embeddings / OpenAI-compatible | Independent native body/vector decoder, including supported extension opt-in | Registered official input/tariff/credential profile only |
-| Responses/background/native WS product | No production route; independent sample/internal consumers only | No inherited Chat approval |
+| Foreground Responses JSON/SSE / native OpenAI-compatible | Separately accepted A01 opt-in route; text/function tools, scoped durable idempotency and short encrypted replay | Rejected before admission/holds/attempt; no proven Responses subset |
+| Responses conversations/background/native WS product | Not implemented; independent foundation consumers do not provide these products | No inherited Chat or A01 approval |
 
 The matrix states implementation scope, not independent provider billing or
 external client certification. S5-03 remains open. Existing `RequirementsFor`,

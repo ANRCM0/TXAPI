@@ -1,6 +1,6 @@
 # Responses HTTP/SSE foreground contract
 
-Status (2026-10-18): S7-A01 implemented on `feat/s7-a01-responses-http`, based on merged `master/bea97fa`. Concentrated local verification and repairs passed on the final source tree; no matching remote CI or merge has been claimed. See [batch evidence](../history/implementation-s7-a01.md). This extends, rather than reopens, the accepted [S6 contracts](compatibility-contracts.md).
+Status (2026-10-18): S7-A01 accepted and merged by PR #10. Final feature head `3195d09` on base `bea97fa` and actual merged `master/a925140` passed their own complete automatic push/PR/master CI, including Linux race and container delivery. See [exact acceptance evidence](../history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance), including the failed initial delivery run and repair. This extends, rather than reopens, the accepted [S6 contracts](compatibility-contracts.md). Responses remains opt-in; A02-A06 and M2 are not complete.
 
 ## Supported Surface
 

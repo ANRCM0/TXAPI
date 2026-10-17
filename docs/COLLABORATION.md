@@ -2,13 +2,15 @@
 
 本页定义当前团队边界、可依赖的接口与集成门槛，并保留初始协作框架 F0 的验收记录。核对日期：2026-10-18；S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过，精确证据见 [S6 记录](history/implementation-s6.md) 和唯一活动计划 [PLAN.md](PLAN.md)。A1–A4 原验收及 S5 计费安全门槛保留。架构仍是模块化单体；“多个团队”指开发分工，不会给产品新增团队/组织租户模型。
 
-F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；已合并的实现已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；Chat/embeddings 已有独立载荷、共享操作信封及发送准备的能力检查；Chat codec 不承担其他操作，S6 验收时独立 Responses 模型未接入生产；当前工作分支已实现默认关闭的 S7-A01 前台 HTTP/SSE，本地集中验证通过，仍待完整 CI/集成验收。A3/A4 已收口为原共同基线；S6 进一步交付现有协议/工具、管理 API、扩展和前端的实际契约闭环。S7-A 的 Responses/任务/原生 WS 接线复用已验收的 M1 基线，按新操作单独验收。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
+2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。A02+ 未实现、M2 未完成，S5 成本门槛继续独立验收。
+
+F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；已合并的实现已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；Chat/embeddings 已有独立载荷、共享操作信封及发送准备的能力检查；Chat codec 不承担其他操作，S6 验收时独立 Responses 模型未接入生产；默认关闭的 S7-A01 前台 HTTP/SSE 已完成独立 CI/合并验收。A3/A4 已收口为原共同基线；S6 进一步交付现有协议/工具、管理 API、扩展和前端的实际契约闭环。S7-A 的 Responses/任务/原生 WS 接线复用已验收的 M1 基线，按新操作单独验收。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
 
 极简 core 不承载用户、预算、会话或任务。功能接入复用同一授权、准入、调度、结算与收尾，不复制另一条业务链；普通函数调用与确有需要的小接口优先，不预建空模块或动态插件平台。
 
 2026-10-18 的职责澄清：core 处理中转；gateway 与身份、调度、计费、状态服务组成业务层；兼容层覆盖 server/protocol/transport 的对外适配、扩展端口及前端应用契约。`web` 经公开应用 API 使用业务能力，页面不能成为授权/账本/恢复的权威。该分工不要求合并成三个大包；现有 server/store 业务调用按真实消费者核对，必要时提取小入口，不能仅凭目录名称宣称已完成分层。
 
-三层实际消费者、已支持组合、构造注册与资源责任见 [兼容契约清单](reference/compatibility-contracts.md)。新增协议沿用 `gateway.Options.Adaptors` 与独立流 session，管理配置复用 `management.Configuration`，页面消费现有应用 API；共享端口变更连同调用方评审。S6/M1 已完成集成验收，当前工作分支已实现 S7-A01 Responses HTTP/SSE，本地集中验证通过，尚待本批完整 CI/集成验收；同类项目能力按具体目标通过这些契约接入。
+三层实际消费者、已支持组合、构造注册与资源责任见 [兼容契约清单](reference/compatibility-contracts.md)。新增协议沿用 `gateway.Options.Adaptors` 与独立流 session，管理配置复用 `management.Configuration`，页面消费现有应用 API；共享端口变更连同调用方评审。S6/M1 已完成集成验收，S7-A01 Responses HTTP/SSE 已完成独立 CI/合并验收；同类项目能力按具体目标通过这些契约接入。
 
 ## 1. 可以并行推进的分工
 
@@ -22,7 +24,7 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 | 管理 API 团队 | `internal/management`、`internal/server/api/<feature>.go` 与对应 store 方法 | 管理用例负责保存/发布，HTTP 表示与既有身份/事务边界分工；按资源补契约与隔离回归 | RegisterAccess/registerResources 注册点、OpenAPI、依赖声明 |
 | 前端团队 | `web/` | 原生 ES Modules 控制台和真实 API 联调；Go embed 随二进制交付，无单独资产构建 | 静态资源路由、CSP、HTTP 契约与生产接线 |
 | 测试/交付团队 | `tests/`、部署脚本、恢复说明 | 模拟上游、启动/升级/恢复、API 工作流、性能基线 | CI 合并门槛和数据库迁移用例 |
-| 状态/传输功能团队（S7-A） | `internal/responses`、WS transport、相关测试 | A01 前台应用与持久幂等已实现待验收；GET/续链/会话/后台/原生 WS 后续单独接线 | 持久端口、账本原子边界、生命周期与依赖表 |
+| 状态/传输功能团队（S7-A） | `internal/responses`、WS transport、相关测试 | A01 前台应用与持久幂等已验收合并；GET/续链/会话/后台/原生 WS 后续单独接线 | 持久端口、账本原子边界、生命周期与依赖表 |
 
 表内是责任角色，不是已指定人员。当前只允许按已稳定边界分工，不表示已经开放全部状态型功能并行改共享入口。2026-10-17 核对仓库未见 CODEOWNERS；可读取的分支规则为空，经典分支保护因权限不足未确认，不能宣称强制评审/必需 CI 已生效。GitHub 成员权限、真实 CODEOWNERS 和分支保护仍由维护者落实，本次不修改远端治理设置。
 
@@ -51,7 +53,7 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 
 Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模型授权、请求/attempt 准入、预留、路由、重试和收尾。每次 `ExecuteTo`（旧 HTTP `Execute` 委托此入口）屏蔽父 context 的旧 RPM/TPM 准入标记及 mutable reservation；HTTP 中间件已完成的单次准入则由适配层明确传入，避免双扣。结果与流解析状态不按外部 Request ID 共享。协调链内部使用 `protocol.ParseRequest` 生成自持正文的 `protocol.Request`；路由/准入/attempt 与 `PrepareRequest` 使用同一操作事实，结果显式记录 Operation。每次准备只把副本交给适配器，不能修改原信封或下一次重试。`model.ModelRequest` 与整数 Mode 仅在旧 Relay/适配器边界保留；旧投影必须匹配正文，未知模式拒绝。
 
-现有 HTTP 通过 `core.HTTPOutput` 消费输出端口，协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 只提供原生请求/响应/SSE 协议与 core 样本，未注册路由，也不能被当成已存在的持久任务或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
+现有 HTTP 通过 `core.HTTPOutput` 消费输出端口，协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 已提供独立原生请求/item/JSON/SSE 编解码，A01 通过 `internal/responses` 应用注册 `POST /v1/responses` 并消费同一 gateway；它不是持久任务、历史/续链或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
 
 ### 最小 worker、输出记录与意图：internal/generation（A3-01 至 A3-05 基础消费者）
 
@@ -73,11 +75,11 @@ A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与�
 
 `internal/transport/websocket` 是纯服务端 I/O，生产只依赖标准库与固定版本 coder/websocket，不导入 access/gateway/generation/store；库不得进入 core 或业务包。`access.ConnectionCapacity` 独立限制物理连接，可信绑定由现有鉴权提供，不复制鉴权。manager 的服务寿命、HTTP 握手和每次生成独立，active/pending/消息/截止时间有界，关闭不代表生成收尾或退款。
 
-当前实际消费者是 generation 的测试专用 socket 应用：每轮经原 Runner 重新授权并调用同一 Gateway/账本；前台断开显式取消并 join，记录型观察断开只取消 Wait。它验证了已有输出端口足以承载编码结果，尚未创建生产 WS 应用或上游 WS executor。公开应用协议、原生 Responses 事件/续链、持久任务及 main 注册必须后续独立验收，不从测试帧复制为产品契约。关闭顺序、Origin/代理、容量和错误边界见[开发指南](reference/generation-runtime.md#a3-03-有界-ws-传输与连接生命周期)。
+当前实际消费者是 generation 的测试专用 socket 应用：每轮经原 Runner 重新授权并调用同一 Gateway/账本；前台断开显式取消并 join，记录型观察断开只取消 Wait。它验证了已有输出端口足以承载编码结果，尚未创建生产 WS 应用或上游 WS executor。原生 WS 应用协议/事件、续链、持久任务及相应 main 注册必须后续独立验收；A01 的原生 HTTP JSON/SSE 与 main 接线已独立验收，不从测试帧复制为产品契约。关闭顺序、Origin/代理、容量和错误边界见[开发指南](reference/generation-runtime.md#a3-03-有界-ws-传输与连接生命周期)。
 
 ### 协议扩展：internal/protocol
 
-厂商适配器实现 `adaptor.Adaptor` 和需要的 `ProtocolAdaptor`，有状态 SSE 实现 `SessionStreamer.NewStreamSession`。适配器实例必须可并发只读；解析状态只属于本次 attempt。未知字段透传/不支持能力的显式拒绝由协议测试约束。`ProtocolAdaptor` 仅是 ChatRequest/ChatResponse/Chat SSE 的 codec，不是通用操作 DTO。内建适配器通过 `adaptor.Capability.Supports(Requirements)` 声明操作能力，`protocol.Supports` 先限制已实现的 OpenAI 入站 HTTP 范围；相同需求用于候选过滤和 `PrepareRequest`，旧声明接口兼容保留。embeddings 显式选择原生转换和独立响应 decoder，保留 input/vector/base64/扩展字段，不能经过 Chat 或输出 SSE DONE；自定义 embeddings opt-in 必须提供 OpenAI-compatible 原生载荷/usage，并不支持任意厂商格式。malformed tools/history 不按纯文本放行 Gemini。尚不声明 Responses/background/WS 生产能力，Gemini 工具与 strict 工具均保守拒绝。
+厂商适配器实现 `adaptor.Adaptor` 和需要的 `ProtocolAdaptor`，有状态 SSE 实现 `SessionStreamer.NewStreamSession`。适配器实例必须可并发只读；解析状态只属于本次 attempt。未知字段透传/不支持能力的显式拒绝由协议测试约束。`ProtocolAdaptor` 仅是 ChatRequest/ChatResponse/Chat SSE 的 codec，不是通用操作 DTO。内建适配器通过 `adaptor.Capability.Supports(Requirements)` 声明操作能力，`protocol.Supports` 先限制已实现的 OpenAI 入站 HTTP 范围；相同需求用于候选过滤和 `PrepareRequest`，旧声明接口兼容保留。embeddings 显式选择原生转换和独立响应 decoder，保留 input/vector/base64/扩展字段，不能经过 Chat 或输出 SSE DONE；自定义 embeddings opt-in 必须提供 OpenAI-compatible 原生载荷/usage，并不支持任意厂商格式。malformed tools/history 不按纯文本放行 Gemini。A01 已声明并验收原生 OpenAI-compatible Responses 前台 HTTP/SSE 能力，不经 Chat 转换；background/原生 WS 仍未实现。Gemini 工具与 strict 工具均保守拒绝，Responses 尚无已证明的 strict 子集，全部在计费前拒绝。
 
 本轮实现矩阵（未代表完整阶段验收）：
 
@@ -87,7 +89,8 @@ A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与�
 | Chat JSON/SSE → Anthropic | 已建模文本/function tools、多调用与结果往返；不可表示字段在执行前 400 | 无已登记输入档案，拒绝执行；原转换维度/输出限制守卫保留 |
 | Chat JSON/SSE → Gemini | 文本子集；signed tool history 无无损表示，因此包含 tools 或历史 tool_call/result 的请求路由拒绝 | 无已登记输入档案，拒绝执行；原转换维度/输出限制守卫保留 |
 | embeddings → OpenAI | 非流式原生路径 | 仅已登记官方 embeddings 输入档案目标；文本批次与精确契约 |
-| Responses / background / native WS | 不开放生产路由/能力；Responses 只有独立协议与 core 样本 | 不开放，不继承 Chat 的预算证明 |
+| Responses 前台 HTTP/SSE（A01） | 原生 OpenAI-compatible 文本/函数工具 JSON/SSE，默认关闭，legacy/disabled 已验收；GET/续链不在本批 | 尚无已证明子集，全部计费前拒绝，不继承 Chat 的预算证明 |
+| background / native WS | 尚未实现公开产品路由/能力，后续独立验收 | 不开放，不继承 Chat 的预算证明 |
 
 跨协议支持的是共同子集，不是“所有 OpenAI 字段换名”。`stream_options` 仅接受已映射的 `include_usage=true`，本地转换返回用量而不把该字段错发给厂商；未实现的 false/扩展拒绝。`n=1` 是显式单候选，其他候选数拒绝。`tool_choice`、strict schema、parallel_tool_calls 等未映射选项不做猜测。引用上游功能逻辑不能扩大本矩阵。
 
@@ -140,7 +143,7 @@ S6 的 `Configuration` 是已有渠道/凭据/价格操作的真实应用服务�
 
 ## 3. 前后端契约
 
-唯一机器可读 HTTP 契约：[openapi.json](openapi.json)，当前 S7-A01 工作版本 `0.3.0` / 80 个操作，尚待本批验收；S6 已验收基线为 `0.2.3` / 79 个操作（管理员对账为 `0.2.2`，首批为 `0.2.1`，S4 为 `0.2.0`，F0 验收版本为 `0.1.0`）。路径沿用现有 `/api/...` 与 `/v1/...`；这个版本标识契约文档，未给现有 URL 强加新前缀。
+唯一机器可读 HTTP 契约：[openapi.json](openapi.json)，当前 S7-A01 已验收版本 `0.3.0` / 80 个操作；S6 已验收基线为 `0.2.3` / 79 个操作（管理员对账为 `0.2.2`，首批为 `0.2.1`，S4 为 `0.2.0`，F0 验收版本为 `0.1.0`）。路径沿用现有 `/api/...` 与 `/v1/...`；这个版本标识契约文档，未给现有 URL 强加新前缀。
 
 - 新前端使用 `/api/auth`、`/api/admin`、`/api/me`；旧 `/api/channels` 等路径标记 deprecated，暂保留原管理密钥鉴权。
 - `APIKey` 为无明文 metadata，`APIKeyCreated` 才有一次性 key。不要将数据库 model.Token 直接作为前端所有场景的通用类型。
@@ -197,7 +200,7 @@ make smoke
 
 ### 后续批次与上游借鉴
 
-后续任务统一以 [PLAN.md 的后续开发路线](PLAN.md#后续开发路线) 为入口。A1–A4 已完成执行/持久/安全底座；S6-A/B/C 已完成协议、公开 API、扩展与前端兼容契约验收并合并；当前工作分支推进已实现待验收的 S7-A01，后续按具体兼容目标吸收同类项目能力。S5 成本证明独立保留，strict 能力单独验收；本轮不新增支付，S7-B/S8/S9 不作前置。
+后续任务统一以 [PLAN.md 的后续开发路线](PLAN.md#后续开发路线) 为入口。A1–A4 已完成执行/持久/安全底座；S6-A/B/C 已完成协议、公开 API、扩展与前端兼容契约验收并合并；S7-A01 已独立验收合并，下一批为 S7-A02，后续按具体兼容目标吸收同类项目能力。S5 成本证明独立保留，strict 能力单独验收；本轮不新增支付，S7-B/S8/S9 不作前置。
 
 内核与兼容框架完成后，每个吸收批次先检查现有实现，明确目标是 API、客户端行为、配置导入还是页面功能，再选择 new-api、sub2api、claude-relay-service 等项目的对应实现，通过本项目适配和业务端口接入。任务/PR 记录具体上游提交、文件、采用方式、许可核对、TXAPI 落点和验证；设计参考与代码移植分开说明。复制/改写代码或新增依赖不得隐去来源，也不得自动改变项目许可、Go 版本或部署承诺；具体规则见 PLAN 的“参考项目与借鉴方式”。
 
@@ -209,7 +212,7 @@ S7-A 由协议/HTTP、持久状态/任务、WS transport、账务/集成、前�
 
 ## 6. 基线与验收证据
 
-当前工作分支 S7-A01 的职责落点为 `internal/responses` 前台应用、`protocol/responses` 原生编解码、gateway 共享执行链与 store schema v11 幂等回执；OpenAPI 0.3.0 登记 80 个操作。默认关闭；启用须有内容密钥和实际凭据加密。owner/Key 幂等校验、当前权限和配额在 store 同一事务内完成，应用先持久记录再执行；true/默认 true 仅增加私有加密短期重放，false 无正文且重试不能重新执行，未知状态不得自动过期/重发。strict 在计费前拒绝，后续 GET/续链/会话/后台/原生 WS 仍须独立批次。具体运行边界见 [Responses 约定](reference/responses-http.md)，实现与集中验证记录见 [S7-A01 批次](history/implementation-s7-a01.md)；当前尚待验收，不沿用 S6 的 0.2.3 / 79 操作或历史 CI 声称本批通过。
+已验收 S7-A01 的职责落点为 `internal/responses` 前台应用、`protocol/responses` 原生编解码、gateway 共享执行链与 store schema v11 幂等回执；OpenAPI 0.3.0 登记 80 个操作。默认关闭；启用须有内容密钥和实际凭据加密。owner/Key 幂等校验、当前权限和配额在 store 同一事务内完成，应用先持久记录再执行；true/默认 true 仅增加私有加密短期重放，false 无正文且重试不能重新执行，未知状态不得自动过期/重发。strict 在计费前拒绝，后续 GET/续链/会话/后台/原生 WS 仍须独立批次。具体运行边界见 [Responses 约定](reference/responses-http.md)，实现与集中验证记录见 [S7-A01 批次](history/implementation-s7-a01.md)；本批独立验收不沿用 S6 的 0.2.3 / 79 操作或历史 CI，A02+ 与 M2 仍未完成。
 
 F0 的阶段勾选、提交和原始 CI 已归入 [S0–S5 历史验收](history/acceptance-s0-s5.md#f0-多团队协作框架收口s2-之后)。本轮 S5/S6/A1–A3 切片已通过 PR #5 合入 `master/5004c57`，合并前后完整 CI 通过，具体范围见 [S5–A3 批次记录](history/implementation-s5-a3.md#2026-10-17-合并与最终验证结果)。
 

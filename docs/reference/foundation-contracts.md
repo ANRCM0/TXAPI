@@ -46,9 +46,12 @@ A3-05 ports are accepted internal extension contracts for the existing operation
 scope. Changes still require coordinated consumer review; they are not a public
 SDK or native S7 wire/event contract. At the accepted foundation/S6 baseline,
 OpenAPI was 0.2.3 with 79 operations and no Responses/session/task/WS route.
-The later unaccepted S7-A01 working tree adds the opt-in foreground Responses
-route (0.3.0 / 80 operations); its [separate contract](responses-http.md) and
-new verification evidence do not inherit acceptance from this matrix.
+S7-A01 subsequently added and separately accepted the opt-in foreground Responses
+route (0.3.0 / 80 operations). PR #10 / `master/a925140` has its own complete
+push/PR/master CI; its [contract](responses-http.md) and
+[acceptance evidence](../history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)
+do not inherit acceptance from this matrix. Its bounded long-SSE archive extension
+raises the shared segment ceiling from 256 to 8192 while preserving byte quotas.
 
 ## Lifetime and failure invariants
 
@@ -135,9 +138,10 @@ substitutes for the final source.
 
 ## Product and governance exclusions
 
-Native Responses production routing, durable conversations, provider-native
-background execution, public/native event ID contracts, native upstream WS/multiturn clients,
-and S7 acceptance remain separate functional batches. An internal output segment
+Native Responses foreground routing is separately accepted by S7-A01, not by
+this foundation audit. Durable conversations, provider-native background execution,
+public resumable event ID contracts, native upstream WS/multiturn clients,
+and full S7 acceptance remain later functional batches. An internal output segment
 sequence alone does not prove a resumable consumer; the private encoded-byte
 snapshot cursor is distinct from a public/live protocol event contract. This does not remove
 the required private persistence/fencing/recovery/security acceptance for A3/A4.

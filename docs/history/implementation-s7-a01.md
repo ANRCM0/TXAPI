@@ -1,6 +1,6 @@
 # S7-A01: Native Responses HTTP/SSE Batch
 
-Date: 2026-10-18. Branch: `feat/s7-a01-responses-http`; source integration base: `bea97faefce65fc5ecf74b8703690c71b2f8cfe2` (accepted M1 plus its documentation). This feature-batch record is prepared after local verification and before matching remote CI/integration acceptance; exact submission/PR/merge evidence is recorded only after it occurs. S5-03 and the full S7-A stage remain unchecked.
+Date: 2026-10-18. Branch: `feat/s7-a01-responses-http`; source integration base: `bea97faefce65fc5ecf74b8703690c71b2f8cfe2` (accepted M1 plus its documentation). S7-A01 is accepted: PR #10 merged final feature head `3195d09` into `master/a925140`, with complete exact-head push/PR and merged-master CI. The original local checkpoints and initial failed delivery runs remain recorded below; [final acceptance](#2026-10-18-s7-a01-functional-acceptance) distinguishes their scope. S5-03, M2 and the full S7-A stage remain incomplete.
 
 ## Scope And Ownership
 
@@ -44,9 +44,9 @@ The browser/API/UI scripts and frontend sources were unchanged after their succe
 
 Focused repair commands used `GOARCH=amd64`: `go test ./internal/gateway -run '^TestResponsesNonNativeErrorsAreSanitizedBeforeOutputLogsAndHealth$' -count=1`; `go test ./internal/protocol/responses ./internal/protocol`; `go test -count=1 ./internal/responses ./internal/config`; and `go test ./internal/generation ./internal/store ./internal/server -run 'TestGenerationArchiveSegmentCapReservesFinalSlotAndBoundsCorruptReads|TestGenerationArchiveRefusesOversizedCorruptBlobBeforeLoading|TestResponsesHTTPNativeJSONSSEAndDurableIdempotency|TestForeground' -count=1`. All passed, followed by the complete final suite above.
 
-### Outstanding Acceptance
+### Outstanding At The Local-Delivery Checkpoint
 
-At the local-delivery checkpoint preceding feature submission, no batch commit/push/PR/merge had been made. Matching remote integration remains pending until independently verified. Linux full race, container installation/upgrade/backup restoration, automatic push/PR/master CI and latest-base integration remain required before checking S7-A01 acceptance. Existing workflows and gates are unchanged. Historical M1 green runs are not evidence for this new source. No real provider/account, vendor cost bound, SDK/Codex client, S7-A02 history/continuation, background or native WebSocket acceptance is claimed. S5-03 and all S7 stage checkboxes remain unchanged.
+At the local-delivery checkpoint preceding feature submission, no batch commit/push/PR/merge had been made, and matching remote integration was pending. Linux full race, container installation/upgrade/backup restoration, automatic push/PR/master CI and latest-base integration were still required before checking S7-A01 acceptance. These requirements have now passed on the exact final source as recorded below; existing workflows and gates are unchanged. Historical M1 green runs are not evidence for this new source. No real provider/account, vendor cost bound, SDK/Codex client, S7-A02 history/continuation, background or native WebSocket acceptance is claimed. S5-03 and the full S7-A stage remain incomplete.
 
 
 ## 2026-10-18 Initial PR And Delivery Regression Repair
@@ -56,3 +56,32 @@ Initial feature head `41382bcdafcfde78013fb3ef3dbd26ff6afed8c3` was pushed once 
 The delivery log identifies `tests/smoke/delivery.py`'s stale expected migration tail `[5,6,7,8,9,10]`; the application correctly added schema v11, causing that exact-version assertion to fail. The concentrated repair updates the expected tail to include v11, requires an empty `response_requests` table for fresh/upgrade disabled deployments, and includes that optional current-only table in snapshots so exact S3 backup restoration also proves it does not remain after rollback. Original released migration rows/timestamps, price-history digests, financial log associations and in-flight SSE drain assertions are retained. The PASS label now reports current/v11 rather than stale v9.
 
 Only this executable test consumer and this evidence document change in the repair; Go production/tests, configuration, OpenAPI, dependencies and workflows are unchanged. AST parsing/source compilation, `python tests/smoke/delivery.py --help`, and an isolated temporary-SQLite snapshot/restore-shape check passed. The ad-hoc Windows checker initially failed temporary-file cleanup because its own sqlite context did not close the connection; explicit closing fixed that checker without changing production or delivery logic. The repaired non-Markdown source fingerprint is `e3b23f49d526a47564d2070b0e6bd2d8490962adb298e60e7a70f73b122b8eab` (same 285 paths). Existing local Go/browser/main evidence is reused only for unchanged consumers; the corrected container path still requires a new complete automatic push/PR Verify run on the repair head. No manual workflow dispatch or CI bypass is used.
+
+## 2026-10-18 S7-A01 Functional Acceptance
+
+The repair was committed as `3195d0923d957eb5f41dde5412912d10e72259f7` after initial feature head `41382bcdafcfde78013fb3ef3dbd26ff6afed8c3`. Fresh fetch before merge confirmed the latest master still matched source base `bea97faefce65fc5ecf74b8703690c71b2f8cfe2`. The exact final head had four successful check/delivery results across automatic push and PR workflows, and PR #10 was mergeable/clean. `gh pr merge 10 --merge --match-head-commit 3195d0923d957eb5f41dde5412912d10e72259f7` merged without administrator override or bypass.
+
+Actual merge: `a925140ab86fca780a71ef6956a45e0e6af38658`, parents `bea97fa` and `3195d09`, at **2026-10-18 06:04:01 Asia/Shanghai** (`2026-10-17T22:04:01Z`). A fresh fetch confirmed that master; its tree is identical to the final feature head. The actual merged-master automatic Verify run then completed successfully, independently of the feature-head runs.
+
+| Exact source / event | Complete Verify result |
+|---|---|
+| `3195d0923d957eb5f41dde5412912d10e72259f7`, push | [39073160376](https://github.com/ANRCM0/TXAPI/actions/runs/39073160376): check SUCCESS, delivery SUCCESS |
+| Same final feature head, PR #10 | [39073164111](https://github.com/ANRCM0/TXAPI/actions/runs/39073164111): check SUCCESS, delivery SUCCESS |
+| `a925140ab86fca780a71ef6956a45e0e6af38658`, merged master | [39073532710](https://github.com/ANRCM0/TXAPI/actions/runs/39073532710): check SUCCESS, delivery SUCCESS |
+
+These are the existing unmodified Linux/ubuntu-latest Verify jobs with the pinned Go/actions configuration: tidy/dependency and architecture/API contracts, build, native frontend behavior, vet, gofmt, full race, coverage reporting, production-main smoke and performance reporting; delivery covers container fresh installation, v11 upgrade, stopped backup/old-version restore and in-flight SSE drain. Results were read using `gh run view ... --json headSha,status,conclusion,jobs` and `gh pr view 10`; `gh run watch ... --exit-status --interval 60` only followed existing automatic runs. No manual dispatch, disabled regression or weakened gate was used. The earlier failed complete runs remain failures, not retroactively green.
+
+### A01 Requirement Proof
+
+| PLAN A01 requirement | Delivered behavior and verification |
+|---|---|
+| Independent native operation/items/events | `protocol/responses` preserves text/function tools/history/instructions/output limits/usage and native terminal semantics; protocol/decoder and real JSON/SSE HTTP regressions pass, without Chat conversion |
+| Shared typed generation and financial lifecycle | Existing `Gateway.ExecuteTo`, admission, attempts and legacy finalization are used; disabled/legacy native JSON/SSE passes. Strict and claimed Responses reject before admission/holds/attempt. Future background atomic admission remains the real existing intent port, not a second queue/ledger |
+| Identity and scoped idempotency | Random generation/public response IDs, private upstream ID, canonical request HMAC and SQLite owner/Key unique/CAS authority; same-key conflict/concurrency, reauthorization, restart unknowns and one-execution/one-charge replay regressions pass |
+| HTTP and existing consumer regression; strict safety | Authenticated native JSON/SSE including 320 deltas, failures, I/O/keys/TTL/capacity pass together with existing Chat/embeddings, frontend, strict, migration, main and delivery checks. There is currently NO cost-proven strict Responses subset: all strict Responses remain explicitly refused, not silently downgraded |
+
+Only the four A01 checklist items are closed by this evidence. A01 retains default-off configuration, real credential encryption plus mounted content/digest keys, private finite replay and fail-closed unknowns. It does not provide GET/delete/input-item or conversation APIs, parent continuation, persistent public history, native background/WS, SDK/Codex or real-provider certification. A02-A06, M2 and full S7-A remain open; S5-03 remains independent and incomplete.
+
+### Acceptance Documentation Scope
+
+The follow-up `docs/s7-a01-acceptance` branch starts from accepted `master/a925140`. It synchronizes status, the four A01 checks and the separate contract/evidence boundaries; it changes Markdown only, not executable source/configuration/OpenAPI/dependencies/workflows. Local `git diff --check`, 12 changed documents / 176 local links and anchors, and independent rule/status review passed on Windows/PowerShell. The 285-file non-Markdown fingerprint remains `e3b23f49d526a47564d2070b0e6bd2d8490962adb298e60e7a70f73b122b8eab`. No redundant Go/browser run was made for these text-only edits. Existing automatic push/PR/merge CI still applies. The documentation's own commits and final CI/merge results are recorded in PR comments after they occur, avoiding an infinite evidence-only commit cycle.

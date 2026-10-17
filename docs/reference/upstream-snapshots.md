@@ -68,4 +68,4 @@
 
 固定 SHA 不变。本轮读取原工作目录 `D:/my-project/TXAPI/.local/references/` 的 RelayKit README、sub2api execution_scope 和 CRS codexToOpenAI 源文件，参考能力拒绝、每次生成的独立作用域及工具事件关联。TXAPI 落点为 gateway/coordinator、protocol/operation、tools 行为回归与独立 protocol/responses；没有复制/改写上游实现，无新增依赖或许可变更。
 
-外部协议另核对 [Anthropic streaming](https://platform.claude.com/docs/en/build-with-claude/streaming)：工具起始数据位于 content_block，后续参数位于 delta.partial_json。测试使用独立最小样本覆盖真实字段、多个调用和交错分片，不沿用旧解析器的字段错误。OpenAI 原生 Responses 以原始请求/JSON/SSE 保留 function_call 等操作结构，不套 Chat DTO；当前仅协议样本，不是生产路由或持久/后台/WS 功能。Gemini signed tool history 尚未无损建模，真实能力过滤保守拒绝该组合。
+外部协议另核对 [Anthropic streaming](https://platform.claude.com/docs/en/build-with-claude/streaming)：工具起始数据位于 content_block，后续参数位于 delta.partial_json。测试使用独立最小样本覆盖真实字段、多个调用和交错分片，不沿用旧解析器的字段错误。OpenAI 原生 Responses 以原始请求/JSON/SSE 保留 function_call 等操作结构，不套 Chat DTO；该历史批次当时仅提供协议样本，不是生产路由或持久/后台/WS 功能。后续 A01 已独立交付并验收前台 HTTP/SSE，官方依据与范围见 [Responses 契约](responses-http.md)，不改变本页固定参考源码的阅读/许可记录。Gemini signed tool history 尚未无损建模，真实能力过滤保守拒绝该组合。
