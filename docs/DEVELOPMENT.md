@@ -6,7 +6,9 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 
 ## 工具与工作目录
 
-### S7-A01 Responses 前台（工作分支，待验收）
+2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。A02+ 未实现、M2 未完成，S5 成本门槛继续独立验收。
+
+### S7-A01 Responses 前台（已验收合并）
 
 `POST /v1/responses` 已实现原生 JSON/SSE，复用统一 gateway 的授权、准入、调度与收尾；默认 `responses.enabled: false`，关闭时已有部署不变。启用必须配置 `responses.keys_file`（或 `GATEWAY_RESPONSES_KEYS_FILE`，沿用 generation 内容密钥文件格式）和实际 store 凭据加密。若 generation 与 responses 同时启用，应共享兼容的内容密钥文件，不能用互不兼容的密钥集读写同一归档。
 
@@ -14,9 +16,9 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 
 `store` 省略保持提供商原生默认 true；true 时额外保存加密私有短期重放，false 不存请求/输出正文，完成后重试返回 409，不重新执行。幂等作用域隔离 owner/Key，重试重新校验当前权限，但不重复计费/准入；它不是 A02 历史或通用恢复接口。strict 在预留/发送前拒绝 Responses；GET、续链、会话、background 和原生 WS 尚未实现。
 
-配置、支持矩阵和恢复细节以 [Responses HTTP 运行约定](reference/responses-http.md) 为准。集中验证和提交/CI/合并事实统一记在 [S7-A01 批次](history/implementation-s7-a01.md)，当前尚待验收，不把 S6 历史 CI 作为本批通过证据。
+配置、支持矩阵和恢复细节以 [Responses HTTP 运行约定](reference/responses-http.md) 为准。集中验证和提交/CI/合并事实统一记在 [S7-A01 批次](history/implementation-s7-a01.md)；A01 已完成独立验收，不把 S6 历史 CI 作为本批通过证据，A02+ 与 M2 完成状态仍独立保留。
 
-当前开发方向按三层职责执行：core 处理中转，业务层处理授权/调度/计费/状态，兼容层统一 API/协议、扩展与前端接入。S6 已通过真实消费者补齐并合并既有支持范围的契约；S6/M1 已完成集成验收；当前工作分支已实现默认关闭的 S7-A01 原生 Responses HTTP/SSE，本地集中验证通过，仍待完整 CI/集成验收，并按明确目标吸收适用参考能力。接入与验证方式见 [S6 兼容框架接入与验收](#s6-兼容框架接入与验收)，只按真实缺口增量扩展。
+当前开发方向按三层职责执行：core 处理中转，业务层处理授权/调度/计费/状态，兼容层统一 API/协议、扩展与前端接入。S6 已通过真实消费者补齐并合并既有支持范围的契约；S6/M1 已完成集成验收；默认关闭的 S7-A01 原生 Responses HTTP/SSE 已完成独立 CI/合并验收，并按明确目标吸收适用参考能力。接入与验证方式见 [S6 兼容框架接入与验收](#s6-兼容框架接入与验收)，只按真实缺口增量扩展。
 
 - Go 1.23 或更高版本，以 `go.mod` 为语言基线。
 - Python 3.10+ 用于标准库冒烟脚本；可选 OpenAI SDK 检查另见下文。
@@ -85,7 +87,7 @@ python tests/smoke/local.py --go go --preview
 
 ### 安装、容器与升级边界
 
-本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前功能基线追加 S5 v5/v6/v7、A3-02 输出记录 v8 和 A3-04 任务意图 v9、A3-05 领取/输出关联与凭据加密 v10；当前工作分支 S7-A01 追加前台幂等回执 v11，见 [Responses 运行约定](reference/responses-http.md)。旧库无主 Key 的认领规则不变。
+本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前功能基线追加 S5 v5/v6/v7、A3-02 输出记录 v8 和 A3-04 任务意图 v9、A3-05 领取/输出关联与凭据加密 v10；已验收 S7-A01 追加前台幂等回执 v11，见 [Responses 运行约定](reference/responses-http.md)。旧库无主 Key 的认领规则不变。
 
 Compose 显式使用 `GATEWAY_DATABASE_PATH=/app/data/gateway.db`；此环境变量优先于 YAML 的 database.path。已有部署若实际库在 `/app/.local/data/` 或其他位置，直接重建可能看到空库，**不是数据自动迁移**。先停止旧进程，确认实际路径并一致备份主库及 WAL/SHM，再恢复到目标卷、检查所有权为容器 app 用户（UID 10001），验证数据后切换；切勿删除旧容器/卷或执行 down -v 来“修复”。
 
@@ -215,7 +217,7 @@ schema v5 增加 `billing_price_versions`、`billing_balances`、`billing_reserv
 
 ### 管理员账本与最终决策
 
-控制台管理员菜单的 **Billing ledger** 默认列出 pending；支持状态/用户筛选及分页，详情展示逐次执行、售价快照、独立上游包络/契约快照、双预算占用和最终决策。金额使用十进制整数字符串传输，`unit_scale="1000000000"`；浏览器使用 BigInt 展示，不把未知成本显示为免费。字段和错误封装以当前 OpenAPI 为准；工作分支为 0.3.0 / 80 个操作，S6 验收基线为 0.2.3 / 79 个操作。
+控制台管理员菜单的 **Billing ledger** 默认列出 pending；支持状态/用户筛选及分页，详情展示逐次执行、售价快照、独立上游包络/契约快照、双预算占用和最终决策。金额使用十进制整数字符串传输，`unit_scale="1000000000"`；浏览器使用 BigInt 展示，不把未知成本显示为免费。字段和错误封装以当前 OpenAPI 为准；当前已验收版本为 0.3.0 / 80 个操作，S6 验收基线为 0.2.3 / 79 个操作。
 
 | 方法与路径 | 行为 |
 |---|---|
@@ -355,7 +357,7 @@ Key/IP 限流共享的窗口表最多 4,096 个桶，每桶最多 4,096 个事�
 
 ## 可选运行组件
 
-main 已有默认关闭的持久 runtime，可按 [A3-05](reference/generation-runtime.md#a3-05-持久执行与运行接线) 配置启用；它要求 strict、挂载内容密钥和实际 store 凭据加密，不会新增公开受理 API。volatile Runner 和 WS transport 仍由显式消费者组装，不能因该 runtime 开关宣称 Responses/会话/后台/原生 WS 已交付；前台 Responses 使用独立默认关闭的 responses 配置，当前工作分支已实现但尚待验收，不依赖旧持久 Runner。端口、密钥、容量、保留和关闭见 [运行约定](reference/generation-runtime.md)。
+main 已有默认关闭的持久 runtime，可按 [A3-05](reference/generation-runtime.md#a3-05-持久执行与运行接线) 配置启用；它要求 strict、挂载内容密钥和实际 store 凭据加密，不会新增公开受理 API。volatile Runner 和 WS transport 仍由显式消费者组装，不能因该 runtime 开关宣称 Responses/会话/后台/原生 WS 已交付；前台 Responses 使用独立默认关闭的 responses 配置，已完成 A01 独立验收合并，不依赖旧持久 Runner。端口、密钥、容量、保留和关闭见 [运行约定](reference/generation-runtime.md)。
 
 | 组件 | 详细约定 |
 |---|---|
