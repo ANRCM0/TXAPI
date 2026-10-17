@@ -93,7 +93,7 @@ financial database or defense against an administrator rewriting the ledger.
   Expired but not yet cleaned rows still require their old key IDs at startup.
   There is no bulk content
   re-encryption or automatic KMS. Rotate before any single AES key accumulates
-  2^32 encrypted segments/credential writes across all instances/backups of its
+  2^32 AEAD envelopes (segments, credential writes and cursor tokens) across all instances/backups of its
   use; count reuse of the same bytes across domains, not only a single key ID.
 - Input ciphertext is purged at TTL even for unresolved execution. Its minimal
   owner/idempotency/financial metadata and holds remain until reconciliation;

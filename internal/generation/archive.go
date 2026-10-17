@@ -52,6 +52,9 @@ type Archive struct {
 	retention time.Duration
 	maxBytes  int64
 	limits    model.GenerationArchiveLimits
+	cursorMu  sync.Mutex
+	cursors   int
+	owners    map[uint]int
 }
 
 // RecordedResult deliberately excludes raw errors, caller keys and policies.
@@ -72,6 +75,7 @@ type Recording struct {
 	Metadata core.ResponseMetadata
 	Body     []byte
 	Result   RecordedResult
+	record   model.GenerationRecord
 }
 
 func NewArchive(opts ArchiveOptions) (*Archive, error) {
@@ -226,6 +230,8 @@ func (a *Archive) Read(ctx context.Context, binding access.Binding, id string) (
 	if out.Result.Model == "" || !principal.Policy.Allows(out.Result.Model) {
 		return Recording{}, access.ErrUnauthorized
 	}
+	r.Segments = nil
+	out.record = r
 	return out, nil
 }
 

@@ -17,7 +17,7 @@ checklist remains [PLAN](../PLAN.md), with prior exact-SHA evidence in
 | `Gateway.ExecuteClaimedTo` | Integration; same path plus fenced original reservation adoption | Private durable consumer; not a caller-supplied budget bypass |
 | `LegacyBilling` / `StrictBilling` / `IntentBilling` | Billing implementation, gateway consumer ports | Original financial authority, no second ledger; new strict dimensions require independent acceptance |
 | `IntentAdmission` / `IntentLeases` | Generation consumer ports, original Engine transaction implementation | Atomic hold/admission, hashed capability/epoch, no transaction callbacks into application |
-| `ArchiveStore` / `Archive` | Store owns bounded CAS persistence; generation owns content AEAD and current authority | Sequence is internal integrity/cursor state, not a public product event API |
+| `ArchiveStore` / `Archive` / `CursorReader` | Store owns bounded CAS persistence; generation owns content AEAD, current authority and authenticated sealed replay snapshots | Resumable encoded-byte cursor, not a public product event ID or live event API |
 | `Store.ResolvePrincipal` | Identity/store; current owner/Key/model and limit snapshot per generation | Binding IDs are not credentials; queued permissions are never authority |
 | `transport/websocket` / `ConnectionCapacity` | Transport I/O / access capacity respectively | Physical connection lifetime is distinct from generation and billing |
 | `secrets` | Shared standard-library-only primitive package | No DB/auth/lifecycle; callers supply domain-separated identity metadata |
@@ -74,6 +74,15 @@ context as an immutable goroutine argument. Local full checks were repeated;
 the failed runs are not acceptance evidence and replacement complete CI is
 required before merge.
 
+The final audit also identified that an append sequence alone was not evidence
+of resumable observation. The added `Archive.OpenCursor` / `CursorReader.Next`
+consumer provides an authenticated encoded-byte position and a bounded sealed
+snapshot. Its concentrated local build/vet/full-test/smoke checks passed:
+859 tests/subtests passed and five subprocess-only helpers skipped. Frontend
+sources and dependencies are unchanged, so their earlier checks remain applicable.
+The earlier green `d6550d3` CI does not validate this addition; complete CI for
+the new head and the common-baseline merge are still required.
+
 | Failure or boundary | Required observation | Regression location |
 |---|---|---|
 | Admission/claim/cancel SQL failure | Intent and original dual hold transition atomically; no partial authority | `billing/intents_test.go`, `billing/intent_execution_test.go` |
@@ -89,6 +98,7 @@ required before merge.
 | Death after receipt/financial finish | Historical idempotent settlement; incomplete output is not success | Same subprocess matrix, `after-receipt`/`after-finish` |
 | Death after sealed output | Recover final success, never a second attempt/hold | Same subprocess matrix, `after-seal` |
 | Recovery batch fairness / TTL | Reclaimable rows do not starve attempted recovery; expired body purged without deleting unknown audit | Billing claim/intent tests |
+| Output cursor / observer death | Authenticated bounded snapshot; current authority, exact byte resume after a real process kill/key rotation, no new execution/hold; cancellation/Close releases observation capacity | `generation/cursor_test.go`, `generation/cursor_crash_test.go` |
 | v9 upgrade/restart/failing v10 indexes | Preserve old intent/ledger/credential identity; no invented permission; old binary refuses | `store/migrations_test.go` |
 | Actual main startup/restart/invalid keys/signal | Encryption activation before producers; missing/wrong secrets reject; Linux SIGTERM joins | `cmd/gateway/generation_test.go`, `tests/smoke/local.py` |
 | Existing connection lifecycle/protocol/HTTP | Existing JSON/SSE/WS I/O/auth/limit behavior remains intact | Existing complete regressions and CI |
@@ -102,9 +112,10 @@ and merge evidence, then update status. No historical green run substitutes.
 ## Product and governance exclusions
 
 Native Responses production routing, durable conversations, provider-native
-background execution, public event cursors, native upstream WS/multiturn clients,
+background execution, public/native event ID contracts, native upstream WS/multiturn clients,
 and S7 acceptance remain separate functional batches. An internal output segment
-sequence does not supply a resumable public event contract. This does not remove
+sequence alone does not prove a resumable consumer; the private encoded-byte
+snapshot cursor is distinct from a public/live protocol event contract. This does not remove
 the required private persistence/fencing/recovery/security acceptance for A3/A4.
 
 Directory ownership is currently a documented role, not evidence that GitHub

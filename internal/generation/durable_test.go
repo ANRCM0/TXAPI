@@ -111,6 +111,15 @@ func TestDurableDispatchUsesOriginalReservationPriceAndEncryptedOutput(t *testin
 	if _, err := opts.Archive.Read(context.Background(), other, in.OutputRecordID); err == nil {
 		t.Fatal("another Key read claimed output")
 	}
+	observer, err := opts.Archive.OpenCursor(context.Background(), binding, in.OutputRecordID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := observer.Next(context.Background(), 4096)
+	_ = observer.Close()
+	if err != nil || !page.Done || page.Result == nil || page.Result.BillingState != billing.Settled {
+		t.Fatal("durable output cursor did not expose the original settled observation", err)
+	}
 	if err := r.runOne(context.Background()); !errors.Is(err, model.ErrIntentNotFound) || hits.Load() != 1 {
 		t.Fatal("completed intent was dispatched twice", err)
 	}
