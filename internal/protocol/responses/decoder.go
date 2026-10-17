@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 
 	"minigateway/internal/core"
 	"minigateway/internal/protocol/jsonutil"
@@ -56,20 +57,63 @@ func ParseResponse(body []byte) (Response, *core.Usage, error) {
 	return r, &core.Usage{PromptTokens: *u.Input, CompletionTokens: *u.Output, TotalTokens: *u.Total}, nil
 }
 
-type Decoder struct{}
+type Observation struct {
+	ID     string
+	Status string
+	Usage  *core.Usage
+}
 
-func NewDecoder() *Decoder { return &Decoder{} }
-func (*Decoder) Decode(body []byte) ([]byte, *core.Usage, error) {
-	_, usage, err := ParseResponse(body)
+type Decoder struct {
+	publicID    string
+	mu          sync.Mutex
+	observation Observation
+}
+
+func NewDecoder() *Decoder                      { return NewDecoderWithID("") }
+func NewDecoderWithID(publicID string) *Decoder { return &Decoder{publicID: publicID} }
+func (d *Decoder) Observation() Observation {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	o := d.observation
+	if o.Usage != nil {
+		u := *o.Usage
+		o.Usage = &u
+	}
+	return o
+}
+func (d *Decoder) observe(o Observation) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.observation = o
+}
+func terminalStatus(status string) bool {
+	return status == "completed" || status == "incomplete" || status == "failed" || status == "cancelled"
+}
+func (d *Decoder) Decode(body []byte) ([]byte, *core.Usage, error) {
+	d.observe(Observation{})
+	r, usage, err := ParseResponse(body)
 	if err != nil {
 		return nil, nil, err
 	}
-	return body, usage, nil
+	if !terminalStatus(r.Status) {
+		return nil, nil, errors.New("Responses synchronous response is not terminal")
+	}
+	out, err := rewrite(body, d.publicID, true, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	d.observe(Observation{ID: r.ID, Status: r.Status, Usage: usage})
+	return out, usage, nil
 }
-func (*Decoder) NewStream() core.StreamDecoder { return &streamDecoder{lastSequence: -1} }
+func (d *Decoder) NewStream() core.StreamDecoder {
+	d.observe(Observation{})
+	return &streamDecoder{lastSequence: -1, owner: d}
+}
 
 // SSE framing and mutable protocol state belong to exactly one attempt.
 type streamDecoder struct {
+	owner        *Decoder
+	upstreamID   string
 	wire         bytes.Buffer
 	data         []string
 	event        string
@@ -134,23 +178,123 @@ func (s *streamDecoder) flush() ([]core.Frame, error) {
 		}
 		s.lastSequence = *event.Sequence
 	}
-	if event.Type == "error" || event.Type == "response.failed" || event.Type == "response.cancelled" {
-		return nil, errors.New("Responses generation failed")
-	}
 	frame := core.Frame{Data: wire}
-	if event.Type == "response.completed" || event.Type == "response.incomplete" {
-		response, usage, err := ParseResponse(event.Response)
+	var response Response
+	var usage *core.Usage
+	if present(event.Response) {
+		var err error
+		response, usage, err = ParseResponse(event.Response)
 		if err != nil {
 			return nil, err
 		}
+		if s.upstreamID != "" && s.upstreamID != response.ID {
+			return nil, errors.New("Responses upstream identity changed")
+		}
+		s.upstreamID = response.ID
+		s.owner.observe(Observation{ID: s.upstreamID})
+	}
+	var identity struct {
+		ResponseID string `json:"response_id"`
+	}
+	if json.Unmarshal(data, &identity) != nil {
+		return nil, errors.New("invalid Responses event identity")
+	}
+	if identity.ResponseID != "" {
+		if s.upstreamID != "" && s.upstreamID != identity.ResponseID {
+			return nil, errors.New("Responses upstream identity changed")
+		}
+		s.upstreamID = identity.ResponseID
+		s.owner.observe(Observation{ID: s.upstreamID})
+	}
+	status := strings.TrimPrefix(event.Type, "response.")
+	if strings.HasPrefix(event.Type, "response.") && terminalStatus(status) {
 		if "response."+response.Status != event.Type {
 			return nil, errors.New("Responses terminal state mismatch")
 		}
 		s.terminal = true
 		frame.Complete = true
 		frame.Usage = usage
+		s.owner.observe(Observation{ID: s.upstreamID, Status: response.Status, Usage: usage})
+	} else if event.Type == "error" {
+		s.terminal = true
+		frame.Complete = true
+		s.owner.observe(Observation{ID: s.upstreamID, Status: "failed"})
+	}
+	rewritten, err := rewrite(data, s.owner.publicID, false, event.Type == "error")
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(rewritten, data) {
+		var out bytes.Buffer
+		for _, line := range strings.Split(strings.TrimSuffix(string(s.wire.Bytes()), "\n"), "\n") {
+			if strings.HasPrefix(line, "data:") || line == "data" {
+				continue
+			}
+			out.WriteString(line)
+			out.WriteByte('\n')
+		}
+		out.WriteString("data: ")
+		out.Write(rewritten)
+		out.WriteString("\n\n")
+		frame.Data = out.Bytes()
 	}
 	return []core.Frame{frame}, nil
+}
+
+// Rewrite only documented envelope positions. Metadata and output items may
+// legitimately contain fields named error, response or response_id themselves.
+func rewrite(body []byte, publicID string, responseRoot, errorEvent bool) ([]byte, error) {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(body, &root); err != nil {
+		return nil, err
+	}
+	changed := false
+	rewriteResponse := func(response map[string]json.RawMessage) {
+		if _, ok := response["id"]; ok && publicID != "" {
+			response["id"], _ = json.Marshal(publicID)
+			changed = true
+		}
+		if present(response["error"]) {
+			response["error"] = json.RawMessage(`{"code":"upstream_error","message":"Upstream generation failed."}`)
+			changed = true
+		}
+	}
+	if responseRoot {
+		rewriteResponse(root)
+	} else {
+		if present(root["response_id"]) && publicID != "" {
+			root["response_id"], _ = json.Marshal(publicID)
+			changed = true
+		}
+		if present(root["response"]) {
+			var response map[string]json.RawMessage
+			if err := json.Unmarshal(root["response"], &response); err != nil {
+				return nil, err
+			}
+			rewriteResponse(response)
+			if changed {
+				var err error
+				root["response"], err = json.Marshal(response)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if errorEvent {
+		for key := range root {
+			if key != "type" && key != "sequence_number" && key != "response_id" {
+				delete(root, key)
+			}
+		}
+		root["message"] = json.RawMessage(`"Upstream generation failed."`)
+		root["code"] = json.RawMessage(`"upstream_error"`)
+		changed = true
+	}
+	if !changed {
+		return body, nil
+	}
+	return json.Marshal(root)
 }
 
 func (s *streamDecoder) End() ([]core.Frame, error) {

@@ -22,7 +22,7 @@
 | 已合并功能基线 | A1–A4 原基线为 PR #6 / `master/ccbfe29`；S6/M1 已由 PR #8 验收合入 `master/ca009c2`，功能头 push/PR 和合并后 master 完整 CI 均通过，不代表完整 S5/S7 产品完成 |
 | S5 | 6 个验收项中 5 个通过，S5-03 未完成；实现已合并，完整阶段尚未验收，不承诺已具备可靠商业收费全部条件 |
 | 统一兼容框架 | S6 已合并现有推理/管理 API、构造扩展与前端的契约闭环，以及真实 API/浏览器验收链；复用 A1–A4 共享业务链和默认关闭的加密持久 runtime。支持矩阵见兼容契约清单，M1 已完成验收，精确证据见 PLAN/批次记录 |
-| Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；目前仅独立 Responses JSON/SSE 协议与样本，未开放生产入口；输出记录和原子意图受理不是 Responses 历史/事件或完整持久任务，产品级持久会话/后台/WS 尚未实现 |
+| Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；当前工作分支已实现默认关闭的 S7-A01 原生 Responses HTTP/SSE、持久幂等元数据和私有加密短期重放，本地集中验证通过，仍待完整 CI/集成验收，不是已合并能力；GET/续链/会话/后台/原生 WS 尚未实现，短期重放不是 A02 历史 |
 | 原生 Messages/Gemini 入站、订阅账号池、支付、分布式部署 | 不属于当前已交付能力；本轮不新增支付 |
 
 现有假上游、SDK 模拟及 CI 记录不等于任意客户端/真实上游全兼容，也不等于已完成生产部署。每种能力分别记录“协议可转发、客户端实测兼容、strict 可计价”，不以品牌名称或路由存在代替验收。
@@ -45,7 +45,7 @@
 上游服务
 
 上游协议编解码亦属于兼容层，由业务协调按操作调用
-业务扩展：Responses / 会话 / 原生后台        <- S7-A 待开发
+业务扩展：Responses 前台已实现待验收 / 会话与后台待开发
 支撑与组装：store / secrets / config / cmd/gateway
 ```
 
@@ -88,11 +88,12 @@ strict 执行现已强制使用[已登记的输入边界档案](docs/reference/i
 
 ## HTTP 契约与目录
 
-[OpenAPI 0.2.3](docs/openapi.json) 当前登记 79 个操作，路由/鉴权/DTO 一致性进入 CI；版本不代表覆盖完整官方协议。
+[OpenAPI 0.3.0](docs/openapi.json) 当前工作分支登记 80 个操作，新增 `POST /v1/responses`；S6 已验收基线仍为 0.2.3 / 79 个操作。路由/鉴权/DTO 一致性进入 CI；版本不代表覆盖完整官方协议，当前 S7-A01 尚待验收。
 
 | 入口 | 当前用途 |
 |---|---|
 | `/v1/models`、`/v1/chat/completions`、`/v1/embeddings` | 模型列表与现有推理能力，使用调用 Key |
+| `POST /v1/responses` | 工作分支原生 JSON/SSE 前台生成，使用调用 Key；默认关闭，strict 在计费前拒绝 |
 | `/api/auth/*` | 登录/登出等会话操作 |
 | `/api/admin/*` | 管理员用户、渠道、配置、价格与账本等操作 |
 | `/api/me/*` | 本人资料、Key、模型与日志/用量 |
@@ -107,6 +108,7 @@ internal/gateway/     请求协调、attempt、重试、统一收尾
 internal/protocol/    操作/厂商转换与每请求流状态
 internal/access/      身份、权限与准入基础
 internal/generation/  worker、加密意图/输出、持久领取和 sealed 字节游标
+internal/responses/   前台 Responses 应用、持久幂等与私有重放（待验收）
 internal/transport/   独立 WS 传输 I/O（无生产 WS 应用/上游接线）
 internal/model/       持久化实体与中立端口数据
 internal/scheduler/   渠道/凭据选择与健康
@@ -120,9 +122,11 @@ docs/                 现行文档、历史验收与参考资料
 .local/               被忽略的本地数据与参考仓库
 ```
 
-WS transport 已位于 `internal/transport/websocket`；Responses 应用包尚未创建。新增目录须在真实功能批次评审依赖边界，不预建空模块。
+WS transport 已位于 `internal/transport/websocket`；`internal/responses` 已有前台真实消费者，经端口使用统一 gateway 与 store，不直接依赖 GORM。新增目录须在真实功能批次评审依赖边界，不预建空模块。
 
 ## 文档与开发顺序
+
+当前 Responses 配置与限制见 [Responses HTTP 运行约定](docs/reference/responses-http.md)，本批实现/验证/验收状态见 [S7-A01 记录](docs/history/implementation-s7-a01.md)。启用须挂载内容密钥并启用实际 store 凭据加密；默认关闭不改变已有部署。`store` 省略保持原生默认 true，true 时额外保存加密私有短期重放缓存；false 不存正文，完成后重试返回 409 而非再次执行。持久回执按 owner/Key 隔离，未知执行不会因 TTL 删除或自动重发；这些能力不等于 GET/续链/会话/后台/WS，也不改变提供商原生存储语义。
 
 | 文档 | 职责 |
 |---|---|
@@ -137,6 +141,6 @@ WS transport 已位于 `internal/transport/websocket`；Responses 应用包尚�
 | [上游固定快照](docs/reference/upstream-snapshots.md) | 历史阅读的参考库 SHA、文件与复用边界；本地副本不随 Git/worktree 分发 |
 | [早期 P6 方案](docs/history/plan-p6.md) | 已停止用于排期的历史设计，不作为现行缺陷或功能清单 |
 
-A1–A4 底座和 S6 内核/兼容框架功能均已合并。S6/M1 已完成集成验收，下一批为 S7-A01 Responses HTTP/SSE，通过现有业务与兼容契约接入；同类项目能力按明确目标有选择地吸收。S5 成本证明单独收口，strict 开放仍遵守原有门槛。本轮不新增支付。
+A1–A4 底座和 S6 内核/兼容框架功能均已合并。S6/M1 已完成集成验收；当前工作分支已通过现有业务与兼容契约实现 S7-A01 Responses HTTP/SSE，本地集中验证通过，仍待完整 CI/集成验收，不复用 S6 历史 CI 作为本批通过证据；同类项目能力按明确目标有选择地吸收。S5 成本证明单独收口，strict 开放仍遵守原有门槛。本轮不新增支付。
 
 开发遵循“批量开发 → 集中验证 → 集中修复 → 合并”；不因每次编辑/汇报重复跑全量测试，最终合并仍需通过完整现有 CI。纯说明文档整理只验证差异、链接与一致性。历史 CI 范围和日期保留在验收记录中，不写成当前未提交文档已通过 CI。

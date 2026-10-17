@@ -25,9 +25,10 @@ import (
 // 为什么用结构体而不是一长串参数：参数已经多到容易传错位（cfg 和 store 都是指针），
 // 具名字段让调用处自解释。
 type Deps struct {
-	Gateway *gateway.Gateway
-	Cfg     *config.Config
-	Store   *store.Store
+	Gateway   *gateway.Gateway
+	Cfg       *config.Config
+	Store     *store.Store
+	Responses http.Handler
 	// AdminAuth 是管理 API 的鉴权中间件，**必填**。
 	// 管理接口能改渠道、看上游 Key 明文，nil 意味着整个 /api 裸奔，
 	// 所以漏传时 NewEngine 直接 panic——装配错误要在启动时炸出来，
@@ -159,6 +160,15 @@ func NewEngine(deps Deps) *gin.Engine {
 	engine.POST("/v1/embeddings", auth.Handle(),
 		middleware.TokenRateLimit(deps.RateLimiter),
 		deps.Gateway.HandleEmbeddings)
+
+	// Deduplication precedes generation RPM/TPM admission inside ExecuteTo.
+	engine.POST("/v1/responses", auth.Handle(), func(c *gin.Context) {
+		if deps.Responses == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "responses_unavailable", "message": "Responses is not enabled"}})
+			return
+		}
+		deps.Responses.ServeHTTP(c.Writer, c.Request)
+	})
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。

@@ -2,7 +2,7 @@
 
 Source baseline: `758ad04` (fetched `origin/master` on 2026-10-18).
 Scope: S6-00 through S6-06 from [the active plan](../PLAN.md).
-The OpenAPI contract remains 0.2.3, with 79 operations. This inventory maps
+The accepted S6 OpenAPI baseline is 0.2.3, with 79 operations. This inventory maps
 source and declared contracts; it does not replace behavior acceptance.
 S6-A/B/C and M1 are accepted on `master/ca009c2` (PR #8). Exact final feature
 head `9a6eaa250099c91847fa92ffde0475af16b6e488` passed complete push/PR CI,
@@ -11,6 +11,11 @@ no tests during implementation; concentrated tests and repairs began only
 after the batch was implemented.
 Commands, first-run failures, repairs and environment are in
 [S6 implementation history](../history/implementation-s6.md).
+
+The current S7-A01 working tree extends the contract to 0.3.0 / 80 operations.
+Its opt-in foreground Responses route, receipt/replay consumer and separate
+verification status are specified in [Responses HTTP](responses-http.md);
+the S6 evidence below does not validate that extension.
 
 ## Responsibilities and actual consumers
 

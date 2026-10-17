@@ -94,7 +94,7 @@ func (g *Gateway) executeScope(c *executionScope, req protocol.Request) {
 			}
 		}
 		if p.TPMLimit > 0 {
-			estimate := billing.EstimateUsage(billing.PromptTextFromBody(body), "").PromptTokens
+			estimate := billing.EstimateUsage(requestPromptText(req), "").PromptTokens
 			if allowed, retry := g.limiter.AllowTokens(ctx, access.TokenUsageBucketKey(p.TokenID), p.TPMLimit, estimate, now); !allowed {
 				c.output.setMetadata("Retry-After", strconv.Itoa(retry))
 				writeError(c, 429, "API key token rate exceeded", "rate_limit_error")
@@ -186,7 +186,7 @@ func (g *Gateway) preRequest(c *executionScope, req protocol.Request) (*billing.
 	userID := c.result.Identity.UserID
 	// legacy 只估算请求模型的输出费用，不是严格上界；选渠道后
 	// 用同一价格快照中的实际模型价格修正。
-	return g.billing.PreRequest(tokenID, userID, req.LegacyMaxTokens(), req.Model())
+	return g.billing.PreRequest(tokenID, userID, requestMaxTokens(req), req.Model())
 }
 
 // finishRequest 收尾：估算用量 → 算费 → 结算额度差额 → 写日志。
@@ -212,8 +212,8 @@ func (g *Gateway) finishRequest(c *executionScope, req protocol.Request, started
 			// 按字符数估算并标记。prompt 从请求体抽文本，
 			// completion 从回写给客户端的内容抽文本。
 			est := billing.EstimateUsage(
-				billing.PromptTextFromBody(reqBody),
-				billing.CompletionTextFromResponse(captureBytes(c)),
+				requestPromptText(req),
+				requestCompletionText(req, captureBytes(c)),
 			)
 			usage = &est
 			isEstimated = true

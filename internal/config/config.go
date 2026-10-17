@@ -158,6 +158,7 @@ type Config struct {
 	Database         DatabaseConfig   `yaml:"database"`
 	Billing          BillingConfig    `yaml:"billing"`
 	Generation       GenerationConfig `yaml:"generation"`
+	Responses        ResponsesConfig  `yaml:"responses"`
 	Channels         []ChannelConfig  `yaml:"channels"`
 	Tokens           []TokenConfig    `yaml:"tokens"`
 }
@@ -210,6 +211,10 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.applyDefaults()
 	cfg.Generation.defaults(cfg.Server.TotalTimeoutSeconds)
+	cfg.Responses.defaults()
+	if value := strings.TrimSpace(os.Getenv(EnvResponsesKeysFile)); value != "" {
+		cfg.Responses.KeysFile = value
+	}
 	if value := strings.TrimSpace(os.Getenv(EnvGenerationKeysFile)); value != "" {
 		cfg.Generation.KeysFile = value
 	}
@@ -352,6 +357,18 @@ func (c *Config) applyDefaults() {
 // 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
 // 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	if err := c.Responses.validate(); err != nil {
+		return err
+	}
+	if c.Responses.Enabled && c.Responses.ReplaySeconds < c.Server.TotalTimeoutSeconds+5 {
+		return fmt.Errorf("responses.replay_seconds must cover server.total_timeout_seconds plus finalization time")
+	}
+	if c.Responses.Enabled && strings.TrimSpace(c.Database.CredentialKeysFile) == "" {
+		return fmt.Errorf("responses.enabled requires database.credential_keys_file or %s", EnvCredentialKeysFile)
+	}
+	if c.Responses.Enabled && c.Generation.Enabled && c.Responses.KeysFile != c.Generation.KeysFile {
+		return fmt.Errorf("responses and generation must share one content keys_file when both are enabled")
+	}
 	if err := c.Generation.validate(c.Billing, c.Server.TotalTimeoutSeconds); err != nil {
 		return err
 	}

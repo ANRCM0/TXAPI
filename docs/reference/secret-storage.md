@@ -14,6 +14,14 @@ requires `generation.keys_file` (or `GATEWAY_GENERATION_KEYS_FILE`) and strict
 billing. The runtime checks the actual store's persisted encryption activation,
 not just a configuration path. It does not provide public task APIs.
 
+The later S7-A01 working tree also has an opt-in foreground Responses runtime.
+It requires actual credential encryption plus `responses.keys_file` /
+`GATEWAY_RESPONSES_KEYS_FILE`, using this same content-key format. Its stable
+idempotency digest marker is separate from the durable-intent marker; retain
+the digest key and every required ciphertext key across restart/restore. Both
+runtimes use the same content-key file when enabled together. This extension
+is not accepted by historical A3/A4 CI; see [Responses HTTP](responses-http.md).
+
 HTTP-only deployments may keep the old plaintext compatibility mode by not
 configuring credential encryption. Main emits a warning in that mode. This is
 not the production security baseline; management response masking does not

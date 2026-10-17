@@ -163,7 +163,7 @@ func TestCapabilitiesRejectUnsupportedOperationTransportAndHiddenTools(t *testin
 		if !Supports(a, Requirements{Operation: Chat, Transport: HTTP}) {
 			t.Fatal(name)
 		}
-		if Supports(a, Requirements{Operation: Responses}) || Supports(a, Requirements{Operation: Chat, Transport: WebSocket}) || Supports(a, Requirements{Operation: Chat, Source: "anthropic"}) {
+		if Supports(a, Requirements{Operation: Responses}) != (name == "openai") || Supports(a, Requirements{Operation: Chat, Transport: WebSocket}) || Supports(a, Requirements{Operation: Chat, Source: "anthropic"}) {
 			t.Fatalf("invented capability: %s", name)
 		}
 	}

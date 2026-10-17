@@ -14,9 +14,10 @@ import (
 // Execution keeps operation payloads intact; it does not translate them to Chat.
 // Context must contain the principal verified by the caller's authentication boundary.
 type Execution struct {
-	Operation protocol.Operation
-	Body      []byte
-	SessionID string
+	Operation  protocol.Operation
+	Body       []byte
+	SessionID  string
+	ResponseID string
 }
 
 // ExecuteTo owns one generation, including admission, attempts and finalization.
@@ -48,7 +49,12 @@ func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Executio
 		return *result
 	}
 	c := newOutputScope(ctx, output, result, in.SessionID)
+	c.responseID = in.ResponseID
 	c.claim = claim
+	if claim != nil && in.Operation == protocol.Responses {
+		writeError(c, http.StatusBadRequest, "Responses cannot consume a strict generation intent", "unsupported_billing_dimension")
+		return *result
+	}
 	if claim != nil && g.billingMode != billing.ModeStrict {
 		writeError(c, http.StatusServiceUnavailable, "durable execution requires strict billing", "billing_unavailable")
 		return *result
@@ -74,8 +80,12 @@ func (g *Gateway) execute(c *executionScope, in Execution) {
 		}
 	}()
 	c.result.Operation = in.Operation
+	if in.Operation == protocol.Responses && (c.claim != nil || g.billingMode == billing.ModeStrict) {
+		writeError(c, http.StatusBadRequest, "Responses has no verified strict billing dimension", "unsupported_billing_dimension")
+		return
+	}
 	switch in.Operation {
-	case protocol.Chat, protocol.Embeddings:
+	case protocol.Chat, protocol.Embeddings, protocol.Responses:
 		request, err := protocol.ParseRequest(in.Operation, in.Body)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, err.Error(), "invalid_request_error")
@@ -92,6 +102,7 @@ type executionScope struct {
 	output          *executionOutput
 	result          *RequestResult
 	sessionID       string
+	responseID      string
 	requestAdmitted bool
 	claim           *model.GenerationClaim
 }

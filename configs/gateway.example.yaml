@@ -102,6 +102,23 @@ generation:
   instance_bytes: 16777216
   owner_bytes: 4194304
 
+# Native foreground Responses, separate from the strict durable worker runtime.
+# Requires activated credential encryption and a mounted content key file.
+# Retained content keys and the digest key must survive restarts and restores.
+responses:
+  enabled: false
+  # keys_file: "/run/secrets/txapi-generation.json"
+  # GATEWAY_RESPONSES_KEYS_FILE overrides the path; share with generation if both enabled.
+  retention_seconds: 86400
+  replay_seconds: 3600
+  max_output_bytes: 262144
+  instance_records: 1024
+  owner_records: 128
+  instance_bytes: 16777216
+  owner_bytes: 4194304
+  active_requests: 32
+  owner_requests: 4
+
 # 渠道与令牌是**种子数据**：只在数据库为空时导入一次，之后通过管理 API 增删改。
 # 真实使用时替换 base_url、模型名和两个 key 占位符；
 # 渠道上游 Key 也可用环境变量 GATEWAY_CHANNEL_KEY_<id> 覆盖（部署时更推荐）。

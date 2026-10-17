@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 10
+const latestMigrationVersion = 11
 
 type dataMigration struct {
 	Version int
@@ -52,6 +52,10 @@ var dataMigrations = []dataMigration{
 			return err
 		}
 		return tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_key_hash ON credentials(channel_id, key_hash) WHERE key_hash <> ''").Error
+	}},
+	{Version: 11, Apply: func(tx *gorm.DB) error {
+		// Foreground receipts start empty; historical logs are not deduplication evidence.
+		return nil
 	}},
 }
 

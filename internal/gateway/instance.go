@@ -124,19 +124,21 @@ type AttemptResult struct {
 }
 
 type RequestResult struct {
-	Operation     protocol.Operation
-	reservation   *billing.PreDeduct
-	strictRequest *billing.StrictRequest
-	BillingState  string
-	Identity      Identity
-	ChannelID     uint
-	CredentialID  uint
-	ChannelName   string
-	ActualModel   string
-	ChannelGroup  string
-	ErrorMessage  string
-	Attempts      []AttemptResult
-	TotalDuration time.Duration
+	ResponseStatus     string
+	UpstreamResponseID string
+	Operation          protocol.Operation
+	reservation        *billing.PreDeduct
+	strictRequest      *billing.StrictRequest
+	BillingState       string
+	Identity           Identity
+	ChannelID          uint
+	CredentialID       uint
+	ChannelName        string
+	ActualModel        string
+	ChannelGroup       string
+	ErrorMessage       string
+	Attempts           []AttemptResult
+	TotalDuration      time.Duration
 	core.Result
 }
 

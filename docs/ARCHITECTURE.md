@@ -2,7 +2,7 @@
 
 状态：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确提交与验证记录见 [PLAN.md](PLAN.md) 和 [S6 记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29` 及其 [验收证据](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；完整 S5 和 S7-A 仍未完成。命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，本页不维护第二份活动计划。
 
-S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 统一兼容与协调框架已验收合并，下一批 S7-A01 接入 Responses HTTP/SSE，再推进持久会话、后台任务和 WebSocket**。上述 S7 产品仍是必须开发的目标，尚未交付；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
+S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 统一兼容与协调框架已验收合并，当前工作分支已实现 S7-A01 原生 Responses HTTP/SSE，本地集中验证通过，仍待完整 CI/集成验收，再推进持久会话、后台任务和 WebSocket**。后续会话/后台/原生 WS 仍是必须开发且尚未实现的目标；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
 
 ## 设计总纲与当前差距
 
@@ -16,7 +16,7 @@ S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对�
 |---|---|---|
 | core 中转内核 | 执行一次上游尝试，管理连接/流式读写、超时取消、背压、提交事实和执行结果 | `internal/core` 已实现标准库 HTTP 执行。纯 WS I/O 仍隔离在 `transport/websocket`，新传输通过受约束的执行适配接入；身份、路由策略、账本和页面不进入内核 |
 | 业务层 | 用户/Key/模型授权、准入、路由、重试策略、计费、会话/任务及统一收尾 | `gateway/access/scheduler/billing/generation` 已有真实消费者与持久基础。gateway 是执行业务协调者；已合并的 `management.Configuration` 承担已有渠道/凭据/价格保存与配置发布用例。业务结果与外部协议表示分离，现有账本和恢复保持唯一权威；S6 本地、功能头 push/PR 与合并后 master 完整 CI 证据见批次记录 |
-| 统一兼容层 | 对外 API 与协议、上游编解码、错误/事件/能力映射、扩展接入与前端应用契约 | `server/protocol/transport`、gateway 的 HTTP 适配及 `web` 实际消费现有 Chat/embeddings 和管理 API。S6 已合并公开契约、构造扩展/生命周期及真实 API/前端闭环；新增操作按支持矩阵独立验收，Responses 仍只有独立协议样本 |
+| 统一兼容层 | 对外 API 与协议、上游编解码、错误/事件/能力映射、扩展接入与前端应用契约 | `server/protocol/transport`、gateway 的 HTTP 适配及 `web` 实际消费现有 Chat/embeddings 和管理 API。S6 已合并公开契约、构造扩展/生命周期及真实 API/前端闭环；新增操作按支持矩阵独立验收，工作分支 Responses 原生 HTTP/SSE 已接线但尚待验收 |
 | 支撑与组装 | 持久化、统一迁移、密钥保护、配置与实例启动/关闭 | `model/store/secrets/config/cmd` 提供支撑。A3 已有原子意图/预算、领取/fencing、历史恢复、加密输出游标及默认关闭的 runtime；依赖由应用入口注入 |
 
 ### 兼容层的接入边界
@@ -27,7 +27,7 @@ S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对�
 - 前端兼容：`web` 是应用 API 的真实消费者，依赖稳定 DTO、错误、权限和能力表达；页面交互属于展示侧，授权、计价和任务状态仍由业务层决定。后续吸收其他前端时先适配这些契约，不能直接依赖数据库或复制核心业务规则。
 - 框架完成以当前约定支持范围的真实闭环为准：现有推理、管理 API、前端和扩展消费者均能通过上述边界工作，并有契约/行为与完整 CI 证据。新厂商、新客户端及 S7 功能仍独立扩大支持矩阵，不以预建接口替代验收。
 
-已有内核边界没有因这次职责澄清失效。F0 是初始接线，A1–A4 提供已验证底座，S6 在其上完成现有支持范围的三层接入并合并。S6/M1 已完成集成验收，下一批 S7-A01 通过同一协调链接入 Responses HTTP/SSE；后续参考能力和产品功能分别扩大支持范围，复用仍适用的底层证据。
+已有内核边界没有因这次职责澄清失效。F0 是初始接线，A1–A4 提供已验证底座，S6 在其上完成现有支持范围的三层接入并合并。S6/M1 已完成集成验收，工作分支 S7-A01 已通过同一协调链接入 Responses HTTP/SSE，本地集中验证通过，尚待本批完整 CI/集成验收；后续参考能力和产品功能分别扩大支持范围，复用仍适用的底层证据。
 
 ### 统一框架的最小契约
 
@@ -165,7 +165,7 @@ core 不能 import Gin、GORM、access、scheduler 或具体厂商适配器。�
 
 ## 7. 协议与性能
 
-目标是同协议保留可保真的原始字段，做必要的路由/模型改写和 usage 观察；跨协议才建立相应语义对象。鉴权、资源限制与 strict 能力检查始终适用，不承诺未知字段无条件透传。本轮已为 Chat/embeddings 引入独立载荷与共享信封，操作能力同时约束路由和发送准备；embeddings 原生字段/usage 保留，不经 Chat 转换或生成 SSE 终态。`ProtocolAdaptor` 明确是 Chat codec，不再作为所有操作的公共载荷接口。Responses 仍使用独立样本模型，后续接线必须经对应操作验收，不能强塞进 ChatRequest。
+目标是同协议保留可保真的原始字段，做必要的路由/模型改写和 usage 观察；跨协议才建立相应语义对象。鉴权、资源限制与 strict 能力检查始终适用，不承诺未知字段无条件透传。本轮已为 Chat/embeddings 引入独立载荷与共享信封，操作能力同时约束路由和发送准备；embeddings 原生字段/usage 保留，不经 Chat 转换或生成 SSE 终态。`ProtocolAdaptor` 明确是 Chat codec，不再作为所有操作的公共载荷接口。当前工作分支 Responses 使用独立请求/item/JSON/SSE 解码器和原生上游路径，不经 ChatRequest 转换；具体支持范围见 [Responses 运行约定](reference/responses-http.md)，仍须独立验收。
 
 能力不对等时明确拒绝或配置可见的降级。未知关键字段不能静默丢弃。大请求的重放使用有限内存/临时文件，或显式禁用重试；流式响应不能无限缓冲。
 
@@ -215,15 +215,17 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 
 ## 12. 首组状态型扩展：Responses 持久执行
 
-状态：2026-10-16 确认的 S7-A 目标，不是已实现能力；批次与验收以 [PLAN.md](PLAN.md#s7-aresponses-持久执行主线) 为准。它是统一框架的首组状态型消费者，不定义整个项目的中心。持久会话、后台任务和 WebSocket 均必须交付，不能以现有亲和缓存或 HTTP 接口替代。首个完整组合使用标准 API Key 和经验证的原生 Responses 上游。
+状态：2026-10-18，当前工作分支已实现默认关闭的 S7-A01 前台原生 HTTP/SSE，本地集中验证通过，仍待完整 CI/集成验收，见 [批次记录](history/implementation-s7-a01.md)。以下持久会话/任务/原生 WS 仍是未实现的后续目标；批次与验收以 [PLAN.md](PLAN.md#s7-aresponses-持久执行主线) 为准。它是统一框架的首组状态型消费者，不定义整个项目的中心。持久会话、后台任务和 WebSocket 均必须交付，不能以现有亲和缓存或 HTTP 接口替代。首个完整组合使用标准 API Key 和经验证的原生 Responses 上游。
 
 ### 12.1 分层与真实复用
+
+当前 A01 应用在统一 gateway 外组织持久幂等与私有加密短期重放；store 的 schema v11 仅新增无正文回执，owner/Key/操作/摘要作用域唯一，先落 dispatching 再调用共享授权、准入、调度和收尾链。已知结果按 TTL 清理，dispatching 在启动恢复时转 uncertain，未知执行不自动过期或重发。`store=true`/省略保持提供商原生存储语义并额外启用私有重放；false 不留正文，重试不能重放时返回 409。strict 在预留/发送前拒绝全部 Responses 组合，不创建第二套账本或迁移。配置、密钥、容量和恢复边界见 [Responses 运行约定](reference/responses-http.md)。
 
 | 层 | 目标职责与依赖 | 不承担 |
 |---|---|---|
 | server | HTTP/WS 鉴权边界、协议 DTO、查询/取消/会话入口 | 后台 worker、重复预算或迁移逻辑 |
 | generation（A3-01 至 A3-05 基础消费者） | 有界 volatile worker、派发身份、共享 Gateway、加密意图/原 hold 原子受理、独立持久领取/fencing/历史恢复、sealed 输出字节游标；main 默认关闭 runtime | 公开后台/会话 API、原生事件/WS、重发未知 attempt、独立账本或迁移 |
-| responses 应用服务（按需新增） | 持久上下文、任务/事件生命周期，调用 gateway 的生成入口；使用 access/gateway/model/protocol 与持久端口 | 直接依赖 store/GORM、自己重新实现上游生成与计费 |
+| responses 应用服务（A01 已实现待验收） | 前台持久幂等与私有加密短期重放，调用 gateway 生成入口与持久端口；持久上下文、任务/事件仍为后续目标 | 直接依赖 store/GORM、自己重新实现上游生成与计费 |
 | gateway | 统一操作准备、授权、准入、调度、attempt、预算、生成收尾；消费执行与持久端口 | 直接依赖 responses 应用服务、store 或框架任务队列 |
 | protocol | Responses 请求/item/事件与能力、usage 解析 | 数据库、连接池、worker 和模型调用 |
 | core | 保留标准库单次 HTTP 执行，复用已有生命周期 | WS 库、会话/任务/用户逻辑 |
@@ -231,13 +233,13 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 | store / billing 持久实现 | 会话/任务/事件与现有账本的一致性事务，版本/幂等约束 | 以访问日志恢复状态、向业务层暴露任意 GORM 事务 |
 | cmd/gateway | 实例组装、worker/WS 管理器启动与有序关闭 | 在包 init 中隐式启动服务 |
 
-现有 HTTP 已调用类型化执行入口，S6 的管理/协议/扩展/前端接入已合并；下一批 S7-A01 依托已验收 M1 接入 Responses，再将该操作接入持久 worker/WS，共享规则只有一个实现。新增模块、WS 依赖与跨模块原子提交端口需连同 `internal/architecture` 边界和真实行为测试评审，禁止为了引入新包删除/放宽全部依赖门槛。纯 WS I/O 与 HTTP core 可用不同执行器，但两者都由 gateway 组织 attempt，不产生第二条业务链。
+现有 HTTP 已调用类型化执行入口，S6 的管理/协议/扩展/前端接入已合并；工作分支 S7-A01 已依托已验收 M1 接入 Responses，待本批验收，后续再将该操作接入持久 worker/WS，共享规则只有一个实现。新增模块、WS 依赖与跨模块原子提交端口需连同 `internal/architecture` 边界和真实行为测试评审，禁止为了引入新包删除/放宽全部依赖门槛。纯 WS I/O 与 HTTP core 可用不同执行器，但两者都由 gateway 组织 attempt，不产生第二条业务链。
 
 后台接收需要任务意图和账本预留在同一存储事务中成功；S7-A01 明确最小事务端口与失败语义，S7-A03 交付真实调用和故障回归。不能先扣余额后异步写队列，也不能先返回任务 ID 后再尝试预留。A3-04 已用现有 Chat/embeddings 的加密输入真实消费此原子端口并验证强杀前后事务；A3-05 已为现有操作交付独立持久领取/续租/fencing、原 hold 接管和历史恢复；原账本继续拒绝意图回执开启无 claim 的普通 attempt。它不是 Responses job，原生上游后台/父链策略仍在 S7 独立验收。
 
 ### 12.2 持久模型与上下文权威
 
-以下为逻辑实体建议，不预占表名或 schema 版本；最终由存储/集成批次决定最小迁移，沿用现有 runner。
+A01 schema v11 仅落地前台幂等回执；以下完整历史/会话/任务/事件仍为后续逻辑实体建议，不预占其表名或 schema 版本；最终由存储/集成批次决定最小迁移，沿用现有 runner。
 
 | 逻辑实体 | 必须保存的事实 |
 |---|---|

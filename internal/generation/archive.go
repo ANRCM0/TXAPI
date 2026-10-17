@@ -180,7 +180,7 @@ func (a *Archive) Read(ctx context.Context, binding access.Binding, id string) (
 		return Recording{}, ErrArchiveUnavailable
 	}
 	if r.ID != id || r.UserID != binding.UserID || r.TokenID != binding.TokenID || r.ExpiresAt <= time.Now().UnixMilli() ||
-		r.MaxBytes > a.maxBytes || r.StoredBytes < 0 || r.StoredBytes > r.MaxBytes || len(r.Segments) > 256 || uint64(len(r.Segments)) != r.NextSequence {
+		r.MaxBytes > a.maxBytes || r.StoredBytes < 0 || r.StoredBytes > r.MaxBytes || len(r.Segments) > model.GenerationArchiveMaxSegments || uint64(len(r.Segments)) != r.NextSequence {
 		return Recording{}, ErrArchiveIntegrity
 	}
 	if r.State != "sealed" {
@@ -274,7 +274,7 @@ func (o *recordOutput) append(ctx context.Context, kind string, data []byte) err
 		return err
 	}
 	// Always leave one segment and 4 KiB for the bounded final observation.
-	maxBytes, maxSequence := o.record.MaxBytes, uint64(256)
+	maxBytes, maxSequence := o.record.MaxBytes, uint64(model.GenerationArchiveMaxSegments)
 	if kind != "result" {
 		maxBytes -= 4096
 		maxSequence--

@@ -175,3 +175,70 @@ func TestGenerationArchiveRefusesOversizedCorruptBlobBeforeLoading(t *testing.T)
 		t.Fatalf("unbounded blob accepted: %v", err)
 	}
 }
+
+func TestGenerationArchiveSegmentCapReservesFinalSlotAndBoundsCorruptReads(t *testing.T) {
+	s := openTestStore(t, "archive-segment-cap")
+	defer s.Close()
+	ctx := context.Background()
+	r := archiveRecord(1, 1)
+	r.MaxBytes = 1 << 20
+	limits := model.GenerationArchiveLimits{InstanceBytes: 2 << 20, OwnerBytes: 1 << 20, InstanceRecords: 2, OwnerRecords: 1}
+	if err := s.CreateGenerationRecord(ctx, r, limits); err != nil {
+		t.Fatal(err)
+	}
+	segments := make([]model.GenerationSegment, model.GenerationArchiveMaxSegments-1)
+	for i := range segments {
+		kind := "body"
+		if i == 0 {
+			kind = "metadata"
+		}
+		segments[i] = model.GenerationSegment{RecordID: r.ID, Sequence: uint64(i), Kind: kind, Ciphertext: make([]byte, 30)}
+	}
+	// Populate a consistent near-cap store snapshot without thousands of
+	// transactions; existing tests cover per-append CAS and rollback behavior.
+	if err := s.DB().CreateInBatches(&segments, 200).Error; err != nil {
+		t.Fatal(err)
+	}
+	r.NextSequence = uint64(len(segments))
+	r.StoredBytes = int64(len(segments) * 30)
+	r.Committed = true
+	if err := s.DB().Model(&model.GenerationRecord{}).Where("id = ?", r.ID).Updates(map[string]any{"next_sequence": r.NextSequence, "stored_bytes": r.StoredBytes, "committed": true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	last := model.GenerationSegment{RecordID: r.ID, Sequence: r.NextSequence, Kind: "body", Ciphertext: make([]byte, 30)}
+	if err := s.AppendGenerationSegment(ctx, r, last); !errors.Is(err, ErrArchiveConflict) {
+		t.Fatalf("body consumed reserved final slot: %v", err)
+	}
+	last.Kind = "result"
+	if err := s.AppendGenerationSegment(ctx, r, last); err != nil {
+		t.Fatal(err)
+	}
+	binding := access.Binding{UserID: 1, TokenID: 1}
+	got, err := s.ReadGenerationRecord(ctx, binding, r.ID)
+	if err != nil || got.State != "sealed" || len(got.Segments) != model.GenerationArchiveMaxSegments {
+		t.Fatalf("exact cap could not be read: segments=%d err=%v", len(got.Segments), err)
+	}
+	last.Sequence = model.GenerationArchiveMaxSegments
+	r.NextSequence = last.Sequence
+	if err := s.AppendGenerationSegment(ctx, r, last); !errors.Is(err, ErrArchiveConflict) {
+		t.Fatalf("append exceeded finite cap: %v", err)
+	}
+	if err := s.DB().Model(&model.GenerationRecord{}).Where("id = ?", r.ID).Update("next_sequence", model.GenerationArchiveMaxSegments+1).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.ReadGenerationRecord(ctx, binding, r.ID)
+	if !errors.Is(err, ErrArchiveConflict) || len(got.Segments) != 0 {
+		t.Fatal("malformed row-count metadata loaded ciphertext beyond cap")
+	}
+	if err := s.DB().Model(&model.GenerationRecord{}).Where("id = ?", r.ID).Update("next_sequence", model.GenerationArchiveMaxSegments).Error; err != nil {
+		t.Fatal(err)
+	}
+	extra := model.GenerationSegment{RecordID: r.ID, Sequence: model.GenerationArchiveMaxSegments, Kind: "body", Ciphertext: make([]byte, 30)}
+	if err := s.DB().Create(&extra).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.ReadGenerationRecord(ctx, binding, r.ID)
+	if !errors.Is(err, ErrArchiveConflict) || len(got.Segments) != 0 {
+		t.Fatal("extra corrupted ciphertext row bypassed pre-load accounting")
+	}
+}

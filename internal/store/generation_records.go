@@ -48,7 +48,7 @@ func (s *Store) CreateGenerationRecord(ctx context.Context, record model.Generat
 
 func (s *Store) AppendGenerationSegment(ctx context.Context, record model.GenerationRecord, segment model.GenerationSegment) error {
 	if segment.RecordID != record.ID || segment.Sequence != record.NextSequence || len(segment.Ciphertext) < 30 || len(segment.Ciphertext) > 65536 ||
-		segment.Sequence >= 256 || (segment.Kind != "metadata" && segment.Kind != "body" && segment.Kind != "result") {
+		segment.Sequence >= model.GenerationArchiveMaxSegments || (segment.Kind != "metadata" && segment.Kind != "body" && segment.Kind != "result") {
 		return ErrArchiveConflict
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -57,7 +57,7 @@ func (s *Store) AppendGenerationSegment(ctx context.Context, record model.Genera
 		if segment.Kind == "metadata" {
 			q = q.Where("next_sequence = 0 AND committed = ?", false)
 		} else if segment.Kind == "body" {
-			q = q.Where("committed = ? AND next_sequence < 255", true)
+			q = q.Where("committed = ? AND next_sequence < ?", true, model.GenerationArchiveMaxSegments-1)
 		}
 		updates := map[string]any{"stored_bytes": gorm.Expr("stored_bytes + ?", len(segment.Ciphertext)), "next_sequence": gorm.Expr("next_sequence + 1")}
 		if segment.Kind == "metadata" {
@@ -88,7 +88,7 @@ func (s *Store) ReadGenerationRecord(ctx context.Context, binding access.Binding
 			return err
 		}
 		// Metadata is checked before loading blobs, including on a damaged DB.
-		if record.MaxBytes < 16384 || record.MaxBytes > 8<<20 || record.StoredBytes < 0 || record.StoredBytes > record.MaxBytes || record.NextSequence > 256 {
+		if record.MaxBytes < 16384 || record.MaxBytes > 8<<20 || record.StoredBytes < 0 || record.StoredBytes > record.MaxBytes || record.NextSequence > model.GenerationArchiveMaxSegments {
 			return ErrArchiveConflict
 		}
 		var segments struct{ Count, Bytes, Largest int64 }
@@ -99,7 +99,7 @@ func (s *Store) ReadGenerationRecord(ctx context.Context, binding access.Binding
 		if segments.Count != int64(record.NextSequence) || segments.Bytes != record.StoredBytes || segments.Largest > 65536 {
 			return ErrArchiveConflict
 		}
-		return tx.Where("record_id = ?", id).Order("sequence ASC").Limit(257).Find(&record.Segments).Error
+		return tx.Where("record_id = ?", id).Order("sequence ASC").Limit(model.GenerationArchiveMaxSegments + 1).Find(&record.Segments).Error
 	})
 	return
 }
