@@ -1,7 +1,9 @@
 # Secret storage and recovery
 
-Status: A3-05 implementation, local integration checked, not yet accepted.
-Final complete CI and common-baseline integration remain pending. See [PLAN](../PLAN.md) and the
+Status: A3/A4 foundation accepted on 2026-10-18. Final feature head
+`56a205c` and merged `master/ccbfe29` passed complete existing CI; PR #6
+provides the common baseline. This accepts the configuration below, not
+plaintext compatibility deployments or unimplemented S7 product capabilities. See [PLAN](../PLAN.md) and the
 [foundation contract audit](foundation-contracts.md).
 
 ## Supported deployment boundary

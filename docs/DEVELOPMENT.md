@@ -2,7 +2,7 @@
 
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
-当前已验收切片功能基线为 `master/5004c57`，阶段状态统一见 [PLAN](PLAN.md)，精确提交、命令和 CI 见 [批次记录](history/implementation-s5-a3.md)。本文的 S1–S5 标题按运行主题保留，不是另一份进度表；worker/加密记录/WS/意图的详细端口约定见 [可选运行组件](reference/generation-runtime.md)。A3-05 本地开发已加入可选持久 runtime 与上游凭据加密接线，并通过集中本地集成检查；最终完整 CI/共同基线合并尚待完成。生产安全配置和停止后启用/轮换/恢复见 [密钥存储约定](reference/secret-storage.md)，完整基础层审计见 [A3/A4 契约矩阵](reference/foundation-contracts.md)。没有新增公开任务/会话/WS 产品 API，不以运行配置存在替代验收。
+当前已验收基础架构基线为 `master/ccbfe29`（PR #6），阶段状态统一见 [PLAN](PLAN.md)，精确源码/命令/CI 见 [最终批次验收](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)。A1–A4 已通过完整 CI 并合并；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。没有新增公开任务/会话/原生 WS 产品 API，完整 S5/S6/S7 功能仍按各自门槛验收。
 
 ## 工具与工作目录
 
@@ -73,7 +73,7 @@ python tests/smoke/local.py --go go --preview
 
 ### 安装、容器与升级边界
 
-本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前功能基线追加 S5 v5/v6/v7、A3-02 输出记录 v8 和 A3-04 任务意图 v9，见下节。旧库无主 Key 的认领规则不变。
+本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前功能基线追加 S5 v5/v6/v7、A3-02 输出记录 v8 和 A3-04 任务意图 v9、A3-05 领取/输出关联与凭据加密 v10，见下节。旧库无主 Key 的认领规则不变。
 
 Compose 显式使用 `GATEWAY_DATABASE_PATH=/app/data/gateway.db`；此环境变量优先于 YAML 的 database.path。已有部署若实际库在 `/app/.local/data/` 或其他位置，直接重建可能看到空库，**不是数据自动迁移**。先停止旧进程，确认实际路径并一致备份主库及 WAL/SHM，再恢复到目标卷、检查所有权为容器 app 用户（UID 10001），验证数据后切换；切勿删除旧容器/卷或执行 down -v 来“修复”。
 
@@ -110,13 +110,13 @@ python3 tests/smoke/delivery.py --go go
 
 - 全新卷初始化管理员、拒绝重复初始化、UID 10001、镜像健康检查、内嵌静态资源和管理员→用户→Key→调用→本人用量闭环。
 - 重启容器进程，确认原 Key、用户、日志和用量仍在数据卷中；故意将 YAML database.path 指向不可写位置，验证 Compose 的卷内路径环境覆盖真实生效。
-- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。当前功能基线预期 v9，历史迁移记录保持原前缀、新增 v5/v6/v7/v8/v9，旧日志不虚构价格版本，新价格快照可核对内容摘要。
+- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。当前功能基线预期 v10，历史迁移记录保持原前缀、新增 v5/v6/v7/v8/v9/v10，旧日志不虚构价格版本，新价格快照可核对内容摘要。
 - SSE 在途时发起 Compose stop，要求完整 DONE、退出码 0 且已接收日志排空；Compose 为正常关闭和日志排空预留 30 秒，不将该时间承诺为任意负载下的恢复保证。
 - 升级后先另存一份备份，再恢复升级前主库及存在的 WAL/SHM；检查 SQLite integrity_check 和关键表逐行一致，重启原 S3 镜像验证原 Key/数据可用，升级后新增数据不在旧备份中。
 
 所有备份只在停止网关并验证正常退出后执行。恢复前确认卷属于本次演练项目，恢复后校正 UID/GID；脚本只删除自己创建的容器/卷/镜像，失败时输出测试容器日志。生产操作仍须按真实路径停写备份，不得对业务卷运行测试清理命令。
 
-最新已合并功能基线 `5004c57` 的 [Verify #39045543169](https://github.com/ANRCM0/TXAPI/actions/runs/39045543169) 已通过当前 v9 容器演练；这是该提交的证据，不冒充本次文档整理重新运行。S3/v4→S4/v4、S5/v5/v6 等较早演练记录见 [历史验收](history/acceptance-s0-s5.md)，后续批次见 [S5–A3 记录](history/implementation-s5-a3.md)。既有升级/恢复检查保留，不额外扩展旧库报错或回滚专项。正常恢复不等于崩溃时无损，普通日志和进程级 revision 的限制不变。
+共同架构基线 `ccbfe29` 的 [Verify #39055782687](https://github.com/ANRCM0/TXAPI/actions/runs/39055782687) 已通过 v10 容器演练；最终功能头 `56a205c` 的 push/PR 完整 CI 也通过。此前 `5004c57` 的 v9 演练及 S3/v4→S4/v4 等旧证据保留在 [历史验收](history/acceptance-s0-s5.md) 与 [S5–A3 批次](history/implementation-s5-a3.md)，不把旧 run 写成新代码证明。正常恢复不等于崩溃时无损，普通日志和进程级 revision 的限制不变。
 
 本地 Windows 的页面/普通测试不代替 Linux race、完整 CI、容器实跑以及安装/升级/恢复演练。阶段状态见 PLAN，不因编写部署说明就标记验收通过。
 
@@ -343,14 +343,14 @@ Key/IP 限流共享的窗口表最多 4,096 个桶，每桶最多 4,096 个事�
 
 ## 可选运行组件
 
-worker、加密输出、WS transport 和意图受理尚未接入生产 main；它们不是通过设置某个虚构环境变量就能启用的产品功能。调用端口、密钥、容量、保留期、取消/关闭和恢复约定集中见 [可选运行组件与持久端口](reference/generation-runtime.md)。
+main 已有默认关闭的持久 runtime，可按 [A3-05](reference/generation-runtime.md#a3-05-持久执行与运行接线) 配置启用；它要求 strict、挂载内容密钥和实际 store 凭据加密，不会新增公开受理 API。volatile Runner 和 WS transport 仍由显式消费者组装，不能因 runtime 开关宣称生产 Responses/会话/后台/原生 WS 已交付。端口、密钥、容量、保留和关闭见 [运行约定](reference/generation-runtime.md)。
 
 | 组件 | 详细约定 |
 |---|---|
 | 有界进程内 worker | [A3-01](reference/generation-runtime.md#a3-01-进程内消费者边界)；进程退出不提供持久受理保证 |
 | 可选加密输出记录 | [A3-02](reference/generation-runtime.md#a3-02-可选加密输出记录)；不记录可重发输入，不据此退款或重放 |
 | 有界 WS 传输 | [A3-03](reference/generation-runtime.md#a3-03-有界-ws-传输与连接生命周期)；纯服务端 I/O，不是原生 Responses 应用/上游 executor |
-| 加密意图与原子预算受理 | [A3-04](reference/generation-runtime.md#a3-04-加密意图与双预算原子受理)；目前不可领取/派发 |
+| 加密意图与原子预算受理 | [A3-04](reference/generation-runtime.md#a3-04-加密意图与双预算原子受理)；A3-05 增加 fenced 持久派发，原双 hold 不重复预留 |
 
 ## 开发与验证节奏
 

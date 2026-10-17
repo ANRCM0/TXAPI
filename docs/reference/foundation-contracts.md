@@ -1,9 +1,11 @@
 # A3/A4 foundation contract audit
 
-Status: integration audit, 2026-10-18. This is not final A4 acceptance evidence.
-A3-05 local build/vet/full behavior/frontend/smoke checks passed after repairing
-one diagnostic-error classification regression. Final complete CI and the
-common-baseline merge are still pending. The authoritative
+Status: A1-A4 foundation accepted on 2026-10-18. PR #6 merged final feature
+head `56a205c` into `master/ccbfe29`; both exact-head push/PR CI and merged
+master complete CI passed. Local final build/vet, 859 tests/subtests (five
+subprocess-only helpers skipped), frontend and production-main smoke passed.
+See the final history record for commands, failed-first-run repairs, exact
+source/baseline and CI links. This is not complete S5/S6/S7 product acceptance. The authoritative
 checklist remains [PLAN](../PLAN.md), with prior exact-SHA evidence in
 [implementation history](../history/implementation-s5-a3.md).
 
@@ -24,8 +26,9 @@ checklist remains [PLAN](../PLAN.md), with prior exact-SHA evidence in
 | main/config/model/migrations/OpenAPI/CI | Integration-owned shared files | Coordinate one version/registration point, preserve existing CI and contracts |
 
 These are real consumers, not declarations of stable S7 product behavior. The
-new A3-05 ports cannot be frozen as an accepted common baseline until the final
-current-source checks and integration finish. Public API contract remains
+A3-05 ports are accepted internal extension contracts for the existing operation
+scope. Changes still require coordinated consumer review; they are not a public
+SDK or native S7 wire/event contract. Public API contract remains
 OpenAPI 0.2.3, 79 operations; no new Responses/session/task/WS route is added.
 
 ## Lifetime and failure invariants
@@ -60,19 +63,20 @@ OpenAPI 0.2.3, 79 operations; no new Responses/session/task/WS route is added.
 ## Failure matrix and evidence routing
 
 The new matrix ran during concentrated local integration, including the real
-five-window process-death tests. The final full Go run passed 851 tests/subtests
+five-window process-death tests. The first repaired full Go run passed 851 tests/subtests
 and skipped four subprocess-only helpers; the later added encrypted seed/pool
 replacement test separately passed on unchanged production source. Six frontend
 behavior tests and production-main smoke also passed. Windows process termination
-is not evidence of graceful SIGTERM; that and Linux race/container delivery still
-require complete CI. Historical green runs do not validate this new source.
+is not evidence of graceful SIGTERM. Final complete Linux CI separately passed
+signal handling, full race and container delivery on the accepted source; the
+local Windows result is not used as a substitute.
 
 The first remote runs on `08f67a6` passed container delivery but failed Linux
 race: lease renewal captured the execution context variable while dispatch
 replaced it with an authorized wrapper. The fix passes the initial deadline
 context as an immutable goroutine argument. Local full checks were repeated;
-the failed runs are not acceptance evidence and replacement complete CI is
-required before merge.
+the failed runs are not acceptance evidence. The fix and the later cursor
+addition passed replacement exact-head complete CI before merge.
 
 The final audit also identified that an append sequence alone was not evidence
 of resumable observation. The added `Archive.OpenCursor` / `CursorReader.Next`
@@ -80,8 +84,8 @@ consumer provides an authenticated encoded-byte position and a bounded sealed
 snapshot. Its concentrated local build/vet/full-test/smoke checks passed:
 859 tests/subtests passed and five subprocess-only helpers skipped. Frontend
 sources and dependencies are unchanged, so their earlier checks remain applicable.
-The earlier green `d6550d3` CI does not validate this addition; complete CI for
-the new head and the common-baseline merge are still required.
+The earlier green `d6550d3` CI did not validate this addition. The final
+`56a205c` push/PR runs and merged `master/ccbfe29` complete CI now cover it.
 
 | Failure or boundary | Required observation | Regression location |
 |---|---|---|
@@ -103,11 +107,12 @@ the new head and the common-baseline merge are still required.
 | Actual main startup/restart/invalid keys/signal | Encryption activation before producers; missing/wrong secrets reject; Linux SIGTERM joins | `cmd/gateway/generation_test.go`, `tests/smoke/local.py` |
 | Existing connection lifecycle/protocol/HTTP | Existing JSON/SSE/WS I/O/auth/limit behavior remains intact | Existing complete regressions and CI |
 
-Before closing A4: finish the audit against PLAN/ARCHITECTURE/COLLABORATION,
-concentrate local build/vet/full behavior/frontend/smoke checks, repair failures,
-verify final head against latest integration base, and run the unchanged complete
-CI (including Linux race and container delivery). Record exact source/environment
-and merge evidence, then update status. No historical green run substitutes.
+A4 audit against PLAN/ARCHITECTURE/COLLABORATION is closed for the foundation
+scope above. Exact feature head and latest integration baseline, complete CI
+(including Linux race, container v10 upgrade/restore and signal handling),
+actual merge and environment are recorded in the implementation history.
+Master run [#39055782687](https://github.com/ANRCM0/TXAPI/actions/runs/39055782687) passed on `ccbfe29545dec358da9d9cda4b7ac3624ded1ec0`. No historical green run
+substitutes for the final source.
 
 ## Product and governance exclusions
 
