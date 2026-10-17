@@ -3,7 +3,6 @@ package generation
 import (
 	"bytes"
 	"context"
-	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -20,6 +19,7 @@ import (
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/jsonutil"
+	"minigateway/internal/secrets"
 )
 
 var ErrIntentIntegrity = errors.New("generation intent cannot be authenticated")
@@ -48,8 +48,7 @@ type IntentOptions struct {
 type IntentAcceptor struct {
 	admission IntentAdmission
 	resolve   func(context.Context, access.Binding) (access.Principal, error)
-	keys      map[string]cipher.AEAD
-	active    string
+	keys      *secrets.Ring
 	digestKey []byte
 	queueTTL  time.Duration
 	retention time.Duration
@@ -58,6 +57,7 @@ type IntentAcceptor struct {
 
 type IntentReceipt struct {
 	ID, BillingID, State           string
+	OutputRecordID                 string
 	CreatedAt, Deadline, ExpiresAt int64
 }
 
@@ -74,7 +74,7 @@ func NewIntentAcceptor(opts IntentOptions) (*IntentAcceptor, error) {
 		opts.Limits.OwnerBytes < 68<<10 || opts.Limits.InstanceBytes < opts.Limits.OwnerBytes || opts.Limits.InstanceBytes > 64<<20 {
 		return nil, fmt.Errorf("invalid generation intent configuration")
 	}
-	keys, err := compileContentKeys(opts.ActiveKey, opts.Keys)
+	keys, err := secrets.NewRing(opts.ActiveKey, opts.Keys)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func NewIntentAcceptor(opts IntentOptions) (*IntentAcceptor, error) {
 			return nil, fmt.Errorf("generation digest and content keys must be independent")
 		}
 	}
-	return &IntentAcceptor{admission: opts.Admission, resolve: opts.Resolve, keys: keys, active: opts.ActiveKey,
+	return &IntentAcceptor{admission: opts.Admission, resolve: opts.Resolve, keys: keys,
 		digestKey: bytes.Clone(opts.DigestKey), queueTTL: opts.QueueTTL, retention: opts.Retention, limits: opts.Limits}, nil
 }
 
@@ -127,31 +127,23 @@ func intentAAD(in model.GenerationIntent, header []byte) []byte {
 }
 
 func (a *IntentAcceptor) sealIntent(in model.GenerationIntent, plain []byte) ([]byte, error) {
-	key := a.keys[a.active]
-	header := append([]byte{1, byte(len(a.active))}, a.active...)
-	nonce := make([]byte, key.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
+	sealed, err := a.keys.Seal(plain, intentAAD(in, nil))
+	if err != nil {
 		return nil, ErrIntentIntegrity
 	}
-	return key.Seal(append(header, nonce...), nonce, plain, intentAAD(in, header)), nil
+	return sealed, nil
 }
 
 func (a *IntentAcceptor) openIntent(in model.GenerationIntent) (gateway.Execution, error) {
 	version := sha256.Sum256(a.digestKey)
-	if in.DigestVersion != hex.EncodeToString(version[:]) || (in.State != model.IntentQueued && in.State != model.IntentCancelled && in.State != model.IntentExpired && in.State != model.IntentUncertain) {
+	if in.DigestVersion != hex.EncodeToString(version[:]) || !validIntentState(in.State) {
 		return gateway.Execution{}, ErrIntentIntegrity
 	}
 	data := in.Ciphertext
-	if len(data) < 2 || len(data) > 68<<10 || data[0] != 1 || data[1] < 1 || data[1] > 32 || len(data) < 2+int(data[1]) {
+	if len(data) > 68<<10 {
 		return gateway.Execution{}, ErrIntentIntegrity
 	}
-	header := data[:2+int(data[1])]
-	key := a.keys[string(header[2:])]
-	if key == nil || len(data) < len(header)+key.NonceSize()+key.Overhead() {
-		return gateway.Execution{}, ErrIntentIntegrity
-	}
-	nonce := data[len(header) : len(header)+key.NonceSize()]
-	plain, err := key.Open(nil, nonce, data[len(header)+len(nonce):], intentAAD(in, header))
+	plain, err := a.keys.Open(data, intentAAD(in, nil))
 	if err != nil {
 		return gateway.Execution{}, ErrIntentIntegrity
 	}
@@ -164,6 +156,15 @@ func (a *IntentAcceptor) openIntent(in model.GenerationIntent) (gateway.Executio
 		return gateway.Execution{}, ErrIntentIntegrity
 	}
 	return gateway.Execution{Operation: payload.Operation, Body: payload.Body, SessionID: payload.SessionID}, nil
+}
+
+func validIntentState(state string) bool {
+	switch state {
+	case model.IntentQueued, model.IntentClaimed, model.IntentRunning, model.IntentFinalizing, model.IntentSucceeded, model.IntentFailed, model.IntentCancelled, model.IntentExpired, model.IntentUncertain:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *IntentAcceptor) requestDigest(plain []byte) string {
@@ -229,7 +230,7 @@ func (a *IntentAcceptor) Admit(ctx context.Context, binding access.Binding, idem
 }
 
 func intentReceipt(in model.GenerationIntent) IntentReceipt {
-	return IntentReceipt{ID: in.ID, BillingID: in.BillingID, State: in.State, CreatedAt: in.CreatedAt, Deadline: in.Deadline, ExpiresAt: in.ExpiresAt}
+	return IntentReceipt{ID: in.ID, BillingID: in.BillingID, State: in.State, OutputRecordID: in.OutputRecordID, CreatedAt: in.CreatedAt, Deadline: in.Deadline, ExpiresAt: in.ExpiresAt}
 }
 
 func (a *IntentAcceptor) Read(ctx context.Context, binding access.Binding, id string) (IntentReceipt, gateway.Execution, error) {

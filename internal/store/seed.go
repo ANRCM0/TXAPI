@@ -74,7 +74,7 @@ func (s *Store) SeedFromConfig(cfg *config.Config) (imported bool, err error) {
 				Weight:    cc.Weight,
 				Status:    model.CredentialActive,
 			}
-			if err := tx.Create(cred).Error; err != nil {
+			if err := s.createCredential(tx, cred); err != nil {
 				return fmt.Errorf("导入渠道 %s 的凭据失败: %w", cc.Name, err)
 			}
 			if err := syncAbilities(tx, ch); err != nil {

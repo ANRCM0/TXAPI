@@ -70,6 +70,10 @@ type Credential struct {
 	Name      string `gorm:"size:128;not null;default:''" json:"name"`
 	// APIKey 是上游渠道的 key，注意与 tokens 表的客户端 key 完全不同。
 	APIKey string `gorm:"size:512;not null" json:"api_key"`
+	// Encrypted deployments leave the legacy column empty. Only the store
+	// decrypts a row into an execution/cache copy; these fields never reach HTTP.
+	KeyCiphertext []byte `json:"-"`
+	KeyHash       string `gorm:"not null;default:'';size:64" json:"-"`
 	// Weight 是凭据级权重，调度器在渠道内部的多个 Key 之间分流时使用。
 	Weight int    `gorm:"not null;default:1" json:"weight"`
 	Status string `gorm:"size:16;not null;default:active" json:"status"`

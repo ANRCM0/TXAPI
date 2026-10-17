@@ -170,6 +170,13 @@ func (g *Gateway) preRequest(c *executionScope, req protocol.Request) (*billing.
 		if !g.strictReady() {
 			return nil, billing.ErrStrictUnavailable
 		}
+		if c.claim != nil {
+			port, ok := g.strictBilling.(IntentBilling)
+			if !ok {
+				return nil, billing.ErrStrictUnavailable
+			}
+			return port.ResumeGenerationIntent(c.ctx, *c.claim, c.result.Identity.UserID, c.result.Identity.TokenID, string(req.Operation()), req.Model())
+		}
 		return g.strictBilling.Reserve(c.ctx, c.result.Identity.TokenID, c.result.Identity.UserID, req.Model())
 	}
 	if g.billing == nil || g.billingMode != billing.ModeLegacy {

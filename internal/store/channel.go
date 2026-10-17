@@ -134,7 +134,7 @@ func (s *Store) CreateChannel(in *ChannelInput) (*model.Channel, error) {
 			Weight:    ch.Weight,
 			Status:    model.CredentialActive,
 		}
-		if err := tx.Create(cred).Error; err != nil {
+		if err := s.createCredential(tx, cred); err != nil {
 			return fmt.Errorf("创建渠道凭据失败: %w", err)
 		}
 		ch.Credentials = []model.Credential{*cred}
@@ -197,7 +197,7 @@ func (s *Store) UpdateChannel(id uint, in *ChannelInput) (*model.Channel, error)
 				Weight:    ch.Weight,
 				Status:    model.CredentialActive,
 			}
-			if err := tx.Create(cred).Error; err != nil {
+			if err := s.createCredential(tx, cred); err != nil {
 				return fmt.Errorf("创建新凭据失败: %w", err)
 			}
 			ch.Credentials = []model.Credential{*cred}
@@ -254,6 +254,9 @@ func (s *Store) GetChannel(id uint) (*model.Channel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取渠道 %d 失败: %w", id, err)
 	}
+	if err := s.openChannels([]model.Channel{ch}); err != nil {
+		return nil, err
+	}
 	return &ch, nil
 }
 
@@ -264,9 +267,12 @@ func (s *Store) ChannelSnapshot() ([]model.Channel, error) {
 	defer s.cacheMu.Unlock()
 	var channels []model.Channel
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		return tx.Preload("Credentials", func(db *gorm.DB) *gorm.DB {
+		if err := tx.Preload("Credentials", func(db *gorm.DB) *gorm.DB {
 			return db.Order("weight DESC, id ASC")
-		}).Order("priority DESC, id ASC").Find(&channels).Error
+		}).Order("priority DESC, id ASC").Find(&channels).Error; err != nil {
+			return err
+		}
+		return s.openChannels(channels)
 	})
 	if err == nil {
 		s.mu.Lock()

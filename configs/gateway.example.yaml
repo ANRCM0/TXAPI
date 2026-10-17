@@ -34,6 +34,10 @@ log_retention_days: 30
 database:
   driver: "sqlite"
   path: ".local/data/gateway.db"
+  # Opt in only after stopping the old process and making a consistent backup.
+  # Once enabled, missing/wrong keys refuse startup; there is no plaintext fallback.
+  # credential_keys_file: "/run/secrets/txapi-credentials.json"
+  # GATEWAY_CREDENTIAL_KEYS_FILE overrides this path. Required for generation.enabled.
 
 # legacy: 保留兼容额度计费，不保证严格预算；disabled: 不计费、不检查额度。
 # strict: 用户/Key 同事务预留整笔单次收费上限，再按实际用量幂等结算。
@@ -79,6 +83,24 @@ billing:
   # 上述数值仅展示语法，不是任何真实模型保证！必须核实全批输入、
   # reasoning/cache/错误请求的总可计费范围及每个绑定凭据的最高适用价格；
   # 已登记标准费率下限不替代失败收费/附加费证明或未来价格变更核查。
+
+# Optional durable generation runtime. This does not expose a background API.
+# Secret bytes belong in a separately mounted JSON file, never in this YAML.
+# The runtime requires configured strict fee/provider ceilings and contracts.
+generation:
+  enabled: false
+  # keys_file: "/run/secrets/txapi-generation.json"
+  # GATEWAY_GENERATION_KEYS_FILE overrides the path.
+  workers: 2
+  poll_milliseconds: 250
+  lease_seconds: 10
+  deadline_seconds: 120
+  retention_seconds: 86400
+  max_output_bytes: 262144
+  instance_records: 256
+  owner_records: 32
+  instance_bytes: 16777216
+  owner_bytes: 4194304
 
 # 渠道与令牌是**种子数据**：只在数据库为空时导入一次，之后通过管理 API 增删改。
 # 真实使用时替换 base_url、模型名和两个 key 占位符；

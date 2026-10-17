@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
 	"minigateway/internal/model"
 )
 
@@ -83,6 +85,7 @@ type providerAttemptSnapshot struct {
 type ProviderCosts struct {
 	budget    int64
 	contracts map[providerKey]providerContract
+	version   string
 }
 
 var monetaryDecimal = regexp.MustCompile(`^[0-9]+(\.[0-9]{1,9})?$`)
@@ -167,6 +170,24 @@ func compileProviderCosts(budget string, configs []ProviderCostContract) (*Provi
 		}
 		policy.contracts[key] = contract
 	}
+	entries := make([]string, 0, len(policy.contracts))
+	for _, contract := range policy.contracts {
+		encoded, err := json.Marshal(contract.config)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, string(encoded))
+	}
+	sort.Strings(entries)
+	encoded, err := json.Marshal(struct {
+		Budget    int64
+		Contracts []string
+	}{units, entries})
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(encoded)
+	policy.version = hex.EncodeToString(digest[:])
 	return policy, nil
 }
 
@@ -290,9 +311,28 @@ func (e *Engine) RecordCostRefusal(ctx context.Context, pre *PreDeduct, cause er
 	// Diagnostics survive client cancellation without extending execution.
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	res := e.strict.db.WithContext(recordCtx).Model(&model.BillingReservation{}).
-		Where("id=? AND state IN ?", pre.BillingID(), []string{Reserved, Active}).Update("reason", reason)
-	if res.Error != nil || res.RowsAffected != 1 {
+	err := e.strict.db.WithContext(recordCtx).Transaction(func(tx *gorm.DB) error {
+		intent, err := checkIntentReservation(tx, pre, false)
+		if err != nil {
+			return err
+		}
+		if intent != nil && intent.State != model.IntentRunning {
+			return model.ErrClaimLost
+		}
+		res := tx.Model(&model.BillingReservation{}).
+			Where("id=? AND state IN ?", pre.BillingID(), []string{Reserved, Active}).Update("reason", reason)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return ErrStrictUnavailable
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, model.ErrClaimLost) {
+			return err
+		}
 		return ErrStrictUnavailable
 	}
 	return cause

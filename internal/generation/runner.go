@@ -1,5 +1,6 @@
-// Package generation provides bounded, process-local generation handoff. It is
-// not a durable task queue and must not back a public background-acceptance API.
+// Package generation provides bounded volatile and durable generation consumers.
+// Runner is process-local; only IntentAcceptor plus DurableRunner persist work.
+// Neither defines a public background API or a provider-native task protocol.
 package generation
 
 import (

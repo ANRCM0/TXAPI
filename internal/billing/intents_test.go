@@ -143,7 +143,17 @@ func TestIntentCapacityCountsRetainedReceiptsAndCleanupNeverDeletesUnknown(t *te
 	if err := st.DB().Model(&model.GenerationIntent{}).Where("id = ?", unknown.ID).Updates(map[string]any{"state": model.IntentUncertain, "expires_at": time.Now().Add(-time.Second).UnixMilli()}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if n, err := e.CleanupGenerationIntents(context.Background(), 200); err != nil || n != 1 {
+		t.Fatalf("expired unknown content not purged: %d %v", n, err)
+	}
+	var retained model.GenerationIntent
+	if err := st.DB().First(&retained, "id = ?", unknown.ID).Error; err != nil || retained.State != model.IntentUncertain || len(retained.Ciphertext) != 0 {
+		t.Fatal("cleanup deleted unresolved metadata or retained expired content", err)
+	}
+	if balance := readBalance(t, st, "user", user); balance.ReservedUnits != 100_000_000 || balance.UsedUnits != 0 {
+		t.Fatal("content retention policy changed financial authority")
+	}
 	if n, err := e.CleanupGenerationIntents(context.Background(), 200); err != nil || n != 0 {
-		t.Fatalf("cleanup forgot uncertain work: %d %v", n, err)
+		t.Fatalf("purged unresolved audit did not remain stable: %d %v", n, err)
 	}
 }

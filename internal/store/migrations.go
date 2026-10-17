@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 9
+const latestMigrationVersion = 10
 
 type dataMigration struct {
 	Version int
@@ -44,6 +44,14 @@ var dataMigrations = []dataMigration{
 	{Version: 9, Apply: func(tx *gorm.DB) error {
 		// No task admission or budget hold can be inferred from old output logs.
 		return nil
+	}},
+	{Version: 10, Apply: func(tx *gorm.DB) error {
+		// Existing intents retain their original holds and an empty policy marker.
+		// They cannot silently adopt a newly configured provider policy.
+		if err := tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_intent_output ON generation_intents(output_record_id) WHERE output_record_id <> ''").Error; err != nil {
+			return err
+		}
+		return tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_key_hash ON credentials(channel_id, key_hash) WHERE key_hash <> ''").Error
 	}},
 }
 

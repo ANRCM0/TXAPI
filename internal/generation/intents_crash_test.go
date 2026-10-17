@@ -73,8 +73,13 @@ func TestIntentAdmissionCrashWorker(t *testing.T) {
 
 func killIntentChild(t *testing.T, path, mode string) string {
 	t.Helper()
-	command := exec.Command(os.Args[0], "-test.run=^TestIntentAdmissionCrashWorker$", "-test.v")
-	command.Env = append(os.Environ(), "TXAPI_TEST_INTENT_CRASH_DB="+path, "TXAPI_TEST_INTENT_CRASH_MODE="+mode)
+	return killGenerationChild(t, path, mode, "TestIntentAdmissionCrashWorker", "TXAPI_TEST_INTENT_CRASH", intentCrashReady)
+}
+
+func killGenerationChild(t *testing.T, path, mode, testName, envPrefix, markerPrefix string) string {
+	t.Helper()
+	command := exec.Command(os.Args[0], "-test.run=^"+testName+"$", "-test.v")
+	command.Env = append(os.Environ(), envPrefix+"_DB="+path, envPrefix+"_MODE="+mode)
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	stdout, err := command.StdoutPipe()
@@ -95,7 +100,7 @@ func killIntentChild(t *testing.T, path, mode string) string {
 	go func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
-			if id, ok := strings.CutPrefix(scanner.Text(), intentCrashReady); ok {
+			if id, ok := strings.CutPrefix(scanner.Text(), markerPrefix); ok {
 				ready <- id
 				return
 			}

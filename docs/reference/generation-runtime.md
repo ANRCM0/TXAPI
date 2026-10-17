@@ -1,6 +1,6 @@
 # 可选运行组件与持久端口
 
-本页保存 generation worker、加密输出记录、WS transport 和加密意图的调用/生命周期/容量/恢复约定。组件已经实现，但当前 main 没有启用这些消费者；不能将本页当作公开后台 API、生产密钥配置或 Responses 产品使用说明。当前状态和执行顺序见 [PLAN.md](../PLAN.md)，开发命令及验证节奏见 [DEVELOPMENT.md](../DEVELOPMENT.md)，跨模块写入边界见 [COLLABORATION.md](../COLLABORATION.md)。
+本页保存 generation worker、加密输出记录、WS transport 和加密意图的调用/生命周期/容量/恢复约定。A3-01 至 A3-04 记录已合并基线；A3-05 描述当前未验收的可选 main 持久 runtime/密钥接线，覆盖前文“没有运行配置/领取”的历史限制，但没有公开后台/会话/Responses/WS 产品 API。当前状态和执行顺序见 [PLAN.md](../PLAN.md)，开发命令及验证节奏见 [DEVELOPMENT.md](../DEVELOPMENT.md)，跨模块写入边界见 [COLLABORATION.md](../COLLABORATION.md)。
 
 这些组件复用原授权、准入、执行和账本，不承诺完整持久任务平台。以下保留 A3 批次编号以便对应 [实现与验收记录](../history/implementation-s5-a3.md)，编号不表示整个架构已经验收。
 
@@ -46,6 +46,8 @@ worker 数、队列长度、单请求正文和排队起算的取消时限均有�
 
 ## A3-04 加密意图与双预算原子受理
 
+本节描述已合并 A3-04 的受理范围；正在开发的领取/派发和 main 配置扩展见本文 A3-05 节，尚未验收，不能据此把生产后台 API 标记完成。
+
 `NewIntentAcceptor(IntentOptions)` 是独立、不可派发的真实持久消费者，当前只接受现有 Chat/embeddings。可信组装者注入原 Engine 的 `IntentAdmission` 和 `Store.ResolvePrincipal`；不导入 GORM、不传事务回调。Admit 在同一事务写 `generation_intents`、稳定摘要密钥版本标记及原账本的用户/Key 双预留，任一失败全部回滚；提交确认丢失后可用相同幂等键读取原回执，不重复 hold。没有先返回 ID 再异步预留，也不复制账本、鉴权或迁移。main/YAML/环境变量尚无消费者与密钥接线，不能宣称公开后台功能已启用。
 
 - 每次 Admit/Read/Cancel 解析当前 owner/创建 Key 和模型权限；同用户其他 Key 不能仅凭 ID 读取或取消。鉴权使用事务前本轮快照，不保证已撤销瞬间中断正在受理的事务；后续派发必须再次授权。输入先于可信回调制作副本，JSON 正文最多 64 KiB，拒绝重复字段/过深/非 UTF-8；会话标识最多 256 字节。JSON 对象键排序并消除空白用于幂等，保留数字字面量差别，不把所有数值语义强行等同。
@@ -57,3 +59,17 @@ worker 数、队列长度、单请求正文和排队起算的取消时限均有�
 - `CleanupGenerationIntents` 每批最多 200 条，只清到期 cancelled/expired 且财务 settled/零费用/同 owner/Key/无 attempt 的内容行；uncertain 永不自动清除，可能持续占容量，须后续明确审计处置。清理不删除 reservation/balances/审计事实；过期保留回执不能创建新 hold，清理后不提供无限期幂等保证。保留期结束、清理和重用键的产品规则仍须公开 API 批次定义。
 
 真实 SQLite 回归覆盖双预算并发、幂等丢确认/并发重试、插入/取消失败的跨表回滚、当前权限收紧、容量、保留期和密钥/元数据篡改。真实子进程分别在提交前强杀（无意图/预留）和提交成功后强杀（重启可解密读取、真实期限到期只回收未执行预算），原数据库/WAL 不包含输入或原始幂等键明文。新迁移为统一 v9，仅追加结构，不伪造历史任务；v8 及更老二进制拒绝打开，恢复旧一致备份的规则不变。本批未操作生产库，不扩展为实际旧库报错/回滚专项。
+
+## A3-05 持久执行与运行接线（开发中）
+
+状态：2026-10-18，本地实现已完成集中集成验证，尚待最终完整 CI 和共同基线合并。开发阶段未运行测试；收口后集中 build/vet/全量 Go/前端/冒烟，发现并修复原拒绝诊断错误分类的一处回归，修复后的完整 Go 与冒烟均通过。下列为本批实现约定，不是 A4 已通过声明；最终 Linux race/容器交付与合并门槛保留。
+
+- `IntentLeases` 由原 Engine 实现，固定数量的 `DurableRunner` 直接从持久意图领取，不再复制到 volatile 队列。领取令牌随机生成，库中只存摘要和单调 epoch；租约为 1 秒–1 分钟、不得越过受理 deadline。续租失效或取消请求终止本轮 context。只有原账本仍为 reserved、没有 attempt/provider 占用的意图才可更换 epoch；旧 epoch 不能再开始 attempt、更新回执/诊断或收尾新所有权。
+- 派发验证加密正文，并重新解析当前 owner/创建 Key、模型权限及限额；存储准备后再刷新一次可信身份。实际调用 `Gateway.ExecuteClaimedTo`，仍走原授权、准入、能力过滤、路由、实际 wire 成本和收尾链。它不是持久预算传入通用 context 的旁路，不重新 Reserve。原不可变售价历史在事务中恢复；受理时保存的 provider 配置指纹/预算必须与当前启动配置一致，变化拒绝，不默默采用新假设。v9 旧意图没有此标记，不会自动获得新的 provider 执行许可。
+- schema v10 追加领取/取消/输出关联字段、非空输出 ID 唯一索引及上游凭据加密列/指纹索引，已发布迁移不改写。所有执行财务写均验证 claim；无 claim 的普通 reservation 入口不能消费 intent hold。已完成 attempt 回执相同重试幂等，冲突内容拒绝而不覆盖恢复证据。运行时不占用一条数据库事务等待网络。fencing 保护本地状态和发送前许可，不能撤回已发送的外部副作用，也不承诺上游 exactly-once。
+- 发送前先为原 owner/创建 Key 创建有界加密输出记录并绑定 intent。财务收尾和任务的 `finalizing`/失败/未知状态同事务提交；只有输出 sealed 且账本 settled 才发布 succeeded。已创建 attempt 的工作不再领取重发；崩溃发生在持久发送许可与网络发送之间同样按可能执行处理。最后持久成功 usage 可按历史价恢复结算，但输出没有完成证据时任务仍未知，不伪造成功。
+- 队列/已领取且无 attempt 的取消可原子零结算并使旧 claim 失效；正在执行的取消只先记录请求，由续租观察者取消 context，原 gateway 收尾决定财务事实。密文无法认证时进入隔离状态并保留双 hold，不因缺钥或篡改当作免费。正常关闭停领取、取消并 join 执行/续租/归档/收尾，然后才能关闭 limiter/gateway/store；Close 超时不授权提前销毁依赖。
+- main 提供默认关闭的 `generation.enabled` 接线，要求 strict 及已配置的收费/provider 上限和契约，以及实际 store 已启用上游凭据加密。配置示例见 `configs/gateway.example.yaml`；`generation.keys_file` 或 `GATEWAY_GENERATION_KEYS_FILE` 指向不超过 16 KiB 的 JSON 挂载密钥文件，格式含 `active_key`、`keys`（ID 到 base64 编码的 32 字节内容密钥）及独立 `digest_key`（base64 编码的 32 字节摘要密钥）。`database.credential_keys_file` / `GATEWAY_CREDENTIAL_KEYS_FILE` 指定上游凭据密钥环；启用标记一旦持久化，不允许缺钥/错摘要或混合明文降级。没有默认密钥、自动 HMAC 轮换或 KMS；部署者必须保护文件权限/ACL并分别备份，详见[密钥操作与限制](secret-storage.md)。
+- 启动前核对仍保留的输入/输出头部所需内容 Key 和稳定摘要指纹，缺旧钥/错摘要拒绝启用 runtime；这只是钥匙可用性检查，不是全量密文完整性认证。实际解密仍在消费/读取时校验。恢复和 TTL 清理按有界批次运行；输入 TTL 到期即清密文，未知财务执行的最小意图/账本审计和 hold 仍保留且占记录容量，财务结清的终态元数据可在到期后清除。不以删除日志冒充恢复或磁盘安全擦除；输入与输出容量分别计数，不是物理磁盘/进程堆上限。
+
+本批没有公开任务/会话/Responses/WS 产品 API，也不等价于厂商原生后台执行。输入和输出仍是已支持操作的 JSON/SSE；没有扩大 strict 的协议、工具或厂商许可。上游凭据可选加密已纳入本批实现，未启用的 HTTP 明文兼容模式不是生产安全基线。最终恢复/安全故障矩阵、稳定端口与 A4 集成验收仍须完成，不能因新增接线/用例宣布基础层已验收；审计范围和待执行证据见 [基础层契约矩阵](foundation-contracts.md)。

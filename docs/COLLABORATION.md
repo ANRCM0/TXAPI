@@ -13,6 +13,7 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 | 平台/集成 | `cmd/gateway`、`internal/core`、`internal/gateway`、`internal/architecture` | 公共契约收口、持久执行边界、取消/关闭与依赖验收 | main、gateway.Options、CI、迁移版本表、OpenAPI |
 | 协议团队 | `internal/protocol/adaptor/<provider>`、协议样本/测试 | 新厂商转换、协议能力/错误映射、独立 SSE 解析器 | `gateway.Options.Adaptors` 的生产注册，由集成团队接线 |
 | 身份与存储团队 | `internal/access`、`internal/store/access*`、相关 API 功能切片 | 用户/Key 生命周期、权限收敛、owner 校验、迁移回归 | `internal/model`、`internal/store/migrations.go`、OpenAPI |
+| 密钥与运行安全（集成协调） | `internal/secrets`、`internal/store/credential_keys*`、generation 内容保护 | 标准库加密/挂载密钥解析，store 负责转换与生命周期；不新建鉴权/迁移 | 共享密文版本、model/store 迁移、main/config、保留与恢复规则 |
 | 调度与准入团队 | `internal/scheduler`、自己的准入实现包、相关测试 | 维护已验收的 S3 准入/租约，按独立批次扩展调度和负载回归 | Admission 接口、gateway.Options 和限额配置/模型字段 |
 | 管理 API 团队 | `internal/server/api/<feature>.go` 与对应 store 方法 | 按资源增加真实 API、输入校验与隔离测试 | RegisterAccess/registerResources 注册点、OpenAPI |
 | 前端团队 | `web/` | 原生 ES Modules 控制台和真实 API 联调；Go embed 随二进制交付，无单独资产构建 | 静态资源路由、CSP、HTTP 契约与生产接线 |
@@ -61,6 +62,8 @@ A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与�
 `generation.IntentAdmission` 只提供类型化 Admit/Read/Cancel；实际 Engine 实现在同一 SQLite 事务保存加密意图、幂等摘要配置标记和原用户/Key 双 hold。generation 不导入 billing/store/GORM；共享 reserve/finish 的事务内实现保留账本权威，没有任意事务回调或第二套余额。原普通 attempt 明确拒绝意图关联 reservation，后续派发不能伪造普通 PreDeduct 或先再预留一次。
 
 `IntentAcceptor` 复用当前身份解析，对 Admit/Read/Cancel 校验可信 owner/创建 Key/当前模型权限；身份是事务前本轮快照，不保证撤销瞬间中断。输入加密和独立稳定 HMAC 密钥由组装者注入，schema v9 统一追加 `generation_intents`，不由应用另迁移。容量、幂等保留期、加密/密钥变更拒绝、取消和恢复详见[开发指南](reference/generation-runtime.md#a3-04-加密意图与双预算原子受理)。这是不可派发的受理消费者，不是公开后台 API/持久队列；没有领取/续租/fencing/重启重派，main 不启动它。
+
+以上段落描述已合并 A3-04 的范围。当前 A3-05 追加 `IntentLeases` / `ExecuteClaimedTo`、v10 领取 epoch/取消/输出关联、原账本预留接管和默认关闭的 main 持久 runtime；并增加 `secrets` 标准库工具包及 store 上游凭据加密接线。本地集中检查已通过，但最终完整 CI/合并尚未完成，不允许下游团队据此假定接口已冻结。共享入口/模型/迁移/main/config 仍由集成负责人统一维护；实际支持、寿命、密钥和故障验收边界见 [基础层契约审计](reference/foundation-contracts.md)，不新增第二套鉴权、账本、迁移或公开 S7 API。
 
 ### WS I/O 与物理连接：A3-03（未阶段验收）
 
@@ -154,6 +157,7 @@ CI 会校验契约与真实 Gin 路由一一匹配、匿名请求受保护、公
 - runner 在事务中执行一步并登记版本；步骤不允许 Commit/Rollback、不读写真实外部服务。失败既回滚数据也不记版本，重试可重新执行。
 - 打开数据库前检查最高版本；比当前二进制新的 schema 将被拒绝，避免先 AutoMigrate 再发现不兼容。结构 AutoMigrate 本身仍不是完整 SQL 迁移框架，备份/恢复规则继续适用。
 - A3-04 统一追加 v9 `generation_intents`，原账本与意图受理共享事务；不回填历史任务/预留，禁止 v8 二进制打开。内容清理不删除财务事实，幂等摘要密钥标记不能为更换密钥而手动删除。
+- A3-05 开发中统一追加 v10 的 claim/取消/输出关联及 credential 加密列/索引。密钥显式配置后的转换/轮换是 store 内同事务功能启用，不是另一套 schema runner；保留 ID/健康代次/原账本，丢钥或启用标记不符拒绝，不明文降级。旧版本回滚必须恢复兼容的一致备份；不能删除迁移/密钥标记降级。
 - 新迁移至少有旧 schema 升级、重启幂等、失败回滚和恢复限制说明。绝不能把清空数据库当修复方案。
 
 ## 5. 分支、测试与集成

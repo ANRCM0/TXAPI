@@ -2,7 +2,7 @@
 
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
-当前功能基线为 `master/5004c57`，阶段状态统一见 [PLAN](PLAN.md)，精确提交、命令和 CI 见 [批次记录](history/implementation-s5-a3.md)。本文的 S1–S5 标题按运行主题保留，不是另一份进度表；worker/加密记录/WS/意图受理的详细端口约定见 [可选运行组件](reference/generation-runtime.md)。这些组件尚未生产接线；下列操作命令不表示本次文件整理重新执行过功能验收。
+当前已验收切片功能基线为 `master/5004c57`，阶段状态统一见 [PLAN](PLAN.md)，精确提交、命令和 CI 见 [批次记录](history/implementation-s5-a3.md)。本文的 S1–S5 标题按运行主题保留，不是另一份进度表；worker/加密记录/WS/意图的详细端口约定见 [可选运行组件](reference/generation-runtime.md)。A3-05 本地开发已加入可选持久 runtime 与上游凭据加密接线，并通过集中本地集成检查；最终完整 CI/共同基线合并尚待完成。生产安全配置和停止后启用/轮换/恢复见 [密钥存储约定](reference/secret-storage.md)，完整基础层审计见 [A3/A4 契约矩阵](reference/foundation-contracts.md)。没有新增公开任务/会话/WS 产品 API，不以运行配置存在替代验收。
 
 ## 工具与工作目录
 

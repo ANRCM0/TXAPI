@@ -7,6 +7,7 @@ loopback-only network fixture; the production binary separately checks refusal.
 """
 
 import argparse
+import base64
 import contextlib
 import hashlib
 import json
@@ -244,6 +245,47 @@ def verified_provider_contract(channel, key):
     }
 
 
+def generation_runtime_workflow(gateway, config, config_path, work, env, gateway_port):
+    """Boot/restart the actual opt-in runtime and reject missing/wrong keys."""
+    credential_keys, content_keys = work / "credential-keys.json", work / "content-keys.json"
+    for path in (credential_keys, content_keys):
+        path.write_text(json.dumps({
+            "active_key": "smoke-1",
+            "keys": {"smoke-1": base64.b64encode(os.urandom(32)).decode("ascii")},
+            "digest_key": base64.b64encode(os.urandom(32)).decode("ascii"),
+        }))
+        path.chmod(0o600)
+    config["database"]["credential_keys_file"] = str(credential_keys)
+    config["generation"] = {"enabled": True, "keys_file": str(content_keys),
+                            "workers": 1, "lease_seconds": 1}
+    config_path.write_text(json.dumps(config))
+    for iteration in range(2):
+        with service([str(gateway), "-config", str(config_path)],
+                     work / f"generation-runtime-{iteration}.log", env) as process:
+            ready(process, gateway_port)
+            assert request(f"http://127.0.0.1:{gateway_port}/healthz")[0] == 200
+            process.terminate()
+            process.wait(timeout=12)
+            if os.name != "nt":
+                assert process.returncode == 0, "SIGTERM did not join the production runtime"
+    with contextlib.closing(sqlite3.connect((work / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
+        assert db.execute("SELECT COUNT(*) FROM credentials WHERE api_key <> '' OR length(key_ciphertext) = 0 OR key_hash = ''").fetchone() == (0,), "Runtime did not require activated credential encryption"
+        assert db.execute("SELECT value FROM settings WHERE key='credentials.encryption_version'").fetchone()[0].startswith("v1:")
+        assert db.execute("SELECT COUNT(*) FROM generation_intents").fetchone() == (0,), "HTTP foreground calls became durable tasks"
+    original = json.loads(credential_keys.read_text())
+    invalid = dict(original, keys={"smoke-1": base64.b64encode(os.urandom(32)).decode("ascii")})
+    credential_keys.write_text(json.dumps(invalid))
+    for mode in ("wrong-credential-key", "missing-content-file"):
+        if mode == "missing-content-file":
+            credential_keys.write_text(json.dumps(original))
+            config["generation"]["keys_file"] = str(work / "missing-content-keys.json")
+            config_path.write_text(json.dumps(config))
+        with (work / f"generation-{mode}.log").open("w", encoding="utf-8") as log:
+            result = subprocess.run([str(gateway), "-config", str(config_path)], cwd=ROOT,
+                                    env=env, stdout=log, stderr=log, timeout=20)
+        assert result.returncode != 0, "Invalid secret configuration started the runtime"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--go", default="go", help="Go executable")
@@ -410,7 +452,8 @@ def main():
                 assert status == 503 and json.loads(body)["error"]["type"] == "provider_credential_unproven", (status, body)
             strict_crash_workflow(strict_gateway, config, config_path, work, strict_env, gateway_port,
                                   f"http://127.0.0.1:{upstream_port}", admin)
-    print("PASS: production startup/auth/normal/SSE/console, strict missing-price/input/tariff rejection; isolated main settlement, credential rotation refusal and recovery")
+            generation_runtime_workflow(gateway, config, config_path, work, clean_env, gateway_port)
+    print("PASS: production startup/auth/normal/SSE/console, strict missing-price/input/tariff rejection; isolated main settlement, credential rotation refusal/recovery, encrypted runtime restart/key rejection and shutdown")
 
 
 if __name__ == "__main__":

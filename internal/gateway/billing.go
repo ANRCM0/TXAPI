@@ -32,6 +32,12 @@ type StrictBilling interface {
 	Finish(context.Context, *billing.PreDeduct, *model.Usage, string, string, bool) (int64, string, error)
 }
 
+// IntentBilling is consumed only by the durable execution entry. The returned
+// reservation owns its original holds and fenced writes, not new deductions.
+type IntentBilling interface {
+	ResumeGenerationIntent(context.Context, dbmodel.GenerationClaim, uint, uint, string, string) (*billing.PreDeduct, error)
+}
+
 func (g *Gateway) strictReady() bool {
 	return g.strictBilling != nil && g.strictBilling.StrictReady()
 }

@@ -43,25 +43,22 @@ func (s *Store) ListCredentials(channelID uint) []model.Credential {
 // priority、能力表都不受影响，只有凭据池变长。这正是把 Key 从
 // 渠道里拆出来的目的。
 func (s *Store) CreateCredential(channelID uint, in *CredentialInput) (*model.Credential, error) {
-	if err := s.validateCredentialInput(channelID, in, 0); err != nil {
+	values := *in
+	var credential *model.Credential
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := s.validateCredentialInputDB(tx, channelID, &values, 0); err != nil {
+			return err
+		}
+		credential = &model.Credential{ChannelID: channelID, Name: values.Name, APIKey: values.APIKey, Weight: values.Weight, Status: model.CredentialActive}
+		return s.createCredential(tx, credential)
+	})
+	if err != nil {
 		return nil, err
 	}
-	cred := &model.Credential{
-		ChannelID: channelID,
-		Name:      in.Name,
-		APIKey:    in.APIKey,
-		Weight:    in.Weight,
-		Status:    model.CredentialActive,
-	}
-	if err := s.db.Create(cred).Error; err != nil {
-		return nil, fmt.Errorf("创建凭据失败: %w", err)
-	}
-	// 与渠道 CRUD 同样的纪律：写后即刷缓存。漏了这一步会出现
-	// 「API 显示加成功了、转发还在用旧凭据池」的静默故障。
 	if err := s.refreshSavedConfiguration(); err != nil {
 		return nil, err
 	}
-	return cred, nil
+	return credential, nil
 }
 
 // UpdateCredential 更新凭据的 name / api_key / weight。
@@ -71,28 +68,41 @@ func (s *Store) CreateCredential(channelID uint, in *CredentialInput) (*model.Cr
 // 刚拉黑的 Key 被一次 PUT 改回 active」的竞态。要人工干预状态走
 // SetCredentialStatus，语义明确且留下操作痕迹。
 func (s *Store) UpdateCredential(id uint, in *CredentialInput) (*model.Credential, error) {
-	var existing model.Credential
-	if err := s.db.First(&existing, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("凭据 %d: %w", id, ErrNotFound)
+	values := *in
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var existing model.Credential
+		if err := tx.First(&existing, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("credential %d: %w", id, ErrNotFound)
+			}
+			return err
 		}
-		return nil, fmt.Errorf("读取凭据 %d 失败: %w", id, err)
-	}
-	// excludeID 传自己：更新时 api_key 没变（等于自己的旧值）不能算重复
-	if in.APIKey == "" {
-		in.APIKey = existing.APIKey
-	}
-	if err := s.validateCredentialInput(existing.ChannelID, in, id); err != nil {
+		if err := s.openCredential(&existing); err != nil {
+			return err
+		}
+		if values.APIKey == "" {
+			values.APIKey = existing.APIKey
+		}
+		if err := s.validateCredentialInputDB(tx, existing.ChannelID, &values, id); err != nil {
+			return err
+		}
+		updates, err := s.credentialKeyUpdates(tx, existing, values.APIKey)
+		if err != nil {
+			return err
+		}
+		updates["name"], updates["weight"] = values.Name, values.Weight
+		updates["health_generation"] = gorm.Expr("health_generation + 1")
+		changed := tx.Model(&model.Credential{}).Where("id = ?", id).Updates(updates)
+		if changed.Error != nil {
+			return changed.Error
+		}
+		if changed.RowsAffected != 1 {
+			return ErrNotFound
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
-	}
-	updates := map[string]any{
-		"name":              in.Name,
-		"api_key":           in.APIKey,
-		"weight":            in.Weight,
-		"health_generation": gorm.Expr("health_generation + 1"),
-	}
-	if err := s.db.Model(&model.Credential{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return nil, fmt.Errorf("更新凭据失败: %w", err)
 	}
 	if err := s.refreshSavedConfiguration(); err != nil {
 		return nil, err
@@ -178,6 +188,9 @@ func (s *Store) GetCredential(id uint) (*model.Credential, error) {
 			return nil, fmt.Errorf("凭据 %d: %w", id, ErrNotFound)
 		}
 		return nil, fmt.Errorf("读取凭据 %d 失败: %w", id, err)
+	}
+	if err := s.openCredential(&cred); err != nil {
+		return nil, err
 	}
 	return &cred, nil
 }
@@ -302,8 +315,12 @@ func (s *Store) RecoverCooledDownCredentials() (int, error) {
 // （同一个 Key 给两个上游用的场景确实存在），只有同渠道内重复
 // 才会让调度器把它当成两个独立凭据轮换，流量统计和故障定位全乱。
 func (s *Store) validateCredentialInput(channelID uint, in *CredentialInput, excludeID uint) error {
+	return s.validateCredentialInputDB(s.db, channelID, in, excludeID)
+}
+
+func (s *Store) validateCredentialInputDB(db *gorm.DB, channelID uint, in *CredentialInput, excludeID uint) error {
 	var n int64
-	if err := s.db.Model(&model.Channel{}).Where("id = ?", channelID).Count(&n).Error; err != nil {
+	if err := db.Model(&model.Channel{}).Where("id = ?", channelID).Count(&n).Error; err != nil {
 		return fmt.Errorf("检查渠道 %d 是否存在失败: %w", channelID, err)
 	}
 	if n == 0 {
@@ -324,9 +341,13 @@ func (s *Store) validateCredentialInput(channelID uint, in *CredentialInput, exc
 		in.Name = "cred"
 	}
 	var dup int64
-	if err := s.db.Model(&model.Credential{}).
-		Where("channel_id = ? AND api_key = ? AND id <> ?", channelID, in.APIKey, excludeID).
-		Count(&dup).Error; err != nil {
+	query := db.Model(&model.Credential{}).Where("channel_id = ? AND id <> ?", channelID, excludeID)
+	if s.vault != nil {
+		query = query.Where("key_hash = ?", s.vault.fingerprint(channelID, in.APIKey))
+	} else {
+		query = query.Where("api_key = ?", in.APIKey)
+	}
+	if err := query.Count(&dup).Error; err != nil {
 		return fmt.Errorf("检查凭据重复失败: %w", err)
 	}
 	if dup > 0 {
