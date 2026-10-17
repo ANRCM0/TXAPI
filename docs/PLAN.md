@@ -8,14 +8,14 @@
 
 | 核对项 | 当前结论 |
 |---|---|
-| 当前代码 | `feat/s5-s6-mainline`，本批基于已推送 `66afe6b` 推进架构优先的输出边界；既有输入/费率门槛、S6 与独立 Responses 切片仍在分支，尚未合并 master |
+| 当前代码 | `feat/s5-s6-mainline`，本批基于已推送 `3474d44` 推进 A2 操作/能力与计费消费侧边界；既有输入/费率门槛、S6 与独立 Responses 切片仍在分支，尚未合并 master |
 | 本地集成基线 | `master/90df76b`，S0–S4 与 F0 已验收合并；开工/合并前重新确认最新基线 |
 | 产品形态 | Go/Gin 模块化单体、单二进制、单实例 SQLite；原生 ES Modules 控制台内嵌 |
 | 现有推理入口 | `/v1/models`、`/v1/chat/completions`（JSON/SSE）、`/v1/embeddings` |
 | HTTP 契约 | [OpenAPI](openapi.json) `0.2.3`，79 个操作；不是 79 种推理能力 |
 | S0–S4 / F0 | 正确性、极简 core、身份隔离、调度准入、控制台与配置交付已有阶段验收记录 |
 | S5 | 6 项中 5 项通过；当前费率/凭据批次已通过本地构建/vet/全量测试与进程冒烟，远端 CI 随提交记录。已将标准费率与 USD/凭据适用范围纳入准入，但逐账户最高适用价、失败收费及未来价格变更假设仍在，S5-03 与完整阶段未验收/合并 |
-| 统一兼容框架 | Chat/embeddings 已迁入非 Gin 协调函数；本批通过 `core.Output` 抽离输出，HTTP 由适配器消费，操作/能力进入路由。正文仍是 JSON/SSE 字节；尚非完整 WS/worker 框架，完整 S6 未验收 |
+| 统一兼容框架 | Chat/embeddings 已迁入非 Gin 协调函数；已有 `core.Output` 与 HTTP 适配；本批由不可变操作信封贯穿路由/attempt/解码，embeddings 不再回落 Chat，计费按消费侧小接口接入。正文仍是 JSON/SSE 字节；尚非完整 WS/worker 框架，完整 S6 未验收 |
 | S6 / S7-A | S6 本轮切片已提交并通过完整 CI，尚未阶段验收合并；S7-A 仅独立 Responses 原生请求/JSON/SSE 协议与 core 样本，没有生产 Responses、持久会话、后台任务或 WS 入口 |
 | 安全与部署限制 | 上游 API Key 当前明文落库，响应掩码不是静态加密；客户端调用 Key 已摘要存储。没有实际生产升级或真实全客户端兼容验收承诺 |
 
@@ -50,12 +50,12 @@
 
 | 顺序 | 可独立评审的架构批次 | 验收结果 |
 |---|---|---|
-| A1（当前） | 输出端口与现有 HTTP 消费者：core/gateway/HTTP 适配及风险回归 | JSON/SSE 和拒绝行为保持；独立输出不伪装 HTTP writer；提交/取消/短写/租约事实正确 |
-| A2 | 操作模型、能力矩阵、可选模块消费侧小接口 | Chat/embeddings 真正复用；不同操作不经 Chat 有损中转；strict 许可独立判断 |
+| A1 | 输出端口与现有 HTTP 消费者：core/gateway/HTTP 适配及风险回归 | JSON/SSE 和拒绝行为保持；独立输出不伪装 HTTP writer；提交/取消/短写/租约事实正确 |
+| A2（当前） | 操作模型、能力矩阵、可选模块消费侧小接口 | Chat/embeddings 真正复用；不同操作不经 Chat 有损中转；strict 许可独立判断 |
 | A3 | 传输、状态和运行基础的可验收切片 | 以最小 WS/worker/持久消费者验证寿命、授权、容量、恢复和安全，不预建通用任务平台 |
 | A4 | 故障矩阵、最终 CI 和共同架构基线集成 | 回归及依赖门槛通过，记录稳定端口、支持范围和未交付功能，再合并共同基线 |
 
-A3 按真实需求逐步增加执行/持久端口；最小消费者是架构验收证据，不等于完成 S7 的会话管理、后台 API、WS 多轮或客户端产品闭环。不得只建空包/接口就勾选架构完成。新增迁移、WS 依赖和 API 时另划批次，同步契约与消费者。本批仅 A1，不修改数据库模型、迁移、HTTP DTO、OpenAPI 操作、依赖或 CI。
+A3 按真实需求逐步增加执行/持久端口；最小消费者是架构验收证据，不等于完成 S7 的会话管理、后台 API、WS 多轮或客户端产品闭环。不得只建空包/接口就勾选架构完成。新增迁移、WS 依赖和 API 时另划批次，同步契约与消费者。本批 A2 只收口现有 Chat/embeddings 的操作信封、能力检查与 legacy/strict 计费消费端口，不修改数据库模型、迁移、HTTP DTO、OpenAPI、依赖或 CI。完整状态型操作模型在 A3 最小消费者中继续验证，不在本批预建通用事件/任务平台。
 
 ## S5 剩余验收
 
@@ -74,7 +74,7 @@ S5-03 已实现双层事务与收取费用上限，但尚不据此宣称允许�
 
 ## 后续开发路线
 
-制定日期：2026-10-16；2026-10-17 更新实际进度。当前功能分支 `feat/s5-s6-mainline`，本批基于 `66afe6b`，最近已核对的集成基线为 `origin/master/90df76b`；合并前重新确认最新集成状态。S0–S4 与 F0 已验收合并，S5 功能仍在分支，S5-03 未完成。下列清单为阶段验收目标；本轮实现与验证进展见页末，未勾选项不能据此视为已通过；执行顺序以“架构优先执行顺序”节为准。
+制定日期：2026-10-16；2026-10-17 更新实际进度。当前功能分支 `feat/s5-s6-mainline`，本批基于 `3474d44`，最近已核对的集成基线为 `origin/master/90df76b`；合并前重新确认最新集成状态。S0–S4 与 F0 已验收合并，S5 功能仍在分支，S5-03 未完成。下列清单为阶段验收目标；本轮实现与验证进展见页末，未勾选项不能据此视为已通过；执行顺序以“架构优先执行顺序”节为准。
 
 本轮范围已由用户明确：**完成 S5、S6 和包含持久会话/后台任务/WebSocket 的 S7-A，不新增支付。** 三个参考项目已克隆到被 Git/Docker 忽略的 `.local/references/`，固定版本与代码阅读入口见[上游参考快照](reference/upstream-snapshots.md)。本方案同时纠正“先堆 Responses 功能、后补共用框架”的顺序：统一协调入口前移到 S6，S7-A 是框架的首组完整状态型功能，不是框架中心。不自动启动 S7-B、S8 或 S9。
 
@@ -530,3 +530,30 @@ gateway 改用 `StartPreparedAttempt` 将真实 URL/正文交给同一成本引�
 首轮新增财务用例及首次全量测试因测试夹具不符合既有 strict 规则而失败：未显式 standard service tier、预留上界不足、移除输入档案后仍带不匹配费率档案。已仅修正测试配置（显式 `default`、足额预留、无档案场景清除相应费率声明），定向复验和最终全量通过；没有关闭用例、放宽生产检查或用测试输出冒充免费执行。
 
 本机未运行 Linux race、Docker、真实上游/客户端或浏览器验收。push/PR 自动完整 CI 按最终 SHA 单独记在现有 draft PR，不手动重复 dispatch；尚未合并，不勾选 S5-03、完整 S6/S7 或 A1–A4 整体完成。下一批 A2 收口操作模型与能力契约，不回到扩展厂商价格清单。
+
+## 2026-10-17 A2 架构批次：操作信封、能力与计费消费端口
+
+负责范围：`internal/protocol`、`internal/gateway`、`cmd/gateway` 的既有计费组装、依赖边界和对应风险回归；同步现有开发文档。父提交 `3474d443b49ffc354d777b96392e1c6ba0e4fb30`。复用 A1 输出、既有 access/Admission、core 和账本；不改 HTTP 契约、模型/迁移、依赖、CI 或生产能力注册，不是上游代码移植。
+
+- `protocol.Request` 自持原始正文及匹配的操作事实，Chat/embeddings 使用各自的载荷投影；未知扩展字段不因解析投影丢失。路由、逐次重试、准入和 `PrepareRequest` 消费同一信封，请求/attempt 结果明确记录 Operation。每次转换获得正文副本，适配回调使用独立目标元数据副本，不能改写下一次尝试或解码类型。
+- 内建适配器实现类型化 `adaptor.Capability`。现有 OpenAI 入站 HTTP 操作在候选过滤和发送准备处都检查支持范围；仅声明支持不能创造未实现的 Responses/background/WS。旧扩展 `SupportsOperation` 与纯文本 Chat 兼容回落保留。malformed tools/history 保守视为需要工具能力，不能误路由 Gemini 文本路径。
+- embeddings 独立走原生请求改写与响应解码；不使用 Chat canonical 请求/响应，不生成 SSE DONE。当前内建生产支持仍只有 OpenAI-compatible embeddings，不扩大到 Anthropic/Gemini。旧整数 Mode 只保留在 HTTP/适配器兼容边界；未知模式及 embeddings SSE 在执行前拒绝，旧 Relay 的路由投影必须匹配正文。
+- gateway 不再持有具体 `billing.Engine`，按实际调用拆为 `LegacyBilling` 与 `StrictBilling`。main 显式注入原引擎；旧 Billing 选项仅在实现 strict 接口时兼容推导。strict 不走 legacy 降级，缺接口/未就绪仍 503；所有已登记输入/费率/凭据、最终 URL/正文/Header、成本占用和持久收尾检查不变。日志回调、access limiter、Admission 已是小接口，不另造事件总线。
+- 新回归验证独立载荷/字段保真、正文及元数据隔离、发送准备双重能力守卫、重试和准入的操作一致性；实际临时 SQLite/原引擎验证 strict-only 接入可结算、端口修改快照不会改变实际 wire，回执持久化故障不重试、双 hold/provider 占用保持 pending。可选接口 typed nil 和不同计费模式不会相互误调用。架构检查阻止 gateway 再引入具体 Engine 或把 ModelRequest 带回内部协调链。
+
+边界：这是现有操作的 A2 切片，不是所有未来操作已统一建模。Chat 的 `ProtocolAdaptor` 只服务 Chat 转换；独立 Responses 样本仍未接生产。输出仍为编码 JSON/SSE，usage 仍是现有三整数观察；协议终态、输出提交与财务终态分别处理，不宣称已有通用语义事件、原生 WS、持久 worker 或新的严格计量证明。S5-03、完整 S6/S7 与 A1–A4 整体验收均不新增勾选。
+
+验证环境：Windows/PowerShell，`GOARCH=amd64 GOFLAGS=-buildvcs=false`；本机无 Make，执行 Makefile 等价命令。2026-10-17 重新 fetch 后 `origin/master=90df76b0340e4cdfa6c332c781f7aa772a04ed07` 仍为祖先，远端本分支与父提交同步，原 PR 保持 draft。未更改集成基线。
+
+| 实际命令/检查 | 结果与适用范围 |
+|---|---|
+| `go test -count=1 ./internal/protocol/... ./internal/gateway ./internal/architecture` | 初批通过；现有兼容/权限/租约/账本和新增操作/能力/消费端口回归 |
+| `go test -count=1 ./internal/gateway -run TestStrictOnlyPortPreservesDurableFinalization` | 最后 wire 快照隔离加固后通过；实际账本/双 hold 与回执持久化故障 |
+| `go build ./...`、`go vet ./...`、`go test -count=1 ./...` | 首轮与最终代码均通过，18 个有测试包；含依赖/79 操作契约、原并发/权限/协议/财务/恢复回归 |
+| 4 项 `node --check` 与 `node --test web/assets/api.test.mjs` | 同批首轮通过，6 项行为测试；前端/浏览器脚本与父提交 `3474d44` 未变，最后内部 wire 隔离修改不影响其输入，因此复用，不重复运行 |
+| `python tests/smoke/local.py --go go` | 首轮与最终代码均通过；生产 HTTP JSON/SSE/控制台和 strict 拒绝，同一 main 隔离 loopback 验证结算/换 Key 拒绝、SSE 强杀重启 pending 与幂等豁免 |
+| 变更 Go 格式、`git diff --check`、文档与保护范围 | 25 个变更 Go 文件格式、最终差异检查与 63 个本地文档路径/锚点通过；OpenAPI/依赖/CI/模型/store/core 无变化 |
+
+首轮完整检查通过后，代码复核进一步为计费端口复制 wire 正文/Header，避免可选实现复用入参影响实际发送；定向及最终完整 Go 检查已重新通过。未关闭测试、放宽 strict 或添加生产测试豁免。
+
+未在本机运行 Linux race、Docker、真实上游/客户端、浏览器或生产库升级验收。push/PR 自动完整 CI 以最终 SHA 单独记录在现有 draft PR，不手动 dispatch、不合并。下一批 A3 按最小真实消费者逐步验证传输、状态、授权、容量、恢复与安全边界，不开始上层产品功能大全。

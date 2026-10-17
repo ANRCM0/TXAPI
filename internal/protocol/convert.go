@@ -11,6 +11,20 @@ import (
 )
 
 func ConvertRequestBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, error) {
+	if m == nil {
+		return nil, fmt.Errorf("missing operation metadata")
+	}
+	operation, known := OperationForMode(m.Mode)
+	requirements := RequirementsFor(operation, body)
+	requirements.Stream = requirements.Stream || m.IsStream
+	if !known || !Supports(a, requirements) {
+		return nil, fmt.Errorf("unsupported operation or capabilities")
+	}
+	if operation == Embeddings {
+		// Only an explicitly capable adaptor may handle native embeddings.
+		// Never parse its input or output through the Chat canonical model.
+		return a.ConvertRequest(body, m)
+	}
 	// 非 openai 渠道才需要走枢纽；openai 渠道走原路，行为与 P1 一致
 	if _, ok := a.(interface{ Name() string }); ok {
 		if pa, ok := a.(adaptor.ProtocolAdaptor); ok && pa.Name() == "openai" {
@@ -43,6 +57,9 @@ func ConvertRequestBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, e
 // convertResponseBody 把上游非流式响应转换成客户端协议的响应体。
 // 返回转换后的 body 和抽取出的 usage（供计费）。
 func ConvertResponseBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, *model.Usage, error) {
+	if m != nil && m.Mode == meta.ModeEmbeddings {
+		return decodeEmbeddings(body)
+	}
 	upstreamPA, ok := a.(adaptor.ProtocolAdaptor)
 	if !ok || upstreamPA.Name() == "openai" {
 		// openai 渠道：不转换，直接透传（P1 行为）。

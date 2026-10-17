@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"minigateway/internal/billing"
 	"minigateway/internal/core"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/meta"
@@ -49,7 +50,22 @@ func (g *Gateway) handleRelay(c *gin.Context, mode int) {
 // Relay is retained for existing in-package integrations. New consumers use Execute.
 func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, allowed []string, mode int, timeout time.Duration) {
 	scope := newExecutionScope(c.Request.Context(), c.Writer, state(c), c.GetHeader(SessionIDHeader))
-	g.relay(scope, req, body, allowed, mode, timeout)
+	if g.billingMode == billing.ModeStrict && (!g.strictReady() || scope.result.reservation.BillingID() == "" || scope.result.strictRequest == nil) {
+		writeError(scope, 503, "strict billing is unavailable; requests cannot be charged safely", "billing_unavailable")
+		return
+	}
+	operation, known := protocol.OperationForMode(mode)
+	if !known {
+		writeError(scope, 400, "unsupported operation", "unsupported_operation")
+		return
+	}
+	request, err := protocol.ParseRequest(operation, body)
+	if err != nil || req == nil || req.Model != request.Model() || req.Stream != request.Stream() {
+		writeError(scope, 400, "request body and routing metadata must match", "invalid_request_error")
+		return
+	}
+	scope.result.Operation = operation
+	g.relay(scope, request, allowed, timeout)
 }
 
 func state(c *gin.Context) *RequestResult {

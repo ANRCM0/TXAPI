@@ -7,7 +7,6 @@ import (
 	"minigateway/internal/access"
 	"minigateway/internal/core"
 	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/meta"
 )
 
 // Execution keeps operation payloads intact; it does not translate them to Chat.
@@ -23,6 +22,7 @@ type Execution struct {
 func (g *Gateway) ExecuteTo(ctx context.Context, output core.Output, in Execution) RequestResult {
 	ctx = access.NewGenerationContext(ctx)
 	result := newRequestResult(ctx)
+	result.Operation = in.Operation
 	if output == nil {
 		result.ErrorMessage = "missing execution output"
 		result.Error = &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: result.ErrorMessage, Type: "internal_error"}}
@@ -55,12 +55,15 @@ func (g *Gateway) execute(c *executionScope, in Execution) {
 			access.FinishTokens(c.ctx, g.limiter, 0)
 		}
 	}()
-	c.operation = in.Operation
+	c.result.Operation = in.Operation
 	switch in.Operation {
-	case protocol.Chat:
-		g.executeScope(c, in.Body, meta.ModeChatCompletions)
-	case protocol.Embeddings:
-		g.executeScope(c, in.Body, meta.ModeEmbeddings)
+	case protocol.Chat, protocol.Embeddings:
+		request, err := protocol.ParseRequest(in.Operation, in.Body)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, err.Error(), "invalid_request_error")
+			return
+		}
+		g.executeScope(c, request)
 	default:
 		writeError(c, http.StatusBadRequest, "unsupported operation", "unsupported_operation")
 	}
@@ -71,7 +74,6 @@ type executionScope struct {
 	output          *executionOutput
 	result          *RequestResult
 	sessionID       string
-	operation       protocol.Operation
 	requestAdmitted bool
 }
 

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,11 +26,9 @@ import (
 // 这是网关的主流程，对应 one-api 的 controller/relay.go。
 // 流程：选渠道 → 转换请求 → 发请求 → 解析响应 → 失败换渠道重试。
 //
-// mode 是本次请求的转发模式（对话 / 向量）。由 handler 按路由传入并
-// 一路透传到 buildMeta：适配器要靠它决定上游路径（openai 适配器的
-// /v1/embeddings 就是靠 Mode 分的支）。以前这里写死对话模式，
-// 新增端点时每个调用方都得记得改，透传让「加端点」只动 handler。
-func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte, allowedModels []string, mode int, timeout time.Duration) {
+// The owned operation envelope binds payload, routing and capability facts for
+// every attempt. Integer modes exist only at the legacy adaptor boundary.
+func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels []string, timeout time.Duration) {
 	result := c.result
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(c.ctx, g.totalTimeout)
@@ -42,7 +41,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 
 	// This exported coordinator also guards policy when called outside the HTTP
 	// handler; an extension must never acquire capacity for an unauthorized model.
-	if result.Identity.Policy != nil && !result.Identity.Policy.Allows(req.Model) {
+	if result.Identity.Policy != nil && !result.Identity.Policy.Allows(req.Model()) {
 		result.StatusCode = http.StatusForbidden
 		result.Error = &core.Error{StatusCode: http.StatusForbidden, Error: core.ErrorDetail{Message: "model is not authorized", Type: "forbidden"}}
 		result.ErrorMessage = result.Error.Error.Message
@@ -50,8 +49,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 		return
 	}
 
-	if err := g.billingMode.CheckAvailable(g.billing.StrictReady()); err != nil ||
-		(g.billingMode == billing.ModeStrict && (result.reservation.BillingID() == "" || result.strictRequest == nil)) {
+	if g.billingMode == billing.ModeStrict && (!g.strictReady() || result.reservation.BillingID() == "" || result.strictRequest == nil) {
 		result.StatusCode = http.StatusServiceUnavailable
 		result.ErrorMessage = "strict billing is unavailable; requests cannot be charged safely"
 		result.Error = &core.Error{StatusCode: result.StatusCode, Error: core.ErrorDetail{Message: result.ErrorMessage, Type: "billing_unavailable"}}
@@ -62,7 +60,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 	// The request lease spans the complete retry loop; each attempt has a
 	// nested lease acquired only after selecting an authorized model target.
 	if !c.requestAdmitted {
-		requestLease, admitErr := g.acquire(ctx, c.output, AdmissionScope{Level: RequestAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model})
+		requestLease, admitErr := g.acquire(ctx, c.output, AdmissionScope{Level: RequestAdmission, Operation: req.Operation(), UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model()})
 		if admitErr != nil {
 			result.StatusCode = admitErr.StatusCode
 			result.Error = admitErr
@@ -74,9 +72,9 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 	}
 
 	// 1. 筛选出能服务这个模型的渠道
-	candidates := g.capableChannels(req.Model, allowedModels, mode, body)
+	candidates := g.capableChannels(req, allowedModels)
 	if len(candidates) == 0 {
-		if len(g.pickChannels(req.Model, allowedModels)) > 0 {
+		if len(g.pickChannels(req.Model(), allowedModels)) > 0 {
 			if g.billingMode == billing.ModeStrict {
 				rejected := g.rejectUnpricedAttempt(c, result.reservation)
 				result.Result = rejected
@@ -89,9 +87,9 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 		// 记账先行：这个提前返回的分支最容易漏掉状态码记录，
 		// 漏了就会把一次彻底失败的请求记成 status=200，账本失去意义
 		c.result.StatusCode = http.StatusServiceUnavailable
-		c.result.ErrorMessage = fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model)
+		c.result.ErrorMessage = fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model())
 		writeError(c, http.StatusServiceUnavailable,
-			fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model), "no_channel")
+			fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model()), "no_channel")
 		return
 	}
 
@@ -116,7 +114,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 
 	// 会话 ID 只算一次：整个请求（含重试）必须落在同一个会话上，
 	// 否则亲和会把重试打到另一把 Key 上，上游的 prompt 缓存白白作废。
-	sessionID := requestSessionID(c, c.result.Identity.UserID, c.result.Identity.TokenID, body)
+	sessionID := requestSessionID(c, c.result.Identity.UserID, c.result.Identity.TokenID, req.Body())
 
 	for attempt := 0; attempt <= retryTimes; attempt++ {
 		if ctx.Err() != nil {
@@ -130,13 +128,13 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 			result.Termination = term
 			break
 		}
-		ch, cred := g.selectTarget(g.capableChannels(req.Model, allowedModels, mode, body), triedCred, sessionID, time.Now())
+		ch, cred := g.selectTarget(g.capableChannels(req, allowedModels), triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}
 		triedCred[cred.ID] = true
 
-		m := buildMeta(ch, cred, req, mode)
+		m := buildMeta(ch, cred, req)
 		// 记账用：把命中的渠道/凭据写进 context，handler 收尾时取用。
 		// 用 context 而不是返回值传递，是因为 Relay 的签名已经很长了，
 		// 再加几个返回值会让调用处难读；context 是这次请求的作用域，正合适。
@@ -170,17 +168,17 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 			"session_id", sessionID,
 			"attempt", attempt)
 
-		attemptLease, admitErr := g.acquire(ctx, c.output, AdmissionScope{Level: AttemptAdmission, UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: m.ActualModel, ChannelID: uint(ch.id), CredentialID: cred.ID, Attempt: attempt + 1})
+		attemptLease, admitErr := g.acquire(ctx, c.output, AdmissionScope{Level: AttemptAdmission, Operation: req.Operation(), UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: m.ActualModel, ChannelID: uint(ch.id), CredentialID: cred.ID, Attempt: attempt + 1})
 		if admitErr != nil {
 			lastErr = admitErr
 			break
 		}
 		attemptResult := func() core.Result {
 			defer attemptLease()
-			return g.doRelay(c, m, body, timeout)
+			return g.doRelay(c, m, req, timeout)
 		}()
 
-		result.Attempts = append(result.Attempts, AttemptResult{ChannelID: uint(ch.id), CredentialID: cred.ID, Model: m.ActualModel, Result: attemptResult})
+		result.Attempts = append(result.Attempts, AttemptResult{Operation: req.Operation(), ChannelID: uint(ch.id), CredentialID: cred.ID, Model: m.ActualModel, Result: attemptResult})
 		result.Result = attemptResult
 		usage, err := attemptResult.Usage, attemptResult.Error
 		if err == nil {
@@ -262,7 +260,7 @@ func (g *Gateway) relay(c *executionScope, req *model.ModelRequest, body []byte,
 }
 
 // doRelay 向单个渠道发一次请求。
-func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout time.Duration) core.Result {
+func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, req protocol.Request, timeout time.Duration) core.Result {
 	a, ok := g.reg.getAdaptor(m.ChannelType)
 	if !ok {
 		return core.Result{Phase: core.NotDispatched, StatusCode: 500, Error: &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "no upstream adaptor", Type: "no_adaptor"}}}
@@ -273,7 +271,7 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout 
 			return g.rejectUnpricedAttempt(c, c.result.reservation)
 		}
 	}
-	input, err := protocol.Prepare(a, body, m)
+	input, err := protocol.PrepareRequest(a, req, m)
 	if err != nil {
 		if g.billingMode == billing.ModeStrict {
 			return g.rejectUnpricedAttempt(c, c.result.reservation)
@@ -302,14 +300,10 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout 
 		if !known || c.result.strictRequest == nil {
 			return core.Result{Phase: core.NotDispatched, StatusCode: 503, Error: &core.Error{StatusCode: 503, Error: core.ErrorDetail{Message: "provider cost contract is unavailable", Type: "provider_cost_contract_missing"}}}
 		}
-		operation := "chat"
-		if m.Mode == meta.ModeEmbeddings {
-			operation = "embeddings"
-		}
-		err := g.billing.StartPreparedAttempt(c.ctx, pre, dbmodel.BillingAttempt{
+		err := g.strictBilling.StartPreparedAttempt(c.ctx, pre, dbmodel.BillingAttempt{
 			Number: number, ChannelID: uint(m.ChannelID), CredentialID: m.CredentialIDValue,
 			ActualModel: m.ActualModel, Group: c.result.ChannelGroup,
-		}, billing.ProviderTarget{ChannelID: uint(m.ChannelID), BaseURL: m.BaseURL, Protocol: pa.Name(), ActualModel: m.ActualModel, Operation: operation}, *c.result.strictRequest, input.URL, input.Body, input.Header)
+		}, billing.ProviderTarget{ChannelID: uint(m.ChannelID), BaseURL: m.BaseURL, Protocol: pa.Name(), ActualModel: m.ActualModel, Operation: string(req.Operation())}, *c.result.strictRequest, input.URL, bytes.Clone(input.Body), input.Header.Clone())
 		if err != nil {
 			code, kind, message := 503, "billing_unavailable", "billing attempt could not be recorded"
 			switch {
@@ -336,7 +330,7 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout 
 	result := g.executor.ExecuteTo(c.ctx, c.output, input)
 	if g.billingMode == billing.ModeStrict {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		err := g.billing.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), result.Usage)
+		err := g.strictBilling.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), result.Usage)
 		cancel()
 		if err != nil {
 			result.StatusCode, result.Termination = 503, core.UpstreamError
@@ -353,7 +347,7 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout 
 
 func (g *Gateway) rejectUnpricedAttempt(c *executionScope, pre *billing.PreDeduct) core.Result {
 	code, kind, message := 400, "unsupported_billing_dimension", "prepared request has no verified text-only billing shape or output limit"
-	if err := g.billing.RecordCostRefusal(c.ctx, pre, billing.ErrUnpricedDimension); !errors.Is(err, billing.ErrUnpricedDimension) {
+	if err := g.strictBilling.RecordCostRefusal(c.ctx, pre, billing.ErrUnpricedDimension); !errors.Is(err, billing.ErrUnpricedDimension) {
 		code, kind, message = 503, "billing_unavailable", "billing refusal could not be recorded"
 	}
 	return core.Result{Phase: core.NotDispatched, StatusCode: code, Error: &core.Error{StatusCode: code, Error: core.ErrorDetail{
@@ -367,12 +361,15 @@ func (g *Gateway) rejectUnpricedAttempt(c *executionScope, pre *billing.PreDeduc
 // 时机必须在每次转发尝试时，因为凭据的冷却/拉黑状态随时在变（见
 // selectTarget 的注释）。
 //
-// mode 由 Relay 透传进来，不再在这里写死对话模式：embeddings 端点
-// 要的是 /v1/embeddings 路径和只按输入计费，适配器靠 Mode 区分。
-func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest, mode int) *meta.Meta {
-	actual := req.Model
-	if mapped, ok := ch.mapping[req.Model]; ok && mapped != "" {
+// The operation supplies the legacy adaptor mode; callers cannot override it.
+func buildMeta(ch *channel, cred *dbmodel.Credential, req protocol.Request) *meta.Meta {
+	actual := req.Model()
+	if mapped, ok := ch.mapping[req.Model()]; ok && mapped != "" {
 		actual = mapped
+	}
+	mode := meta.ModeChatCompletions
+	if req.Operation() == protocol.Embeddings {
+		mode = meta.ModeEmbeddings
 	}
 	return &meta.Meta{
 		ChannelID:         ch.id,
@@ -380,9 +377,9 @@ func buildMeta(ch *channel, cred *dbmodel.Credential, req *model.ModelRequest, m
 		ChannelType:       ch.typ,
 		BaseURL:           ch.baseURL,
 		APIKey:            cred.APIKey,
-		OriginModel:       req.Model,
+		OriginModel:       req.Model(),
 		ActualModel:       actual,
-		IsStream:          req.Stream,
+		IsStream:          req.Stream(),
 		Mode:              mode,
 		CredentialIDValue: cred.ID,
 	}
@@ -678,13 +675,9 @@ func requestSessionID(c *executionScope, userID, tokenID uint, body []byte) stri
 	return scheduler.SessionID("", userID, tokenID, envelope.Messages)
 }
 
-func (g *Gateway) capableChannels(model string, allowed []string, mode int, body []byte) []*channel {
-	operation := protocol.Chat
-	if mode == meta.ModeEmbeddings {
-		operation = protocol.Embeddings
-	}
-	requirements := protocol.RequirementsFor(operation, body)
-	candidates := g.pickChannels(model, allowed)
+func (g *Gateway) capableChannels(req protocol.Request, allowed []string) []*channel {
+	requirements := req.Requirements()
+	candidates := g.pickChannels(req.Model(), allowed)
 	filtered := make([]*channel, 0, len(candidates))
 	for _, ch := range candidates {
 		a, ok := g.reg.getAdaptor(ch.typ)

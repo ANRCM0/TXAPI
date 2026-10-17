@@ -197,7 +197,7 @@ func main() {
 		Channels:  st.Channels(), RetryTimes: cfg.Server.RetryTimes,
 		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
 		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
-		Billing:        engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
+		Billing:        engine, StrictBilling: engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
 		BillingMode: billing.Mode(cfg.Billing.Mode),
 		Picker: func(creds []model.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*model.Credential, bool) {
 			if cfg.Server.SessionAffinity {

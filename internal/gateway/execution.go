@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -13,28 +12,14 @@ import (
 	"minigateway/internal/billing"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
-	"minigateway/internal/protocol/meta"
+	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/model"
 )
 
 const captureLimit = 64 * 1024
 
-func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
-	if len(body) == 0 {
-		writeError(c, http.StatusBadRequest, "请求体为空", "invalid_request_error")
-		return
-	}
-
-	// 只解析路由/计费必需的字段
-	var req model.ModelRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(c, http.StatusBadRequest, "请求体不是合法 JSON: "+err.Error(), "invalid_request_error")
-		return
-	}
-	if req.Model == "" {
-		writeError(c, http.StatusBadRequest, "缺少 model 字段", "invalid_request_error")
-		return
-	}
+func (g *Gateway) executeScope(c *executionScope, req protocol.Request) {
+	body := req.Body()
 
 	result := c.result
 
@@ -52,9 +37,9 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 	slog.Info("[请求] 收到转发请求",
 		"request_id", requestID,
 		"token", tokenName,
-		"model", req.Model,
-		"endpoint", modeName(mode),
-		"stream", req.Stream)
+		"model", req.Model(),
+		"endpoint", string(req.Operation()),
+		"stream", req.Stream())
 
 	// 记录开始时间，用于算整条链路耗时（含重试）
 	startedAt := time.Now()
@@ -71,29 +56,29 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 	//
 	// 必须在转发之前：超额时直接回 403，一个字节都不发给上游——
 	// 上游的 Key 是按量收费的，转发注定被拒的请求等于白烧钱（SPEC 4.2）。
-	if result.Identity.Policy != nil && !result.Identity.Policy.Allows(req.Model) {
+	if result.Identity.Policy != nil && !result.Identity.Policy.Allows(req.Model()) {
 		result.StatusCode = http.StatusForbidden
 		result.ErrorMessage = "model is not authorized for this user and API key"
-		g.finishRequest(c, &req, startedAt, nil, body)
+		g.finishRequest(c, req, startedAt, nil, body)
 		writeError(c, http.StatusForbidden, result.ErrorMessage, "forbidden")
 		return
 	}
-	if g.billingMode == billing.ModeStrict && g.billing.StrictReady() {
-		limits, err := billing.ParseStrictRequest(body, mode == meta.ModeEmbeddings)
+	if g.billingMode == billing.ModeStrict && g.strictReady() {
+		limits, err := billing.ParseStrictRequest(body, req.Operation() == protocol.Embeddings)
 		if err != nil {
 			result.StatusCode = http.StatusBadRequest
 			result.ErrorMessage = err.Error()
-			g.finishRequest(c, &req, startedAt, nil, body)
+			g.finishRequest(c, req, startedAt, nil, body)
 			writeError(c, result.StatusCode, result.ErrorMessage, "unsupported_billing_dimension")
 			return
 		}
 		result.strictRequest = &limits
 	}
 	requestLease, admissionErr := g.acquire(ctx, c.output, AdmissionScope{Level: RequestAdmission,
-		UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model})
+		UserID: result.Identity.UserID, TokenID: result.Identity.TokenID, Model: req.Model(), Operation: req.Operation()})
 	if admissionErr != nil {
 		writeError(c, admissionErr.StatusCode, admissionErr.Error.Message, admissionErr.Error.Type)
-		g.finishRequest(c, &req, startedAt, nil, body)
+		g.finishRequest(c, req, startedAt, nil, body)
 		return
 	}
 	defer requestLease()
@@ -104,7 +89,7 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 			if allowed, retry := g.limiter.AllowRequest(ctx, access.TokenBucketKey(p.TokenID), p.RPMLimit, now); !allowed {
 				c.output.setMetadata("Retry-After", strconv.Itoa(retry))
 				writeError(c, 429, "API key request rate exceeded", "rate_limit_error")
-				g.finishRequest(c, &req, startedAt, nil, body)
+				g.finishRequest(c, req, startedAt, nil, body)
 				return
 			}
 		}
@@ -113,14 +98,14 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 			if allowed, retry := g.limiter.AllowTokens(ctx, access.TokenUsageBucketKey(p.TokenID), p.TPMLimit, estimate, now); !allowed {
 				c.output.setMetadata("Retry-After", strconv.Itoa(retry))
 				writeError(c, 429, "API key token rate exceeded", "rate_limit_error")
-				g.finishRequest(c, &req, startedAt, nil, body)
+				g.finishRequest(c, req, startedAt, nil, body)
 				return
 			}
 			c.ctx = access.WithTokenReservation(ctx, p.TokenID, estimate)
 		}
 		c.ctx = access.WithRateAdmission(c.ctx, p.TokenID)
 	}
-	pre, err := g.preRequest(c, &req)
+	pre, err := g.preRequest(c, req)
 	if errors.Is(err, billing.ErrQuotaExceeded) {
 		// 记账先行：403 也是请求，日志里要能看到「被额度拦下」，
 		// 否则排查「为什么突然全部 403」时账本一片空白。
@@ -128,7 +113,7 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 		// 按 403（而不是默认的 500）记账。
 		c.result.StatusCode = http.StatusForbidden
 		c.result.ErrorMessage = err.Error()
-		g.finishRequest(c, &req, startedAt, pre, body)
+		g.finishRequest(c, req, startedAt, pre, body)
 		writeError(c, http.StatusForbidden, err.Error(), "quota_exceeded")
 		return
 	}
@@ -137,7 +122,7 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 			slog.Error("strict budget reservation failed; request rejected", "request_id", requestID, "err", err)
 			result.StatusCode = http.StatusServiceUnavailable
 			result.ErrorMessage = "strict billing could not reserve the request budget"
-			g.finishRequest(c, &req, startedAt, nil, body)
+			g.finishRequest(c, req, startedAt, nil, body)
 			writeError(c, result.StatusCode, result.ErrorMessage, "billing_unavailable")
 			return
 		}
@@ -146,7 +131,7 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 		// 「价格缺失不报错」是同一条原则。但必须响亮的告警。
 		// error 级别：这是网关自身子系统的故障，不是上游问题。
 		slog.Error("[额度] 预检失败，放行本次请求",
-			"request_id", requestID, "model", req.Model, "err", err)
+			"request_id", requestID, "model", req.Model(), "err", err)
 		pre = pre.PriceOnly()
 	}
 	result.reservation = pre
@@ -164,36 +149,28 @@ func (g *Gateway) executeScope(c *executionScope, body []byte, mode int) {
 	finished := false
 	defer func() {
 		if !finished {
-			g.finishRequest(c, &req, startedAt, pre, body)
+			g.finishRequest(c, req, startedAt, pre, body)
 		}
 	}()
 
-	g.relay(c, &req, body, allowedModels, mode, g.attemptTimeout)
+	g.relay(c, req, allowedModels, g.attemptTimeout)
 
 	finished = true
 	// 收尾放在 Relay 之后而不是用 defer 直接包：流式响应是在 Relay
 	// 内部边收边发的，函数返回时响应早已写完；非流式的 c.Data 也在
 	// Relay 内部完成。此时结算和记账不会影响客户端拿到的任何字节。
-	g.finishRequest(c, &req, startedAt, pre, body)
-}
-
-// modeName 把转发模式转成日志里看的名字。
-func modeName(mode int) string {
-	if mode == meta.ModeEmbeddings {
-		return "embeddings"
-	}
-	return "chat"
+	g.finishRequest(c, req, startedAt, pre, body)
 }
 
 // preRequest 做请求前的额度检查与预扣。返回的快照要传给 finishRequest。
 //
 // legacy 跳过 ID=0 的目标；strict 要求可信用户与 Key 归属都存在。
-func (g *Gateway) preRequest(c *executionScope, req *model.ModelRequest) (*billing.PreDeduct, error) {
+func (g *Gateway) preRequest(c *executionScope, req protocol.Request) (*billing.PreDeduct, error) {
 	if g.billingMode == billing.ModeStrict {
-		if g.billing == nil {
+		if !g.strictReady() {
 			return nil, billing.ErrStrictUnavailable
 		}
-		return g.billing.Reserve(c.ctx, c.result.Identity.TokenID, c.result.Identity.UserID, req.Model)
+		return g.strictBilling.Reserve(c.ctx, c.result.Identity.TokenID, c.result.Identity.UserID, req.Model())
 	}
 	if g.billing == nil || g.billingMode != billing.ModeLegacy {
 		return nil, nil
@@ -202,13 +179,13 @@ func (g *Gateway) preRequest(c *executionScope, req *model.ModelRequest) (*billi
 	userID := c.result.Identity.UserID
 	// legacy 只估算请求模型的输出费用，不是严格上界；选渠道后
 	// 用同一价格快照中的实际模型价格修正。
-	return g.billing.PreRequest(tokenID, userID, req.MaxTokens, req.Model)
+	return g.billing.PreRequest(tokenID, userID, req.LegacyMaxTokens(), req.Model())
 }
 
 // finishRequest 收尾：估算用量 → 算费 → 结算额度差额 → 写日志。
 //
 // 无论 Relay 成功、失败还是 panic 都会走到这里。
-func (g *Gateway) finishRequest(c *executionScope, req *model.ModelRequest, startedAt time.Time, pre *billing.PreDeduct, reqBody []byte) {
+func (g *Gateway) finishRequest(c *executionScope, req protocol.Request, startedAt time.Time, pre *billing.PreDeduct, reqBody []byte) {
 	status := scopeStatus(c)
 	tokenID := c.result.Identity.TokenID
 	userID := c.result.Identity.UserID
@@ -239,7 +216,7 @@ func (g *Gateway) finishRequest(c *executionScope, req *model.ModelRequest, star
 			// price_missing 标记。曾经直接把「找到」赋值给「缺失」，
 			// 导致有价格的模型全被打上缺价标记（集成测试抓到的）。
 			priceFound := false
-			cost, priceFound = g.billing.PriceOfSnapshot(pre, usage, relayActualModel(c, req.Model), req.Model, relayChannelGroup(c))
+			cost, priceFound = g.billing.PriceOfSnapshot(pre, usage, relayActualModel(c, req.Model()), req.Model(), relayChannelGroup(c))
 			priceMissing = !priceFound
 		}
 	}
@@ -258,7 +235,7 @@ func (g *Gateway) finishRequest(c *executionScope, req *model.ModelRequest, star
 	}
 	if g.billingMode == billing.ModeStrict && pre.BillingID() != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		charge, billingState, err := g.billing.Finish(ctx, pre, rawUsage, relayActualModel(c, req.Model), relayChannelGroup(c),
+		charge, billingState, err := g.strictBilling.Finish(ctx, pre, rawUsage, relayActualModel(c, req.Model()), relayChannelGroup(c),
 			status == http.StatusOK && c.result.Termination == "success")
 		cancel()
 		c.result.BillingState = billingState
@@ -304,7 +281,7 @@ func (g *Gateway) finishRequest(c *executionScope, req *model.ModelRequest, star
 // 失败的渠道信息已经由 scheduler 的凭据失败指标和 relay 的 warn
 // 日志覆盖；请求级指标记的是「这次请求最终结果」，重复记会把
 // gateway_requests_total 撑成重试次数，rate() 算出来的 QPS 是假的。
-func (g *Gateway) finishObservability(c *executionScope, req *model.ModelRequest, startedAt time.Time,
+func (g *Gateway) finishObservability(c *executionScope, req protocol.Request, startedAt time.Time,
 	status int, cost float64, usage *model.Usage, priceMissing bool) {
 	latency := time.Since(startedAt)
 	channel := c.result.ChannelName
@@ -316,7 +293,7 @@ func (g *Gateway) finishObservability(c *executionScope, req *model.ModelRequest
 		"channel_id", c.result.ChannelID,
 		"credential_id", c.result.CredentialID,
 		"channel", channel,
-		"model", req.Model,
+		"model", req.Model(),
 		"latency_ms", latency.Milliseconds(),
 		"status", status,
 	}
@@ -354,14 +331,14 @@ func (g *Gateway) finishObservability(c *executionScope, req *model.ModelRequest
 	// 指标：实际模型名当 model 标签（价格和 token 都是它产生的），
 	// 客户端请求名只在日志里——否则 model_mapping 会让两个名字
 	// 的流量被算成两个指标，看不出真实分布。
-	g.metrics.RecordRequest(actualModelFor(c, req.Model), channel, status, latency)
+	g.metrics.RecordRequest(actualModelFor(c, req.Model()), channel, status, latency)
 	if usage != nil {
-		g.metrics.RecordTokens(actualModelFor(c, req.Model), channel,
+		g.metrics.RecordTokens(actualModelFor(c, req.Model()), channel,
 			metrics.TokenTypePrompt, int64(usage.PromptTokens))
-		g.metrics.RecordTokens(actualModelFor(c, req.Model), channel,
+		g.metrics.RecordTokens(actualModelFor(c, req.Model()), channel,
 			metrics.TokenTypeCompletion, int64(usage.CompletionTokens))
 	}
-	g.metrics.RecordCost(actualModelFor(c, req.Model), channel, cost)
+	g.metrics.RecordCost(actualModelFor(c, req.Model()), channel, cost)
 }
 
 // actualModelFor 取映射后的上游模型名（无映射时回落客户端请求名）。
@@ -383,7 +360,7 @@ func captureBytes(c *executionScope) []byte { return c.output.capture.Bytes() }
 // writeRequestLog 组装并写一条请求日志。
 //
 // 普通日志允许有界丢弃，不影响已提交的响应；严格账本已单独同步持久化。
-func (g *Gateway) writeRequestLog(c *executionScope, req *model.ModelRequest, startedAt time.Time,
+func (g *Gateway) writeRequestLog(c *executionScope, req protocol.Request, startedAt time.Time,
 	cost float64, usage *model.Usage, isEstimated, priceMissing bool, pre *billing.PreDeduct) {
 	if g.logRecorder == nil {
 		return
@@ -397,7 +374,7 @@ func (g *Gateway) writeRequestLog(c *executionScope, req *model.ModelRequest, st
 	tokenID := c.result.Identity.TokenID
 	userID := c.result.Identity.UserID
 
-	actualModel := relayActualModel(c, req.Model)
+	actualModel := relayActualModel(c, req.Model())
 	rid := c.result.Identity.RequestID
 	errMsg := c.result.ErrorMessage
 
@@ -407,9 +384,9 @@ func (g *Gateway) writeRequestLog(c *executionScope, req *model.ModelRequest, st
 		TokenID:      tokenID,
 		ChannelID:    channelID,
 		CredentialID: credentialID,
-		OriginModel:  req.Model,
+		OriginModel:  req.Model(),
 		ActualModel:  actualModel,
-		IsStream:     req.Stream,
+		IsStream:     req.Stream(),
 		Status:       status,
 		ErrorMessage: errMsg,
 		LatencyMs:    time.Since(startedAt).Milliseconds(),

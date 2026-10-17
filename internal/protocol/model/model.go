@@ -8,12 +8,9 @@ package model
 
 import "minigateway/internal/core"
 
-// ModelRequest 只解析路由必需的字段。
-//
-// MaxTokens 是唯一的例外：它不在路由必需之列，但 P5 的预扣需要它
-// 算「费用上限」（max_tokens × 输出单价）。多解析一个标量字段
-// 不影响透明代理——请求体本身仍然原样透传，这个结构体只是
-// 路由/计费需要的信息投影。
+// ModelRequest is retained only by the legacy Relay compatibility boundary.
+// New coordination uses protocol.Request and operation-specific payloads.
+// MaxTokens is a legacy Chat estimate, never a strict cost-bound proof.
 type ModelRequest struct {
 	Model     string `json:"model"`
 	Stream    bool   `json:"stream"`

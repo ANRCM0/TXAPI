@@ -11,8 +11,8 @@ S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对�
 | 层次 | 最终职责 | 当前代码与缺口 |
 |---|---|---|
 | 极简执行内核 | 单次 I/O 尝试、取消/超时、响应提交事实与执行结果 | `internal/core` 已实现标准库 HTTP 执行；不含 WS |
-| 统一请求协调 | 授权、准入、路由/attempt、重试、预算、统一收尾 | `internal/gateway` 已抽离非 Gin 协调函数与 `core.Output` 输出端口，现有 HTTP 实际复用；保留 HTTP/Gin 适配和具体 `billing.Engine`；无 native WS/持久 worker 入口 |
-| 统一兼容契约 | 按操作的语义模型、能力约束、usage/结果、传输边界 | Chat 的 `ProtocolAdaptor` 仍使用独立 Chat 模型；已有真实操作/传输候选过滤与独立 Responses 模型，完整矩阵未验收 |
+| 统一请求协调 | 授权、准入、路由/attempt、重试、预算、统一收尾 | `internal/gateway` 已抽离非 Gin 协调函数与 `core.Output` 输出端口，现有 HTTP 实际复用；保留 HTTP/Gin 适配，以 `LegacyBilling`/`StrictBilling` 消费原账本；无 native WS/持久 worker 入口 |
+| 统一兼容契约 | 按操作的语义模型、能力约束、usage/结果、传输边界 | Chat/embeddings 有各自载荷与不可变操作信封，类型化能力进入路由和准备，embeddings 独立解码；独立 Responses 模型未接生产，完整矩阵未验收 |
 | 功能模块 | 身份、调度、可选计费、观测，以及后续状态型应用 | 前几项已有实现；Responses、持久会话、后台任务均待开发 |
 | 接入与基础设施 | HTTP/SSE/WS、持久实现、控制台、显式组装 | HTTP/SSE、SQLite、内嵌控制台已实现；WS transport、状态存储与 worker 待开发 |
 
@@ -132,7 +132,7 @@ API 目标分区：`/api/admin/*` 为管理员操作，`/api/me/*` 为个人资�
 7. gateway 根据错误分类和剩余预算决定是否重试，更新健康状态。
 8. 统一收尾：释放并发/凭据资源、保存结果、结算或可靠标记待处理。异常与取消也必须走收尾。
 
-现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；JSON/SSE 字节未抽象为通用协议事件，尚未接入 worker/native WS，也未完成 S6 阶段验收。
+现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。`protocol.Request` 将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；JSON/SSE 字节未抽象为通用协议事件，尚未接入 worker/native WS，也未完成 S6 阶段验收。
 
 ## 6. 内核契约与重试边界
 
@@ -153,7 +153,7 @@ core 不能 import Gin、GORM、access、scheduler 或具体厂商适配器。�
 
 ## 7. 协议与性能
 
-目标是同协议保留可保真的原始字段，做必要的路由/模型改写和 usage 观察；跨协议才建立相应语义对象。鉴权、资源限制与 strict 能力检查始终适用，不承诺未知字段无条件透传。当前公共协议接口仍偏 Chat；S6/S7-A 逐项建立操作模型，不把 Responses 强塞进 ChatRequest。
+目标是同协议保留可保真的原始字段，做必要的路由/模型改写和 usage 观察；跨协议才建立相应语义对象。鉴权、资源限制与 strict 能力检查始终适用，不承诺未知字段无条件透传。本轮已为 Chat/embeddings 引入独立载荷与共享信封，操作能力同时约束路由和发送准备；embeddings 原生字段/usage 保留，不经 Chat 转换或生成 SSE 终态。`ProtocolAdaptor` 明确是 Chat codec，不再作为所有操作的公共载荷接口。Responses 仍使用独立样本模型，后续接线必须经对应操作验收，不能强塞进 ChatRequest。
 
 能力不对等时明确拒绝或配置可见的降级。未知关键字段不能静默丢弃。大请求的重放使用有限内存/临时文件，或显式禁用重试；流式响应不能无限缓冲。
 

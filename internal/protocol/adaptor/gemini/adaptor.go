@@ -23,15 +23,16 @@ import (
 // Adaptor 是 Gemini 协议适配器。
 type Adaptor struct{}
 
-func (*Adaptor) SupportsOperation(operation string, stream, tools bool) bool {
+func (*Adaptor) Supports(r adaptor.Requirements) bool {
 	// Signed thinking/tool histories have no lossless canonical representation yet.
-	return operation == "chat" && !tools
+	return r.Operation == adaptor.Chat && !r.Tools
 }
 
 // 编译期断言：同时满足两个接口。
 var (
 	_ adaptor.Adaptor         = (*Adaptor)(nil)
 	_ adaptor.ProtocolAdaptor = (*Adaptor)(nil)
+	_ adaptor.Capability      = (*Adaptor)(nil)
 )
 
 // openaiPA 是入站（客户端侧）协议适配器。

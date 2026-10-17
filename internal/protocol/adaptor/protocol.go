@@ -17,6 +17,8 @@ import (
 // 每个厂商适配器都要实现一遍 HTTP 样板代码，而且没法单测转换逻辑。
 // 现在 anthropic/gemini 适配器 = 一个 ProtocolAdaptor（纯转换）
 // + 一个薄薄的 Adaptor 外壳（调 ProtocolAdaptor 干活）。
+// This is the Chat codec, not a universal operation payload interface.
+// Native embeddings and Responses must never be passed through these methods.
 type ProtocolAdaptor interface {
 	// Name 返回协议名，如 "openai" / "anthropic" / "gemini"。
 	Name() string

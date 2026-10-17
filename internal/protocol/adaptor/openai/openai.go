@@ -26,14 +26,15 @@ import (
 // Adaptor 是 OpenAI 兼容协议的适配器实现。
 type Adaptor struct{}
 
-func (*Adaptor) SupportsOperation(operation string, stream, tools bool) bool {
-	return operation == "chat" || (operation == "embeddings" && !stream && !tools)
+func (*Adaptor) Supports(r adaptor.Requirements) bool {
+	return r.Operation == adaptor.Chat || (r.Operation == adaptor.Embeddings && !r.Stream && !r.Tools)
 }
 
 // 编译期断言：同时满足两个接口。
 var (
 	_ adaptor.Adaptor         = (*Adaptor)(nil)
 	_ adaptor.ProtocolAdaptor = (*Adaptor)(nil)
+	_ adaptor.Capability      = (*Adaptor)(nil)
 )
 
 // GetRequestURL 拼出上游地址。

@@ -2,6 +2,7 @@
 package architecture
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -42,11 +43,11 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 			t.Errorf("register module ownership before adding %s", relative)
 			return nil
 		}
-		ast, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 		if err != nil {
 			return err
 		}
-		for _, spec := range ast.Imports {
+		for _, spec := range file.Imports {
 			imported, err := strconv.Unquote(spec.Path.Value)
 			if err != nil {
 				return err
@@ -65,6 +66,26 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 			}
 			if owner != "store" && owner != "billing" && owner != "model" && (strings.HasPrefix(imported, "gorm.io/") || strings.Contains(imported, "sqlite")) {
 				t.Errorf("database dependency escaped persistence/billing: %s", relative)
+			}
+			if owner == "gateway" && (imported == "minigateway/internal/billing" || imported == "minigateway/internal/protocol/model") {
+				alias := filepath.Base(imported)
+				if spec.Name != nil {
+					alias = spec.Name.Name
+				}
+				if alias == "." {
+					t.Errorf("gateway consumer boundaries require named imports: %s", relative)
+				}
+				ast.Inspect(file, func(node ast.Node) bool {
+					selector, ok := node.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					pkg, ok := selector.X.(*ast.Ident)
+					if ok && pkg.Name == alias && (imported == "minigateway/internal/billing" && selector.Sel.Name == "Engine" || imported == "minigateway/internal/protocol/model" && selector.Sel.Name == "ModelRequest" && entry.Name() != "handler.go") {
+						t.Errorf("gateway must consume operation envelopes and billing ports, not %s.%s: %s", alias, selector.Sel.Name, relative)
+					}
+					return true
+				})
 			}
 		}
 		return nil

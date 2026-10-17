@@ -33,8 +33,13 @@ func relayStream(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta
 	return result.Usage, nil
 }
 
-func (g *Gateway) SetTimeout(d time.Duration)                        { g.attemptTimeout = d }
-func (g *Gateway) SetBilling(e *billing.Engine)                      { g.billing = e }
+func (g *Gateway) SetTimeout(d time.Duration) { g.attemptTimeout = d }
+func (g *Gateway) SetBilling(e *billing.Engine) {
+	g.billing, g.strictBilling = e, e
+	if e == nil {
+		g.billing, g.strictBilling = nil, nil
+	}
+}
 func (g *Gateway) SetRateLimiter(l middleware.Limiter)               { g.limiter = l }
 func (g *Gateway) SetLogRecorder(fn func(entry *dbmodel.RequestLog)) { g.logRecorder = fn }
 func (g *Gateway) SetRetryTimes(n int)                               { g.retryTimes = n }

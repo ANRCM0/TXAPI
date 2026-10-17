@@ -2,7 +2,7 @@
 
 本页定义当前团队边界、可依赖的接口与集成门槛，并保留初始协作框架 F0 的验收记录。核对日期：2026-10-17；当前优先完成底层架构验收，再补全功能；S5 计费安全门槛保留，以 [PLAN.md](PLAN.md) 为唯一活动计划。架构仍是模块化单体；“多个团队”指开发分工，不会给产品新增团队/组织租户模型。
 
-F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；本轮已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；协议公共接口仍偏 Chat，独立 Responses 模型未接入生产。S6 先用现有 HTTP 消费者收口类型化执行入口并验收合并，再让 S7-A 的 Responses/任务/WS 接入。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
+F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；本轮已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；Chat/embeddings 已有独立载荷、共享操作信封及发送准备的能力检查；Chat codec 不承担其他操作，独立 Responses 模型未接入生产。S6 先用现有 HTTP 消费者收口类型化执行入口并验收合并，再让 S7-A 的 Responses/任务/WS 接入。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
 
 极简 core 不承载用户、预算、会话或任务。功能接入复用同一授权、准入、调度、结算与收尾，不复制另一条业务链；普通函数调用与确有需要的小接口优先，不预建空模块或动态插件平台。
 
@@ -43,13 +43,13 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 
 `Gateway.ExecuteTo(ctx, output, gateway.Execution)` 接收已验证 Principal 与独立的 operation/body，返回本次 `RequestResult`；不构造 Gin context。调用方必须在**每次生成前**重新验证身份有效性，不能复用长连接初始认证快照承诺持续授权。公开入口拒绝无 user/key 身份，HTTP 适配保留已有认证中间件。
 
-Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模型授权、请求/attempt 准入、预留、路由、重试和收尾。每次 `ExecuteTo`（旧 HTTP `Execute` 委托此入口）屏蔽父 context 的旧 RPM/TPM 准入标记及 mutable reservation；HTTP 中间件已完成的单次准入则由适配层明确传入，避免双扣。结果与流解析状态不按外部 Request ID 共享。
+Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模型授权、请求/attempt 准入、预留、路由、重试和收尾。每次 `ExecuteTo`（旧 HTTP `Execute` 委托此入口）屏蔽父 context 的旧 RPM/TPM 准入标记及 mutable reservation；HTTP 中间件已完成的单次准入则由适配层明确传入，避免双扣。结果与流解析状态不按外部 Request ID 共享。协调链内部使用 `protocol.ParseRequest` 生成自持正文的 `protocol.Request`；路由/准入/attempt 与 `PrepareRequest` 使用同一操作事实，结果显式记录 Operation。每次准备只把副本交给适配器，不能修改原信封或下一次重试。`model.ModelRequest` 与整数 Mode 仅在旧 Relay/适配器边界保留；旧投影必须匹配正文，未知模式拒绝。
 
 现有 HTTP 通过 `core.HTTPOutput` 消费输出端口，协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 只提供原生请求/响应/SSE 协议与 core 样本，未注册路由，也不能被当成已存在的持久任务或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
 
 ### 协议扩展：internal/protocol
 
-厂商适配器实现 `adaptor.Adaptor` 和需要的 `ProtocolAdaptor`，有状态 SSE 实现 `SessionStreamer.NewStreamSession`。适配器实例必须可并发只读；解析状态只属于本次 attempt。未知字段透传/不支持能力的显式拒绝由协议测试约束。当前 `ProtocolAdaptor` 的公共载荷仍是 ChatRequest/ChatResponse，不应直接视为 Responses、后台或 WS 的既成扩展契约；本轮 `protocol.RequirementsFor` 把操作/源协议/HTTP 传输及显式或历史工具需求送入真实候选过滤；尚不声明 background/WS 能力，Gemini 工具与 strict 工具均保守拒绝。
+厂商适配器实现 `adaptor.Adaptor` 和需要的 `ProtocolAdaptor`，有状态 SSE 实现 `SessionStreamer.NewStreamSession`。适配器实例必须可并发只读；解析状态只属于本次 attempt。未知字段透传/不支持能力的显式拒绝由协议测试约束。`ProtocolAdaptor` 仅是 ChatRequest/ChatResponse/Chat SSE 的 codec，不是通用操作 DTO。内建适配器通过 `adaptor.Capability.Supports(Requirements)` 声明操作能力，`protocol.Supports` 先限制已实现的 OpenAI 入站 HTTP 范围；相同需求用于候选过滤和 `PrepareRequest`，旧声明接口兼容保留。embeddings 显式选择原生转换和独立响应 decoder，保留 input/vector/base64/扩展字段，不能经过 Chat 或输出 SSE DONE；自定义 embeddings opt-in 必须提供 OpenAI-compatible 原生载荷/usage，并不支持任意厂商格式。malformed tools/history 不按纯文本放行 Gemini。尚不声明 Responses/background/WS 生产能力，Gemini 工具与 strict 工具均保守拒绝。
 
 本轮实现矩阵（未代表完整阶段验收）：
 
@@ -76,6 +76,12 @@ gw, err := gateway.New(gateway.Options{
 ```
 
 注册表在构造时复制，不能通过修改原 map 热替换实例。内建协议默认仍可用；替换已有名称是显式的构造行为。不能在协议包发 HTTP 请求、访问用户表、记录费用或创建后台 worker。`protocol.Resolve` 仅描述内建默认协议，不等于实例注册表。
+
+### 可选计费消费端口
+
+gateway 只消费 `LegacyBilling`（预扣/快照计价/结算）与 `StrictBilling`（就绪/预留/实际 wire 成本准入/回执/拒绝/收尾），不持有具体 Engine 或访问数据库。财务类型仍来自 billing/model；端口不意味着另建账本或允许替换安全语义。main 负责注入/启动/关闭原引擎及恢复 worker，执行结束由同一协调器收尾。
+
+`Options.Billing` 接收 legacy 接口，`Options.StrictBilling` 可独立注入；为兼容既有组装，后者未指定时仅从同时实现 strict 接口的 Billing 推导。生产 main 显式给两个端口注入同一原引擎。strict 缺接口/未就绪、不能预留或不能记录发送前成本时拒绝，不回落 legacy；已执行但持久回执失败仍保留双 hold/pending，不重试。可选端口 typed nil 按缺失处理；disabled 不调用两条财务路径。成本端口接收正文/Header 快照，不能通过修改入参改变实际发送。实现方须满足并发和有界调用要求，不能把副作用留到可丢日志。
 
 ### S3 准入接入：gateway.Admission
 
