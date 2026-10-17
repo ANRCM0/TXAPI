@@ -12,10 +12,11 @@ import (
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
+	"minigateway/internal/store"
 )
 
-func TestWorkerShutdownPreservesUnknownExecutionAndDualBudgetHolds(t *testing.T) {
-	st, binding, _ := fixture(t)
+func strictRecordingFixture(t *testing.T, st *store.Store) (*billing.Engine, []model.Channel) {
+	t.Helper()
 	if err := st.UpsertModelPrice(&model.ModelPrice{Model: "m", InputPricePer1K: 0.00015, OutputPricePer1K: 0.0006}); err != nil {
 		t.Fatal(err)
 	}
@@ -36,6 +37,12 @@ func TestWorkerShutdownPreservesUnknownExecutionAndDualBudgetHolds(t *testing.T)
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	return engine, ch
+}
+
+func TestWorkerShutdownPreservesUnknownExecutionAndDualBudgetHolds(t *testing.T) {
+	st, binding, _ := fixture(t)
+	engine, ch := strictRecordingFixture(t, st)
 	started := make(chan struct{})
 	var hits atomic.Int64
 	g, capacity := newGateway(t, gateway.Options{Channels: ch, StrictBilling: engine, BillingMode: billing.ModeStrict, RetryTimes: 2,

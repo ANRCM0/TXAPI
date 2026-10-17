@@ -34,16 +34,20 @@ type Options struct {
 	MaxDuration time.Duration
 	Resolve     func(context.Context, access.Binding) (access.Principal, error)
 	Execute     func(context.Context, core.Output, gateway.Execution) gateway.RequestResult
+	// Archive enables opt-in encrypted output recording, not durable job acceptance.
+	Archive *Archive
 }
 
 type Runner struct {
-	mu     sync.Mutex
-	closed bool
-	ctx    context.Context
-	cancel context.CancelFunc
-	jobs   chan *job
-	done   chan struct{}
-	opts   Options
+	mu          sync.Mutex
+	closed      bool
+	ctx         context.Context
+	cancel      context.CancelFunc
+	jobs        chan *job
+	pending     int
+	submissions sync.WaitGroup
+	done        chan struct{}
+	opts        Options
 }
 
 type outcome struct {
@@ -85,7 +89,8 @@ func New(ctx context.Context, opts Options) (*Runner, error) {
 	if ctx == nil || opts.Resolve == nil || opts.Execute == nil || opts.Workers < 1 || opts.Workers > 1024 ||
 		opts.QueueCapacity < 1 || opts.QueueCapacity > 4096 || opts.MaxRequestBytes < 1 || opts.MaxRequestBytes > 20<<20 ||
 		int64(opts.Workers+opts.QueueCapacity)*int64(opts.MaxRequestBytes) > 64<<20 ||
-		opts.MaxDuration <= 0 || opts.MaxDuration > 24*time.Hour {
+		opts.MaxDuration <= 0 || opts.MaxDuration > 24*time.Hour ||
+		(opts.Archive != nil && opts.MaxDuration+5*time.Second > opts.Archive.retention) {
 		return nil, fmt.Errorf("invalid generation runner configuration")
 	}
 	root, cancel := context.WithCancel(ctx)
@@ -106,6 +111,7 @@ func New(ctx context.Context, opts Options) (*Runner, error) {
 	go func() {
 		<-root.Done()
 		r.stop()
+		r.submissions.Wait()
 		workers.Wait()
 		close(r.done)
 	}()
@@ -118,34 +124,94 @@ func New(ctx context.Context, opts Options) (*Runner, error) {
 // The caller transfers exclusive output ownership until the result is received
 // or Close finishes, not merely until an observation is canceled.
 func (r *Runner) Submit(observer context.Context, binding access.Binding, output core.Output, in gateway.Execution) (*Future, error) {
+	f, _, err := r.submit(observer, binding, output, in, false)
+	return f, err
+}
+
+// SubmitRecorded reserves bounded output storage before volatile handoff. Only
+// output is journaled: no request body, job intent, budget hold or restart replay.
+func (r *Runner) SubmitRecorded(observer context.Context, binding access.Binding, in gateway.Execution) (*Future, string, error) {
+	if r.opts.Archive == nil {
+		return nil, "", ErrArchiveUnavailable
+	}
+	return r.submit(observer, binding, nil, in, true)
+}
+
+func (r *Runner) submit(observer context.Context, binding access.Binding, output core.Output, in gateway.Execution, recorded bool) (*Future, string, error) {
 	if err := observer.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if binding.UserID == 0 || binding.TokenID == 0 {
-		return nil, access.ErrUnauthorized
+		return nil, "", access.ErrUnauthorized
 	}
 	requestID := access.RequestID(observer)
-	if output == nil || (in.Operation != protocol.Chat && in.Operation != protocol.Embeddings) ||
+	if (!recorded && output == nil) || (in.Operation != protocol.Chat && in.Operation != protocol.Embeddings) ||
 		len(in.Body) == 0 || len(in.Body) > r.opts.MaxRequestBytes || len(in.SessionID) > 256 || len(requestID) > 256 {
-		return nil, fmt.Errorf("invalid or oversized generation handoff")
+		return nil, "", fmt.Errorf("invalid or oversized generation handoff")
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.closed || r.ctx.Err() != nil {
-		return nil, ErrClosed
+		r.mu.Unlock()
+		return nil, "", ErrClosed
 	}
 	if err := observer.Err(); err != nil {
-		return nil, err
+		r.mu.Unlock()
+		return nil, "", err
 	}
-	if len(r.jobs) == cap(r.jobs) {
-		return nil, ErrFull
+	if len(r.jobs)+r.pending >= cap(r.jobs) {
+		r.mu.Unlock()
+		return nil, "", ErrFull
 	}
-	ctx, cancel := context.WithTimeout(r.ctx, r.opts.MaxDuration)
-	future := &Future{cancel: cancel, result: make(chan outcome, 1)}
+	r.pending++
+	r.submissions.Add(1)
+	r.mu.Unlock()
+	defer r.submissions.Done()
+	// Reserve queue capacity before storage I/O without holding the shutdown lock.
+	// Close joins in-progress handoffs before allowing the store to be closed.
 	in.Body = append([]byte(nil), in.Body...)
 	in.SessionID = strings.Clone(in.SessionID)
-	r.jobs <- &job{ctx: ctx, binding: binding, requestID: strings.Clone(requestID), output: output, in: in, future: future}
-	return future, nil
+	requestID = strings.Clone(requestID)
+	id := ""
+	var preparationErr error
+	if recorded {
+		request, err := protocol.ParseRequest(in.Operation, in.Body)
+		if err != nil || len(request.Model()) > 256 {
+			preparationErr = fmt.Errorf("invalid recorded generation request")
+		} else {
+			ctx, cancel := context.WithTimeout(observer, 2*time.Second)
+			stop := context.AfterFunc(r.ctx, cancel)
+			out, err := r.opts.Archive.start(ctx, binding)
+			stop()
+			cancel()
+			if err != nil {
+				preparationErr = err
+			} else {
+				out.model = request.Model()
+				output, id = out, out.record.ID
+			}
+		}
+	}
+	r.mu.Lock()
+	r.pending--
+	if preparationErr == nil {
+		if r.closed || r.ctx.Err() != nil {
+			preparationErr = ErrClosed
+		} else {
+			preparationErr = observer.Err()
+		}
+	}
+	if preparationErr != nil {
+		r.mu.Unlock()
+		if out, ok := output.(*recordOutput); ok {
+			_ = out.finish(gateway.RequestResult{Operation: in.Operation, Result: core.Result{Phase: core.NotDispatched}}, context.Canceled)
+		}
+		return nil, id, preparationErr
+	}
+	defer r.mu.Unlock()
+	ctx, cancel := context.WithTimeout(r.ctx, r.opts.MaxDuration)
+	future := &Future{cancel: cancel, result: make(chan outcome, 1)}
+	r.jobs <- &job{ctx: ctx, binding: binding, requestID: requestID, output: output, in: in, future: future}
+	return future, id, nil
 }
 
 func (r *Runner) run(j *job) (out outcome) {
@@ -162,6 +228,12 @@ func (r *Runner) run(j *job) (out outcome) {
 			if out.result.Phase != core.NotDispatched {
 				state := panicOutputState(j.output)
 				out.result.Committed, out.result.HTTPStatus = state.Committed, state.HTTPStatus
+			}
+		}
+		if output, ok := j.output.(*recordOutput); ok {
+			if err := output.finish(out.result, out.err); err != nil {
+				out.err = errors.Join(out.err, ErrArchiveUnavailable)
+				out.result.Replayable = false
 			}
 		}
 	}()

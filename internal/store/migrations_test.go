@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,59 @@ import (
 	"minigateway/internal/config"
 	"minigateway/internal/model"
 )
+
+func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v7-archive-upgrade.db")
+	st, err := Open(config.DatabaseConfig{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Where("version = 8").Delete(&model.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Migrator().DropTable(&model.GenerationSegment{}, &model.GenerationRecord{}); err != nil {
+		t.Fatal(err)
+	}
+	var released []model.SchemaMigration
+	if err := st.DB().Order("version").Find(&released).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSetting("archive-upgrade-preserve", "existing-value"); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	for range 2 {
+		st, err = Open(config.DatabaseConfig{Path: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []model.SchemaMigration
+		if err := st.DB().Order("version").Find(&got).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(released)+1 || got[len(got)-1].Version != 8 {
+			t.Fatalf("non-idempotent v8: %+v", got)
+		}
+		for i := range released {
+			if got[i].Version != released[i].Version || !got[i].AppliedAt.Equal(released[i].AppliedAt) {
+				t.Fatal("released ledger changed")
+			}
+		}
+		if value, err := st.GetSetting("archive-upgrade-preserve"); err != nil || value != "existing-value" {
+			t.Fatalf("pre-existing state changed: %s %v", value, err)
+		}
+		if err := checkMigrationVersion(st.DB(), 7); err == nil {
+			t.Fatal("v7 accepted v8 database")
+		}
+		if !st.DB().Migrator().HasTable(&model.GenerationSegment{}) {
+			t.Fatal("archive schema missing")
+		}
+		if n, err := st.InterruptGenerationRecords(context.Background(), 1); err != nil || n != 0 {
+			t.Fatalf("invented historical output: %d %v", n, err)
+		}
+		st.Close()
+	}
+}
 
 func TestMigrationFailureRollsBackAndCanBeRetried(t *testing.T) {
 	st := openTestStore(t, "migration-rollback")

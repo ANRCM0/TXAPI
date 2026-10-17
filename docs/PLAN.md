@@ -8,14 +8,14 @@
 
 | 核对项 | 当前结论 |
 |---|---|
-| 当前代码 | `feat/s5-s6-mainline`，本批基于已推送 `5ea7393` 推进 A3-01 派发身份与最小进程内 worker；A1/A2、既有输入/费率门槛、S6 与独立 Responses 切片仍在分支，尚未合并 master |
+| 当前代码 | `feat/s5-s6-mainline`，本批基于已推送 `951aca9` 推进 A3-02 加密输出持久记录；A3-01 派发身份与进程内 worker 已通过完整 CI；A1/A2、既有输入/费率门槛、S6 与独立 Responses 切片仍在分支，尚未合并 master |
 | 本地集成基线 | `master/90df76b`，S0–S4 与 F0 已验收合并；开工/合并前重新确认最新基线 |
 | 产品形态 | Go/Gin 模块化单体、单二进制、单实例 SQLite；原生 ES Modules 控制台内嵌 |
 | 现有推理入口 | `/v1/models`、`/v1/chat/completions`（JSON/SSE）、`/v1/embeddings` |
 | HTTP 契约 | [OpenAPI](openapi.json) `0.2.3`，79 个操作；不是 79 种推理能力 |
 | S0–S4 / F0 | 正确性、极简 core、身份隔离、调度准入、控制台与配置交付已有阶段验收记录 |
 | S5 | 6 项中 5 项通过；当前费率/凭据批次已通过本地构建/vet/全量测试与进程冒烟，远端 CI 随提交记录。已将标准费率与 USD/凭据适用范围纳入准入，但逐账户最高适用价、失败收费及未来价格变更假设仍在，S5-03 与完整阶段未验收/合并 |
-| 统一兼容框架 | Chat/embeddings 已迁入非 Gin 协调函数；已有 `core.Output`、不可变操作信封及计费消费侧小接口；A3-01 增加实际调用 `ExecuteTo` 的有界进程内 worker 与派发时身份解析。正文仍是 JSON/SSE 字节；没有生产持久任务/WS，完整 S6 未验收 |
+| 统一兼容框架 | Chat/embeddings 已迁入非 Gin 协调函数；已有 `core.Output`、不可变操作信封及计费消费侧小接口；A3-01 增加实际调用 `ExecuteTo` 的有界进程内 worker 与派发时身份解析，A3-02 增加其可选加密输出记录、隔离/容量与中断恢复。正文仍是 JSON/SSE 字节；没有生产持久任务/WS，完整 S6 未验收 |
 | S6 / S7-A | S6 本轮切片已提交并通过完整 CI，尚未阶段验收合并；S7-A 仅独立 Responses 原生请求/JSON/SSE 协议与 core 样本，没有生产 Responses、持久会话、后台任务或 WS 入口 |
 | 安全与部署限制 | 上游 API Key 当前明文落库，响应掩码不是静态加密；客户端调用 Key 已摘要存储。没有实际生产升级或真实全客户端兼容验收承诺 |
 
@@ -52,10 +52,10 @@
 |---|---|---|
 | A1 | 输出端口与现有 HTTP 消费者：core/gateway/HTTP 适配及风险回归 | JSON/SSE 和拒绝行为保持；独立输出不伪装 HTTP writer；提交/取消/短写/租约事实正确 |
 | A2 | 操作模型、能力矩阵、可选模块消费侧小接口 | Chat/embeddings 真正复用；不同操作不经 Chat 有损中转；strict 许可独立判断 |
-| A3（当前） | 传输、状态和运行基础的可验收切片 | 以最小 WS/worker/持久消费者验证寿命、授权、容量、恢复和安全，不预建通用任务平台；A3-01 先交付派发身份与进程内 worker，不关闭整个 A3 |
+| A3（当前） | 传输、状态和运行基础的可验收切片 | 以最小 WS/worker/持久消费者验证寿命、授权、容量、恢复和安全，不预建通用任务平台；A3-01 已交付派发身份/进程内 worker；A3-02 交付加密输出记录，不关闭整个 A3 |
 | A4 | 故障矩阵、最终 CI 和共同架构基线集成 | 回归及依赖门槛通过，记录稳定端口、支持范围和未交付功能，再合并共同基线 |
 
-A3 按真实需求逐步增加执行/持久端口；最小消费者是架构验收证据，不等于完成 S7 的会话管理、后台 API、WS 多轮或客户端产品闭环。不得只建空包/接口就勾选架构完成。新增迁移、WS 依赖和 API 时另划批次，同步契约与消费者。A2 已收口现有 Chat/embeddings 的操作信封、能力检查与 legacy/strict 计费消费端口。本批 A3-01 只增加真实进程内消费及共享身份解析，不新增持久任务、模型字段/迁移、HTTP DTO、OpenAPI、依赖或 CI；完整状态型模型、安全存储与 WS 留待后续切片，不预建通用事件/任务平台。
+A3 按真实需求逐步增加执行/持久端口；最小消费者是架构验收证据，不等于完成 S7 的会话管理、后台 API、WS 多轮或客户端产品闭环。不得只建空包/接口就勾选架构完成。新增迁移、WS 依赖和 API 时另划批次，同步契约与消费者。A2 已收口现有 Chat/embeddings 的操作信封、能力检查与 legacy/strict 计费消费端口。A3-01 已增加真实进程内消费及共享身份解析；本批 A3-02 以该 worker 为实际消费者，增加可选加密输出记录、统一 schema v8 和存储端口，不新增任务意图/领取、HTTP DTO、OpenAPI、依赖或 CI；完整状态型模型、生产密钥注入/保留策略与 WS 留待后续切片，不预建通用事件/任务平台。
 
 ## S5 剩余验收
 
@@ -74,7 +74,7 @@ S5-03 已实现双层事务与收取费用上限，但尚不据此宣称允许�
 
 ## 后续开发路线
 
-制定日期：2026-10-16；2026-10-17 更新实际进度。当前功能分支 `feat/s5-s6-mainline`，本批基于 `5ea7393`，最近已核对的集成基线为 `origin/master/90df76b`；合并前重新确认最新集成状态。S0–S4 与 F0 已验收合并，S5 功能仍在分支，S5-03 未完成。下列清单为阶段验收目标；本轮实现与验证进展见页末，未勾选项不能据此视为已通过；执行顺序以“架构优先执行顺序”节为准。
+制定日期：2026-10-16；2026-10-17 更新实际进度。当前功能分支 `feat/s5-s6-mainline`，本批基于 `951aca9`，最近已核对的集成基线为 `origin/master/90df76b`；合并前重新确认最新集成状态。S0–S4 与 F0 已验收合并，S5 功能仍在分支，S5-03 未完成。下列清单为阶段验收目标；本轮实现与验证进展见页末，未勾选项不能据此视为已通过；执行顺序以“架构优先执行顺序”节为准。
 
 本轮范围已由用户明确：**完成 S5、S6 和包含持久会话/后台任务/WebSocket 的 S7-A，不新增支付。** 三个参考项目已克隆到被 Git/Docker 忽略的 `.local/references/`，固定版本与代码阅读入口见[上游参考快照](reference/upstream-snapshots.md)。本方案同时纠正“先堆 Responses 功能、后补共用框架”的顺序：统一协调入口前移到 S6，S7-A 是框架的首组完整状态型功能，不是框架中心。不自动启动 S7-B、S8 或 S9。
 
@@ -580,3 +580,33 @@ gateway 改用 `StartPreparedAttempt` 将真实 URL/正文交给同一成本引�
 | 格式/差异/文档 | 仅格式化 11 个变更 Go 文件；`git diff --check` 与 4 份更新文档的 46 个本地链接/锚点通过；新增 generation 依赖规则不放宽原模块边界 |
 
 早期定向测试有夹具字段命名和取消结果断言错误：已修正字段，区分 attempt 的 canceled 与取消后出口不可写的最终 client_write_error；未为测试改变生产取消/账务语义或关闭用例。此后定向及最终完整检查均通过。本机未执行 Linux race、Docker、真实上游/客户端/浏览器或生产数据库验收；由 push/PR 自动触发的最终完整 CI 单独记录，不手动重复 dispatch。完整 A3、S5-03、S6/S7 与 A1–A4 共同基线均不新增完成勾选、不合并。下一切片继续安全持久状态/恢复及最小传输消费者，不扩成上层功能大全。
+
+
+## 2026-10-17 A3-02：加密输出记录与保守中断恢复
+
+负责目录：`internal/generation` 实际消费端、`internal/model` / `internal/store` 的统一 v8 结构/事务、依赖约束、风险回归及 `tests/smoke/delivery.py` 对新增迁移的交付断言；同步现有文档，不新增另一份计划。父提交 `951aca920c1549a2ad5199289cc315ed39181b2a`，本批 fetch 确认 `origin/master=90df76b0340e4cdfa6c332c781f7aa772a04ed07` 是祖先且功能分支同步。沿用现有 draft PR #5；本批不合并、不勾选完整阶段。
+
+- `ArchiveStore` 是加密输出追加/读取/删除的小端口，真实实现使用现有 Store/SQLite；generation 只增加 model 依赖，不导入 store/GORM/billing/Gin，不改 core/gateway 的执行或财务实现。
+- `SubmitRecorded` 先原子预留 owner/实例的有界密文容量，再交给原 worker；每次 Commit/Write 都在加密后实际落库，输出故障对原协调器可见。接收不保存输入正文或原始 Key，不代表持久任务/预算受理。普通 Submit 仍不存正文，main 未启用 runner/归档。
+- AES-256-GCM 独立注入密钥环、随机 nonce，认证记录/owner/Key/过期/容量/类型/序号；读取/删除重新验证当前绑定，读取检查当前模型策略。无 key 或篡改不回落明文，也不返回部分明文。密钥轮换/备份、TTL、逻辑容量与尚无生产注入/自动清理工具的边界见开发指南。
+- 统一 schema v8 只新增输出记录/加密片段；旧迁移/账本不改，不从普通日志补造内容。事务序号 CAS、终态写入、容量预留和级联删除有真实 SQLite 回归；过期立即不可读、清理按有界批次回收容量。
+- 输出收尾与账本终态分开：open/sealed/interrupted 是观察完整性，不是生成/收费状态。独占启动恢复只标记中断，拒绝旧写入句柄，绝不返回可重放任务。实际子进程在部分加密 SSE 持久后被强杀，重启、真实租约到期后仍保留未知执行双 hold/provider 占用；另验证归档最终观察写失败不会撤销已结算费用。
+- 存储 I/O 不占停接锁，Close 等待尚在准备的交接及 worker/收尾；确认丢失和 finalizer panic 不重试生成、不丢提交事实、不杀 worker。保留已有取消/权限/协议/财务与队列回归，没有生产测试豁免。
+
+验证环境：2026-10-17 Windows/PowerShell，Go 1.26.3、Node 24.14.1、Python 3.14.3，Go 命令显式 `GOARCH=amd64 GOFLAGS=-buildvcs=false`。本机无 Make，按 Makefile 执行等价命令。
+
+| 实际命令/检查 | 结果与适用范围 |
+|---|---|
+| `go test -count=1 ./internal/generation ./internal/store ./internal/architecture` | 初批最终通过；真实 SQLite 事务/容量并发、迁移/隔离、密钥/篡改/顺序/TTL、丢确认/finalizer panic、关停及强杀恢复 |
+| `go test -count=1 ./internal/generation -run 'TestRecordedOutputFailure\|TestArchiveForcedProcessDeath'` | 通过；真实 Engine/账本和实际强杀进程，不是内存状态模拟；原 strict 档案/费率/凭据绑定门槛保持 |
+| `go test -count=1 ./internal/generation -run 'TestArchiveModelAndDispatch\|TestArchiveHandoff\|TestRunnerConcurrent'` | 最后快照一致性加固后通过；入队前以同一输入副本绑定归档模型和实际派发，慢存储不持停接锁，旧并发关闭回归保留 |
+| `go build ./...`、`go vet ./...`、`go test -count=1 ./...` | 首轮和最终代码通过，19 个有测试包；含依赖/79 操作契约、权限/协议/并发、迁移、财务及恢复 |
+| 4 项 `node --check` 与 `node --test web/assets/api.test.mjs` | 同批首轮通过，6 项行为用例；最终内部快照/归档测试不改前端或浏览器脚本及其输入，故复用、不重复运行 |
+| `python tests/smoke/local.py --go go` | 首轮及最终代码通过；生产启动/JSON/SSE/控制台与 strict 拒绝，同一生产 main 的 loopback 夹具验证结算、换 Key 拒绝及 SSE 强杀重启 pending/审计豁免；不是生产归档接线 |
+| 格式、差异、文档与脚本 | 12 个变更 Go 文件格式、`git diff --check`、5 份文档的 63 个本地链接/锚点及交付脚本 Python AST 通过；core/gateway/server/main/OpenAPI/第三方依赖/CI 未改 |
+
+首轮定向编译有一个未使用 import，首轮 SSE 夹具缺少既有 decoder 要求的 finish_reason；仅修正新测试，没有放宽生产终态。最终复核进一步把输入副本提前到身份/存储回调前，防止归档模型与实际派发正文错代，补充真实协调器回归及最终观察丢确认用例；定向和最终完整检查重新通过。没有关闭既有回归或改动生产账本语义。
+
+本机未运行 Linux race、Docker、真实上游/客户端/浏览器或生产库升级。最终 SHA 的 push/PR 自动完整 CI 单独记录于现有 draft PR，不手动 dispatch；没有把父提交绿灯或本地结果当作本批远端验收。
+
+边界：这是 A3 的真实输出持久消费者，不是通用任务平台、Responses 持久历史/协议事件，尚无任务意图+账本原子受理、领取/租约/fencing、原生后台/WS、生产密钥注入或公开 API。OpenAPI 保持 0.2.3 / 79 操作，依赖与 CI 触发不改；交付脚本只同步 v8 迁移与空归档表的断言。现有上游 Key 明文落库风险保留。后续 A3 继续最小传输和任务原子/恢复边界，A4 才收口最终共同基线，不把本批当作项目完成。

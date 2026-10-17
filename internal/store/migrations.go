@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 7
+const latestMigrationVersion = 8
 
 type dataMigration struct {
 	Version int
@@ -35,6 +35,10 @@ var dataMigrations = []dataMigration{
 	}},
 	{Version: 7, Apply: func(tx *gorm.DB) error {
 		// No cost contracts can be inferred for historical attempts.
+		return nil
+	}},
+	{Version: 8, Apply: func(tx *gorm.DB) error {
+		// The encrypted output archive has no historical content to backfill.
 		return nil
 	}},
 }
