@@ -1,12 +1,12 @@
 # 架构设计：中转内核、业务层与统一兼容层
 
-状态：2026-10-18，A1–A4 执行/持久/安全底座已验收合并为 `master/ccbfe29`；S6-A/B/C 的广义兼容框架、完整 S5 和 S7-A 尚未全部实现/验收。任务状态以 [PLAN.md](PLAN.md) 为准，命令以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准，精确功能头/合并与 CI 见 [最终验收](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)；本页不维护第二份活动计划。
+状态：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确提交与验证记录见 [PLAN.md](PLAN.md) 和 [S6 记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29` 及其 [验收证据](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；完整 S5 和 S7-A 仍未完成。命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，本页不维护第二份活动计划。
 
-S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 先收口统一兼容与协调框架，S7-A 再接入 Responses HTTP/SSE、持久会话、后台任务和 WebSocket**。这些是必须开发的目标，不是已有功能；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
+S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 统一兼容与协调框架已验收合并，下一批 S7-A01 接入 Responses HTTP/SSE，再推进持久会话、后台任务和 WebSocket**。上述 S7 产品仍是必须开发的目标，尚未交付；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
 
 ## 设计总纲与当前差距
 
-2026-10-18 用户明确的目标为 **core 内核负责中转，业务层负责业务处理，兼容层统一对外兼容和扩展接入，包括前端契约**。开发顺序为先完成内核与统一兼容框架的验收，再有选择地吸收同类项目的能力，通过适配接入。A1–A4 已验收的执行、持久与安全底座继续复用；广义兼容层尚须按 PLAN 的 S6-C 收口，不能将原有基础层验收扩大为整个兼容框架已完成。
+2026-10-18 用户明确的目标为 **core 内核负责中转，业务层负责业务处理，兼容层统一对外兼容和扩展接入，包括前端契约**。开发顺序为先完成内核与统一兼容框架的验收，再有选择地吸收同类项目的能力，通过适配接入。S6 已复用 A1–A4 底座，交付现有 API、协议、构造扩展与前端的真实契约闭环；范围和消费者见 [兼容契约清单](reference/compatibility-contracts.md)，M1 集成验收已完成，精确证据见 PLAN/批次记录。
 
 三层是职责边界，不要求立即合并或改名为三个大包。兼容层同时包含客户端入站、上游协议适配以及扩展/前端接入契约；其内部保留 API、协议、传输和展示分工。各操作保留自己的语义模型，兼容范围落实到具体操作、源/目标协议、传输、客户端版本和计费模式。
 
@@ -15,8 +15,8 @@ S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对�
 | 层次 | 最终职责 | 当前代码映射与缺口 |
 |---|---|---|
 | core 中转内核 | 执行一次上游尝试，管理连接/流式读写、超时取消、背压、提交事实和执行结果 | `internal/core` 已实现标准库 HTTP 执行。纯 WS I/O 仍隔离在 `transport/websocket`，新传输通过受约束的执行适配接入；身份、路由策略、账本和页面不进入内核 |
-| 业务层 | 用户/Key/模型授权、准入、路由、重试策略、计费、会话/任务及统一收尾 | `gateway/access/scheduler/billing/generation` 已有真实消费者与持久基础。gateway 是执行业务协调者；S6 新增 `management.Configuration` 承担已有渠道/凭据/价格保存与配置发布用例。业务结果与外部协议表示分离，现有账本和恢复保持唯一权威；本批新代码仍待集中验收 |
-| 统一兼容层 | 对外 API 与协议、上游编解码、错误/事件/能力映射、扩展接入与前端应用契约 | `server/protocol/transport`、gateway 的 HTTP 适配及 `web` 的 API 消费已有切片；现有 Chat/embeddings、管理 API 和页面可用于收口验证。公开契约、扩展注册/生命周期及前端接入尚须统一验收；Responses 只有独立协议样本 |
+| 业务层 | 用户/Key/模型授权、准入、路由、重试策略、计费、会话/任务及统一收尾 | `gateway/access/scheduler/billing/generation` 已有真实消费者与持久基础。gateway 是执行业务协调者；已合并的 `management.Configuration` 承担已有渠道/凭据/价格保存与配置发布用例。业务结果与外部协议表示分离，现有账本和恢复保持唯一权威；S6 本地、功能头 push/PR 与合并后 master 完整 CI 证据见批次记录 |
+| 统一兼容层 | 对外 API 与协议、上游编解码、错误/事件/能力映射、扩展接入与前端应用契约 | `server/protocol/transport`、gateway 的 HTTP 适配及 `web` 实际消费现有 Chat/embeddings 和管理 API。S6 已合并公开契约、构造扩展/生命周期及真实 API/前端闭环；新增操作按支持矩阵独立验收，Responses 仍只有独立协议样本 |
 | 支撑与组装 | 持久化、统一迁移、密钥保护、配置与实例启动/关闭 | `model/store/secrets/config/cmd` 提供支撑。A3 已有原子意图/预算、领取/fencing、历史恢复、加密输出游标及默认关闭的 runtime；依赖由应用入口注入 |
 
 ### 兼容层的接入边界
@@ -27,7 +27,7 @@ S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对�
 - 前端兼容：`web` 是应用 API 的真实消费者，依赖稳定 DTO、错误、权限和能力表达；页面交互属于展示侧，授权、计价和任务状态仍由业务层决定。后续吸收其他前端时先适配这些契约，不能直接依赖数据库或复制核心业务规则。
 - 框架完成以当前约定支持范围的真实闭环为准：现有推理、管理 API、前端和扩展消费者均能通过上述边界工作，并有契约/行为与完整 CI 证据。新厂商、新客户端及 S7 功能仍独立扩大支持矩阵，不以预建接口替代验收。
 
-已有内核边界没有因这次职责澄清失效。F0 是初始接线，A1–A4 为现有 HTTP、worker、socket 与持久消费者提供了已验证底座；下一步以这些实现完成统一兼容层的实际契约收口，再接入同类项目能力和 S7 产品功能。该顺序不要求重做已通过且仍适用的底层验证。
+已有内核边界没有因这次职责澄清失效。F0 是初始接线，A1–A4 提供已验证底座，S6 在其上完成现有支持范围的三层接入并合并。S6/M1 已完成集成验收，下一批 S7-A01 通过同一协调链接入 Responses HTTP/SSE；后续参考能力和产品功能分别扩大支持范围，复用仍适用的底层证据。
 
 ### 统一框架的最小契约
 
@@ -104,7 +104,7 @@ flowchart TD
 
 客户端 API Key 由服务端生成足够随机的值，仅创建时返回一次；当前已存储验证摘要和展示前缀，不保留可查询的明文。上游凭据需要恢复原值用于转发，目标是单独加密存储并保护主密钥，不能与客户端 key 混用同一存储方式。
 
-**当前基础层状态**：A3-05 的可选上游凭据 AEAD 加密、挂载密钥、原子启用/轮换及持久 runtime 已通过完整 CI 并合并，见 [最终验收](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)。runtime 必须核验实际 store 已加密。未配置的 HTTP 兼容模式仍明文落库并输出警告，不计入生产安全基线；管理掩码仅保护展示。具体启用、旧备份/WAL/内存限制见 [密钥存储约定](reference/secret-storage.md)。这项基础验收不关闭新增的 S6-C 统一兼容层清单。
+**当前基础层状态**：A3-05 的可选上游凭据 AEAD 加密、挂载密钥、原子启用/轮换及持久 runtime 已通过完整 CI 并合并，见 [最终验收](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)。runtime 必须核验实际 store 已加密。未配置的 HTTP 兼容模式仍明文落库并输出警告，不计入生产安全基线；管理掩码仅保护展示。具体启用、旧备份/WAL/内存限制见 [密钥存储约定](reference/secret-storage.md)。S6 的独立功能与集成证据见其批次记录，不由本项基础验收代替。
 
 ## 4. 管理员与普通用户的权限
 
@@ -144,7 +144,7 @@ API 目标分区：`/api/admin/*` 为管理员操作，`/api/me/*` 为个人资�
 7. gateway 根据错误分类和剩余预算决定是否重试，更新健康状态。
 8. 统一收尾：释放并发/凭据资源、保存结果、结算或可靠标记待处理。异常与取消也必须走收尾。
 
-现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。`protocol.Request` 将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；A3-01 的 `internal/generation` 已作为有界进程内 worker 真实调用同一入口并重新解析派发身份，A3-02 又为它增加可选加密输出记录和中断标记；A3-03 的真实 socket 消费者验证同一执行链与独立连接容量；A3-04 通过 IntentAdmission 小端口原子保存加密意图和原账本双 hold，不把意图接入 volatile Runner；A3-05 经独立 DurableRunner/ExecuteClaimedTo 领取/fencing，接管原预留与历史售价，未知 attempt 不重发；main 有默认关闭接线。sealed 输出字节游标不等于原生协议事件，native WS 与完整 S6 产品能力仍单独验收。
+现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。`protocol.Request` 将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；A3-01 的 `internal/generation` 已作为有界进程内 worker 真实调用同一入口并重新解析派发身份，A3-02 又为它增加可选加密输出记录和中断标记；A3-03 的真实 socket 消费者验证同一执行链与独立连接容量；A3-04 通过 IntentAdmission 小端口原子保存加密意图和原账本双 hold，不把意图接入 volatile Runner；A3-05 经独立 DurableRunner/ExecuteClaimedTo 领取/fencing，接管原预留与历史售价，未知 attempt 不重发；main 有默认关闭接线。sealed 输出字节游标不等于原生协议事件，native WS 等 S7 产品能力仍单独验收；S6 既有支持范围的功能与集成状态见其批次记录。
 
 ## 6. 内核契约与重试边界
 
@@ -231,7 +231,7 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 | store / billing 持久实现 | 会话/任务/事件与现有账本的一致性事务，版本/幂等约束 | 以访问日志恢复状态、向业务层暴露任意 GORM 事务 |
 | cmd/gateway | 实例组装、worker/WS 管理器启动与有序关闭 | 在包 init 中隐式启动服务 |
 
-S6 先让现有 HTTP 成为类型化执行入口的真实调用者并验收合并；S7-A01 接入 Responses，后续再接 worker/WS，共享规则只有一个实现。新增模块、WS 依赖与跨模块原子提交端口需连同 `internal/architecture` 边界和真实行为测试评审，禁止为了引入新包删除/放宽全部依赖门槛。纯 WS I/O 与 HTTP core 可用不同执行器，但两者都由 gateway 组织 attempt，不产生第二条业务链。
+现有 HTTP 已调用类型化执行入口，S6 的管理/协议/扩展/前端接入已合并；下一批 S7-A01 依托已验收 M1 接入 Responses，再将该操作接入持久 worker/WS，共享规则只有一个实现。新增模块、WS 依赖与跨模块原子提交端口需连同 `internal/architecture` 边界和真实行为测试评审，禁止为了引入新包删除/放宽全部依赖门槛。纯 WS I/O 与 HTTP core 可用不同执行器，但两者都由 gateway 组织 attempt，不产生第二条业务链。
 
 后台接收需要任务意图和账本预留在同一存储事务中成功；S7-A01 明确最小事务端口与失败语义，S7-A03 交付真实调用和故障回归。不能先扣余额后异步写队列，也不能先返回任务 ID 后再尝试预留。A3-04 已用现有 Chat/embeddings 的加密输入真实消费此原子端口并验证强杀前后事务；A3-05 已为现有操作交付独立持久领取/续租/fencing、原 hold 接管和历史恢复；原账本继续拒绝意图回执开启无 claim 的普通 attempt。它不是 Responses job，原生上游后台/父链策略仍在 S7 独立验收。
 

@@ -46,7 +46,8 @@ Environment: Windows/PowerShell, Go 1.26.3 (host windows/386; every Go command
 explicitly set `GOARCH=amd64`), Node 24.14.1, Python 3.14.3, installed Playwright
 with Chromium 1208. No real upstream, production database or external client
 credential was used. The candidate is the S6 working source on the fetched
-`758ad04` integration baseline; final exact-source CI and merge are pending.
+`758ad04` integration baseline. Exact-source CI and the actual feature merge
+are recorded separately below; local passes do not certify later source.
 
 | Actual command / check | Result and scope |
 |---|---|
@@ -75,6 +76,69 @@ passed with approved shared-Git access. It was not bypassed with build flags.
 
 Browser commands used the existing bundled module path via `NODE_PATH` and
 `PLAYWRIGHT_EXECUTABLE_PATH` pointing to installed Chromium. No dependency was
-downloaded. Linux full race and existing container delivery remain the final CI
-gate and are not inferred from local Windows passes. S6-A/B/C remain unchecked
-until complete CI and integration acceptance exist.
+downloaded. Linux full race and existing container delivery were subsequently
+executed by exact-source CI, not inferred from local Windows passes.
+
+## 2026-10-18 S6 framework acceptance and M1 baseline
+
+| Fact | Exact source and scope |
+|---|---|
+| Latest integration baseline | `758ad04fb82dcf70dd4cadec039d15cd2a8629a7`, fetched at start and again immediately before merge; it remained the feature ancestor and PR base |
+| Protocol slice | `060a2eb`, content/tool stream fidelity and final usage |
+| Management slice | `c349bc4`, shared configuration persistence/publication use cases |
+| Final feature head | `9a6eaa250099c91847fa92ffde0475af16b6e488`, frontend compatibility, real consumers and the complete S6 batch; clean tree after commit/push |
+| Exact-head push CI | [Verify 39062579429](https://github.com/ANRCM0/TXAPI/actions/runs/39062579429), SUCCESS for both `check` and `delivery` |
+| Exact-head PR CI | [Verify 39063298294](https://github.com/ANRCM0/TXAPI/actions/runs/39063298294), SUCCESS for both `check` and `delivery`; all four push/PR checks were confirmed green with `MERGEABLE` / `CLEAN` before merge |
+| Actual feature merge | [PR #8](https://github.com/ANRCM0/TXAPI/pull/8), merged at 2026-10-18 03:43:33 Asia/Shanghai (2026-10-17 19:43:33 UTC); merge `ca009c2a1e3aa00bfb978f9d9e48785db979763a`, parents are the latest baseline and exact verified feature head |
+| Merged-master CI | [Verify 39063693685](https://github.com/ANRCM0/TXAPI/actions/runs/39063693685), SUCCESS for both `check` and `delivery` on exact `ca009c2a1e3aa00bfb978f9d9e48785db979763a` |
+
+Merge used an exact-head match, without admin/bypass. No workflow trigger,
+existing regression or gate was disabled, and no workflow was manually
+dispatched. Complete CI includes module cleanliness, architecture/dependency
+and all 79 OpenAPI operation checks, build/vet/gofmt, frontend syntax/behavior,
+full Linux race, the existing production-main smoke, and container installation,
+S3 upgrade, backup/restore and shutdown. Coverage and performance are reports,
+not claims of an improvement or additional external compatibility.
+
+The PR audit mapped S6-00 through S6-05 to actual code, consumers and the
+recorded local/CI evidence, and found no remaining promised-scope functional
+gap. The new real API/browser workflow ran locally with the temporary production
+binary; its execution is not attributed to the CI syntax-only browser check.
+Unchanged A1-A4 behavior reuses its recorded evidence only where applicable;
+the final S6 full CI also executes all existing Go/race and smoke regressions.
+
+The completed S6-00 through S6-06 audit is scoped as follows:
+
+| Requirement | Delivered behavior and authoritative proof |
+|---|---|
+| S6-00 inventory | All 79 operations, application consumers, support matrix and G01-G11 findings are mapped in the compatibility inventory; unchanged, repaired and unsupported behavior are distinguished |
+| S6-01 core/business | Shared gateway coordination and HTTP admission handoff remain; typed-nil injection and missing output fail before dispatch. New injection/output cases and existing authorization, worker/socket, lease, budget and finalization regressions pass in final full CI |
+| S6-02 protocol/tools | OpenAI structured content, Anthropic initial blocks/multi-tool parameters and bounded stream sequencing, Gemini cumulative/tail usage and usage-only chunks are preserved; all protocol packages pass after the fixture-only repair, then final full Linux race passes |
+| S6-03 management/API | Both legacy and session HTTP consumers use real `management.Configuration`; real Store tests cover save/readback errors, publication ordering and Apply without replay. Existing DTO, route/authentication and owner/resource behavior pass final contract and full tests |
+| S6-04 extensions | Existing injected adaptor dispatch and copied-map isolation are actual consumers; invalid injection, per-stream sessions, capability rejection, dependency and lifecycle rules are recorded and regression-checked, without a dynamic loader or empty interface platform |
+| S6-05 frontend | Ten API behavior cases plus navigation/billing regressions cover saved/applied errors, role/session changes, stale responses, exact money and pagination. Temporary production binary/SQLite and real API/browser flow pass at desktop/mobile sizes; existing main smoke also passes |
+| S6-06 integration | Exact feature head and latest ancestor/base confirmed, full push/PR CI green, PR #8 actually merged with matching head and merged-master full CI green; PLAN and the compatibility/application/extension guides synchronize these observed facts |
+
+S6-A/B/C and M1 are accepted for the declared existing support range on
+`master/ca009c2`. No application support promise was replaced with a refusal
+to obtain acceptance. S5-03/full cost proof, new strict permission, S7-A
+production Responses/conversations/native background and product WS, arbitrary
+external clients, real providers and production database operation remain
+outside this S6 acceptance. This documentation-only update records already
+observed source results; those runs do not certify the subsequent documentation
+text itself. It adds no executable source, migration, dependency or contract
+change and does not require another local functional test run/manual CI dispatch.
+
+## Acceptance documentation synchronization
+
+The follow-up `docs/s6-m1-acceptance` starts from the verified functional merge
+`ca009c2`. It changes only eight Markdown files: the active PLAN, README,
+architecture/development/collaboration guides and S6/foundation references and
+history. Windows/PowerShell `python .local/validation/check-foundation-docs.py`
+checked 131 local links/fragments across those eight changed documents;
+`git diff --check` and the scoped diff/status review passed. The checker is an
+ignored local validation helper, not a new product dependency. No additional Go,
+browser or smoke tests were run for this pure explanation/status update; normal
+automatic push/PR CI triggers remain unchanged. Final documentation integration
+and its exact CI results can be recorded on the PR, rather than creating
+recursive evidence-only source commits.
