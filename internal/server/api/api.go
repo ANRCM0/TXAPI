@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"minigateway/internal/billing"
 	"minigateway/internal/store"
 )
 
@@ -25,11 +26,12 @@ import (
 // 为什么把 store 和回调函数都塞进来：渠道变更后必须同步刷新转发层的
 // 渠道池，价格变更后必须让计费引擎失效价格缓存——否则会出现
 // 「API 显示改成功了但转发/计费还用旧数据」的静默故障。
-// 把回调作为依赖注入，api 包就不需要反向 import relay/billing
-// （那会形成 server → api → relay → server 的环）。
+// 通过回调和 billing.Engine 注入依赖，api 包不反向 import gateway/server，
+// 避免形成 HTTP 装配层的依赖环。
 type Handler struct {
 	loginGate loginGate
 	store     *store.Store
+	billing   *billing.Engine
 	// onChannelsChanged 在渠道发生任何写操作后调用，用于刷新 relay 渠道池。
 	channels publication
 	// onPricesChanged 在价格/倍率发生任何写操作后调用，用于让计费引擎
@@ -41,7 +43,11 @@ type Handler struct {
 
 // New 创建管理 API handler。
 func New(st *store.Store, onChannelsChanged, onPricesChanged func() error) *Handler {
-	h := &Handler{store: st, epoch: time.Now().UTC().Format(time.RFC3339Nano)}
+	return NewWithBilling(st, onChannelsChanged, onPricesChanged, nil)
+}
+
+func NewWithBilling(st *store.Store, onChannelsChanged, onPricesChanged func() error, ledger *billing.Engine) *Handler {
+	h := &Handler{store: st, billing: ledger, epoch: time.Now().UTC().Format(time.RFC3339Nano)}
 	h.channels.apply, h.prices.apply = onChannelsChanged, onPricesChanged
 	h.channels.publish(true)
 	h.prices.publish(true)

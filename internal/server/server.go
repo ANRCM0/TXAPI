@@ -162,7 +162,7 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。
-	apiHandler := api.New(deps.Store, func() error {
+	apiHandler := api.NewWithBilling(deps.Store, func() error {
 		channels, err := deps.Store.ChannelSnapshot()
 		if err != nil {
 			return err
@@ -174,7 +174,7 @@ func NewEngine(deps Deps) *gin.Engine {
 			return deps.Billing.Prices().ReloadPrices()
 		}
 		return nil
-	})
+	}, deps.Billing)
 	apiHandler.Register(engine.Group(""), deps.AdminAuth)
 	apiHandler.RegisterAccess(engine.Group(""))
 

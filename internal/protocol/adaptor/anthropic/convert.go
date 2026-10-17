@@ -134,8 +134,9 @@ type claudeStreamEvent struct {
 	Message *claudeResponse `json:"message,omitempty"`
 
 	// content_block_start / content_block_delta: index + delta
-	Index int             `json:"index,omitempty"`
-	Delta json.RawMessage `json:"delta,omitempty"`
+	Index        int             `json:"index,omitempty"`
+	Delta        json.RawMessage `json:"delta,omitempty"`
+	ContentBlock json.RawMessage `json:"content_block,omitempty"`
 
 	// message_delta: delta.stop_reason + usage.output_tokens
 	Usage *claudeUsage `json:"usage,omitempty"`

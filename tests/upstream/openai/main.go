@@ -61,6 +61,9 @@ func main() {
 			flusher := w.(http.Flusher)
 			chunks := []string{"你好", "，这是", "流式", "响应。"}
 			delay := 50 * time.Millisecond
+			if strings.Contains(auth, "smoke-slow") {
+				delay = 500 * time.Millisecond
+			}
 			if req.ChunkDelayMS > 0 && req.ChunkDelayMS <= 1000 {
 				delay = time.Duration(req.ChunkDelayMS) * time.Millisecond
 			}

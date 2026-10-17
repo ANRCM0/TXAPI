@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/core"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
+	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/adaptor"
 )
 
@@ -26,7 +26,11 @@ type Options struct {
 	RetryTimes     int
 	AttemptTimeout time.Duration
 	TotalTimeout   time.Duration
-	Billing        *billing.Engine
+	Billing        LegacyBilling
+	// StrictBilling can be supplied independently. For existing callers, Billing
+	// is also used when it implements StrictBilling. Strict never uses legacy fees.
+	StrictBilling  StrictBilling
+	BillingMode    billing.Mode
 	Limiter        access.Limiter
 	Metrics        *metrics.Registry
 	LogRecorder    func(*dbmodel.RequestLog)
@@ -42,7 +46,9 @@ type Gateway struct {
 	retryTimes     int
 	attemptTimeout time.Duration
 	totalTimeout   time.Duration
-	billing        *billing.Engine
+	billing        LegacyBilling
+	strictBilling  StrictBilling
+	billingMode    billing.Mode
 	limiter        access.Limiter
 	metrics        *metrics.Registry
 	logRecorder    func(*dbmodel.RequestLog)
@@ -51,6 +57,21 @@ type Gateway struct {
 }
 
 func New(opts Options) (*Gateway, error) {
+	if opts.BillingMode == "" {
+		opts.BillingMode = billing.ModeLegacy
+	}
+	if err := opts.BillingMode.Validate(); err != nil {
+		return nil, err
+	}
+	if nilBilling(opts.Billing) {
+		opts.Billing = nil
+	}
+	if nilBilling(opts.StrictBilling) {
+		opts.StrictBilling = nil
+	}
+	if opts.StrictBilling == nil {
+		opts.StrictBilling, _ = opts.Billing.(StrictBilling)
+	}
 	if opts.RetryTimes < 0 || opts.RetryTimes > 10 || opts.AttemptTimeout < 0 || opts.TotalTimeout < 0 {
 		return nil, fmt.Errorf("invalid gateway retry or timeout configuration")
 	}
@@ -69,7 +90,7 @@ func New(opts Options) (*Gateway, error) {
 		opts.Metrics = metrics.New()
 	}
 	g := &Gateway{admission: opts.Admission, adaptors: maps.Clone(opts.Adaptors), executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout,
-		billing: opts.Billing, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter}
+		billing: opts.Billing, strictBilling: opts.StrictBilling, billingMode: opts.BillingMode, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter}
 	if err := g.initRegistry(opts.Channels); err != nil {
 		g.Close()
 		return nil, err
@@ -89,6 +110,7 @@ type Identity struct {
 }
 
 type AttemptResult struct {
+	Operation    protocol.Operation
 	ChannelID    uint
 	CredentialID uint
 	Model        string
@@ -96,6 +118,10 @@ type AttemptResult struct {
 }
 
 type RequestResult struct {
+	Operation     protocol.Operation
+	reservation   *billing.PreDeduct
+	strictRequest *billing.StrictRequest
+	BillingState  string
 	Identity      Identity
 	ChannelID     uint
 	CredentialID  uint
@@ -112,29 +138,5 @@ type resultContextKey struct{}
 
 func ResultFromContext(ctx context.Context) *RequestResult {
 	result, _ := ctx.Value(resultContextKey{}).(*RequestResult)
-	return result
-}
-
-// state is an HTTP boundary helper. Relay bookkeeping lives in a typed context
-// value, never in Gin's string map. Authentication is read once at this boundary.
-func state(c *gin.Context) *RequestResult {
-	if c.Request == nil {
-		c.Request = &http.Request{Header: make(http.Header)}
-	}
-	if result := ResultFromContext(c.Request.Context()); result != nil {
-		return result
-	}
-	identity := Identity{RequestID: access.RequestID(c.Request.Context())}
-	if p, ok := access.PrincipalFromContext(c.Request.Context()); ok {
-		identity.UserID = p.UserID
-		identity.TokenID = p.TokenID
-		identity.TokenName = p.TokenName
-		identity.AllowedModels = append([]string(nil), p.Policy.Models...)
-		policy := p.Policy
-		identity.Policy = &policy
-	}
-	result := &RequestResult{Result: core.Result{StatusCode: 500}, Identity: identity}
-
-	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), resultContextKey{}, result))
 	return result
 }

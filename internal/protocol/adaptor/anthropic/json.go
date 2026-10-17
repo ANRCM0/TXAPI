@@ -2,7 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
 	"strings"
 
 	"minigateway/internal/protocol/canonical"
@@ -28,12 +28,7 @@ func extractExtra(body []byte, modeled ...string) map[string]json.RawMessage {
 	return all
 }
 
-// mergeExtra 把未建模字段合并回出站请求体。
-//
-// 两个原则：
-//  1. 出站结构体已生成的字段不被 Extra 覆盖（结构体是权威）
-//  2. Extra 里不在 claudeSupportedExtra 白名单的字段不发出，
-//     并记警告——静默丢弃是明确禁止的，所以必须有日志。
+// Unsupported fields are request errors, not a log-only lossy conversion.
 func mergeExtra(body []byte, extra map[string]json.RawMessage, supported map[string]bool) ([]byte, error) {
 	if len(extra) == 0 {
 		return body, nil
@@ -50,18 +45,9 @@ func mergeExtra(body []byte, extra map[string]json.RawMessage, supported map[str
 			all[k] = v
 			continue
 		}
-		// 不静默丢弃：记下这个字段，运维能看到用户传了什么、
-		// 网关为什么没转发。
-		logUnsupportedField(k)
+		return nil, fmt.Errorf("%w: field %q cannot be preserved", ErrUnsupported, k)
 	}
 	return json.Marshal(all)
-}
-
-// logUnsupportedField 记录被丢弃的字段。
-// 用标准库 log 而不是结构化日志器：项目目前只有 log.Printf 一条路，
-// 保持一致。等接入结构化日志（P5）再统一改。
-func logUnsupportedField(field string) {
-	log.Printf("[anthropic] 丢弃 Claude 不支持的请求字段: %s", field)
 }
 
 // sseData 取出一行 SSE 的 data 载荷。

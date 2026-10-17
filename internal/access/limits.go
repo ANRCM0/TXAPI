@@ -19,6 +19,22 @@ func TokenBucketKey(tokenID uint) string      { return "tok:" + strconv.FormatUi
 func TokenUsageBucketKey(tokenID uint) string { return TokenBucketKey(tokenID) + ":tpm" }
 
 type reservationKey struct{}
+type rateAdmissionKey struct{}
+
+func WithRateAdmission(ctx context.Context, tokenID uint) context.Context {
+	return context.WithValue(ctx, rateAdmissionKey{}, tokenID)
+}
+func HasRateAdmission(ctx context.Context, tokenID uint) bool {
+	id, _ := ctx.Value(rateAdmissionKey{}).(uint)
+	return tokenID != 0 && id == tokenID
+}
+
+// A new generation never inherits a previous generation's mutable reservation.
+func NewGenerationContext(ctx context.Context) context.Context {
+	ctx = context.WithValue(ctx, reservationKey{}, (*tokenReservation)(nil))
+	return context.WithValue(ctx, rateAdmissionKey{}, uint(0))
+}
+
 type tokenReservation struct {
 	tokenID  uint
 	estimate int

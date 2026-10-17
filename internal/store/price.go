@@ -3,6 +3,8 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"strings"
 
 	"minigateway/internal/model"
 )
@@ -29,8 +31,10 @@ type PriceInput struct {
 // 「数据落库前的最后防线」，api 的校验是「把 400 拦在门外」，
 // 两层都要有。
 func (in *PriceInput) Validate() error {
-	if in.InputPricePer1K < 0 || in.OutputPricePer1K < 0 {
-		return fmt.Errorf("单价不能为负数: 输入=%v 输出=%v", in.InputPricePer1K, in.OutputPricePer1K)
+	for _, price := range []float64{in.InputPricePer1K, in.OutputPricePer1K} {
+		if math.IsNaN(price) || math.IsInf(price, 0) || price < 0 || price > model.MaxPricePer1K {
+			return fmt.Errorf("price must be finite and between 0 and 1000000000 per 1K tokens")
+		}
 	}
 	return nil
 }
@@ -49,6 +53,13 @@ func (s *Store) ModelPrices() ([]model.ModelPrice, error) {
 // 用主键冲突更新而不是「先查再写」：价格由管理接口维护，
 // 先查再写在并发改价时会丢更新；UPSERT 一条语句搞定。
 func (s *Store) UpsertModelPrice(p *model.ModelPrice) error {
+	if p == nil || strings.TrimSpace(p.Model) == "" {
+		return fmt.Errorf("price model is required")
+	}
+	in := PriceInput{InputPricePer1K: p.InputPricePer1K, OutputPricePer1K: p.OutputPricePer1K}
+	if err := in.Validate(); err != nil {
+		return err
+	}
 	if err := s.db.Clauses(upsertClause()).Create(p).Error; err != nil {
 		return fmt.Errorf("写入模型 %s 的价格失败: %w", p.Model, err)
 	}
@@ -94,8 +105,8 @@ func (s *Store) GroupRates() (map[string]float64, error) {
 // （删掉某个分组是常见操作，按组合并做不到）。
 func (s *Store) SetGroupRates(rates map[string]float64) error {
 	for group, rate := range rates {
-		if rate <= 0 {
-			return fmt.Errorf("分组 %s 的倍率必须为正数: %v", group, rate)
+		if strings.TrimSpace(group) == "" || math.IsNaN(rate) || math.IsInf(rate, 0) || rate <= 0 || rate > model.MaxGroupRate {
+			return fmt.Errorf("group rate requires a nonempty name and a finite value in (0, 1000000]")
 		}
 	}
 	encoded, err := json.Marshal(rates)

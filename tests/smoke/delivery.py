@@ -6,6 +6,7 @@ Never reads config.yaml, .env, deployment secrets or existing Docker volumes.
 
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -350,8 +351,20 @@ def main():
             after = upgrade.backup("after-s4")
             upgraded = snapshot(after / "gateway.db")
             assert len(upgraded["logs"]) == 4, "Graceful stop did not flush accepted access logs"
-            assert upgraded["schema_migrations"] == original["schema_migrations"], "S4 changed schema"
-            print("PASS: S3 -> S4, original identities/keys/credentials/usage, in-flight SSE and log drain", flush=True)
+            previous_steps = len(original["schema_migrations"])
+            assert upgraded["schema_migrations"][:previous_steps] == original["schema_migrations"], "Released migrations changed"
+            assert [row[0] for row in upgraded["schema_migrations"][previous_steps:]] == [5, 6, 7, 8, 9], "Missing billing/archive/intent migrations"
+            with contextlib.closing(sqlite3.connect((after / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
+                for table in ("generation_records", "generation_segments", "generation_intents"):
+                    assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,), "Archive schema missing or main started an undeclared consumer"
+                history = dict(db.execute("SELECT version,payload FROM billing_price_versions").fetchall())
+                assert history, "Published price history was not persisted"
+                for version, payload in history.items():
+                    assert hashlib.sha256(payload.encode()).hexdigest() == version
+                versions = db.execute("SELECT price_version FROM logs ORDER BY id").fetchall()
+                assert versions[:2] == [("",), ("",)], "Historical logs were assigned invented prices"
+                assert all(version in history for version, in versions[2:]), "New requests lack persisted price versions"
+            print("PASS: S3/v4 -> current/v9, original identities/keys/usage, price history, in-flight SSE and log drain", flush=True)
             upgrade.restore(before)
             restored = upgrade.backup("restored")
             assert snapshot(restored / "gateway.db") == original, "Restore did not recover the exact baseline data"

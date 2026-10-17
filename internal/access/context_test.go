@@ -64,3 +64,17 @@ func TestReservationFinalizesOnceAfterCancellation(t *testing.T) {
 	}
 	FinishTokens(ctx, nil, 30)
 }
+
+func TestGenerationDoesNotInheritMutableAdmission(t *testing.T) {
+	parent := WithRateAdmission(WithTokenReservation(context.Background(), 12, 100), 12)
+	child := NewGenerationContext(parent)
+	limiter := &completionLimiter{}
+	FinishTokens(child, limiter, 0)
+	if HasRateAdmission(child, 12) || limiter.calls != 0 {
+		t.Fatal("child inherited parent admission")
+	}
+	FinishTokens(parent, limiter, 30)
+	if !HasRateAdmission(parent, 12) || limiter.calls != 1 || limiter.delta != -70 {
+		t.Fatal("child changed parent's admission")
+	}
+}

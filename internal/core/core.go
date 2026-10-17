@@ -33,6 +33,15 @@ type Error struct {
 
 type Termination string
 
+// Phase records local observations, never proof that the provider did not run.
+type Phase string
+
+const (
+	NotDispatched    Phase = "not_dispatched"
+	Dispatching      Phase = "dispatching"
+	ResponseReceived Phase = "response_received"
+)
+
 const (
 	Success          Termination = "success"
 	UpstreamError    Termination = "upstream_error"
@@ -42,17 +51,20 @@ const (
 )
 
 // Result reports execution independently of the HTTP status already sent.
-// Committed is monotonic: once headers/body have been sent it cannot be reset.
+// Committed is monotonic: irreversible output commitment cannot be reset.
 type Result struct {
-	StatusCode   int
-	HTTPStatus   int
-	Committed    bool
-	Replayable   bool
-	Termination  Termination
-	Usage        *Usage
-	Error        *Error
-	Duration     time.Duration
-	BytesWritten int64
+	Phase            Phase
+	UpstreamStatus   int
+	ProtocolComplete bool
+	StatusCode       int
+	HTTPStatus       int
+	Committed        bool
+	Replayable       bool
+	Termination      Termination
+	Usage            *Usage
+	Error            *Error
+	Duration         time.Duration
+	BytesWritten     int64
 }
 
 type Frame struct {
@@ -74,6 +86,7 @@ type Decoder interface {
 }
 
 type Input struct {
+	Method     string
 	URL        string
 	Header     http.Header
 	Body       []byte
@@ -119,10 +132,22 @@ func failure(status int, message string, kind string) *Error {
 }
 
 func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Input) (result Result) {
+	return e.ExecuteTo(parent, NewHTTPOutput(w), in)
+}
+
+// ExecuteTo executes one HTTP attempt with an independently owned output.
+func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (result Result) {
 	started := time.Now()
+	result.Phase = NotDispatched
 	result.Replayable = in.Replayable
 	result.Termination = UpstreamError
-	defer func() { result.Duration = time.Since(started) }()
+	defer func() {
+		result.Duration = time.Since(started)
+		if output != nil {
+			state := output.State()
+			result.Committed, result.HTTPStatus = state.Committed, state.HTTPStatus
+		}
+	}()
 	ctx := parent
 	var cancel context.CancelFunc
 	if in.Timeout > 0 {
@@ -144,16 +169,25 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 		// Never expose request URLs (Gemini credentials may be in query strings).
 		result.Error = failure(result.StatusCode, message, string(result.Termination))
 	}
-	if in.Decoder == nil {
+	if output == nil || in.Decoder == nil {
 		result.StatusCode = http.StatusInternalServerError
-		result.Error = failure(result.StatusCode, "missing response decoder", "internal_error")
+		result.Error = failure(result.StatusCode, "missing output or response decoder", "internal_error")
+		return
+	}
+	if output.State().Committed {
+		result.StatusCode = http.StatusInternalServerError
+		result.Error = failure(result.StatusCode, "execution output is already committed", "internal_error")
 		return
 	}
 	if err := ctx.Err(); err != nil {
 		fail("request canceled before upstream execution", err, Canceled)
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, in.URL, bytes.NewReader(in.Body))
+	method := in.Method
+	if method == "" {
+		method = http.MethodPost
+	}
+	req, err := http.NewRequestWithContext(ctx, method, in.URL, bytes.NewReader(in.Body))
 	if err != nil {
 		result.StatusCode = 400
 		result.Error = failure(400, "invalid upstream request", "invalid_request")
@@ -167,12 +201,16 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 	if in.Stream {
 		req.Header.Set("Accept", "text/event-stream")
 	}
+	// Once Do starts, a transport error cannot establish non-execution.
+	result.Phase = Dispatching
 	resp, err := e.client.Do(req)
 	if err != nil {
 		fail("upstream request failed", err, UpstreamError)
 		return
 	}
 	defer resp.Body.Close()
+	result.Phase = ResponseReceived
+	result.UpstreamStatus = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		body, readErr := readBounded(resp.Body, e.maxResponseBytes)
 		if readErr != nil {
@@ -190,34 +228,41 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 		result.Error = &Error{StatusCode: resp.StatusCode, Error: detail}
 		return
 	}
-	controller := http.NewResponseController(w)
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := controller.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			fail("failed setting downstream write deadline", err, ClientWriteError)
-			return
+	if controller, supported := output.(interface{ SetWriteDeadline(time.Time) error }); supported {
+		if deadline, ok := ctx.Deadline(); ok {
+			if err := controller.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				fail("failed setting downstream write deadline", err, ClientWriteError)
+				return
+			}
+			defer controller.SetWriteDeadline(time.Time{})
 		}
-		defer controller.SetWriteDeadline(time.Time{})
 	}
 	write := func(data []byte, stream bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !result.Committed {
+		if !output.State().Committed {
+			contentType := "application/json"
 			if stream {
-				w.Header().Set("Content-Type", "text/event-stream")
-				w.Header().Set("Cache-Control", "no-cache")
-				w.Header().Set("X-Accel-Buffering", "no")
-			} else {
-				w.Header().Set("Content-Type", "application/json")
+				contentType = "text/event-stream"
 			}
-			result.Committed = true
-			result.HTTPStatus = http.StatusOK
-			w.WriteHeader(http.StatusOK)
+			if err := output.Commit(ctx, ResponseMetadata{StatusCode: http.StatusOK, ContentType: contentType}); err != nil {
+				return err
+			}
+			if !output.State().Committed {
+				return errors.New("output did not commit the response")
+			}
 		}
-		n, err := w.Write(data)
+		n, err := output.Write(ctx, data)
+		if n < 0 || n > len(data) {
+			return errors.New("output returned an invalid write count")
+		}
 		result.BytesWritten += int64(n)
+		if err == nil && n != len(data) {
+			err = io.ErrShortWrite
+		}
 		if err == nil && stream {
-			err = controller.Flush()
+			err = output.Flush(ctx)
 		}
 		return err
 	}
@@ -233,6 +278,7 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 			fail("failed decoding upstream response", err, UpstreamError)
 			return
 		}
+		result.ProtocolComplete = true
 		if err = write(out, false); err != nil {
 			fail("failed writing downstream response", err, ClientWriteError)
 			return
@@ -291,6 +337,7 @@ func (e *Executor) Execute(parent context.Context, w http.ResponseWriter, in Inp
 			fail("upstream stream ended prematurely", err, UpstreamError)
 			return
 		}
+		result.ProtocolComplete = true
 		if err = emit(frames); err != nil {
 			fail("failed writing stream terminator", err, ClientWriteError)
 			return

@@ -111,6 +111,9 @@ func (h *Handler) RegisterAccess(r *gin.RouterGroup) {
 	admin.POST("/keys/:id/claim", h.ClaimKey)
 	admin.GET("/model-policy", h.SystemPolicy)
 	admin.PUT("/model-policy", h.SetSystemPolicy)
+	admin.GET("/billing/reservations", h.BillingReservations)
+	admin.GET("/billing/reservations/:id", h.BillingReservation)
+	admin.POST("/billing/reservations/:id/resolve", h.ResolveBillingReservation)
 	h.registerResources(admin)
 }
 func (h *Handler) Login(c *gin.Context) {

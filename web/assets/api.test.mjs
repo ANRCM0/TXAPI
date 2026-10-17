@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createClient, channelInput, keyInput, userInput, list } from "./api.mjs";
+import { createClient, channelInput, keyInput, userInput, list, ledgerMoney, resolutionInput } from "./api.mjs";
 
 test("nullable lists and full-update payloads preserve restrictions", () => {
   assert.deepEqual(list(null), []);
@@ -22,6 +22,24 @@ test("editing channel does not send masked keys or wipe its pool", () => {
   assert.equal("api_key" in channel, false);
   assert.deepEqual(channel.model_mapping, { m1: "actual" });
   assert.throws(() => channelInput({ model_mapping: "[]" }));
+});
+
+test("ledger amounts preserve precision and decisions require explicit confirmation and usage", () => {
+  assert.equal(ledgerMoney("9223372036854775807"), "9223372036.854775807");
+  assert.equal(ledgerMoney("1"), "0.000000001");
+  assert.equal(ledgerMoney("100000000"), "0.1");
+  assert.throws(() => ledgerMoney("unknown"));
+  const id = "0123456789abcdef0123456789abcdef";
+  const values = { confirmation: id, action: "settle_usage", reason: " verified ", evidence: "receipt",
+    prompt_tokens: "11", completion_tokens: "0", actor_id: 999, actual_model: "free" };
+  assert.deepEqual(resolutionInput(values, id), { action: "settle_usage", reason: "verified", evidence: "receipt",
+    usage: { prompt_tokens: 11, completion_tokens: 0 } });
+  assert.throws(() => resolutionInput({ ...values, confirmation: "wrong" }, id));
+  assert.throws(() => resolutionInput({ ...values, completion_tokens: "" }, id));
+  assert.throws(() => resolutionInput({ ...values, prompt_tokens: "9007199254740992" }, id));
+  assert.throws(() => resolutionInput({ ...values, action: "waive" }, id));
+  assert.deepEqual(resolutionInput({ ...values, action: "waive", prompt_tokens: "", completion_tokens: "" }, id),
+    { action: "waive", reason: "verified", evidence: "receipt" });
 });
 
 test("API client separates sessions from call keys and warns about saved/pending config", async () => {

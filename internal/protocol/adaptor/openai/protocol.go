@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"minigateway/internal/protocol/canonical"
@@ -33,6 +34,9 @@ func (a *Adaptor) AuthHeader(apiKey string) (string, string) {
 // content 字段允许「字符串」和「分片数组」两种写法（多模态时是数组），
 // 这里统一折叠成 []ContentPart，让下游所有适配器只面对一种形态。
 func (a *Adaptor) ParseRequest(body []byte) (*canonical.ChatRequest, error) {
+	if err := validateConvertibleRequest(body); err != nil {
+		return nil, err
+	}
 	var raw struct {
 		Model       string          `json:"model"`
 		Messages    []rawMessage    `json:"messages"`
@@ -57,8 +61,24 @@ func (a *Adaptor) ParseRequest(body []byte) (*canonical.ChatRequest, error) {
 	}
 	req.Stop = parseStop(raw.Stop)
 
+	// Resolve results by call ID, not by guessing names from client-supplied IDs.
+	calls := map[string]string{}
 	for _, m := range raw.Messages {
-		req.Messages = append(req.Messages, m.toCanonical())
+		for _, call := range m.ToolCalls {
+			if _, exists := calls[call.ID]; exists {
+				return nil, fmt.Errorf("duplicate tool call id %q", call.ID)
+			}
+			calls[call.ID] = call.Function.Name
+		}
+		msg := m.toCanonical()
+		if m.Role == canonical.RoleTool {
+			name, ok := calls[m.ToolCallID]
+			if !ok || (m.Name != "" && m.Name != name) {
+				return nil, fmt.Errorf("tool result has no matching call")
+			}
+			msg.Name = name
+		}
+		req.Messages = append(req.Messages, msg)
 	}
 
 	for _, t := range raw.Tools {
@@ -73,6 +93,11 @@ func (a *Adaptor) ParseRequest(body []byte) (*canonical.ChatRequest, error) {
 	// 出站适配器决定是映射、透传还是报错——绝不在这里悄悄丢掉。
 	req.Extra = extractExtra(body, "model", "messages", "max_tokens",
 		"temperature", "top_p", "stop", "stream", "tools")
+	if string(req.Extra["n"]) == "1" {
+		delete(req.Extra, "n")
+	}
+	// The converted response emits usage locally, not as a vendor request field.
+	delete(req.Extra, "stream_options")
 	return req, nil
 }
 

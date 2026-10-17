@@ -69,11 +69,11 @@ func TestExecutorDeadlineAndPreCanceledRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	result := e.Execute(ctx, httptest.NewRecorder(), Input{URL: upstream.URL, Decoder: rawDecoder{}})
-	if result.Termination != Canceled || result.Committed || hits.Load() != 0 {
+	if result.Termination != Canceled || result.Committed || hits.Load() != 0 || result.Phase != NotDispatched {
 		t.Fatalf("pre-canceled: %+v hits=%d", result, hits.Load())
 	}
 	result = e.Execute(context.Background(), httptest.NewRecorder(), Input{URL: upstream.URL, Decoder: rawDecoder{}, Timeout: 30 * time.Millisecond})
-	if result.Termination != Deadline || result.StatusCode != 504 || result.Committed {
+	if result.Termination != Deadline || result.StatusCode != 504 || result.Committed || result.Phase != Dispatching {
 		t.Fatalf("deadline: %+v", result)
 	}
 }
@@ -85,7 +85,7 @@ func TestExecutorReportsCommittedStreamFailure(t *testing.T) {
 	defer e.Close()
 	w := httptest.NewRecorder()
 	result := e.Execute(context.Background(), w, Input{URL: upstream.URL, Decoder: rawDecoder{}, Stream: true, Replayable: true})
-	if result.Error == nil || !result.Committed || result.HTTPStatus != 200 || result.StatusCode != 502 {
+	if result.Error == nil || !result.Committed || result.HTTPStatus != 200 || result.StatusCode != 502 || result.Phase != ResponseReceived || result.ProtocolComplete || result.UpstreamStatus != 200 {
 		t.Fatalf("result=%+v", result)
 	}
 	if strings.Contains(w.Body.String(), "[DONE]") {

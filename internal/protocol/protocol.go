@@ -31,11 +31,45 @@ func Resolve(name string) (adaptor.Adaptor, bool) {
 }
 
 func Prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (core.Input, *core.Error) {
-	url, err := a.GetRequestURL(m)
+	if m == nil {
+		return core.Input{}, unsupportedOperation()
+	}
+	operation, known := OperationForMode(m.Mode)
+	requirements := RequirementsFor(operation, body)
+	requirements.Stream = requirements.Stream || m.IsStream
+	if !known || !Supports(a, requirements) {
+		return core.Input{}, unsupportedOperation()
+	}
+	return prepare(a, body, m)
+}
+
+// PrepareRequest binds a selected target to the same operation facts used by
+// routing. The old Mode/IsStream fields cannot substitute a different operation.
+func PrepareRequest(a adaptor.Adaptor, request Request, m *meta.Meta) (core.Input, *core.Error) {
+	mode, known := modeForOperation(request.Operation())
+	if m == nil || !known || !Supports(a, request.Requirements()) {
+		return core.Input{}, unsupportedOperation()
+	}
+	target := *m
+	target.Mode, target.IsStream, target.OriginModel = mode, request.Stream(), request.Model()
+	return prepare(a, request.Body(), &target)
+}
+
+func unsupportedOperation() *core.Error {
+	return &core.Error{StatusCode: 400, Error: core.ErrorDetail{Message: "upstream does not support the requested operation or capabilities", Type: "unsupported_operation"}}
+}
+
+func prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (core.Input, *core.Error) {
+	// Adaptors receive independent value copies; their scratch mutations cannot
+	// change another callback's target or the operation-specific decoder.
+	target := *m
+	callbackMeta := target
+	url, err := a.GetRequestURL(&callbackMeta)
 	if err != nil {
 		return core.Input{}, &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "invalid upstream URL", Type: "internal_error"}}
 	}
-	out, err := ConvertRequestBody(a, body, m)
+	callbackMeta = target
+	out, err := ConvertRequestBody(a, body, &callbackMeta)
 	if err != nil {
 		return core.Input{}, &core.Error{StatusCode: 400, Error: core.ErrorDetail{Message: "request conversion failed: " + err.Error(), Type: "convert_error"}}
 	}
@@ -43,10 +77,11 @@ func Prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (core.Input, *core.Er
 	if err != nil {
 		return core.Input{}, &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "invalid upstream URL", Type: "internal_error"}}
 	}
-	if err = a.SetupRequestHeader(req, m); err != nil {
+	callbackMeta = target
+	if err = a.SetupRequestHeader(req, &callbackMeta); err != nil {
 		return core.Input{}, &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "upstream authentication header failed", Type: "internal_error"}}
 	}
-	return core.Input{URL: url, Header: req.Header, Body: out, Stream: m.IsStream, Replayable: true, Decoder: NewDecoder(a, m)}, nil
+	return core.Input{URL: url, Header: req.Header, Body: out, Stream: target.IsStream, Replayable: true, Decoder: NewDecoder(a, &target)}, nil
 }
 
 type decoder struct {
@@ -54,7 +89,12 @@ type decoder struct {
 	target meta.Meta
 }
 
-func NewDecoder(a adaptor.Adaptor, m *meta.Meta) core.Decoder { return &decoder{a: a, target: *m} }
+func NewDecoder(a adaptor.Adaptor, m *meta.Meta) core.Decoder {
+	if m != nil && m.Mode == meta.ModeEmbeddings {
+		return embeddingsDecoder{}
+	}
+	return &decoder{a: a, target: *m}
+}
 func (d *decoder) Decode(b []byte) ([]byte, *core.Usage, error) {
 	return ConvertResponseBody(d.a, b, &d.target)
 }

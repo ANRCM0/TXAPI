@@ -65,13 +65,8 @@ func (c *rawContent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &parts); err != nil {
 		return err
 	}
-	var texts []string
-	for _, p := range parts {
-		if p.Type == "text" && p.Text != "" {
-			texts = append(texts, p.Text)
-		}
-	}
-	*c = rawContent(strings.Join(texts, "\n"))
+	// Preserve structured content until every part can be inspected.
+	*c = rawContent(string(data))
 	return nil
 }
 
@@ -101,6 +96,11 @@ func (m rawMessage) toCanonical() canonical.Message {
 		}
 	} else if m.Content != "" {
 		msg.Content = append(msg.Content, canonical.ContentPart{Type: canonical.PartText, Text: string(m.Content)})
+	}
+	if m.Role == canonical.RoleTool {
+		for i := range msg.Content {
+			msg.Content[i].Type = canonical.PartToolResult
+		}
 	}
 
 	// tool_calls 拆成独立的 tool_use 内容块，跟 Claude 的 content 块数组对齐

@@ -6,7 +6,7 @@ import (
 
 // RequestLog 是每次转发的记账流水。
 //
-// 这张表是计费、排障、用量统计的唯一事实来源。设计要点：
+// 这张表用于兼容计费观测、排障和用量统计，不是可靠结算账本。设计要点：
 //   - 同时记录 channel_id 和 credential_id，才能回答「哪个 Key 出的问题」
 //   - 记录 OriginModel 和 ActualModel，才能发现「模型映射配错了」
 //   - latency_ms 分开记录首字延迟和总延迟的余地（P5 再拆）
@@ -27,6 +27,11 @@ type RequestLog struct {
 	TotalTokens      int `gorm:"not null;default:0" json:"total_tokens"`
 	// Cost 是本次请求的费用（元），由 P5 的价格表算出。
 	Cost float64 `gorm:"not null;default:0" json:"cost"`
+	// Empty for historical, disabled or unavailable pricing. The immutable
+	// configuration history is retained separately from this droppable log.
+	PriceVersion string `gorm:"size:64;not null;default:'';index" json:"price_version"`
+	BillingID    string `gorm:"size:32;index;not null;default:''" json:"billing_id"`
+	BillingState string `gorm:"size:16;not null;default:''" json:"billing_state"`
 	// LatencyMs 是整条链路耗时（含重试），不是单次上游耗时。
 	LatencyMs int64 `gorm:"not null;default:0" json:"latency_ms"`
 

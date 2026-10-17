@@ -115,6 +115,15 @@ type TokenView struct {
 	KeyConcurrencyLimit  int
 }
 
+func (v TokenView) Principal() access.Principal {
+	return access.Principal{
+		UserID: v.UserID, TokenID: v.ID, TokenName: v.Name,
+		Policy:   access.Policy{Mode: v.Policy.Mode, Models: append([]string(nil), v.Policy.Models...)},
+		RPMLimit: v.RPMLimit, TPMLimit: v.TPMLimit, UserRPMLimit: v.UserRPMLimit,
+		UserConcurrencyLimit: v.UserConcurrencyLimit, KeyConcurrencyLimit: v.KeyConcurrencyLimit,
+	}
+}
+
 // IsActive 判断令牌当前是否可用（启用且未过期）。
 func (t *Token) IsActive(now time.Time) bool {
 	if t.Status != TokenStatusActive {
