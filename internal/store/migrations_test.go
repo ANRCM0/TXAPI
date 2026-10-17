@@ -18,10 +18,10 @@ func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.DB().Where("version = 8").Delete(&model.SchemaMigration{}).Error; err != nil {
+	if err := st.DB().Where("version >= 8").Delete(&model.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := st.DB().Migrator().DropTable(&model.GenerationSegment{}, &model.GenerationRecord{}); err != nil {
+	if err := st.DB().Migrator().DropTable(&model.GenerationIntent{}, &model.GenerationSegment{}, &model.GenerationRecord{}); err != nil {
 		t.Fatal(err)
 	}
 	var released []model.SchemaMigration
@@ -41,8 +41,8 @@ func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+1 || got[len(got)-1].Version != 8 {
-			t.Fatalf("non-idempotent v8: %+v", got)
+		if len(got) != len(released)+2 || got[len(got)-2].Version != 8 || got[len(got)-1].Version != 9 {
+			t.Fatalf("non-idempotent v8/v9: %+v", got)
 		}
 		for i := range released {
 			if got[i].Version != released[i].Version || !got[i].AppliedAt.Equal(released[i].AppliedAt) {
@@ -62,6 +62,79 @@ func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
 			t.Fatalf("invented historical output: %d %v", n, err)
 		}
 		st.Close()
+	}
+}
+
+func TestIntentV9UpgradePreservesV8OutputAndFinancialAuthority(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v8-intent-upgrade.db")
+	st, err := Open(config.DatabaseConfig{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Where("version = 9").Delete(&model.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Migrator().DropTable(&model.GenerationIntent{}); err != nil {
+		t.Fatal(err)
+	}
+	var released []model.SchemaMigration
+	if err := st.DB().Order("version").Find(&released).Error; err != nil {
+		t.Fatal(err)
+	}
+	record := model.GenerationRecord{ID: "v8-retained-output", UserID: 1, TokenID: 2, State: "sealed", MaxBytes: 16384, StoredBytes: 40, NextSequence: 1,
+		CreatedAt: time.Now().UnixMilli(), ExpiresAt: time.Now().Add(time.Hour).UnixMilli(), Segments: []model.GenerationSegment{{RecordID: "v8-retained-output", Sequence: 0, Kind: "result", Ciphertext: []byte("opaque-existing-encrypted-observation")}}}
+	if err := st.DB().Create(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	reservation := model.BillingReservation{ID: "existing-pending", UserID: 1, TokenID: 2, State: "pending", ReservedUnits: 71, ProviderHeldUnits: 23, PriceVersion: "existing-price-version", LeaseUntil: time.Now().Add(time.Minute).UnixMilli()}
+	if err := st.DB().Create(&reservation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Create(&model.BillingBalance{OwnerType: "user", OwnerID: 1, ReservedUnits: 71, UsedUnits: 9}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		st, err = Open(config.DatabaseConfig{Path: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []model.SchemaMigration
+		if err := st.DB().Order("version").Find(&got).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(released)+1 || got[len(got)-1].Version != 9 {
+			t.Fatalf("non-idempotent v9 migration: %+v", got)
+		}
+		for i := range released {
+			if got[i].Version != released[i].Version || !got[i].AppliedAt.Equal(released[i].AppliedAt) {
+				t.Fatal("released version ledger changed")
+			}
+		}
+		var old model.GenerationRecord
+		if err := st.DB().Preload("Segments").First(&old, "id = ?", record.ID).Error; err != nil || len(old.Segments) != 1 || string(old.Segments[0].Ciphertext) != string(record.Segments[0].Ciphertext) {
+			t.Fatalf("v8 content changed: %+v %v", old, err)
+		}
+		var bill model.BillingReservation
+		if err := st.DB().First(&bill, "id = ?", reservation.ID).Error; err != nil || bill.State != "pending" || bill.ReservedUnits != 71 || bill.ProviderHeldUnits != 23 {
+			t.Fatalf("financial authority changed: %+v %v", bill, err)
+		}
+		var balance model.BillingBalance
+		if err := st.DB().First(&balance).Error; err != nil || balance.ReservedUnits != 71 || balance.UsedUnits != 9 {
+			t.Fatalf("balance changed: %+v %v", balance, err)
+		}
+		var intents int64
+		if err := st.DB().Model(&model.GenerationIntent{}).Count(&intents).Error; err != nil || intents != 0 {
+			t.Fatalf("invented historical task: %d %v", intents, err)
+		}
+		if err := checkMigrationVersion(st.DB(), 8); err == nil {
+			t.Fatal("v8 binary accepted v9")
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

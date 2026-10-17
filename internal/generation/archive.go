@@ -2,7 +2,6 @@ package generation
 
 import (
 	"context"
-	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/hex"
@@ -85,27 +84,12 @@ func NewArchive(opts ArchiveOptions) (*Archive, error) {
 	}
 	a := &Archive{store: opts.Store, resolve: opts.Resolve, activeKey: opts.ActiveKey, retention: opts.Retention,
 		maxBytes: opts.MaxRecordBytes, limits: opts.Limits, keys: make(map[string]cipher.AEAD)}
-	for id, key := range opts.Keys {
-		if len(id) < 1 || len(id) > 32 || len(key) != 32 {
-			return nil, fmt.Errorf("invalid generation archive key configuration")
-		}
-		for _, c := range id {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
-				return nil, fmt.Errorf("invalid generation archive key identifier")
-			}
-		}
-		block, err := aes.NewCipher(append([]byte(nil), key...))
-		if err != nil {
-			return nil, fmt.Errorf("invalid generation archive key configuration")
-		}
-		a.keys[id], err = cipher.NewGCM(block)
-		if err != nil {
-			return nil, fmt.Errorf("invalid generation archive cipher configuration")
-		}
+	keys, err := compileContentKeys(opts.ActiveKey, opts.Keys)
+	if err != nil {
+		return nil, err
 	}
-	if a.keys[a.activeKey] == nil {
-		return nil, fmt.Errorf("active generation archive key is missing")
-	}
+	a.keys = keys
+
 	return a, nil
 }
 
@@ -114,7 +98,11 @@ func (a *Archive) authorize(ctx context.Context, binding access.Binding) error {
 	return err
 }
 
-func (a *Archive) principal(ctx context.Context, binding access.Binding) (principal access.Principal, err error) {
+func (a *Archive) principal(ctx context.Context, binding access.Binding) (access.Principal, error) {
+	return currentPrincipal(ctx, a.resolve, binding)
+}
+
+func currentPrincipal(ctx context.Context, resolve func(context.Context, access.Binding) (access.Principal, error), binding access.Binding) (principal access.Principal, err error) {
 	defer func() {
 		if recover() != nil {
 			principal, err = access.Principal{}, ErrAuthorityUnavailable
@@ -123,7 +111,7 @@ func (a *Archive) principal(ctx context.Context, binding access.Binding) (princi
 	if binding.UserID == 0 || binding.TokenID == 0 {
 		return access.Principal{}, access.ErrUnauthorized
 	}
-	p, err := a.resolve(ctx, binding)
+	p, err := resolve(ctx, binding)
 	if errors.Is(err, access.ErrUnauthorized) {
 		return access.Principal{}, access.ErrUnauthorized
 	}

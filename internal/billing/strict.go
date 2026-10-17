@@ -85,53 +85,63 @@ func (e *Engine) EnableStrict(ceiling string, lease time.Duration) error {
 func (e *Engine) StrictReady() bool { return e != nil && e.strict != nil }
 
 func (e *Engine) Reserve(ctx context.Context, tokenID, userID uint, origin string) (*PreDeduct, error) {
-	if !e.StrictReady() || tokenID == 0 || userID == 0 {
-		return nil, ErrStrictUnavailable
+	row, pre, err := e.prepareReservation(tokenID, userID, origin)
+	if err != nil {
+		return nil, err
 	}
-	s := e.strict
-	prices := s.prices.Snapshot()
+	if err := e.strict.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return reserveReservation(tx, row)
+	}); err != nil {
+		return nil, err
+	}
+	return pre, nil
+}
+
+func (e *Engine) prepareReservation(tokenID, userID uint, origin string) (model.BillingReservation, *PreDeduct, error) {
+	if !e.StrictReady() || tokenID == 0 || userID == 0 {
+		return model.BillingReservation{}, nil, ErrStrictUnavailable
+	}
+	prices := e.strict.prices.Snapshot()
 	if _, found := prices.price(origin); !found {
-		return nil, ErrPriceMissing
+		return model.BillingReservation{}, nil, ErrPriceMissing
 	}
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		return nil, err
+		return model.BillingReservation{}, nil, err
 	}
-	id := hex.EncodeToString(raw[:])
-	row := model.BillingReservation{ID: id, UserID: userID, TokenID: tokenID, OriginModel: origin,
-		PriceVersion: prices.Version(), ReservedUnits: s.ceiling, State: Reserved, LeaseUntil: time.Now().Add(s.lease).UnixMilli()}
+	row := model.BillingReservation{ID: hex.EncodeToString(raw[:]), UserID: userID, TokenID: tokenID, OriginModel: origin,
+		PriceVersion: prices.Version(), ReservedUnits: e.strict.ceiling, State: Reserved, LeaseUntil: time.Now().Add(e.strict.lease).UnixMilli()}
 	providerCosts := e.providerCosts.Load()
 	if providerCosts != nil {
 		row.ProviderBudgetUnits = providerCosts.budget
 	}
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// The owner relation is a budget invariant, never a caller-supplied ID.
-		var token model.Token
-		if err := tx.Where("id = ? AND user_id = ?", tokenID, userID).First(&token).Error; err != nil {
-			return err
-		}
-		var user model.User
-		if err := tx.First(&user, userID).Error; err != nil {
-			return err
-		}
-		for _, target := range []struct {
-			kind        string
-			id          uint
-			quota, used float64
-		}{
-			{"user", userID, user.Quota, user.UsedQuota}, {"key", tokenID, token.Quota, token.UsedQuota},
-		} {
-			if err := reserveBalance(tx, target.kind, target.id, target.quota, target.used, s.ceiling); err != nil {
-				return err
-			}
-		}
-		return tx.Create(&row).Error
-	})
-	if err != nil {
-		return nil, err
+	pre := &PreDeduct{prices: prices, reservation: &Reservation{id: row.ID, prices: prices, origin: origin, providerCosts: providerCosts}}
+	return row, pre, nil
+}
+
+// Both ordinary requests and durable intent admission use this exact dual hold.
+// The caller owns the transaction; no connection or callback escapes it.
+func reserveReservation(tx *gorm.DB, row model.BillingReservation) error {
+	var token model.Token
+	if err := tx.Where("id = ? AND user_id = ?", row.TokenID, row.UserID).First(&token).Error; err != nil {
+		return err
 	}
-	reservation := &Reservation{id: id, prices: prices, origin: origin, providerCosts: providerCosts}
-	return &PreDeduct{prices: prices, reservation: reservation}, nil
+	var user model.User
+	if err := tx.First(&user, row.UserID).Error; err != nil {
+		return err
+	}
+	for _, target := range []struct {
+		kind        string
+		id          uint
+		quota, used float64
+	}{
+		{"user", row.UserID, user.Quota, user.UsedQuota}, {"key", row.TokenID, token.Quota, token.UsedQuota},
+	} {
+		if err := reserveBalance(tx, target.kind, target.id, target.quota, target.used, row.ReservedUnits); err != nil {
+			return err
+		}
+	}
+	return tx.Create(&row).Error
 }
 
 func reserveBalance(tx *gorm.DB, kind string, id uint, quota, used float64, amount int64) error {
@@ -202,6 +212,13 @@ func (e *Engine) startAttempt(ctx context.Context, pre *PreDeduct, attempt model
 		return ErrStrictUnavailable
 	}
 	return e.strict.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var intents int64
+		if err := tx.Model(&model.GenerationIntent{}).Where("billing_id = ?", pre.BillingID()).Count(&intents).Error; err != nil {
+			return err
+		}
+		if intents != 0 {
+			return ErrStrictUnavailable // Intent admission does not grant dispatch.
+		}
 		query := tx.Model(&model.BillingReservation{}).
 			Where("id=? AND state IN ? AND lease_until>?", pre.BillingID(), []string{Reserved, Active}, time.Now().UnixMilli())
 		updates := map[string]any{"state": Active}
@@ -292,6 +309,15 @@ func (e *Engine) Finish(ctx context.Context, pre *PreDeduct, u *relaymodel.Usage
 		return 0, "", ErrStrictUnavailable
 	}
 	err = e.strict.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var finishErr error
+		charge, state, finishErr = finishReservation(tx, pre, u, actual, group, complete)
+		return finishErr
+	})
+	return
+}
+
+func finishReservation(tx *gorm.DB, pre *PreDeduct, u *relaymodel.Usage, actual, group string, complete bool) (charge int64, state string, err error) {
+	err = func() error {
 		var row model.BillingReservation
 		if err := tx.First(&row, "id=?", pre.BillingID()).Error; err != nil {
 			return err
@@ -348,7 +374,7 @@ func (e *Engine) Finish(ctx context.Context, pre *PreDeduct, u *relaymodel.Usage
 			refusal = ""
 		}
 		return tx.Model(&row).Updates(map[string]any{"state": Settled, "reason": refusal, "charge_units": actualCost, "fingerprint": digest}).Error
-	})
+	}()
 	return
 }
 
@@ -390,8 +416,12 @@ func (e *Engine) RecoverExpired(ctx context.Context, now time.Time) error {
 	if !e.StrictReady() {
 		return ErrStrictUnavailable
 	}
+	if _, err := e.RecoverGenerationIntents(ctx, now, 200); err != nil {
+		return err
+	}
 	var rows []model.BillingReservation
-	if err := e.strict.db.WithContext(ctx).Where("state IN ? AND lease_until <= ?", []string{Reserved, Active}, now.UnixMilli()).Limit(200).Find(&rows).Error; err != nil {
+	if err := e.strict.db.WithContext(ctx).Where("state IN ? AND lease_until <= ?", []string{Reserved, Active}, now.UnixMilli()).
+		Where("NOT EXISTS (SELECT 1 FROM generation_intents gi WHERE gi.billing_id = billing_reservations.id)").Limit(200).Find(&rows).Error; err != nil {
 		return err
 	}
 	for _, row := range rows {

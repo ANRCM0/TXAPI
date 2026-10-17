@@ -48,13 +48,19 @@ Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模
 
 现有 HTTP 通过 `core.HTTPOutput` 消费输出端口，协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 只提供原生请求/响应/SSE 协议与 core 样本，未注册路由，也不能被当成已存在的持久任务或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
 
-### 最小 worker 与输出记录：internal/generation（A3-01/02，未阶段验收）
+### 最小 worker、输出记录与意图：internal/generation（A3-01/02/04，未阶段验收）
 
 新增模块只允许依赖 access/core/gateway/protocol/model，不导入 store/GORM、Gin 或 billing 引擎；组装者注入身份解析函数与实际 `Gateway.ExecuteTo`。固定 worker 和有界队列实际消费现有 Chat/embeddings，正文副本总预算最高 64 MiB，排队起算取消期限。交接不会预占 generation/network 槽、预留预算或持久受理。每次派发重新解析可信绑定，旧 context 的身份/准入标记不能带入；排队后撤销禁止新执行，已派发轮次仍用本轮快照，尚无后台任务撤销传播服务。
 
 观察者取消不取消已交接工作；显式 `Future.Cancel`、服务关闭和期限可取消生成，均继续走 gateway 既有收尾。输出属于本次生成，结果仅一次接收；commit 后 panic 保守标记执行可能未知，不重放、不伪造未派发或清零账本。`Close` 等待所有 worker 与收尾；超时后不得提前关闭 gateway/store，同进程不合作回调无法被隔离或强杀。
 
-A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与原子序号追加；`SubmitRecorded` 为实际输出保留加密片段，读取/删除重新校验当前绑定，读取还检查当前模型权限。逐条容量预留、owner/实例限额、TTL、CAS 和故障回归见开发指南。它不是任务意图、领取/fencing 租约或原子任务+预算端口；输出片段不是可公开恢复的协议事件。没有公开路由、任务 ID 或重启重派，不在 main 隐式启动，不能替代 S7-A 的后台受理与持久 worker。架构回归用真实临时 SQLite/授权/准入/执行/财务链验证它，不把独立内存消费者当作整个 A3 已完成。HTTP 前台生命周期不变，A3-03 的 WS 消费回归见下节；产品持久任务仍另划批次。
+A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与原子序号追加；`SubmitRecorded` 为实际输出保留加密片段，读取/删除重新校验当前绑定，读取还检查当前模型权限。逐条容量预留、owner/实例限额、TTL、CAS 和故障回归见开发指南。它不是任务意图、领取/fencing 租约或原子任务+预算端口；输出片段不是可公开恢复的协议事件。没有公开路由、任务 ID 或重启重派，不在 main 隐式启动，不能替代 S7-A 的后台受理与持久 worker。架构回归用真实临时 SQLite/授权/准入/执行/财务链验证它，不把独立内存消费者当作整个 A3 已完成。HTTP 前台生命周期不变，A3-03 的 WS 消费回归见下节；产品持久任务仍另划批次。A3-04 新增独立 IntentAcceptor，不将持久意图送入 volatile Runner；其原子受理边界见下节。
+
+### 意图与账本原子受理：A3-04（未阶段验收）
+
+`generation.IntentAdmission` 只提供类型化 Admit/Read/Cancel；实际 Engine 实现在同一 SQLite 事务保存加密意图、幂等摘要配置标记和原用户/Key 双 hold。generation 不导入 billing/store/GORM；共享 reserve/finish 的事务内实现保留账本权威，没有任意事务回调或第二套余额。原普通 attempt 明确拒绝意图关联 reservation，后续派发不能伪造普通 PreDeduct 或先再预留一次。
+
+`IntentAcceptor` 复用当前身份解析，对 Admit/Read/Cancel 校验可信 owner/创建 Key/当前模型权限；身份是事务前本轮快照，不保证撤销瞬间中断。输入加密和独立稳定 HMAC 密钥由组装者注入，schema v9 统一追加 `generation_intents`，不由应用另迁移。容量、幂等保留期、加密/密钥变更拒绝、取消和恢复详见[开发指南](DEVELOPMENT.md#a3-04-加密意图与双预算原子受理)。这是不可派发的受理消费者，不是公开后台 API/持久队列；没有领取/续租/fencing/重启重派，main 不启动它。
 
 ### WS I/O 与物理连接：A3-03（未阶段验收）
 
@@ -147,6 +153,7 @@ CI 会校验契约与真实 Gin 路由一一匹配、匿名请求受保护、公
 - 每个版本号由集成负责人分配，同一集成周期按顺序合并；未合并分支不要自行预占同一个已发布版本。已发布步骤只追加不重写。
 - runner 在事务中执行一步并登记版本；步骤不允许 Commit/Rollback、不读写真实外部服务。失败既回滚数据也不记版本，重试可重新执行。
 - 打开数据库前检查最高版本；比当前二进制新的 schema 将被拒绝，避免先 AutoMigrate 再发现不兼容。结构 AutoMigrate 本身仍不是完整 SQL 迁移框架，备份/恢复规则继续适用。
+- A3-04 统一追加 v9 `generation_intents`，原账本与意图受理共享事务；不回填历史任务/预留，禁止 v8 二进制打开。内容清理不删除财务事实，幂等摘要密钥标记不能为更换密钥而手动删除。
 - 新迁移至少有旧 schema 升级、重启幂等、失败回滚和恢复限制说明。绝不能把清空数据库当修复方案。
 
 ## 5. 分支、测试与集成

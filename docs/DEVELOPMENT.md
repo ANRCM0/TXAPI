@@ -2,7 +2,7 @@
 
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
-2026-10-17 按架构优先更新：本页的 S1–S5 标题按功能/运行主题保留，不表示仍停留在当时开发阶段。当前 S0–S4/F0 已验收，S5 未完整收口；S6 协调/能力/工具已有通过 CI 的切片，S7-A 仅独立 Responses 协议实现，生产状态型功能仍待开发。A1/A2 已增加输出端口、操作信封、能力检查及计费小接口；A3-01 增加共享身份解析及真正调用 `ExecuteTo` 的有界进程内 worker，A3-02 增加可选加密输出记录与统一 schema v8，A3-03 增加有界 WS transport 与独立连接容量，尚未接公开后台/WS 路由或生产 worker；完整底层架构仍待验收。历史提交和 CI 证据见 [验收归档](history/acceptance-s0-s5.md)；下列命令是操作指南，不代表本次文档批次重新执行。
+2026-10-17 按架构优先更新：本页的 S1–S5 标题按功能/运行主题保留，不表示仍停留在当时开发阶段。当前 S0–S4/F0 已验收，S5 未完整收口；S6 协调/能力/工具已有通过 CI 的切片，S7-A 仅独立 Responses 协议实现，生产状态型功能仍待开发。A1/A2 已增加输出端口、操作信封、能力检查及计费小接口；A3-01 增加共享身份解析及真正调用 `ExecuteTo` 的有界进程内 worker，A3-02 增加可选加密输出记录与统一 schema v8，A3-03 增加有界 WS transport 与独立连接容量，A3-04 增加加密意图+双预算原子受理与统一 schema v9；尚未接公开后台/WS 路由、意图派发或生产 worker；完整底层架构仍待验收。历史提交和 CI 证据见 [验收归档](history/acceptance-s0-s5.md)；下列命令是操作指南，不代表本次文档批次重新执行。
 
 ## 工具与工作目录
 
@@ -73,7 +73,7 @@ python tests/smoke/local.py --go go --preview
 
 ### 安装、容器与升级边界
 
-本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前分支追加 S5 v5/v6/v7 和 A3-02 输出记录 v8，见下节。旧库无主 Key 的认领规则不变。
+本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前分支追加 S5 v5/v6/v7、A3-02 输出记录 v8 和 A3-04 任务意图 v9，见下节。旧库无主 Key 的认领规则不变。
 
 Compose 显式使用 `GATEWAY_DATABASE_PATH=/app/data/gateway.db`；此环境变量优先于 YAML 的 database.path。已有部署若实际库在 `/app/.local/data/` 或其他位置，直接重建可能看到空库，**不是数据自动迁移**。先停止旧进程，确认实际路径并一致备份主库及 WAL/SHM，再恢复到目标卷、检查所有权为容器 app 用户（UID 10001），验证数据后切换；切勿删除旧容器/卷或执行 down -v 来“修复”。
 
@@ -110,7 +110,7 @@ python3 tests/smoke/delivery.py --go go
 
 - 全新卷初始化管理员、拒绝重复初始化、UID 10001、镜像健康检查、内嵌静态资源和管理员→用户→Key→调用→本人用量闭环。
 - 重启容器进程，确认原 Key、用户、日志和用量仍在数据卷中；故意将 YAML database.path 指向不可写位置，验证 Compose 的卷内路径环境覆盖真实生效。
-- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。当前分支预期 v8，历史迁移记录保持原前缀、新增 v5/v6/v7/v8，旧日志不虚构价格版本，新价格快照可核对内容摘要。
+- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。当前分支预期 v9，历史迁移记录保持原前缀、新增 v5/v6/v7/v8/v9，旧日志不虚构价格版本，新价格快照可核对内容摘要。
 - SSE 在途时发起 Compose stop，要求完整 DONE、退出码 0 且已接收日志排空；Compose 为正常关闭和日志排空预留 30 秒，不将该时间承诺为任意负载下的恢复保证。
 - 升级后先另存一份备份，再恢复升级前主库及存在的 WAL/SHM；检查 SQLite integrity_check 和关键表逐行一致，重启原 S3 镜像验证原 Key/数据可用，升级后新增数据不在旧备份中。
 
@@ -380,6 +380,20 @@ worker 数、队列长度、单请求正文和排队起算的取消时限均有�
 - 关闭顺序：身份连接容量停接 → manager 停接/关闭/等待握手 → HTTP handlers 停接与 WS 应用 reader 退出 → runner 停接/取消/等待执行和账务收尾 → 应用 goroutine join → gateway/共享资源 → store。manager 或 runner 超时后保持后续资源存活并重试等待。物理连接 Done 仅说明 transport 清理，不说明应用生成/财务已结束。
 
 `go test -count=1 ./internal/access ./internal/transport/websocket ./internal/generation ./internal/architecture` 覆盖真实 TCP/TLS、控制帧/分片/UTF-8、Origin、读/写/绝对寿命、慢读背压、握手/关闭竞争和容量；测试专用应用在真实 socket 上调用原 Runner/Gateway/SQLite/严格账本，验证逐轮撤销/收权、同 ID 并发隔离、前台未知成本和记录型观察者断开。测试帧信封只在 `_test.go`，载荷仍为已有 JSON/SSE 字节；没有新增生产 wire 协议、公开 API、Responses 多轮或原生 WS 上游能力。
+
+### A3-04 加密意图与双预算原子受理
+
+`NewIntentAcceptor(IntentOptions)` 是独立、不可派发的真实持久消费者，当前只接受现有 Chat/embeddings。可信组装者注入原 Engine 的 `IntentAdmission` 和 `Store.ResolvePrincipal`；不导入 GORM、不传事务回调。Admit 在同一事务写 `generation_intents`、稳定摘要密钥版本标记及原账本的用户/Key 双预留，任一失败全部回滚；提交确认丢失后可用相同幂等键读取原回执，不重复 hold。没有先返回 ID 再异步预留，也不复制账本、鉴权或迁移。main/YAML/环境变量尚无消费者与密钥接线，不能宣称公开后台功能已启用。
+
+- 每次 Admit/Read/Cancel 解析当前 owner/创建 Key 和模型权限；同用户其他 Key 不能仅凭 ID 读取或取消。鉴权使用事务前本轮快照，不保证已撤销瞬间中断正在受理的事务；后续派发必须再次授权。输入先于可信回调制作副本，JSON 正文最多 64 KiB，拒绝重复字段/过深/非 UTF-8；会话标识最多 256 字节。JSON 对象键排序并消除空白用于幂等，保留数字字面量差别，不把所有数值语义强行等同。
+- 幂等键为 1–128 字节可打印非空 ASCII，按 user/创建 Key 作用域唯一；同键不同请求/操作/模型拒绝。只存域分离 HMAC-SHA256，不存原键或明文输入。独立随机 32 字节 DigestKey 必须跨重启/内容密钥轮换保持不变；首次成功受理在同一事务保存其非秘密指纹，后续密钥不符时 fail closed，不能悄悄新建命名空间、重复预留或手删 `generation.intent_digest_version`。当前没有该密钥的轮换/历史迁移工具，即使清理全部内容也不自动重置标记。
+- 使用与输出记录相同的独立 AES-256-GCM 密钥环规则，随机 nonce，认证 ID/owner/Key、幂等摘要、请求摘要/摘要版本、操作/模型、billing ID 和创建/截止/过期时间；缺钥/篡改不返回明文，无默认密钥或明文回落。内容密钥与 DigestKey 不得相同，分别与数据库分离备份。可更换 active 内容密钥并保留旧钥读取原回执；同一密钥累计加密达到 2^32 条/段前必须轮换，无自动 KMS 或重加密。
+- QueueTTL 明确为 1 秒–5 分钟，且不得超过原 strict reservation 实际租约；Retention 为 1 分钟–7 天且不短于 QueueTTL。TTL 从受理前创建起算，不是长后台执行租约。每条密文最多 68 KiB，实例记录数 2–4096、owner 至少 1 且小于实例；owner 字节限额至少 68 KiB、实例总密文至多 64 MiB。所有尚保留的终态/到期行继续占记录和字节容量，满额原子拒绝；这是逻辑限额，不是 SQLite/WAL/索引/备份物理配额或安全擦除保证。
+- 意图只为 `queued/cancelled/expired/uncertain`；queued 不授权执行，也不交给现有 Runner。原 StartAttempt 在账本事务中拒绝任何意图关联 reservation，不能把回执当成 PreDeduct 开始上游调用。Read 仅返回重新授权并认证解密的输入与回执，不授予重发/恢复权限。完整派发仍缺领取/续租/fencing、价格/能力恢复、最大执行时间和上游不确定策略。
+- Cancel 先认证密文，再在同一事务证明原 reservation 属于该 owner/Key/模型、仍 reserved、没有任何 attempt/provider 占用，才调用原 finish 以零费用释放双 hold 并改意图状态。异常执行证据只改 uncertain/账本 pending，不重发、不退款、不清零 provider 占用。截止时间到期后 `RecoverGenerationIntents` 每批最多 200 条，不读取正文/不要求密钥/不返回可执行工作；原 `RecoverExpired` 先走此路径并排除所有意图关联账本，避免普通恢复误释放。
+- `CleanupGenerationIntents` 每批最多 200 条，只清到期 cancelled/expired 且财务 settled/零费用/同 owner/Key/无 attempt 的内容行；uncertain 永不自动清除，可能持续占容量，须后续明确审计处置。清理不删除 reservation/balances/审计事实；过期保留回执不能创建新 hold，清理后不提供无限期幂等保证。保留期结束、清理和重用键的产品规则仍须公开 API 批次定义。
+
+真实 SQLite 回归覆盖双预算并发、幂等丢确认/并发重试、插入/取消失败的跨表回滚、当前权限收紧、容量、保留期和密钥/元数据篡改。真实子进程分别在提交前强杀（无意图/预留）和提交成功后强杀（重启可解密读取、真实期限到期只回收未执行预算），原数据库/WAL 不包含输入或原始幂等键明文。新迁移为统一 v9，仅追加结构，不伪造历史任务；v8 及更老二进制拒绝打开，恢复旧一致备份的规则不变。本批未操作生产库，不扩展为实际旧库报错/回滚专项。
 
 ## 开发与验证节奏
 

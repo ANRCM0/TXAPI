@@ -8,14 +8,14 @@
 
 | 核对项 | 当前结论 |
 |---|---|
-| 当前代码 | `feat/s5-s6-mainline`，本批基于已推送 `9d92d65` 推进 A3-03 有界 WS 传输和连接容量；A3-02 加密输出记录已通过完整 CI；A1/A2、既有输入/费率门槛、S6 与独立 Responses 切片仍在分支，尚未合并 master |
+| 当前代码 | `feat/s5-s6-mainline`，本批基于已推送 `8c4a2f1` 推进 A3-04 加密意图与双预算原子受理；A3-03 有界 WS 传输已通过完整 CI；A1/A2、既有输入/费率门槛、S6 与独立 Responses 切片仍在分支，尚未合并 master |
 | 本地集成基线 | `master/90df76b`，S0–S4 与 F0 已验收合并；开工/合并前重新确认最新基线 |
 | 产品形态 | Go/Gin 模块化单体、单二进制、单实例 SQLite；原生 ES Modules 控制台内嵌 |
 | 现有推理入口 | `/v1/models`、`/v1/chat/completions`（JSON/SSE）、`/v1/embeddings` |
 | HTTP 契约 | [OpenAPI](openapi.json) `0.2.3`，79 个操作；不是 79 种推理能力 |
 | S0–S4 / F0 | 正确性、极简 core、身份隔离、调度准入、控制台与配置交付已有阶段验收记录 |
 | S5 | 6 项中 5 项通过；当前费率/凭据批次已通过本地构建/vet/全量测试与进程冒烟，远端 CI 随提交记录。已将标准费率与 USD/凭据适用范围纳入准入，但逐账户最高适用价、失败收费及未来价格变更假设仍在，S5-03 与完整阶段未验收/合并 |
-| 统一兼容框架 | Chat/embeddings 已迁入非 Gin 协调函数；已有 `core.Output`、不可变操作信封及计费消费侧小接口；A3-01 增加实际调用 `ExecuteTo` 的有界进程内 worker 与派发时身份解析，A3-02 增加其可选加密输出记录、隔离/容量与中断恢复；A3-03 增加独立 WS transport、物理连接容量及真实 socket 消费回归。正文仍是 JSON/SSE 字节；没有生产持久任务/原生 WS，完整 S6 未验收 |
+| 统一兼容框架 | Chat/embeddings 已迁入非 Gin 协调函数；已有 `core.Output`、不可变操作信封及计费消费侧小接口；A3-01 增加实际调用 `ExecuteTo` 的有界进程内 worker 与派发时身份解析，A3-02 增加其可选加密输出记录、隔离/容量与中断恢复；A3-03 增加独立 WS transport、物理连接容量及真实 socket 消费回归；A3-04 增加加密意图与用户/Key 预留原子受理、幂等与未执行回收。意图没有领取/派发，正文仍是 JSON/SSE 字节；没有生产持久任务/原生 WS，完整 S6 未验收 |
 | S6 / S7-A | S6 本轮切片已提交并通过完整 CI，尚未阶段验收合并；S7-A 仅独立 Responses 原生请求/JSON/SSE 协议与 core 样本，没有生产 Responses、持久会话、后台任务或 WS 入口 |
 | 安全与部署限制 | 上游 API Key 当前明文落库，响应掩码不是静态加密；客户端调用 Key 已摘要存储。没有实际生产升级或真实全客户端兼容验收承诺 |
 
@@ -52,10 +52,10 @@
 |---|---|---|
 | A1 | 输出端口与现有 HTTP 消费者：core/gateway/HTTP 适配及风险回归 | JSON/SSE 和拒绝行为保持；独立输出不伪装 HTTP writer；提交/取消/短写/租约事实正确 |
 | A2 | 操作模型、能力矩阵、可选模块消费侧小接口 | Chat/embeddings 真正复用；不同操作不经 Chat 有损中转；strict 许可独立判断 |
-| A3（当前） | 传输、状态和运行基础的可验收切片 | 以最小 WS/worker/持久消费者验证寿命、授权、容量、恢复和安全，不预建通用任务平台；A3-01 已交付派发身份/进程内 worker；A3-02 交付加密输出记录；A3-03 交付有界 WS transport 与真实 socket 消费回归，不关闭整个 A3 |
+| A3（当前） | 传输、状态和运行基础的可验收切片 | 以最小 WS/worker/持久消费者验证寿命、授权、容量、恢复和安全，不预建通用任务平台；A3-01 已交付派发身份/进程内 worker；A3-02 交付加密输出记录；A3-03 交付有界 WS transport 与真实 socket 消费回归；A3-04 交付意图原子受理/幂等/未执行回收，不关闭整个 A3 |
 | A4 | 故障矩阵、最终 CI 和共同架构基线集成 | 回归及依赖门槛通过，记录稳定端口、支持范围和未交付功能，再合并共同基线 |
 
-A3 按真实需求逐步增加执行/持久端口；最小消费者是架构验收证据，不等于完成 S7 的会话管理、后台 API、WS 多轮或客户端产品闭环。不得只建空包/接口就勾选架构完成。新增迁移、WS 依赖和 API 时另划批次，同步契约与消费者。A2 已收口现有 Chat/embeddings 的操作信封、能力检查与 legacy/strict 计费消费端口。A3-01 已增加真实进程内消费及共享身份解析；A3-02 以该 worker 为实际消费者增加可选加密输出记录、统一 schema v8 和存储端口。本批 A3-03 新增独立 transport 与固定版本 WS 依赖，用测试专用真实 socket 消费者验证同一授权/准入/执行/账本链；不新增生产 wire 协议、路由、原生 WS 上游执行、任务意图/领取或迁移。完整状态型模型、生产密钥注入/保留策略与产品 WS 留待后续切片，不预建通用事件/任务平台。
+A3 按真实需求逐步增加执行/持久端口；最小消费者是架构验收证据，不等于完成 S7 的会话管理、后台 API、WS 多轮或客户端产品闭环。不得只建空包/接口就勾选架构完成。新增迁移、WS 依赖和 API 时另划批次，同步契约与消费者。A2 已收口现有 Chat/embeddings 的操作信封、能力检查与 legacy/strict 计费消费端口。A3-01 已增加真实进程内消费及共享身份解析；A3-02 以该 worker 为实际消费者增加可选加密输出记录、统一 schema v8 和存储端口。A3-03 新增独立 transport 与固定版本 WS 依赖，用测试专用真实 socket 消费者验证同一授权/准入/执行/账本链；本批 A3-04 经消费侧小端口和统一 schema v9 增加加密意图+原账本双预留的原子受理、幂等/取消/到期回收。没有生产 wire 协议/路由、原生 WS 上游、领取/fencing 或重启重派。完整状态型模型、生产密钥注入/保留策略与产品 WS 留待后续切片，不预建通用事件/任务平台。
 
 ## S5 剩余验收
 
@@ -635,3 +635,31 @@ gateway 改用 `StartPreparedAttempt` 将真实 URL/正文交给同一成本引�
 首轮控制帧测试遗漏 Ping 发起端的 reader，Origin 成功握手的断言没有等待 handler 关闭，集成用例有一处状态常量名错误；集中修正新 fixture。未知执行断言按既有 Replayable（请求体可重放）与实际取消/账务事实分开，未放宽生产重试或财务规则。实际读写/关闭路径未绕过任何测试门槛。
 
 本机未运行 Linux race、Docker、真实上游/原生 WS 客户端、浏览器或生产库操作。最终 SHA 的自动 push/PR 完整 CI 单独记录于既有 PR，不手动 dispatch。本批实现入站服务端 transport 与最小 socket 消费证据，没有原生上游 WS executor、公开应用 wire 协议/路由、Responses 事件/续链、任务意图+账本原子受理、领取/fencing 或重启重派；main 未启动。A3 后续继续原子任务/恢复边界，再由 A4 收口共同架构基线，S5-03 与完整 S6/S7-A 仍未验收。
+
+
+## 2026-10-17 A3-04：加密意图与双预算原子受理
+
+负责范围：`internal/generation` 的 IntentAcceptor 实际消费者、`internal/billing` 的类型化原子持久端口与原 reserve/finish 事务复用、`internal/model` / `internal/store` 的统一 v9 迁移、相关风险回归及 `tests/smoke/delivery.py` 的交付断言。父提交 `8c4a2f1e38d111534ad8cc34d52fe6732ca2b9e1`；开工和提交前 fetch 的 `origin/master=90df76b0340e4cdfa6c332c781f7aa772a04ed07` 仍为祖先，功能分支与父提交同步。父提交 push/PR CI `39042296316` / `39042300080` 通过只用于确认原基线；本批代码单独验证，沿用 draft PR #5、不合并、不提前勾选 A3/A4 或完整阶段。
+
+- IntentAdmission 端口以同一事务保存加密输入意图、幂等摘要版本标记及原用户/Key 双 hold；generation 不导入 billing/store/GORM，原账本保持唯一财务权威。原普通 Reserve 和受理共享同一内部 reserve 实现，取消共享 finish 实现，不新增一套余额、鉴权、迁移或任意 DB 回调。
+- 当前 owner/创建 Key/模型权限每次重新解析；先于可信回调复制输入，JSON 有界/拒绝重复字段/规范对象键和空白。独立稳定 HMAC 只保存幂等键与请求的摘要；同作用域同键同请求返回原回执，不同请求冲突。首次成功事务保存摘要密钥指纹；重启误换 DigestKey 失败关闭，不能创建新幂等命名空间并多扣一次。
+- 独立 AES-256-GCM 密钥环加密正文/会话标识，随机 nonce 和认证元数据绑定 owner/Key/操作/模型/billing ID/期限/摘要。保留旧内容密钥可读取原回执，内容密钥轮换或运行 TTL 变化不改变同请求幂等身份；缺钥/篡改不返回明文，无默认/明文回落。稳定摘要密钥暂不支持轮换，不能删除其指纹标记绕过。
+- schema v9 仅新增 generation_intents，不改历史迁移/财务事实、不回填任务。输入、密文、实例/owner 记录数/字节、QueueTTL/Retention 和清理批次有界；终态或到期但仍保留的行继续计入容量。详见开发指南的配置/密钥备份和保留期规则；逻辑容量不是物理磁盘配额或安全擦除。
+- 这是不可派发的短期意图，不进入 Runner。原 StartAttempt 事务明确拒绝意图关联 reservation；本批无领取/续租/fencing、任务派发、价格/能力恢复或重启重派，不扩大 strict 可发送范围。Read 返回解密输入不是恢复执行许可。
+- Cancel 与到期恢复只在同一事务证明 reservation 仍 reserved、同 owner/Key/模型、无任何 attempt/provider 占用后，调用原 finish 零费用释放双 hold并写终态。异常执行标为 uncertain/账本 pending、保留占用；原普通过期恢复排除所有意图关联行，避免错误退款。恢复不读正文、不需密钥、不返回任务；清理只删可证明零费用且无 attempt 的到期 cancelled/expired 内容，财务事实保留，uncertain 不自动删。
+
+验证环境：2026-10-17 Windows/PowerShell，Go 1.26.3、Node 24.14.1、Python 3.14.3；Go 显式 `GOARCH=amd64 GOFLAGS=-buildvcs=false`，本机无 Make，按 Makefile 等价执行。
+
+| 实际命令/检查 | 结果及适用范围 |
+|---|---|
+| `go test -run '^$' ./internal/billing ./internal/generation ./internal/store ./internal/architecture` | 开发期编译通过 |
+| `go test -count=1 ./internal/generation ./internal/billing ./internal/store ./internal/architecture` | 开发期集中定向通过；真实 SQLite 双预算并发、幂等/丢确认、跨表插入/取消回滚、权限/容量/加密与保守恢复；后续新增用例由下列定向和最终全量覆盖 |
+| `go test -count=1 ./internal/generation -run '^TestIntent'`；`go test -count=1 ./internal/store -run 'TestIntentV9\|TestArchiveV8'` | 最终新增意图与迁移回归通过；另因误将慢编译判断为等待，曾定向重跑 forced-process-death 调试，用例仍通过，无生产超时放宽 |
+| `go build ./...`、`go vet ./...`、`go test -json -count=1 ./...` | 最终代码通过，20 个有测试包；原依赖/79 操作契约、授权/协议/并发、财务、迁移与强杀恢复回归保留 |
+| 4 项 `node --check` 与 `node --test web/assets/api.test.mjs` | 本批执行通过，6 项行为用例 |
+| `python tests/smoke/local.py --go go` | 本批通过；生产启动/JSON/SSE/控制台/strict 拒绝及同 main 的隔离结算、凭据轮换拒绝、强杀重启 pending 和审计幂等豁免；不是生产意图接线冒烟 |
+| 格式/差异/文档/交付脚本 | 只格式化 12 个变更 Go 文件；`git diff --check`、5 份现有文档的 65 个本地链接/锚点、delivery Python AST 通过。OpenAPI 保持 0.2.3 / 79 操作，无依赖、workflow、core/gateway/server/main 变更 |
+
+真实 OS 子进程分别在双 hold 与意图事务提交前被强杀、和成功受理后被强杀；前者重启无意图/预留/兼容额度占用，后者保留唯一回执、可在相同密钥下解密读取，真实排队期限到期后重复恢复只零费用释放未执行预算，无 attempt。SQLite/WAL 未出现输入与原幂等键的明文标记。测试专用 GORM hook 不进入生产；没有用内存状态模拟崩溃或加生产绕过开关。并发同键仅一条意图/一个 hold，跨 Key 不突破用户预算；人为注入未知 attempt 的回归保留双 hold/provider 占用并拒绝自动清理。
+
+本机未运行 Linux race、Docker、真实上游/客户端/浏览器或生产库操作。最终 SHA 的自动 push/PR 完整 CI 单独记入现有 PR，不手动 dispatch；容器交付脚本已同步 v9 和空意图表断言，实际远端结果不借用旧绿灯。本批不开放持久后台 API/Responses/WS 产品能力，main 未启动受理器，旧上游凭据明文风险保留。下一批 A3 收口领取/租约/fencing 与安全派发/未知恢复，再由 A4 验收共同架构基线；S5-03 和完整 S6/S7-A 仍未完成。
