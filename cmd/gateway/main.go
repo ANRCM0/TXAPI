@@ -95,6 +95,9 @@ func main() {
 	// defer 保证任何退出路径都 flush 异步日志：Close 先排空日志队列
 	// 再关连接；普通日志可能因队列满/写库失败而丢弃并计数。
 	defer st.Close()
+	if !st.CredentialEncryptionReady(context.Background()) {
+		slog.Warn("upstream credentials use plaintext compatibility storage; this is not the production security baseline")
+	}
 	if *initAdmin {
 		user, err := st.BootstrapAdmin(os.Getenv("TXAPI_ADMIN_USERNAME"), os.Getenv("TXAPI_ADMIN_PASSWORD"))
 		if err != nil {
@@ -289,6 +292,18 @@ func main() {
 		}
 	}()
 
+	generationRuntime, err := startGenerationRuntime(cfg.Generation, st, engine, gw)
+	if err != nil {
+		slog.Error("durable generation initialization failed", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		// Do not close gateway, limiter or store while a worker still owns them.
+		if err := generationRuntime.Close(context.Background()); err != nil {
+			slog.Error("durable generation shutdown failed")
+		}
+	}()
+
 	// 7. 创建引擎并注册路由
 	// 管理 API 鉴权中间件在这里装配：密钥已由 config.Load 保证非空
 	// （缺失时 Load 直接拒绝启动），中间件内部用常量时间比较校验
@@ -338,6 +353,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	slog.Info("正在关闭网关...")
+	generationRuntime.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

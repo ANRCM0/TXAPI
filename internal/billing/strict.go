@@ -51,6 +51,7 @@ type Reservation struct {
 	prices        *PriceSnapshot
 	origin        string
 	providerCosts *ProviderCosts
+	claim         *model.GenerationClaim
 }
 
 func (e *Engine) EnableStrict(ceiling string, lease time.Duration) error {
@@ -212,12 +213,12 @@ func (e *Engine) startAttempt(ctx context.Context, pre *PreDeduct, attempt model
 		return ErrStrictUnavailable
 	}
 	return e.strict.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var intents int64
-		if err := tx.Model(&model.GenerationIntent{}).Where("billing_id = ?", pre.BillingID()).Count(&intents).Error; err != nil {
+		intent, err := checkIntentReservation(tx, pre, true)
+		if err != nil {
 			return err
 		}
-		if intents != 0 {
-			return ErrStrictUnavailable // Intent admission does not grant dispatch.
+		if intent != nil && bound == nil {
+			return ErrProviderContract
 		}
 		query := tx.Model(&model.BillingReservation{}).
 			Where("id=? AND state IN ? AND lease_until>?", pre.BillingID(), []string{Reserved, Active}, time.Now().UnixMilli())
@@ -271,31 +272,55 @@ func (e *Engine) EndAttempt(ctx context.Context, pre *PreDeduct, number, status 
 	if !e.StrictReady() || pre == nil || pre.reservation == nil {
 		return ErrStrictUnavailable
 	}
-	var attempt model.BillingAttempt
-	db := e.strict.db.WithContext(ctx)
-	if err := db.First(&attempt, "reservation_id=? AND number=?", pre.BillingID(), number).Error; err != nil {
-		return err
-	}
-	attempt.State, attempt.Status, attempt.Termination = "finished", status, termination
 	var contractErr error
-	if u != nil && attempt.ProviderContractVersion != "" {
-		var snapshot providerAttemptSnapshot
-		hash := sha256.Sum256([]byte(attempt.ProviderContractSnapshot))
-		if json.Unmarshal([]byte(attempt.ProviderContractSnapshot), &snapshot) != nil ||
-			hex.EncodeToString(hash[:]) != attempt.ProviderContractVersion || (snapshot.Format != 1 && snapshot.Format != 2) || snapshot.UnitScale != UnitScale ||
-			int64(u.PromptTokens) > snapshot.Contract.InputTokenCeiling || int64(u.CompletionTokens) > snapshot.OutputLimit {
-			contractErr = ErrProviderLimit
-			attempt.Termination = "provider_contract_violation"
+	err := e.strict.db.WithContext(ctx).Transaction(func(db *gorm.DB) error {
+		intent, err := checkIntentReservation(db, pre, false)
+		if err != nil {
+			return err
 		}
-	}
-	if u != nil {
-		attempt.PromptTokens, attempt.OutputTokens = u.PromptTokens, u.CompletionTokens
-		cost, err := snapshotCost(pre.prices, u, attempt.ActualModel, pre.reservation.origin, attempt.Group)
-		if err == nil && completeUsage(u) {
-			attempt.CostUnits, attempt.CostKnown = cost, termination == "success" && status == 200 && contractErr == nil
+		if intent != nil && intent.State != model.IntentRunning {
+			return model.ErrClaimLost
 		}
-	}
-	if err := db.Save(&attempt).Error; err != nil {
+		var attempt model.BillingAttempt
+		if err := db.First(&attempt, "reservation_id=? AND number=?", pre.BillingID(), number).Error; err != nil {
+			return err
+		}
+		original := attempt
+		if original.State != Active && original.State != "finished" {
+			return ErrSettlementConflict
+		}
+		attempt.State, attempt.Status, attempt.Termination = "finished", status, termination
+		attempt.PromptTokens, attempt.OutputTokens, attempt.CostUnits, attempt.CostKnown = 0, 0, 0, false
+		if u != nil && attempt.ProviderContractVersion != "" {
+			var snapshot providerAttemptSnapshot
+			hash := sha256.Sum256([]byte(attempt.ProviderContractSnapshot))
+			if json.Unmarshal([]byte(attempt.ProviderContractSnapshot), &snapshot) != nil ||
+				hex.EncodeToString(hash[:]) != attempt.ProviderContractVersion || (snapshot.Format != 1 && snapshot.Format != 2) || snapshot.UnitScale != UnitScale ||
+				int64(u.PromptTokens) > snapshot.Contract.InputTokenCeiling || int64(u.CompletionTokens) > snapshot.OutputLimit {
+				contractErr = ErrProviderLimit
+				attempt.Termination = "provider_contract_violation"
+			}
+		}
+		if u != nil {
+			attempt.PromptTokens, attempt.OutputTokens = u.PromptTokens, u.CompletionTokens
+			cost, err := snapshotCost(pre.prices, u, attempt.ActualModel, pre.reservation.origin, attempt.Group)
+			if err == nil && completeUsage(u) {
+				attempt.CostUnits, attempt.CostKnown = cost, termination == "success" && status == 200 && contractErr == nil
+			}
+		}
+		if original.State == "finished" {
+			if original.Status != attempt.Status || original.Termination != attempt.Termination || original.PromptTokens != attempt.PromptTokens ||
+				original.OutputTokens != attempt.OutputTokens || original.CostUnits != attempt.CostUnits || original.CostKnown != attempt.CostKnown {
+				return ErrSettlementConflict
+			}
+			return nil
+		}
+		if err := db.Save(&attempt).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	return contractErr
@@ -309,9 +334,16 @@ func (e *Engine) Finish(ctx context.Context, pre *PreDeduct, u *relaymodel.Usage
 		return 0, "", ErrStrictUnavailable
 	}
 	err = e.strict.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		intent, checkErr := checkIntentReservation(tx, pre, false)
+		if checkErr != nil {
+			return checkErr
+		}
 		var finishErr error
 		charge, state, finishErr = finishReservation(tx, pre, u, actual, group, complete)
-		return finishErr
+		if finishErr != nil {
+			return finishErr
+		}
+		return finishClaimIntent(tx, intent, state, complete)
 	})
 	return
 }
@@ -410,6 +442,10 @@ func completeUsage(u *relaymodel.Usage) bool {
 	return u.TotalTokens == 0 || u.TotalTokens == u.PromptTokens+u.CompletionTokens
 }
 
+func receiptUsage(receipt model.BillingAttempt) *relaymodel.Usage {
+	return &relaymodel.Usage{PromptTokens: receipt.PromptTokens, CompletionTokens: receipt.OutputTokens}
+}
+
 // RecoverExpired never refunds a possibly executed request. It is safe to
 // repeat and also repairs reservations abandoned before their first attempt.
 func (e *Engine) RecoverExpired(ctx context.Context, now time.Time) error {
@@ -464,7 +500,22 @@ func (e *Engine) ReconcileKnownUsage(ctx context.Context, id string, u *relaymod
 		return 0, "", err
 	}
 	pre := &PreDeduct{prices: prices, reservation: &Reservation{id: id, origin: row.OriginModel, prices: prices}}
-	return e.Finish(ctx, pre, u, actual, group, true)
+	var charge int64
+	var state string
+	err = e.strict.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var linked model.GenerationIntent
+		q := tx.Omit("ciphertext").Where("billing_id = ?", id).Limit(1).Find(&linked)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected == 1 && linked.State != model.IntentUncertain {
+			return model.ErrIntentUnsafe
+		}
+		var err error
+		charge, state, err = finishReservation(tx, pre, u, actual, group, true)
+		return err
+	})
+	return charge, state, err
 }
 
 func (e *Engine) StartRecovery(interval time.Duration) func() {

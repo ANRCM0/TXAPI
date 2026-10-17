@@ -2,7 +2,6 @@ package generation
 
 import (
 	"context"
-	"crypto/cipher"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +16,7 @@ import (
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
+	"minigateway/internal/secrets"
 )
 
 var (
@@ -48,11 +48,13 @@ type ArchiveOptions struct {
 type Archive struct {
 	store     ArchiveStore
 	resolve   func(context.Context, access.Binding) (access.Principal, error)
-	keys      map[string]cipher.AEAD
-	activeKey string
+	keys      *secrets.Ring
 	retention time.Duration
 	maxBytes  int64
 	limits    model.GenerationArchiveLimits
+	cursorMu  sync.Mutex
+	cursors   int
+	owners    map[uint]int
 }
 
 // RecordedResult deliberately excludes raw errors, caller keys and policies.
@@ -73,6 +75,7 @@ type Recording struct {
 	Metadata core.ResponseMetadata
 	Body     []byte
 	Result   RecordedResult
+	record   model.GenerationRecord
 }
 
 func NewArchive(opts ArchiveOptions) (*Archive, error) {
@@ -82,9 +85,9 @@ func NewArchive(opts ArchiveOptions) (*Archive, error) {
 		opts.Limits.OwnerRecords < 1 || opts.Limits.InstanceRecords < opts.Limits.OwnerRecords {
 		return nil, fmt.Errorf("invalid generation archive configuration")
 	}
-	a := &Archive{store: opts.Store, resolve: opts.Resolve, activeKey: opts.ActiveKey, retention: opts.Retention,
-		maxBytes: opts.MaxRecordBytes, limits: opts.Limits, keys: make(map[string]cipher.AEAD)}
-	keys, err := compileContentKeys(opts.ActiveKey, opts.Keys)
+	a := &Archive{store: opts.Store, resolve: opts.Resolve, retention: opts.Retention,
+		maxBytes: opts.MaxRecordBytes, limits: opts.Limits}
+	keys, err := secrets.NewRing(opts.ActiveKey, opts.Keys)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +118,8 @@ func currentPrincipal(ctx context.Context, resolve func(context.Context, access.
 	if errors.Is(err, access.ErrUnauthorized) {
 		return access.Principal{}, access.ErrUnauthorized
 	}
-	if err != nil || p.UserID != binding.UserID || p.TokenID != binding.TokenID || p.Policy.Validate() != nil {
+	if err != nil || p.UserID != binding.UserID || p.TokenID != binding.TokenID || p.Policy.Validate() != nil ||
+		p.RPMLimit < 0 || p.TPMLimit < 0 || p.UserRPMLimit < 0 || p.UserConcurrencyLimit < 0 || p.KeyConcurrencyLimit < 0 {
 		return access.Principal{}, ErrAuthorityUnavailable
 	}
 	return p, ctx.Err()
@@ -148,27 +152,15 @@ func archiveAAD(r model.GenerationRecord, seq uint64, kind string, header []byte
 }
 
 func (a *Archive) seal(r model.GenerationRecord, kind string, data []byte) ([]byte, error) {
-	key := a.keys[a.activeKey]
-	header := append([]byte{1, byte(len(a.activeKey))}, a.activeKey...)
-	nonce := make([]byte, key.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
+	sealed, err := a.keys.Seal(data, archiveAAD(r, r.NextSequence, kind, nil))
+	if err != nil {
 		return nil, ErrArchiveUnavailable
 	}
-	return key.Seal(append(header, nonce...), nonce, data, archiveAAD(r, r.NextSequence, kind, header)), nil
+	return sealed, nil
 }
 
 func (a *Archive) open(r model.GenerationRecord, s model.GenerationSegment) ([]byte, error) {
-	data := s.Ciphertext
-	if len(data) < 2 || data[0] != 1 || data[1] < 1 || data[1] > 32 || len(data) < 2+int(data[1]) {
-		return nil, ErrArchiveIntegrity
-	}
-	header := data[:2+int(data[1])]
-	key := a.keys[string(header[2:])]
-	if key == nil || len(data) < len(header)+key.NonceSize()+key.Overhead() {
-		return nil, ErrArchiveIntegrity
-	}
-	nonce := data[len(header) : len(header)+key.NonceSize()]
-	plain, err := key.Open(nil, nonce, data[len(header)+len(nonce):], archiveAAD(r, s.Sequence, s.Kind, header))
+	plain, err := a.keys.Open(s.Ciphertext, archiveAAD(r, s.Sequence, s.Kind, nil))
 	if err != nil {
 		return nil, ErrArchiveIntegrity
 	}
@@ -238,6 +230,8 @@ func (a *Archive) Read(ctx context.Context, binding access.Binding, id string) (
 	if out.Result.Model == "" || !principal.Policy.Allows(out.Result.Model) {
 		return Recording{}, access.ErrUnauthorized
 	}
+	r.Segments = nil
+	out.record = r
 	return out, nil
 }
 

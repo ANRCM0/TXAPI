@@ -60,6 +60,7 @@ type ConcurrencyConfig struct {
 
 // DatabaseConfig 是存储层配置。
 type DatabaseConfig struct {
+	CredentialKeysFile string `yaml:"credential_keys_file"`
 	// Driver 目前只支持 "sqlite"（留字段给 PostgreSQL，见 PLAN 技术栈）。
 	Driver string `yaml:"driver"`
 	// Path 是 SQLite 文件路径，相对路径按进程工作目录解析。
@@ -153,11 +154,12 @@ type Config struct {
 	// （见 store.PurgeExpiredLogs）。
 	// 0 表示关闭自动清理（比如想自己导出归档后再删），负数非法。
 	// 环境变量 GATEWAY_LOG_RETENTION_DAYS 优先。
-	LogRetentionDays int             `yaml:"log_retention_days"`
-	Database         DatabaseConfig  `yaml:"database"`
-	Billing          BillingConfig   `yaml:"billing"`
-	Channels         []ChannelConfig `yaml:"channels"`
-	Tokens           []TokenConfig   `yaml:"tokens"`
+	LogRetentionDays int              `yaml:"log_retention_days"`
+	Database         DatabaseConfig   `yaml:"database"`
+	Billing          BillingConfig    `yaml:"billing"`
+	Generation       GenerationConfig `yaml:"generation"`
+	Channels         []ChannelConfig  `yaml:"channels"`
+	Tokens           []TokenConfig    `yaml:"tokens"`
 }
 
 // EnvAdminKey 是管理密钥的环境变量名。
@@ -207,6 +209,10 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析 YAML 失败: %w", err)
 	}
 	cfg.applyDefaults()
+	cfg.Generation.defaults(cfg.Server.TotalTimeoutSeconds)
+	if value := strings.TrimSpace(os.Getenv(EnvGenerationKeysFile)); value != "" {
+		cfg.Generation.KeysFile = value
+	}
 	if explicit.Server.RetryTimes != nil {
 		cfg.Server.RetryTimes = *explicit.Server.RetryTimes
 	}
@@ -215,6 +221,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvDatabasePath)); v != "" {
 		cfg.Database.Path = v
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvCredentialKeysFile)); v != "" {
+		cfg.Database.CredentialKeysFile = v
 	}
 	// 环境变量覆盖配置文件：部署时改配置要重新打镜像/改文件，
 	// 改环境变量不用。密钥尤其应该走环境变量（不进 git）。
@@ -343,6 +352,12 @@ func (c *Config) applyDefaults() {
 // 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
 // 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	if err := c.Generation.validate(c.Billing, c.Server.TotalTimeoutSeconds); err != nil {
+		return err
+	}
+	if c.Generation.Enabled && strings.TrimSpace(c.Database.CredentialKeysFile) == "" {
+		return fmt.Errorf("generation.enabled requires database.credential_keys_file or %s", EnvCredentialKeysFile)
+	}
 	switch c.Billing.Mode {
 	case "legacy", "disabled", "strict":
 	default:

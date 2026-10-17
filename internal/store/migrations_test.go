@@ -1,9 +1,11 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +13,105 @@ import (
 	"minigateway/internal/config"
 	"minigateway/internal/model"
 )
+
+func TestIntentV10UpgradePreservesV9IntentAndOriginalFinancialAuthority(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v9-claim-upgrade.db")
+	st, err := Open(config.DatabaseConfig{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := encryptedChannel(t, st, "v9", "legacy-v9-fixture-key")
+	id := strings.Repeat("a", 64)
+	original := model.GenerationIntent{ID: id, UserID: 7, TokenID: 8, AdmissionKey: strings.Repeat("b", 64), RequestDigest: strings.Repeat("c", 64), DigestVersion: strings.Repeat("d", 64), Operation: "chat", Model: "m", BillingID: id[:32], State: model.IntentQueued, Ciphertext: bytes.Repeat([]byte{42}, 64), CreatedAt: time.Now().UnixMilli(), Deadline: time.Now().Add(time.Minute).UnixMilli(), ExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+	if err := st.DB().Create(&original).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Create(&model.BillingReservation{ID: original.BillingID, UserID: 7, TokenID: 8, OriginModel: "m", PriceVersion: "v9-price", ReservedUnits: 71, State: "reserved", LeaseUntil: original.Deadline}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Create(&model.BillingBalance{OwnerType: "user", OwnerID: 7, ReservedUnits: 71, UsedUnits: 9}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Where("version = 10").Delete(&model.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"idx_intent_output", "idx_credential_key_hash", "idx_generation_intents_claim_until"} {
+		if err := st.DB().Exec("DROP INDEX IF EXISTS " + name).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"ProviderPolicyVersion", "ClaimEpoch", "ClaimHash", "ClaimUntil", "CancelRequested", "OutputRecordID"} {
+		if err := st.DB().Migrator().DropColumn(&model.GenerationIntent{}, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"KeyCiphertext", "KeyHash"} {
+		if err := st.DB().Migrator().DropColumn(&model.Credential{}, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = st.Close()
+	for range 2 {
+		st, err = Open(config.DatabaseConfig{Path: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got model.GenerationIntent
+		if err := st.DB().First(&got, "id = ?", original.ID).Error; err != nil || !bytes.Equal(got.Ciphertext, original.Ciphertext) || got.ClaimEpoch != 0 || got.ProviderPolicyVersion != "" || got.OutputRecordID != "" || got.State != model.IntentQueued {
+			t.Fatal("v10 invented execution authority or changed v9 content", err)
+		}
+		var financial model.BillingReservation
+		if err := st.DB().First(&financial, "id = ?", original.BillingID).Error; err != nil || financial.ReservedUnits != 71 || financial.State != "reserved" || financial.PriceVersion != "v9-price" {
+			t.Fatal("v10 changed original hold", err)
+		}
+		var balance model.BillingBalance
+		if err := st.DB().First(&balance).Error; err != nil || balance.ReservedUnits != 71 || balance.UsedUnits != 9 {
+			t.Fatal("v10 changed financial balance", err)
+		}
+		cred, err := st.GetCredential(channel.Credentials[0].ID)
+		if err != nil || cred.APIKey != "legacy-v9-fixture-key" {
+			t.Fatal("compatibility upgrade altered credential", err)
+		}
+		if err := checkMigrationVersion(st.DB(), 9); err == nil {
+			t.Fatal("v9 binary accepted v10 database")
+		}
+		var count int64
+		if err := st.DB().Model(&model.SchemaMigration{}).Where("version = 10").Count(&count).Error; err != nil || count != 1 {
+			t.Fatal("v10 was not idempotent", err)
+		}
+		_ = st.Close()
+	}
+}
+
+func TestV10IndexFailureRollsBackBothIndexesAndVersion(t *testing.T) {
+	st := openTestStore(t, "v10-index-failure")
+	defer st.Close()
+	channel := encryptedChannel(t, st, "bad-duplicate-fixture", "first")
+	if _, err := st.CreateCredential(channel.ID, &CredentialInput{APIKey: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"idx_intent_output", "idx_credential_key_hash"} {
+		if err := st.DB().Exec("DROP INDEX IF EXISTS " + name).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.DB().Model(&model.Credential{}).Where("channel_id = ?", channel.ID).UpdateColumn("key_hash", "duplicate-corrupt-fixture").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Where("version = 10").Delete(&model.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := applyDataMigrations(st.DB(), dataMigrations); err == nil {
+		t.Fatal("conflicting unique index accepted")
+	}
+	if st.DB().Migrator().HasIndex(&model.GenerationIntent{}, "idx_intent_output") {
+		t.Fatal("first DDL escaped failed migration transaction")
+	}
+	var count int64
+	if err := st.DB().Model(&model.SchemaMigration{}).Where("version = 10").Count(&count).Error; err != nil || count != 0 {
+		t.Fatal("failed v10 recorded completion", err)
+	}
+}
 
 func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v7-archive-upgrade.db")
@@ -41,8 +142,8 @@ func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+2 || got[len(got)-2].Version != 8 || got[len(got)-1].Version != 9 {
-			t.Fatalf("non-idempotent v8/v9: %+v", got)
+		if len(got) != len(released)+3 || got[len(got)-3].Version != 8 || got[len(got)-2].Version != 9 || got[len(got)-1].Version != 10 {
+			t.Fatalf("non-idempotent v8/v9/v10: %+v", got)
 		}
 		for i := range released {
 			if got[i].Version != released[i].Version || !got[i].AppliedAt.Equal(released[i].AppliedAt) {
@@ -71,7 +172,7 @@ func TestIntentV9UpgradePreservesV8OutputAndFinancialAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.DB().Where("version = 9").Delete(&model.SchemaMigration{}).Error; err != nil {
+	if err := st.DB().Where("version >= 9").Delete(&model.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := st.DB().Migrator().DropTable(&model.GenerationIntent{}); err != nil {
@@ -105,8 +206,8 @@ func TestIntentV9UpgradePreservesV8OutputAndFinancialAuthority(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+1 || got[len(got)-1].Version != 9 {
-			t.Fatalf("non-idempotent v9 migration: %+v", got)
+		if len(got) != len(released)+2 || got[len(got)-2].Version != 9 || got[len(got)-1].Version != 10 {
+			t.Fatalf("non-idempotent v9/v10 migration: %+v", got)
 		}
 		for i := range released {
 			if got[i].Version != released[i].Version || !got[i].AppliedAt.Equal(released[i].AppliedAt) {

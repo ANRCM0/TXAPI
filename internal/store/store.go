@@ -29,7 +29,8 @@ import (
 
 // Store 聚合数据库连接和内存缓存。
 type Store struct {
-	db *gorm.DB
+	db    *gorm.DB
+	vault *credentialVault
 
 	// logs 是请求日志的异步批量写入器。由 Open 创建、Close 先 flush。
 	// 指针类型是为了让「不开异步」的构造路径（测试里直接造 Store）可用。
@@ -47,6 +48,10 @@ type Store struct {
 // （历史兼容原因），不打开的话 channels 删了、credentials 还留着。
 // busy_timeout 是为了并发写时等锁而不是立刻报 "database is locked"。
 func Open(cfg config.DatabaseConfig) (*Store, error) {
+	vault, err := loadCredentialVault(cfg.CredentialKeysFile)
+	if err != nil {
+		return nil, err
+	}
 	driver := cfg.Driver
 	if driver == "" {
 		driver = "sqlite"
@@ -76,14 +81,19 @@ func Open(cfg config.DatabaseConfig) (*Store, error) {
 	sqlDB.SetMaxIdleConns(1)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	s := &Store{db: db}
+	s := &Store{db: db, vault: vault}
 	if err := s.AutoMigrate(); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	if err := s.initializeCredentialVault(); err != nil {
 		_ = sqlDB.Close()
 		return nil, err
 	}
 	// 日志异步写入器：建好表之后再启动，保证第一批日志就能落库
 	s.logs = newAsyncLogWriter(db)
 	if err := s.reloadCache(); err != nil {
+		_ = s.Close()
 		return nil, err
 	}
 	return s, nil
@@ -158,6 +168,9 @@ func (s *Store) reloadCache() error {
 		return db.Order("weight DESC, id ASC")
 	}).Order("priority DESC, id ASC").Find(&channels).Error; err != nil {
 		return fmt.Errorf("读取渠道缓存失败: %w", err)
+	}
+	if err := s.openChannels(channels); err != nil {
+		return err
 	}
 
 	var tokens []model.Token

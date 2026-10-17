@@ -5,7 +5,9 @@ import (
 	"net/http"
 
 	"minigateway/internal/access"
+	"minigateway/internal/billing"
 	"minigateway/internal/core"
+	"minigateway/internal/model"
 	"minigateway/internal/protocol"
 )
 
@@ -20,6 +22,17 @@ type Execution struct {
 // ExecuteTo owns one generation, including admission, attempts and finalization.
 // Result and decoder state are fresh even when callers reuse a parent context.
 func (g *Gateway) ExecuteTo(ctx context.Context, output core.Output, in Execution) RequestResult {
+	return g.executeTo(ctx, output, in, nil)
+}
+
+// ExecuteClaimedTo consumes an authenticated durable intent through the same
+// authorization/admission/routing/attempt/finalization chain as HTTP. The caller
+// refreshes the Principal and owns lease renewal, output and shutdown joining.
+func (g *Gateway) ExecuteClaimedTo(ctx context.Context, output core.Output, in Execution, claim model.GenerationClaim) RequestResult {
+	return g.executeTo(ctx, output, in, &claim)
+}
+
+func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Execution, claim *model.GenerationClaim) RequestResult {
 	ctx = access.NewGenerationContext(ctx)
 	result := newRequestResult(ctx)
 	result.Operation = in.Operation
@@ -35,6 +48,11 @@ func (g *Gateway) ExecuteTo(ctx context.Context, output core.Output, in Executio
 		return *result
 	}
 	c := newOutputScope(ctx, output, result, in.SessionID)
+	c.claim = claim
+	if claim != nil && g.billingMode != billing.ModeStrict {
+		writeError(c, http.StatusServiceUnavailable, "durable execution requires strict billing", "billing_unavailable")
+		return *result
+	}
 	principal, ok := access.PrincipalFromContext(ctx)
 	if !ok || principal.UserID == 0 || principal.TokenID == 0 {
 		writeError(c, http.StatusUnauthorized, "a verified generation identity is required", "unauthorized")
@@ -75,6 +93,7 @@ type executionScope struct {
 	result          *RequestResult
 	sessionID       string
 	requestAdmitted bool
+	claim           *model.GenerationClaim
 }
 
 func newOutputScope(ctx context.Context, output core.Output, result *RequestResult, sessionID string) *executionScope {

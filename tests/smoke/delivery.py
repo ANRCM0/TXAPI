@@ -353,7 +353,7 @@ def main():
             assert len(upgraded["logs"]) == 4, "Graceful stop did not flush accepted access logs"
             previous_steps = len(original["schema_migrations"])
             assert upgraded["schema_migrations"][:previous_steps] == original["schema_migrations"], "Released migrations changed"
-            assert [row[0] for row in upgraded["schema_migrations"][previous_steps:]] == [5, 6, 7, 8, 9], "Missing billing/archive/intent migrations"
+            assert [row[0] for row in upgraded["schema_migrations"][previous_steps:]] == [5, 6, 7, 8, 9, 10], "Missing billing/archive/intent/claim migrations"
             with contextlib.closing(sqlite3.connect((after / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
                 for table in ("generation_records", "generation_segments", "generation_intents"):
                     assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,), "Archive schema missing or main started an undeclared consumer"

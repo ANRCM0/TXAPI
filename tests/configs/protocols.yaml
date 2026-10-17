@@ -1,4 +1,4 @@
-# Gemini 样本仍采用旧快照假设，不用于证明真实协议兼容性；修复见 docs/PLAN.md S0-02。
+# 样本只用于隔离测试，不证明真实服务兼容性；Gemini 增量语义回归见 docs/history/acceptance-s0-s5.md S0-02。
 # 多协议转换原型的手工测试配置
 # 三个假上游都在本地跑（见 tests/upstream/）：
 #   9911 = 假 OpenAI 上游（openai）

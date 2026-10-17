@@ -122,7 +122,9 @@ func (s *Store) InterruptGenerationRecords(ctx context.Context, limit int) (int6
 	if limit < 1 || limit > 1000 {
 		return 0, ErrArchiveConflict
 	}
-	q := s.db.Model(&model.GenerationRecord{}).Select("id").Where("state = ?", "open").Order("created_at, id").Limit(limit)
+	q := s.db.Model(&model.GenerationRecord{}).Select("id").Where("state = ?", "open").
+		Where("NOT EXISTS (SELECT 1 FROM generation_intents gi WHERE gi.output_record_id = generation_records.id AND gi.state IN ? AND gi.claim_until > ?)",
+			[]string{model.IntentClaimed, model.IntentRunning, model.IntentFinalizing}, time.Now().UnixMilli()).Order("created_at, id").Limit(limit)
 	result := s.db.WithContext(ctx).Model(&model.GenerationRecord{}).Where("id IN (?) AND state = ?", q, "open").Update("state", "interrupted")
 	return result.RowsAffected, result.Error
 }
