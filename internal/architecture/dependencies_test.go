@@ -24,6 +24,7 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 		"billing":    {"model": true, "protocol": true, "billing": true},
 		"store":      {"model": true, "access": true, "config": true, "store": true},
 		"generation": {"access": true, "core": true, "gateway": true, "protocol": true, "model": true},
+		"transport":  {"transport": true},
 		"gateway":    {"access": true, "core": true, "protocol": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true},
 		"server":     {"access": true, "model": true, "config": true, "store": true, "billing": true, "gateway": true, "metrics": true, "server": true},
 	}
@@ -61,6 +62,9 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 			}
 			if owner == "core" && strings.Contains(strings.Split(imported, "/")[0], ".") {
 				t.Errorf("core must use only standard library: %s", imported)
+			}
+			if strings.HasPrefix(imported, "github.com/coder/websocket") && !strings.HasPrefix(filepath.ToSlash(relative), "transport/websocket/") {
+				t.Errorf("websocket library escaped transport boundary: %s", relative)
 			}
 			if owner != "server" && owner != "gateway" && strings.HasPrefix(imported, "github.com/gin-gonic/") {
 				t.Errorf("framework dependency escaped HTTP boundary: %s", relative)

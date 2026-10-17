@@ -19,9 +19,9 @@
 | 范围 | 状态与边界 |
 |---|---|
 | S0–S4 与 F0 | 已有阶段验收并合并本地 master；F0 是初始团队接线基线，不是最终统一兼容框架 |
-| 当前代码快照 | `feat/s5-s6-mainline` 基于 `951aca9` 推进 A3-02 加密执行输出记录；A1/A2/A3-01 完整 CI 已通过，本批按最终代码重新验证，远端 CI 随提交单独记录。origin/master 最近核对为 `90df76b`，尚未合并，证据见 PLAN |
+| 当前代码快照 | `feat/s5-s6-mainline` 基于 `9d92d65` 推进 A3-03 有界 WS 传输和连接容量；A3-02 完整 CI 已通过，本批按最终代码重新验证，远端 CI 随提交单独记录。origin/master 最近核对为 `90df76b`，尚未合并，证据见 PLAN |
 | S5 | 6 个验收项中 5 个通过，S5-03 未完成；完整阶段尚未验收/合并，不承诺已具备可靠商业收费全部条件 |
-| 统一兼容框架 | Chat/embeddings 已复用非 Gin 协调与独立输出；操作信封贯穿路由/attempt/解码，计费按小接口接入；已有进程内 worker 与可选加密输出记录，但 main 未启用，完整 S6/A3 未验收，不等于已具备持久后台/WS |
+| 统一兼容框架 | Chat/embeddings 已复用非 Gin 协调与独立输出；操作信封贯穿路由/attempt/解码，计费按小接口接入；已有进程内 worker、可选加密输出记录和独立 WS transport；真实 socket 回归消费同一执行链，但 main 未启用，完整 S6/A3 未验收，不等于已具备生产持久后台/原生 WS |
 | Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；目前仅独立 Responses JSON/SSE 协议与样本，未开放生产入口；本批输出记录不是 Responses 持久历史、任务意图或可恢复事件，产品级持久会话/后台/WS 尚未实现 |
 | 原生 Messages/Gemini 入站、订阅账号池、支付、分布式部署 | 不属于当前已交付能力；本轮不新增支付 |
 
@@ -34,14 +34,14 @@
 ```text
 客户端 / 管理控制台
         |
-HTTP / SSE / WebSocket 接入                 <- WS 待开发
+HTTP / SSE / WebSocket 接入                 <- WS 产品接入待开发
         |
 协议与操作模型 / 能力校验
         |
 统一请求协调 gateway                       <- 切片已通过 CI，待 S6 阶段验收
   授权 -> 准入 -> 调度 -> attempt -> 收尾
         |                      |
-单次 HTTP 执行 core            可替换传输端口 <- WS transport 待开发
+单次 HTTP 执行 core            独立 WS I/O    <- transport 已实现，生产接线待开发
         |
 上游服务
 

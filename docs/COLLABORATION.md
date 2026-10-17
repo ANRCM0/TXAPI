@@ -54,7 +54,13 @@ Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模
 
 观察者取消不取消已交接工作；显式 `Future.Cancel`、服务关闭和期限可取消生成，均继续走 gateway 既有收尾。输出属于本次生成，结果仅一次接收；commit 后 panic 保守标记执行可能未知，不重放、不伪造未派发或清零账本。`Close` 等待所有 worker 与收尾；超时后不得提前关闭 gateway/store，同进程不合作回调无法被隔离或强杀。
 
-A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与原子序号追加；`SubmitRecorded` 为实际输出保留加密片段，读取/删除重新校验当前绑定，读取还检查当前模型权限。逐条容量预留、owner/实例限额、TTL、CAS 和故障回归见开发指南。它不是任务意图、领取/fencing 租约或原子任务+预算端口；输出片段不是可公开恢复的协议事件。没有公开路由、任务 ID 或重启重派，不在 main 隐式启动，不能替代 S7-A 的后台受理与持久 worker。架构回归用真实临时 SQLite/授权/准入/执行/财务链验证它，不把独立内存消费者当作整个 A3 已完成。HTTP 前台生命周期不变，WS 和持久消费者另划批次。
+A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与原子序号追加；`SubmitRecorded` 为实际输出保留加密片段，读取/删除重新校验当前绑定，读取还检查当前模型权限。逐条容量预留、owner/实例限额、TTL、CAS 和故障回归见开发指南。它不是任务意图、领取/fencing 租约或原子任务+预算端口；输出片段不是可公开恢复的协议事件。没有公开路由、任务 ID 或重启重派，不在 main 隐式启动，不能替代 S7-A 的后台受理与持久 worker。架构回归用真实临时 SQLite/授权/准入/执行/财务链验证它，不把独立内存消费者当作整个 A3 已完成。HTTP 前台生命周期不变，A3-03 的 WS 消费回归见下节；产品持久任务仍另划批次。
+
+### WS I/O 与物理连接：A3-03（未阶段验收）
+
+`internal/transport/websocket` 是纯服务端 I/O，生产只依赖标准库与固定版本 coder/websocket，不导入 access/gateway/generation/store；库不得进入 core 或业务包。`access.ConnectionCapacity` 独立限制物理连接，可信绑定由现有鉴权提供，不复制鉴权。manager 的服务寿命、HTTP 握手和每次生成独立，active/pending/消息/截止时间有界，关闭不代表生成收尾或退款。
+
+当前实际消费者是 generation 的测试专用 socket 应用：每轮经原 Runner 重新授权并调用同一 Gateway/账本；前台断开显式取消并 join，记录型观察断开只取消 Wait。它验证了已有输出端口足以承载编码结果，尚未创建生产 WS 应用或上游 WS executor。公开应用协议、原生 Responses 事件/续链、持久任务及 main 注册必须后续独立验收，不从测试帧复制为产品契约。关闭顺序、Origin/代理、容量和错误边界见[开发指南](DEVELOPMENT.md#a3-03-有界-ws-传输与连接生命周期)。
 
 ### 协议扩展：internal/protocol
 

@@ -8,14 +8,14 @@
 
 | 核对项 | 当前结论 |
 |---|---|
-| 当前代码 | `feat/s5-s6-mainline`，本批基于已推送 `951aca9` 推进 A3-02 加密输出持久记录；A3-01 派发身份与进程内 worker 已通过完整 CI；A1/A2、既有输入/费率门槛、S6 与独立 Responses 切片仍在分支，尚未合并 master |
+| 当前代码 | `feat/s5-s6-mainline`，本批基于已推送 `9d92d65` 推进 A3-03 有界 WS 传输和连接容量；A3-02 加密输出记录已通过完整 CI；A1/A2、既有输入/费率门槛、S6 与独立 Responses 切片仍在分支，尚未合并 master |
 | 本地集成基线 | `master/90df76b`，S0–S4 与 F0 已验收合并；开工/合并前重新确认最新基线 |
 | 产品形态 | Go/Gin 模块化单体、单二进制、单实例 SQLite；原生 ES Modules 控制台内嵌 |
 | 现有推理入口 | `/v1/models`、`/v1/chat/completions`（JSON/SSE）、`/v1/embeddings` |
 | HTTP 契约 | [OpenAPI](openapi.json) `0.2.3`，79 个操作；不是 79 种推理能力 |
 | S0–S4 / F0 | 正确性、极简 core、身份隔离、调度准入、控制台与配置交付已有阶段验收记录 |
 | S5 | 6 项中 5 项通过；当前费率/凭据批次已通过本地构建/vet/全量测试与进程冒烟，远端 CI 随提交记录。已将标准费率与 USD/凭据适用范围纳入准入，但逐账户最高适用价、失败收费及未来价格变更假设仍在，S5-03 与完整阶段未验收/合并 |
-| 统一兼容框架 | Chat/embeddings 已迁入非 Gin 协调函数；已有 `core.Output`、不可变操作信封及计费消费侧小接口；A3-01 增加实际调用 `ExecuteTo` 的有界进程内 worker 与派发时身份解析，A3-02 增加其可选加密输出记录、隔离/容量与中断恢复。正文仍是 JSON/SSE 字节；没有生产持久任务/WS，完整 S6 未验收 |
+| 统一兼容框架 | Chat/embeddings 已迁入非 Gin 协调函数；已有 `core.Output`、不可变操作信封及计费消费侧小接口；A3-01 增加实际调用 `ExecuteTo` 的有界进程内 worker 与派发时身份解析，A3-02 增加其可选加密输出记录、隔离/容量与中断恢复；A3-03 增加独立 WS transport、物理连接容量及真实 socket 消费回归。正文仍是 JSON/SSE 字节；没有生产持久任务/原生 WS，完整 S6 未验收 |
 | S6 / S7-A | S6 本轮切片已提交并通过完整 CI，尚未阶段验收合并；S7-A 仅独立 Responses 原生请求/JSON/SSE 协议与 core 样本，没有生产 Responses、持久会话、后台任务或 WS 入口 |
 | 安全与部署限制 | 上游 API Key 当前明文落库，响应掩码不是静态加密；客户端调用 Key 已摘要存储。没有实际生产升级或真实全客户端兼容验收承诺 |
 
@@ -52,10 +52,10 @@
 |---|---|---|
 | A1 | 输出端口与现有 HTTP 消费者：core/gateway/HTTP 适配及风险回归 | JSON/SSE 和拒绝行为保持；独立输出不伪装 HTTP writer；提交/取消/短写/租约事实正确 |
 | A2 | 操作模型、能力矩阵、可选模块消费侧小接口 | Chat/embeddings 真正复用；不同操作不经 Chat 有损中转；strict 许可独立判断 |
-| A3（当前） | 传输、状态和运行基础的可验收切片 | 以最小 WS/worker/持久消费者验证寿命、授权、容量、恢复和安全，不预建通用任务平台；A3-01 已交付派发身份/进程内 worker；A3-02 交付加密输出记录，不关闭整个 A3 |
+| A3（当前） | 传输、状态和运行基础的可验收切片 | 以最小 WS/worker/持久消费者验证寿命、授权、容量、恢复和安全，不预建通用任务平台；A3-01 已交付派发身份/进程内 worker；A3-02 交付加密输出记录；A3-03 交付有界 WS transport 与真实 socket 消费回归，不关闭整个 A3 |
 | A4 | 故障矩阵、最终 CI 和共同架构基线集成 | 回归及依赖门槛通过，记录稳定端口、支持范围和未交付功能，再合并共同基线 |
 
-A3 按真实需求逐步增加执行/持久端口；最小消费者是架构验收证据，不等于完成 S7 的会话管理、后台 API、WS 多轮或客户端产品闭环。不得只建空包/接口就勾选架构完成。新增迁移、WS 依赖和 API 时另划批次，同步契约与消费者。A2 已收口现有 Chat/embeddings 的操作信封、能力检查与 legacy/strict 计费消费端口。A3-01 已增加真实进程内消费及共享身份解析；本批 A3-02 以该 worker 为实际消费者，增加可选加密输出记录、统一 schema v8 和存储端口，不新增任务意图/领取、HTTP DTO、OpenAPI、依赖或 CI；完整状态型模型、生产密钥注入/保留策略与 WS 留待后续切片，不预建通用事件/任务平台。
+A3 按真实需求逐步增加执行/持久端口；最小消费者是架构验收证据，不等于完成 S7 的会话管理、后台 API、WS 多轮或客户端产品闭环。不得只建空包/接口就勾选架构完成。新增迁移、WS 依赖和 API 时另划批次，同步契约与消费者。A2 已收口现有 Chat/embeddings 的操作信封、能力检查与 legacy/strict 计费消费端口。A3-01 已增加真实进程内消费及共享身份解析；A3-02 以该 worker 为实际消费者增加可选加密输出记录、统一 schema v8 和存储端口。本批 A3-03 新增独立 transport 与固定版本 WS 依赖，用测试专用真实 socket 消费者验证同一授权/准入/执行/账本链；不新增生产 wire 协议、路由、原生 WS 上游执行、任务意图/领取或迁移。完整状态型模型、生产密钥注入/保留策略与产品 WS 留待后续切片，不预建通用事件/任务平台。
 
 ## S5 剩余验收
 
@@ -74,7 +74,7 @@ S5-03 已实现双层事务与收取费用上限，但尚不据此宣称允许�
 
 ## 后续开发路线
 
-制定日期：2026-10-16；2026-10-17 更新实际进度。当前功能分支 `feat/s5-s6-mainline`，本批基于 `951aca9`，最近已核对的集成基线为 `origin/master/90df76b`；合并前重新确认最新集成状态。S0–S4 与 F0 已验收合并，S5 功能仍在分支，S5-03 未完成。下列清单为阶段验收目标；本轮实现与验证进展见页末，未勾选项不能据此视为已通过；执行顺序以“架构优先执行顺序”节为准。
+制定日期：2026-10-16；2026-10-17 更新实际进度。当前功能分支 `feat/s5-s6-mainline`，本批基于 `9d92d65`，最近已核对的集成基线为 `origin/master/90df76b`；合并前重新确认最新集成状态。S0–S4 与 F0 已验收合并，S5 功能仍在分支，S5-03 未完成。下列清单为阶段验收目标；本轮实现与验证进展见页末，未勾选项不能据此视为已通过；执行顺序以“架构优先执行顺序”节为准。
 
 本轮范围已由用户明确：**完成 S5、S6 和包含持久会话/后台任务/WebSocket 的 S7-A，不新增支付。** 三个参考项目已克隆到被 Git/Docker 忽略的 `.local/references/`，固定版本与代码阅读入口见[上游参考快照](reference/upstream-snapshots.md)。本方案同时纠正“先堆 Responses 功能、后补共用框架”的顺序：统一协调入口前移到 S6，S7-A 是框架的首组完整状态型功能，不是框架中心。不自动启动 S7-B、S8 或 S9。
 
@@ -610,3 +610,28 @@ gateway 改用 `StartPreparedAttempt` 将真实 URL/正文交给同一成本引�
 本机未运行 Linux race、Docker、真实上游/客户端/浏览器或生产库升级。最终 SHA 的 push/PR 自动完整 CI 单独记录于现有 draft PR，不手动 dispatch；没有把父提交绿灯或本地结果当作本批远端验收。
 
 边界：这是 A3 的真实输出持久消费者，不是通用任务平台、Responses 持久历史/协议事件，尚无任务意图+账本原子受理、领取/租约/fencing、原生后台/WS、生产密钥注入或公开 API。OpenAPI 保持 0.2.3 / 79 操作，依赖与 CI 触发不改；交付脚本只同步 v8 迁移与空归档表的断言。现有上游 Key 明文落库风险保留。后续 A3 继续最小传输和任务原子/恢复边界，A4 才收口最终共同基线，不把本批当作项目完成。
+
+## 2026-10-17 A3-03：有界 WS 传输与连接生命周期
+
+负责范围：`internal/transport/websocket` 纯服务端 I/O、`internal/access` 独立物理连接容量、`internal/generation` 的实际 socket 消费回归、依赖约束与文档。父提交 `9d92d6507caa62f41d45cedc3a84d355b94b0284`；本批重新 fetch 确认 `origin/master=90df76b0340e4cdfa6c332c781f7aa772a04ed07` 为祖先、功能分支同步。复核父提交 push/PR CI `39024845146` / `39024848225` 均 success，仅用于确认原基线，不替本批代码背书；沿用 draft PR #5、不合并、不勾选完整阶段。
+
+- 采用固定版本 `github.com/coder/websocket v1.8.15`（ISC），已核对官方发布与所用 API 的该版本源码；生产库只进入 transport，不进入 core/gateway/protocol/generation。无新增传递依赖；保留模块校验，没有修改全局 Go 代理或跳过 checksum。
+- Manager 限制 active/pending、消息、读/写/握手与绝对连接寿命，禁用压缩；精确 Origin/TLS 规则、UTF-8/完整消息限额、单 reader/串行有时限写、错误白名单与关闭职责见开发指南。取消握手 callback 完成后才 reset deadline，防止过期写期限污染升级连接。Close 会 join pending 握手，超时不假装完成。
+- ConnectionCapacity 只接可信 Binding，限制实例/用户/Key 的物理连接并幂等释放；不把空闲连接当 generation/attempt/RPM/预算。Close 停接且保留尚在占用的租约事实，连接与生成的生命周期独立。
+- 测试专用应用通过真实 WS socket 调用原 Runner/Gateway/SQLite/严格账本；每轮重新解析身份，同连接撤销/收权后拒绝、无额外 attempt/预留。同外部轮次 ID 两条连接强制并发时输出隔离；无另一套授权、预算或收尾实现。
+- 前台断开显式 Cancel 并等待原收尾，只执行一次；未知成本继续 pending/双 hold/provider 占用，进程槽与连接槽均释放。记录型观察者断开和 Manager 关闭不取消已交接生成，释放上游后可按原 owner/Key 读取完整加密结果；不是公开后台持久受理。
+- 真实 TCP/TLS 回归覆盖 HTTP handler 返回/HTTP shutdown 后连接仍独立、控制帧与分片、消息/UTF-8、Origin/Forwarded、读/写超时/绝对寿命、真实慢读背压、失败/阻塞握手及并发关闭；有序关闭须另外 join 应用/runner 再关闭 gateway/store。
+
+验证环境：2026-10-17 Windows/PowerShell，Go 1.26.3、Node 24.14.1、Python 3.14.3；Go 显式 `GOARCH=amd64 GOFLAGS=-buildvcs=false`，本机无 Make，按 Makefile 等价执行。
+
+| 实际命令/检查 | 结果及适用范围 |
+|---|---|
+| `go test -count=1 ./internal/access ./internal/transport/websocket ./internal/generation ./internal/architecture`，失败项修正后 `go test -count=1 ./internal/transport/websocket ./internal/generation` | 最终通过；物理容量/实际 TCP/TLS/关闭竞争和真实协调器/严格账本集成；其余两包由最终全量再次验证 |
+| `go build ./...`、`go vet ./...`、`go test -json -count=1 ./...` | 最终代码通过，20 个有测试包；依赖/79 操作契约、权限/协议/并发、旧迁移、财务及强杀恢复回归保留 |
+| 4 项 `node --check` 与 `node --test web/assets/api.test.mjs` | 通过，6 项行为用例 |
+| `python tests/smoke/local.py --go go` | 通过；生产启动/原 JSON/SSE/控制台/strict 拒绝及同一 main 的 loopback 结算/凭据轮换拒绝/强杀重启 pending 与幂等豁免；没有生产 WS 接线冒烟 |
+| 格式、差异、文档与边界 | 6 个变更 Go 文件格式、`git diff --check`、5 份文档的 64 个本地链接/锚点通过；core/gateway/model/store/server/main/OpenAPI/CI 不改，schema 仍 v8、OpenAPI 仍 0.2.3 / 79 操作 |
+
+首轮控制帧测试遗漏 Ping 发起端的 reader，Origin 成功握手的断言没有等待 handler 关闭，集成用例有一处状态常量名错误；集中修正新 fixture。未知执行断言按既有 Replayable（请求体可重放）与实际取消/账务事实分开，未放宽生产重试或财务规则。实际读写/关闭路径未绕过任何测试门槛。
+
+本机未运行 Linux race、Docker、真实上游/原生 WS 客户端、浏览器或生产库操作。最终 SHA 的自动 push/PR 完整 CI 单独记录于既有 PR，不手动 dispatch。本批实现入站服务端 transport 与最小 socket 消费证据，没有原生上游 WS executor、公开应用 wire 协议/路由、Responses 事件/续链、任务意图+账本原子受理、领取/fencing 或重启重派；main 未启动。A3 后续继续原子任务/恢复边界，再由 A4 收口共同架构基线，S5-03 与完整 S6/S7-A 仍未验收。

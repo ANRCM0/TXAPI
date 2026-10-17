@@ -14,7 +14,7 @@ S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对�
 | 统一请求协调 | 授权、准入、路由/attempt、重试、预算、统一收尾 | `internal/gateway` 已抽离非 Gin 协调函数与 `core.Output` 输出端口，现有 HTTP 实际复用；保留 HTTP/Gin 适配，以 `LegacyBilling`/`StrictBilling` 消费原账本；无 native WS/持久 worker 入口 |
 | 统一兼容契约 | 按操作的语义模型、能力约束、usage/结果、传输边界 | Chat/embeddings 有各自载荷与不可变操作信封，类型化能力进入路由和准备，embeddings 独立解码；独立 Responses 模型未接生产，完整矩阵未验收 |
 | 功能模块 | 身份、调度、可选计费、观测，以及后续状态型应用 | 前几项已有实现；Responses、持久会话、后台任务均待开发 |
-| 接入与基础设施 | HTTP/SSE/WS、持久实现、控制台、显式组装 | HTTP/SSE、SQLite、内嵌控制台已实现；A3-01 增加有界进程内 worker，A3-02 增加其可选加密输出记录；WS transport、产品状态存储与生产持久 worker 待开发 |
+| 接入与基础设施 | HTTP/SSE/WS、持久实现、控制台、显式组装 | HTTP/SSE、SQLite、内嵌控制台已实现；A3-01 增加有界进程内 worker，A3-02 增加其可选加密输出记录，A3-03 增加独立 WS transport 与实际 socket 消费回归；产品 WS 接线、状态存储与生产持久 worker 待开发 |
 
 已有内核边界没有因后续规划失效；需要纠正的是框架尚未完成就让状态型功能主导接口设计的顺序。F0 只是初始可协作基线，不等于上表的统一兼容框架已经验收。S6 用现有生产 HTTP 消费者证明入口收敛，再让 S7-A 消费；不能只建立空接口宣称框架完成。
 
@@ -132,7 +132,7 @@ API 目标分区：`/api/admin/*` 为管理员操作，`/api/me/*` 为个人资�
 7. gateway 根据错误分类和剩余预算决定是否重试，更新健康状态。
 8. 统一收尾：释放并发/凭据资源、保存结果、结算或可靠标记待处理。异常与取消也必须走收尾。
 
-现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。`protocol.Request` 将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；A3-01 的 `internal/generation` 已作为有界进程内 worker 真实调用同一入口并重新解析派发身份，A3-02 又为它增加可选加密输出记录和中断标记，但没有生产后台接线、任务恢复重派或 native WS。JSON/SSE 字节仍非通用协议事件，S6 未完成阶段验收。
+现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。`protocol.Request` 将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；A3-01 的 `internal/generation` 已作为有界进程内 worker 真实调用同一入口并重新解析派发身份，A3-02 又为它增加可选加密输出记录和中断标记；A3-03 的真实 socket 消费者验证同一执行链与独立连接容量，但没有生产后台接线、任务恢复重派或 native WS。JSON/SSE 字节仍非通用协议事件，S6 未完成阶段验收。
 
 ## 6. 内核契约与重试边界
 
@@ -215,7 +215,7 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 | gateway | 统一操作准备、授权、准入、调度、attempt、预算、生成收尾；消费执行与持久端口 | 直接依赖 responses 应用服务、store 或框架任务队列 |
 | protocol | Responses 请求/item/事件与能力、usage 解析 | 数据库、连接池、worker 和模型调用 |
 | core | 保留标准库单次 HTTP 执行，复用已有生命周期 | WS 库、会话/任务/用户逻辑 |
-| WS transport（按需新增） | 纯传输、帧/消息读写、deadline、关闭；经 gateway 消费侧端口注入 | 用户、账本、数据库、协议业务事件含义 |
+| WS transport（A3-03 已有基础） | 纯 I/O、消息/容量边界、deadline、关闭；当前由测试应用调用，产品原生 WS 执行端口仍待接线 | 用户、账本、数据库、协议业务事件含义；不能绕过 gateway 执行 |
 | store / billing 持久实现 | 会话/任务/事件与现有账本的一致性事务，版本/幂等约束 | 以访问日志恢复状态、向业务层暴露任意 GORM 事务 |
 | cmd/gateway | 实例组装、worker/WS 管理器启动与有序关闭 | 在包 init 中隐式启动服务 |
 

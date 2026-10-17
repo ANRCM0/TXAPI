@@ -2,7 +2,7 @@
 
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
-2026-10-17 按架构优先更新：本页的 S1–S5 标题按功能/运行主题保留，不表示仍停留在当时开发阶段。当前 S0–S4/F0 已验收，S5 未完整收口；S6 协调/能力/工具已有通过 CI 的切片，S7-A 仅独立 Responses 协议实现，生产状态型功能仍待开发。A1/A2 已增加输出端口、操作信封、能力检查及计费小接口；A3-01 增加共享身份解析及真正调用 `ExecuteTo` 的有界进程内 worker，本批 A3-02 增加可选加密输出记录与统一 schema v8，尚未接公开后台路由或生产 worker；完整底层架构仍待验收。历史提交和 CI 证据见 [验收归档](history/acceptance-s0-s5.md)；下列命令是操作指南，不代表本次文档批次重新执行。
+2026-10-17 按架构优先更新：本页的 S1–S5 标题按功能/运行主题保留，不表示仍停留在当时开发阶段。当前 S0–S4/F0 已验收，S5 未完整收口；S6 协调/能力/工具已有通过 CI 的切片，S7-A 仅独立 Responses 协议实现，生产状态型功能仍待开发。A1/A2 已增加输出端口、操作信封、能力检查及计费小接口；A3-01 增加共享身份解析及真正调用 `ExecuteTo` 的有界进程内 worker，A3-02 增加可选加密输出记录与统一 schema v8，A3-03 增加有界 WS transport 与独立连接容量，尚未接公开后台/WS 路由或生产 worker；完整底层架构仍待验收。历史提交和 CI 证据见 [验收归档](history/acceptance-s0-s5.md)；下列命令是操作指南，不代表本次文档批次重新执行。
 
 ## 工具与工作目录
 
@@ -366,6 +366,20 @@ worker 数、队列长度、单请求正文和排队起算的取消时限均有�
 原账本仍是唯一财务权威。真实隔离 transport/SQLite 回归分别验证：输出写失败且上游 usage 未知，双 hold/provider 占用保留 pending；生成已结算而最终观察写失败，既有结算不回退。另有真实子进程在部分 SSE 加密片段持久后被强杀，重启后旧句柄被拒绝、记录为中断、真实租约到期恢复不重发/不退款。测试没有降低 strict 档案或凭据门槛。
 
 这不是持久会话、durable task acceptance、任务领取/续租/fencing、原子任务意图+预算预留或事件游标；不保留可用于重发的输入，也没有自动恢复生成。S7-A 的 store=false/后台原生状态与内容策略仍需自己的产品接线和验收，不能静默把客户端请求送入本记录器。现有上游凭据明文存储未因本批加密输出记录而修复。
+
+### A3-03 有界 WS 传输与连接生命周期
+
+`internal/transport/websocket` 只管理服务端 WS 握手、物理连接和同步消息 I/O；不导入业务包、不处理身份/协议事件/账本。固定使用 `github.com/coder/websocket v1.8.15`（ISC），Go 依赖校验保持开启。已核对官方发布及该版本 Accept/Read/Write/CloseNow/SetReadLimit 源码：取消正在进行的 I/O 会关闭连接，Ping 的发起端也必须有读取器接收 Pong，CloseNow 不等待普通关闭握手。第三方库不进入标准库 core，生产依赖约束限定在本 transport 包；该包不是原生 Responses WS 上游执行器。
+
+- 组装者先用现有身份权威认证，再以可信 `access.Binding` 调用 `ConnectionCapacity.Acquire`，随后 `Manager.Accept`。连接限额为 `1 <= Key <= User < Instance <= 4096`，关闭只停接、不丢掉尚未释放的租约；幂等释放。空闲连接不预占 generation/attempt 槽、RPM 或预算。当前没有 main/YAML 配置或公开 WS 路由；不能把这一测试组装当成已启用的产品。
+- `Manager` 使用服务 context；HTTP request context 只约束握手检查，handler 返回或 HTTP Server.Shutdown 不拥有已升级 socket。实例连接数 1–4096，单消息 1 字节–20 MiB，连接数乘单消息上限不超过 32 MiB（每方向正文配置预算，非进程总堆内存保证）；禁用压缩。握手/写时限不超过 30 秒，单次读时限不超过 5 分钟，绝对连接寿命不超过 24 小时且不少于读时限，所有值须显式设置。
+- Origin 采用已复制的精确 http(s) scheme/host 列表，并允许真实请求的同源浏览器；拒绝 wildcard/null/路径/用户信息/多值或错误 scheme。实际 TLS 决定同源 scheme，不信任 X-Forwarded-*；TLS 终止代理后的浏览器需由组装者显式允许外部 Origin。无 Origin 的 native 客户端仍必须先认证，Origin 校验不替代鉴权。
+- `Accept` 同时限制 active/pending，在升级前要求 ResponseController 写截止时间能力；不支持则失败关闭。停接取消握手写入并等待 callback 完成，防止迟到的过期截止时间覆盖升级后的 reset。pending 握手未退出时 Close 可超时，不能宣称资源已释放；忽略 deadline 的可信自定义 Hijacker 仍需退出后再 join。
+- 每条连接始终保持一个 reader 以处理控制/关闭帧；并行 reader 明确拒绝。读限额覆盖组装后的完整消息而非单帧；Text 校验 UTF-8，Binary 保持字节。Write 同步串行且总时限包含等待，不复制/排队正文或自行启动写 goroutine；调用方仍须限制并发调用数量。错误仅返回白名单类别，丢弃 peer reason、原始 header/URL/payload。预取消调用不启动 I/O；I/O 中取消/超时会终止物理连接。
+- 应用区分物理连接、生成和观察：前台连接丢失时显式 `Future.Cancel` 并等待原 gateway 收尾，未知执行继续 pending/保留双 hold/provider 占用；记录型交接的观察者丢失只取消 Wait，工作继续到完成/期限/runner 停止。Connection Close 与 Manager Close 都不退款、不重放，也不替代 runner 的 join。产品后台仍不能使用 volatile handoff 承诺持久受理。
+- 关闭顺序：身份连接容量停接 → manager 停接/关闭/等待握手 → HTTP handlers 停接与 WS 应用 reader 退出 → runner 停接/取消/等待执行和账务收尾 → 应用 goroutine join → gateway/共享资源 → store。manager 或 runner 超时后保持后续资源存活并重试等待。物理连接 Done 仅说明 transport 清理，不说明应用生成/财务已结束。
+
+`go test -count=1 ./internal/access ./internal/transport/websocket ./internal/generation ./internal/architecture` 覆盖真实 TCP/TLS、控制帧/分片/UTF-8、Origin、读/写/绝对寿命、慢读背压、握手/关闭竞争和容量；测试专用应用在真实 socket 上调用原 Runner/Gateway/SQLite/严格账本，验证逐轮撤销/收权、同 ID 并发隔离、前台未知成本和记录型观察者断开。测试帧信封只在 `_test.go`，载荷仍为已有 JSON/SSE 字节；没有新增生产 wire 协议、公开 API、Responses 多轮或原生 WS 上游能力。
 
 ## 开发与验证节奏
 
