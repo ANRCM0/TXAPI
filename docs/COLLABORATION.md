@@ -1,8 +1,8 @@
 # 多团队开发与框架基线
 
-本页定义当前团队边界、可依赖的接口与集成门槛，并保留初始协作框架 F0 的验收记录。核对日期：2026-10-17；当前优先完成底层架构验收，再补全功能；S5 计费安全门槛保留，以 [PLAN.md](PLAN.md) 为唯一活动计划。架构仍是模块化单体；“多个团队”指开发分工，不会给产品新增团队/组织租户模型。
+本页定义当前团队边界、可依赖的接口与集成门槛，并保留初始协作框架 F0 的验收记录。核对日期：2026-10-18；A1–A4 共同架构基线已验收，后续补全功能；S5 计费安全门槛保留，以 [PLAN.md](PLAN.md) 为唯一活动计划。架构仍是模块化单体；“多个团队”指开发分工，不会给产品新增团队/组织租户模型。
 
-F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；已合并的实现已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；Chat/embeddings 已有独立载荷、共享操作信封及发送准备的能力检查；Chat codec 不承担其他操作，独立 Responses 模型未接入生产。S6 的现有 HTTP 消费者切片已合并，但完整 S6/A3/A4 仍须收口验收，再让 S7-A 的 Responses/任务/WS 生产接线依赖该基线。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
+F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S3/S4 已验收，S5 仍有成本边界缺口；已合并的实现已把 Chat/embeddings 业务协调迁出 Gin，Gin 仅保留接入适配；Chat/embeddings 已有独立载荷、共享操作信封及发送准备的能力检查；Chat codec 不承担其他操作，独立 Responses 模型未接入生产。S6 的现有 HTTP 消费者切片已合并，A3/A4 已经收口为共同基线；完整 S6 产品/工具仍单独核对，S7-A 的 Responses/任务/原生 WS 接线依赖该基线。仓库内部 Go 接口不是公开 SDK；共享约定的修改需要调用方一起评审。
 
 极简 core 不承载用户、预算、会话或任务。功能接入复用同一授权、准入、调度、结算与收尾，不复制另一条业务链；普通函数调用与确有需要的小接口优先，不预建空模块或动态插件平台。
 
@@ -41,7 +41,7 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 
 `core.Result` 的 StatusCode/Termination 是执行结果，HTTPStatus 是已写入的 HTTP 状态（非 HTTP 输出为 0），Committed 是不可逆输出提交事实，两者不能混为一谈。流已提交后无法把 HTTP 200 改为 502，也不能重试或追加正常结束标记来假装成功。
 
-### 类型化协调入口（本轮实现，未阶段验收）
+### 类型化协调入口（A1–A4 基础契约已验收）
 
 `Gateway.ExecuteTo(ctx, output, gateway.Execution)` 接收已验证 Principal 与独立的 operation/body，返回本次 `RequestResult`；不构造 Gin context。调用方必须在**每次生成前**重新验证身份有效性，不能复用长连接初始认证快照承诺持续授权。公开入口拒绝无 user/key 身份，HTTP 适配保留已有认证中间件。
 
@@ -49,23 +49,23 @@ Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模
 
 现有 HTTP 通过 `core.HTTPOutput` 消费输出端口，协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 只提供原生请求/响应/SSE 协议与 core 样本，未注册路由，也不能被当成已存在的持久任务或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
 
-### 最小 worker、输出记录与意图：internal/generation（A3-01/02/04，未阶段验收）
+### 最小 worker、输出记录与意图：internal/generation（A3-01 至 A3-05 基础消费者）
 
-新增模块只允许依赖 access/core/gateway/protocol/model，不导入 store/GORM、Gin 或 billing 引擎；组装者注入身份解析函数与实际 `Gateway.ExecuteTo`。固定 worker 和有界队列实际消费现有 Chat/embeddings，正文副本总预算最高 64 MiB，排队起算取消期限。交接不会预占 generation/network 槽、预留预算或持久受理。每次派发重新解析可信绑定，旧 context 的身份/准入标记不能带入；排队后撤销禁止新执行，已派发轮次仍用本轮快照，尚无后台任务撤销传播服务。
+新增模块只允许依赖 access/core/gateway/protocol/model/secrets，不导入 store/GORM、Gin 或 billing 引擎；组装者注入身份解析函数与实际 `Gateway.ExecuteTo`。固定 worker 和有界队列实际消费现有 Chat/embeddings，正文副本总预算最高 64 MiB，排队起算取消期限。交接不会预占 generation/network 槽、预留预算或持久受理。每次派发重新解析可信绑定，旧 context 的身份/准入标记不能带入；排队后撤销禁止新执行，已派发轮次仍用本轮快照，尚无后台任务撤销传播服务。
 
 观察者取消不取消已交接工作；显式 `Future.Cancel`、服务关闭和期限可取消生成，均继续走 gateway 既有收尾。输出属于本次生成，结果仅一次接收；commit 后 panic 保守标记执行可能未知，不重放、不伪造未派发或清零账本。`Close` 等待所有 worker 与收尾；超时后不得提前关闭 gateway/store，同进程不合作回调无法被隔离或强杀。
 
 A3-02 通过消费侧 `ArchiveStore` 端口接入 store 的统一 v8 迁移与原子序号追加；`SubmitRecorded` 为实际输出保留加密片段，读取/删除重新校验当前绑定，读取还检查当前模型权限。逐条容量预留、owner/实例限额、TTL、CAS 和故障回归见开发指南。它不是任务意图、领取/fencing 租约或原子任务+预算端口；输出片段不是可公开恢复的协议事件。没有公开路由、任务 ID 或重启重派，不在 main 隐式启动，不能替代 S7-A 的后台受理与持久 worker。架构回归用真实临时 SQLite/授权/准入/执行/财务链验证它，不把独立内存消费者当作整个 A3 已完成。HTTP 前台生命周期不变，A3-03 的 WS 消费回归见下节；产品持久任务仍另划批次。A3-04 新增独立 IntentAcceptor，不将持久意图送入 volatile Runner；其原子受理边界见下节。
 
-### 意图与账本原子受理：A3-04（未阶段验收）
+### 意图与账本原子受理：A3-04（历史切片范围）
 
 `generation.IntentAdmission` 只提供类型化 Admit/Read/Cancel；实际 Engine 实现在同一 SQLite 事务保存加密意图、幂等摘要配置标记和原用户/Key 双 hold。generation 不导入 billing/store/GORM；共享 reserve/finish 的事务内实现保留账本权威，没有任意事务回调或第二套余额。原普通 attempt 明确拒绝意图关联 reservation，后续派发不能伪造普通 PreDeduct 或先再预留一次。
 
 `IntentAcceptor` 复用当前身份解析，对 Admit/Read/Cancel 校验可信 owner/创建 Key/当前模型权限；身份是事务前本轮快照，不保证撤销瞬间中断。输入加密和独立稳定 HMAC 密钥由组装者注入，schema v9 统一追加 `generation_intents`，不由应用另迁移。容量、幂等保留期、加密/密钥变更拒绝、取消和恢复详见[开发指南](reference/generation-runtime.md#a3-04-加密意图与双预算原子受理)。这是不可派发的受理消费者，不是公开后台 API/持久队列；没有领取/续租/fencing/重启重派，main 不启动它。
 
-以上段落描述已合并 A3-04 的范围。当前 A3-05 追加 `IntentLeases` / `ExecuteClaimedTo`、v10 领取 epoch/取消/输出关联、原账本预留接管和默认关闭的 main 持久 runtime；并增加 `secrets` 标准库工具包及 store 上游凭据加密接线。本地集中检查已通过，但最终完整 CI/合并尚未完成，不允许下游团队据此假定接口已冻结。共享入口/模型/迁移/main/config 仍由集成负责人统一维护；实际支持、寿命、密钥和故障验收边界见 [基础层契约审计](reference/foundation-contracts.md)，不新增第二套鉴权、账本、迁移或公开 S7 API。
+以上段落保留 A3-04 的历史范围，不是当前领取能力限制。A3-05 已在 `master/ccbfe29`（PR #6）交付 `IntentLeases` / `ExecuteClaimedTo`、v10 epoch/取消/输出关联、原预留与历史价接管、sealed 输出字节游标、默认关闭 main runtime，以及 secrets/store 凭据加密。最终功能头与合并后 master 完整 CI 均通过；上述内部端口可作为现有操作的共同开发基线，不是永久冻结的公开 SDK/S7 产品事件契约。共享入口/模型/迁移/main/config 仍由集成协调；支持/寿命/责任及故障证明见 [基础层契约审计](reference/foundation-contracts.md)，不另建鉴权、账本、迁移或 S7 路由。
 
-### WS I/O 与物理连接：A3-03（未阶段验收）
+### WS I/O 与物理连接：A3-03（基础 I/O 已验收）
 
 `internal/transport/websocket` 是纯服务端 I/O，生产只依赖标准库与固定版本 coder/websocket，不导入 access/gateway/generation/store；库不得进入 core 或业务包。`access.ConnectionCapacity` 独立限制物理连接，可信绑定由现有鉴权提供，不复制鉴权。manager 的服务寿命、HTTP 握手和每次生成独立，active/pending/消息/截止时间有界，关闭不代表生成收尾或退款。
 

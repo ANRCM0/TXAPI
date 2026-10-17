@@ -1,6 +1,6 @@
 # 架构设计：极简内核、统一框架与功能模块
 
-状态：2026-10-17，已合并功能基线 `master/5004c57`，目标架构尚未全部实现/验收。任务状态以 [PLAN.md](PLAN.md) 为准，命令以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准；阶段证据见 [历史验收](history/acceptance-s0-s5.md)，本轮实现与实际合并见 [S5–A3 批次](history/implementation-s5-a3.md)。本页不维护第二份活动计划。
+状态：2026-10-18，A1–A4 共同基础架构已验收合并为 `master/ccbfe29`，完整 S5/S6 产品与 S7-A 尚未全部实现/验收。任务状态以 [PLAN.md](PLAN.md) 为准，命令以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准，精确功能头/合并与 CI 见 [最终验收](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)；本页不维护第二份活动计划。
 
 S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 先收口统一兼容与协调框架，S7-A 再接入 Responses HTTP/SSE、持久会话、后台任务和 WebSocket**。这些是必须开发的目标，不是已有功能；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
 
@@ -11,12 +11,12 @@ S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对�
 | 层次 | 最终职责 | 当前代码与缺口 |
 |---|---|---|
 | 极简执行内核 | 单次 I/O 尝试、取消/超时、响应提交事实与执行结果 | `internal/core` 已实现标准库 HTTP 执行；不含 WS |
-| 统一请求协调 | 授权、准入、路由/attempt、重试、预算、统一收尾 | `internal/gateway` 已抽离非 Gin 协调函数与 `core.Output` 输出端口，现有 HTTP 实际复用；保留 HTTP/Gin 适配，以 `LegacyBilling`/`StrictBilling` 消费原账本；无 native WS/持久 worker 入口 |
-| 统一兼容契约 | 按操作的语义模型、能力约束、usage/结果、传输边界 | Chat/embeddings 有各自载荷与不可变操作信封，类型化能力进入路由和准备，embeddings 独立解码；独立 Responses 模型未接生产，完整矩阵未验收 |
+| 统一请求协调 | 授权、准入、路由/attempt、重试、预算、统一收尾 | `internal/gateway` 已抽离非 Gin 协调函数与 `core.Output` 输出端口，现有 HTTP 实际复用；保留 HTTP/Gin 适配，以 `LegacyBilling`/`StrictBilling` 消费原账本；持久 worker 经 ExecuteClaimedTo 复用同一链，无 native WS 产品入口 |
+| 统一兼容契约 | 按操作的语义模型、能力约束、usage/结果、传输边界 | Chat/embeddings 有各自载荷与不可变操作信封，类型化能力进入路由和准备，embeddings 独立解码；现有支持边界已作基础层验收，Responses 模型未接生产，新操作和产品矩阵仍须独立验收 |
 | 功能模块 | 身份、调度、可选计费、观测，以及后续状态型应用 | 前几项已有实现；Responses、持久会话、后台任务均待开发 |
-| 接入与基础设施 | HTTP/SSE/WS、持久实现、控制台、显式组装 | HTTP/SSE、SQLite、内嵌控制台已实现；A3-01 增加有界进程内 worker，A3-02 增加其可选加密输出记录，A3-03 增加独立 WS transport 与实际 socket 消费回归；A3-04 增加加密任务意图+双预算原子受理与未执行回收；产品 WS、完整状态服务与生产持久 worker 待开发 |
+| 接入与基础设施 | HTTP/SSE/WS、持久实现、控制台、显式组装 | HTTP/SSE、SQLite、内嵌控制台已实现；A3-01 增加有界进程内 worker，A3-02 增加其可选加密输出记录，A3-03 增加独立 WS transport 与实际 socket 消费回归；A3-04 增加加密任务意图+双预算原子受理与未执行回收；A3-05 持久 worker/领取/fencing/历史恢复与 sealed 输出字节游标已验收，main 默认关闭；产品 WS 和完整状态服务待开发 |
 
-已有内核边界没有因后续规划失效；需要纠正的是框架尚未完成就让状态型功能主导接口设计的顺序。F0 只是初始可协作基线，不等于上表的统一兼容框架已经验收。S6 用现有生产 HTTP 消费者证明入口收敛，再让 S7-A 消费；不能只建立空接口宣称框架完成。
+已有内核边界没有因后续规划失效；此前让状态型功能主导框架接口设计的顺序已由 A1–A4 架构优先批次纠正。F0 只是初始接线，最终共同基础以现有 HTTP、worker、socket 与持久消费者及完整 CI 实证验收；不能只建立空接口宣称完成，也不能把这个结果扩展为完整 S6/S7 产品验收。
 
 ### 统一框架的最小契约
 
@@ -132,7 +132,7 @@ API 目标分区：`/api/admin/*` 为管理员操作，`/api/me/*` 为个人资�
 7. gateway 根据错误分类和剩余预算决定是否重试，更新健康状态。
 8. 统一收尾：释放并发/凭据资源、保存结果、结算或可靠标记待处理。异常与取消也必须走收尾。
 
-现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。`protocol.Request` 将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；A3-01 的 `internal/generation` 已作为有界进程内 worker 真实调用同一入口并重新解析派发身份，A3-02 又为它增加可选加密输出记录和中断标记；A3-03 的真实 socket 消费者验证同一执行链与独立连接容量；A3-04 通过 IntentAdmission 小端口原子保存加密意图和原账本双 hold，但不把意图接入 Runner，不授予 attempt 权限；没有生产后台接线、领取/任务恢复重派或 native WS。JSON/SSE 字节仍非通用协议事件，S6 未完成阶段验收。
+现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。`protocol.Request` 将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；A3-01 的 `internal/generation` 已作为有界进程内 worker 真实调用同一入口并重新解析派发身份，A3-02 又为它增加可选加密输出记录和中断标记；A3-03 的真实 socket 消费者验证同一执行链与独立连接容量；A3-04 通过 IntentAdmission 小端口原子保存加密意图和原账本双 hold，不把意图接入 volatile Runner；A3-05 经独立 DurableRunner/ExecuteClaimedTo 领取/fencing，接管原预留与历史售价，未知 attempt 不重发；main 有默认关闭接线。sealed 输出字节游标不等于原生协议事件，native WS 与完整 S6 产品能力仍单独验收。
 
 ## 6. 内核契约与重试边界
 
@@ -210,7 +210,7 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 | 层 | 目标职责与依赖 | 不承担 |
 |---|---|---|
 | server | HTTP/WS 鉴权边界、协议 DTO、查询/取消/会话入口 | 后台 worker、重复预算或迁移逻辑 |
-| generation（A3-01/02/04 最小消费者） | 有界进程内交接、派发前解析可信绑定、调用 `Gateway.ExecuteTo`、可选加密输出记录；独立 IntentAcceptor 经小端口原子持久受理/未执行取消 | 意图派发、公开后台 API、完整持久任务/事件、重启重派、独立账本；当前 main 未启动 |
+| generation（A3-01 至 A3-05 基础消费者） | 有界 volatile worker、派发身份、共享 Gateway、加密意图/原 hold 原子受理、独立持久领取/fencing/历史恢复、sealed 输出字节游标；main 默认关闭 runtime | 公开后台/会话 API、原生事件/WS、重发未知 attempt、独立账本或迁移 |
 | responses 应用服务（按需新增） | 持久上下文、任务/事件生命周期，调用 gateway 的生成入口；使用 access/gateway/model/protocol 与持久端口 | 直接依赖 store/GORM、自己重新实现上游生成与计费 |
 | gateway | 统一操作准备、授权、准入、调度、attempt、预算、生成收尾；消费执行与持久端口 | 直接依赖 responses 应用服务、store 或框架任务队列 |
 | protocol | Responses 请求/item/事件与能力、usage 解析 | 数据库、连接池、worker 和模型调用 |
@@ -221,7 +221,7 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 
 S6 先让现有 HTTP 成为类型化执行入口的真实调用者并验收合并；S7-A01 接入 Responses，后续再接 worker/WS，共享规则只有一个实现。新增模块、WS 依赖与跨模块原子提交端口需连同 `internal/architecture` 边界和真实行为测试评审，禁止为了引入新包删除/放宽全部依赖门槛。纯 WS I/O 与 HTTP core 可用不同执行器，但两者都由 gateway 组织 attempt，不产生第二条业务链。
 
-后台接收需要任务意图和账本预留在同一存储事务中成功；S7-A01 明确最小事务端口与失败语义，S7-A03 交付真实调用和故障回归。不能先扣余额后异步写队列，也不能先返回任务 ID 后再尝试预留。A3-04 已用现有 Chat/embeddings 的加密输入真实消费此原子端口并验证强杀前后事务；只是短期、不可执行的意图回执，不是 Responses job。原账本拒绝以该回执开启普通 attempt；领取/续租/fencing、持久价格/能力恢复和原生上游策略须后续独立验收。
+后台接收需要任务意图和账本预留在同一存储事务中成功；S7-A01 明确最小事务端口与失败语义，S7-A03 交付真实调用和故障回归。不能先扣余额后异步写队列，也不能先返回任务 ID 后再尝试预留。A3-04 已用现有 Chat/embeddings 的加密输入真实消费此原子端口并验证强杀前后事务；A3-05 已为现有操作交付独立持久领取/续租/fencing、原 hold 接管和历史恢复；原账本继续拒绝意图回执开启无 claim 的普通 attempt。它不是 Responses job，原生上游后台/父链策略仍在 S7 独立验收。
 
 ### 12.2 持久模型与上下文权威
 

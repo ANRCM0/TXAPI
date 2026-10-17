@@ -421,3 +421,73 @@ gateway 改用 `StartPreparedAttempt` 将真实 URL/正文交给同一成本引�
 真实 OS 子进程分别在双 hold 与意图事务提交前被强杀、和成功受理后被强杀；前者重启无意图/预留/兼容额度占用，后者保留唯一回执、可在相同密钥下解密读取，真实排队期限到期后重复恢复只零费用释放未执行预算，无 attempt。SQLite/WAL 未出现输入与原幂等键的明文标记。测试专用 GORM hook 不进入生产；没有用内存状态模拟崩溃或加生产绕过开关。并发同键仅一条意图/一个 hold，跨 Key 不突破用户预算；人为注入未知 attempt 的回归保留双 hold/provider 占用并拒绝自动清理。
 
 本机未运行 Linux race、Docker、真实上游/客户端/浏览器或生产库操作。最终 SHA 的自动 push/PR 完整 CI 单独记入现有 PR，不手动 dispatch；容器交付脚本已同步 v9 和空意图表断言，实际远端结果不借用旧绿灯。本批不开放持久后台 API/Responses/WS 产品能力，main 未启动受理器，旧上游凭据明文风险保留。下一批 A3 收口领取/租约/fencing 与安全派发/未知恢复，再由 A4 验收共同架构基线；S5-03 和完整 S6/S7-A 仍未完成。
+
+## 2026-10-18 A3-05/A4 最终验收与共同基线
+
+本批完成目标是 **A3 持久执行收口 → A4 基础层验收**，不是缩减为一个领取接口或文档阶段。负责 `generation/billing`、受影响的 `gateway` 消费端口、`secrets`、`model/store` 统一迁移和 `cmd/gateway/config` 显式组装及风险回归；没有新增公开产品路径/DTO、第二套鉴权/账本/迁移、第三方依赖、支付或账号池。`core` 和 `secrets` 保持标准库，WS 库仍只在 transport；OpenAPI 保持 0.2.3 / 79 个操作。用户要求开发阶段不测，实际在实现和回归编写收口后集中集成、修复和最终 CI，未更改 workflow/触发条件/门槛。
+
+### 源码、集成与完整 CI
+
+| 事实 | 精确来源与范围 |
+|---|---|
+| 开工/合并前集成基线 | `5004c5703cefecfb383cb718ad0377489f047e73`，最新 fetch 核对，为最终功能头祖先；PR #5 历史绿灯不代替本批 |
+| 文档清理 | `701a7fd`，分离唯一活动计划和历史证据，不用于声明功能完成 |
+| 首批功能 | `08f67a6251212e159920eafd78b8e21ae4ce3809`，持久领取/安全 runtime；首次 CI 有失败，见下节 |
+| heartbeat 生产修复 | `d6550d306013d58ce60d922e4e5f6ffff53505d0`，不共享可变 context 变量；push [39053773147](https://github.com/ANRCM0/TXAPI/actions/runs/39053773147) / PR [39053776673](https://github.com/ANRCM0/TXAPI/actions/runs/39053776673) 全部成功，仅验证该源码 |
+| 最终功能头 | `56a205c5bd24897877e055f29f54c36b000e4551`，补入真实 sealed 输出快照游标、观察进程强杀/重启/携旧钥轮换续读及容量/撤权/关闭回归，重新集中本地集成 |
+| 最终 head 完整 CI | push [39055432154](https://github.com/ANRCM0/TXAPI/actions/runs/39055432154) / PR [39055434538](https://github.com/ANRCM0/TXAPI/actions/runs/39055434538) 均 success，`check` + `delivery` 全绿；不是复用父提交绿灯 |
+| 共同功能基线合并 | [PR #6](https://github.com/ANRCM0/TXAPI/pull/6) 于 2026-10-18 01:54:24（Asia/Shanghai；UTC 为 2026-10-17 17:54:24）实际合并；merge `ccbfe29545dec358da9d9cda4b7ac3624ded1ec0`，合并命令绑定已验证 head，无 admin/bypass |
+| 合并后完整 CI | `master/ccbfe29545dec358da9d9cda4b7ac3624ded1ec0` 的 [Verify 39055782687](https://github.com/ANRCM0/TXAPI/actions/runs/39055782687) success，`check` + `delivery` 全通过。本次验收文档只同步这些已发生事实；不宣称本段文字自身已被该 run 检查 |
+
+### 实现与故障证明
+
+稳定内部端口、负责人、依赖、寿命、支持矩阵和失败用例集中在 [基础层契约审计](../reference/foundation-contracts.md)；操作约定见 [运行组件](../reference/generation-runtime.md) 和 [密钥约定](../reference/secret-storage.md)。A1–A4 逐项审计：
+
+| 底层项 | 实际实现/消费与验收结果 |
+|---|---|
+| 模块与组装、极简 core | 既有依赖回归保留，secrets 无内部/第三方依赖；main 显式 opt-in，应用根持有停止/join，未放宽 core/gateway/protocol 反向依赖 |
+| 统一协调和操作模型 | HTTP Chat/embeddings、volatile/durable worker、真实 socket 最小消费者复用 Gateway 输出与操作信封；ExecuteClaimedTo 只接管已 fenced 原 hold，不伪造 Gin context 或复制协调器 |
+| 协议与能力 | 原操作/源目标/传输支持矩阵和成本拒绝进入真实路由/prepare；JSON/SSE 与工具/usage 既有回归保留，没有把编码字节当 native Responses/WS 事件 |
+| 传输和寿命 | 物理 WS 连接、观察者、排队意图、生成和 attempt 各自有界；观察断开不取消已交接工作，显式取消/期限/停止走原执行收尾；Close join 后才销毁依赖 |
+| 身份授权 | 创建 owner/Key 绑定、每次派发及存储准备后刷新当前身份/模型/限额；游标逐页重新授权，其他 Key/跨用户/撤权均不能续读或执行 |
+| 调度与资源 | 有界固定 worker、持久领取而非复制到第二内存队列；进程/owner/Key/连接/生成/attempt、输入输出密文与快照容量有独立上限；异常取消/panic/数据库/输出失败无槽泄漏 |
+| 可选模块端口 | IntentAdmission / IntentLeases 由原 Engine 实现，原 reservation 和财务权威保持唯一；共享原 reserve/finish 事务，无任意应用事务回调 |
+| 持久化与恢复 | v10 只追加 claim/cancel/output 与 credential 密文/指纹索引；随机 claim 摘要、单调 epoch、续租/失效 fencing；重新领取只允许无 attempt/provider 占用的原 hold |
+| 历史财务和未知执行 | 原售价历史恢复，provider 假设漂移拒绝；回执同重放幂等、冲突不覆盖；五个真实强杀窗口覆盖 claim/start/receipt/finish/seal：未知 attempted 不重发或退款，已知 usage 可幂等结算，不伪造输出成功 |
+| 输出关联与游标 | 财务终态/任务 transition 原子，成功需账务 settled 与 sealed/committed 输出；先认证完整快照，AEAD 字节位置绑定 record/owner/创建 Key/TTL；观察进程真实强杀后重启/轮换可无重执行续读，未完成记录不公开部分明文 |
+| 运行安全 | 挂载密钥、AES-GCM/HMAC 独立用途、限长严格解析、缺旧钥/错摘要/坏 AAD 拒绝；凭据加密原子激活/轮换、CRUD/cache/seed/替换全链路无 SQL 明文；durable runtime 核对真实 store 加密模式 |
+| 最终共同基线 | 本地集中验证、精确 feature head 完整 CI、最新集成基线检查、实际 PR #6 合并和 master 完整 CI 全通过；A1–A4 基础层可供后续功能依赖 |
+
+### 实际验证命令与结果
+
+本地环境：2026-10-18 Windows/PowerShell，Go 1.26.3 分发环境默认 windows/386，每次 Go 命令显式 `GOARCH=amd64 GOFLAGS=-buildvcs=false GOWORK=off`；Node 24.14.1、Python 3.14.3。使用临时 SQLite、随机本地端口和隔离假上游/loopback transport，不读取或修改真实服务 Key/数据库。CI 使用仓库 Go 1.23 基线和 Linux runner，保持现有 `Verify` 的自动 push/PR；未手动重复 dispatch。
+
+| 实际命令/检查 | 结果和适用范围 |
+|---|---|
+| `go mod tidy` | 集中首轮通过，go.mod/go.sum 无变化；后续只增加标准库游标，依赖检查由最终完整 CI 再确认 |
+| `go build ./...`、`go vet ./...` | 集中修复后、race 修复后和最终游标功能头均通过 |
+| `go test -json -count=1 ./...` | 最终游标源码 859 项测试/子用例通过、5 个仅供子进程调用的 helper 正常跳过；包括真实 SQLite/gateway/账本、全部新故障/强杀与既有回归，不将 helper 跳过算作实际行为验收 |
+| 4 项 `node --check` 和 `node --test web/assets/api.test.mjs` | 同批集中执行通过，6 项行为；游标/heartbeat 后续未改前端与依赖，复用其适用本地证据；最终 CI 另按原门槛执行 |
+| `python tests/smoke/local.py --go go` | 最终源码通过：真实生产启动/JSON/SSE/控制台和 strict 缺依据拒绝；同一 main 的隔离 transport 验证结算、凭据换代拒绝/恢复、SSE 强杀重启 pending/审计幂等豁免、加密 runtime 重启/缺错钥拒绝与终止 |
+| 格式、差异、契约和边界 | 仅格式化本次 Go 文件；`git diff --check` 通过，完整 CI 再验 gofmt/依赖/OpenAPI 消费契约。没有批量格式化无关 CRLF 文件 |
+| 最终精确 head 和合并后 master 自动 Verify | 全部通过；含 build/vet/gofmt/依赖/79 操作契约、前端、全量 `go test -race ./...`、覆盖率/性能报告、main 冒烟及实际容器安装/S3 升级至 v10/一致备份恢复/旧二进制拒绝/正常退出 |
+
+本地没有执行 Linux race/Docker，也不将 Windows 强制终止算作优雅 SIGTERM。后两者由最终自动 Linux CI 和容器演练实际补齐；不冒充真实厂商 TLS/计费/客户端或实际生产库升级证据。
+
+### 首轮失败、修复和最终审计补项
+
+1. 本地第一轮全量发现拒绝诊断事务错误分类回归。修复后先复验失败项/受影响包，再重新跑完整 Go 和 main 冒烟；不删除原有行为断言。新 secrets/凭据/迁移/claim/取消/预算/输出/TTL/主进程/强杀回归继续保留。
+2. `08f67a6` 的 push [39053310131](https://github.com/ANRCM0/TXAPI/actions/runs/39053310131) 和 PR [39053378513](https://github.com/ANRCM0/TXAPI/actions/runs/39053378513) delivery 通过，但 check 在 Linux race 检出 heartbeat 捕获 ctx 与执行流程 enrich ctx 的竞争。`d6550d3` 用不可变 goroutine 参数修复，重新本地全量/build/vet/冒烟与新源码完整自动 CI。旧失败 run 不作为验收。
+3. 最终 A4 审计没有将追加段序号/CAS 当作游标消费证据。`56a205c` 新增有界 `Archive.OpenCursor`/`CursorReader.Next`，真实 SSE/跨 UTF-8 续读及观察进程强杀/密钥轮换恢复。每个 Archive 最多 4 个快照、每用户跨 Key 最多 2 个，每份最多已有 8 MiB；页 4–64 KiB，观察最多 30 秒且不越原 TTL，逐页授权，Close/取消/完成释放容量并 join 阻塞授权。补项收口后重新集中 build/vet/全量/冒烟和精确 head 完整 CI；不拿 `d6550d3` 的绿灯代替它。
+
+### 已完成范围与剩余门槛
+
+A3/A4 关闭的是当前支持操作的底层架构和共同开发基线：单体/单二进制/单实例 SQLite、共享执行/财务权威、最小真实 WS/worker/持久消费者及安全恢复。内部端口可供下一功能批次依赖，但不是永久不变的公开 SDK。
+
+以下继续未完成且没有补勾：S5-03/完整成本与厂商假设证明；完整 S6 产品/工具验收；S7-A 生产 Responses 路由、持久会话、provider-native 后台/事件、原生上游 WS 与真实客户端。sealed 编码字节游标不是公开/native/live event replay。真实上游、生产数据库迁移、真实浏览器/全部 SDK、分布式或零损/安全擦除承诺均未在本批执行或宣称。
+
+生产安全基线要求启用凭据加密；HTTP-only 明文兼容模式有明确警告，不纳入该验收。停止后原子激活/轮换/恢复、旧钥与稳定 HMAC、旧备份/WAL/内存/配置种子明文以及磁盘配额的限制保留。TTL 清到期正文不删除未知财务审计/hold，不靠删除日志恢复账本。
+
+团队目录/共享注册与迁移由文档角色协调，并不代表平台已强制保护：可读 master branch rules 为空，经典 protection API 因 token 权限不足返回 403，不能宣称 CODEOWNERS/required review/required checks 已强制启用；未创建团队或绕过任何检查。技术基线合并与平台治理是两项事实。
+
+验收状态同步为独立纯说明文档批次，基于已通过完整 CI 的 `ccbfe29`：修改 README、PLAN、ARCHITECTURE、DEVELOPMENT、COLLABORATION、批次历史及三份运行/安全/契约参考，共 9 个 Markdown 文件。实际执行差异/规则一致性核对、`git diff --check` 与本地链接/锚点检查（117 个）通过；先发现并修正运行参考中的一个相对历史链接。未改 Go、脚本、运行配置、依赖、OpenAPI 或 CI，未无理由重跑本地功能测试；提交后现有 push/PR 自动 CI 按原规则执行，不手动 dispatch。

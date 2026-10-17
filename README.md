@@ -6,7 +6,7 @@
 
 ## 当前能做什么
 
-核对日期：2026-10-17，已合并功能基线为 `master/5004c57`。以下区分当前代码与最终目标；唯一活动计划见 [PLAN](docs/PLAN.md)，精确提交与 CI 见 [批次记录](docs/history/implementation-s5-a3.md#2026-10-17-合并与最终验证结果)。
+核对日期：2026-10-18，A1–A4 基础架构已验收合并为 `master/ccbfe29`。以下区分当前代码与最终目标；唯一活动计划见 [PLAN](docs/PLAN.md)，精确提交与 CI 见 [批次记录](docs/history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)。
 
 - 管理员初始化、登录、创建/停用用户，设置用户模型与限额；管理会话和模型调用 Key 分离。
 - 用户创建、限制、吊销自己的 Key，查看本人可用模型、访问日志和日志聚合用量；调用 Key 仅创建时展示，服务端摘要存储。
@@ -19,9 +19,9 @@
 | 范围 | 状态与边界 |
 |---|---|
 | S0–S4 与 F0 | 已有阶段验收并合并 master；F0 是初始团队接线基线，不是最终统一兼容框架 |
-| 已合并功能基线 | PR #5 已合入 `master/5004c57`，包含 S5/S6/A1–A3-04 切片；功能头 push/PR 与合并后 master 的完整 CI 均通过。切片合并不等于完整架构验收 |
+| 已合并功能基线 | PR #6 已合入 `master/ccbfe29`；最终功能头及合并后 master 完整 CI 通过，A1–A4 成为共同架构基线，不代表完整 S5/S6/S7 产品完成 |
 | S5 | 6 个验收项中 5 个通过，S5-03 未完成；实现已合并，完整阶段尚未验收，不承诺已具备可靠商业收费全部条件 |
-| 统一兼容框架 | Chat/embeddings 已复用非 Gin 协调与独立输出；操作信封贯穿路由/attempt/解码，计费按小接口接入；已有进程内 worker、可选加密输出记录、独立 WS transport 和加密意图+用户/Key 预留原子事务；意图尚不能领取/派发，main 未启用这些消费者，完整 S6/A3 未验收，不等于已具备生产持久后台/原生 WS |
+| 统一兼容框架 | Chat/embeddings 共用非 Gin 协调与独立输出；真实 worker/WS 消费、意图/双 hold 原子受理、持久领取/租约/fencing、原预留与历史价恢复、加密输出 sealed 字节游标已验收。main 有默认关闭的加密持久 runtime，无公开任务/会话或原生 WS 产品 API，完整 S6 功能仍单独验收 |
 | Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；目前仅独立 Responses JSON/SSE 协议与样本，未开放生产入口；输出记录和原子意图受理不是 Responses 历史/事件或完整持久任务，产品级持久会话/后台/WS 尚未实现 |
 | 原生 Messages/Gemini 入站、订阅账号池、支付、分布式部署 | 不属于当前已交付能力；本轮不新增支付 |
 
@@ -85,7 +85,7 @@ strict 会复核转换后的最终正文，而非只检查入口：保留三协�
 
 strict 执行现已强制使用[已登记的输入边界档案](docs/reference/input-bound-profiles.md)：没有档案的旧契约仍可加载以支持历史读取与恢复，但新尝试返回 503 `provider_input_unproven`，不发上游、不反馈健康、不继续换凭据。当前可执行范围仅为档案登记的官方 OpenAI Chat/embeddings 目标；Anthropic/Gemini、兼容代理及未登记模型在 strict 下不再仅凭运营声明放行，legacy/disabled 的兼容路径不变。档案核对真实 URL、正文模型和整请求包络；最终正文输出限制必须与占用成本时的限制完全一致。发送还须通过[费率档案与凭据绑定](docs/reference/provider-tariff-profiles.md)：显式标准 USD 档案、费率不得低于已登记下限，凭据 ID 与实际发送的上游 Key 摘要必须匹配。缺费率档案返回 `provider_tariff_unproven`，换 Key/新凭据或实际鉴权头不匹配返回 `provider_credential_unproven`；已核对的标准价下限不替代逐凭据最高适用价、失败收费和未来变更依据，完整 S5 仍未验收。
 
-普通访问日志可丢弃且会过期，页面用量只是日志聚合，不是权威余额或恢复账本。客户端调用 Key 已摘要存储；**上游 API Key 当前仍明文落库**，管理 API 掩码不等于加密存储。上游凭据加密需独立安全加固；S7-A 的持久正文加密也尚未实现。部署时保护数据库、备份和 root 管理凭据，公网接入必须配置合适的 TLS 与边界防护。
+普通访问日志可丢弃且会过期，页面用量只是日志聚合，不是权威余额或恢复账本。客户端调用 Key 已摘要存储；上游 API Key 支持挂载密钥的静态加密，生产安全基线必须启用，durable runtime 强制核对 store 已加密。HTTP 明文兼容模式不计入该安全验收；管理掩码不是存储保护。意图/输出内容加密与私有 sealed 字节游标已交付，S7 产品历史/事件仍未交付。密钥轮换、旧备份/WAL/内存等限制见 [密钥约定](docs/reference/secret-storage.md)，公网仍须 TLS 与边界防护。
 
 ## HTTP 契约与目录
 
@@ -107,7 +107,7 @@ internal/core/        标准库单次 HTTP 执行
 internal/gateway/     请求协调、attempt、重试、统一收尾
 internal/protocol/    操作/厂商转换与每请求流状态
 internal/access/      身份、权限与准入基础
-internal/generation/  进程内 worker、加密输出与意图受理（main 未启用）
+internal/generation/  worker、加密意图/输出、持久领取和 sealed 字节游标
 internal/transport/   独立 WS 传输 I/O（无生产 WS 应用/上游接线）
 internal/model/       持久化实体与中立端口数据
 internal/scheduler/   渠道/凭据选择与健康
@@ -132,11 +132,11 @@ WS transport 已位于 `internal/transport/websocket`；Responses 应用包尚�
 | [开发指南](docs/DEVELOPMENT.md) | 运行命令、配置、验证节奏、升级和恢复 |
 | [协作约定](docs/COLLABORATION.md) | 团队目录、共享入口、契约与集成门槛 |
 | [贡献约定](CONTRIBUTING.md) / [代理约束](AGENTS.md) | 开发执行规则 |
-| [运行组件约定](docs/reference/generation-runtime.md) | worker、加密输出、WS I/O 与不可派发意图的端口/生命周期/容量/恢复 |
+| [运行组件约定](docs/reference/generation-runtime.md) | worker、加密意图/输出、持久领取/游标、WS I/O 的端口/寿命/恢复 |
 | [阶段历史](docs/history/acceptance-s0-s5.md) / [S5–A3 批次](docs/history/implementation-s5-a3.md) | 原始提交、命令、CI、验收范围和合并事实，不另行排期 |
 | [上游固定快照](docs/reference/upstream-snapshots.md) | 历史阅读的参考库 SHA、文件与复用边界；本地副本不随 Git/worktree 分发 |
 | [早期 P6 方案](docs/history/plan-p6.md) | 已停止用于排期的历史设计，不作为现行缺陷或功能清单 |
 
-后续按 A1–A4 先完成底层架构并验收合并为团队共同基线，再按 S7-A 批次补全 Responses HTTP/SSE、持久会话、后台任务和原生 WS。S5 成本证明单独收口，不阻塞无关架构建设，strict 开放仍遵守原有门槛。本轮不新增支付，也不直接移植参考项目的整个架构。
+A1–A4 已验收为团队共同架构基线；后续核对完整 S6 功能并按 S7-A 批次补全 Responses HTTP/SSE、持久会话、后台任务和原生 WS。S5 成本证明单独收口，不阻塞无关架构建设，strict 开放仍遵守原有门槛。本轮不新增支付，也不直接移植参考项目的整个架构。
 
 开发遵循“批量开发 → 集中验证 → 集中修复 → 合并”；不因每次编辑/汇报重复跑全量测试，最终合并仍需通过完整现有 CI。纯说明文档整理只验证差异、链接与一致性。历史 CI 范围和日期保留在验收记录中，不写成当前未提交文档已通过 CI。
