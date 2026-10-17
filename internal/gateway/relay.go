@@ -18,6 +18,7 @@ import (
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/meta"
 	"minigateway/internal/protocol/model"
+	"minigateway/internal/protocol/responses"
 	"minigateway/internal/scheduler"
 )
 
@@ -134,7 +135,7 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 		}
 		triedCred[cred.ID] = true
 
-		m := buildMeta(ch, cred, req)
+		m := buildMeta(ch, cred, req, c.responseID)
 		// 记账用：把命中的渠道/凭据写进 context，handler 收尾时取用。
 		// 用 context 而不是返回值传递，是因为 Relay 的签名已经很长了，
 		// 再加几个返回值会让调用处难读；context 是这次请求的作用域，正合适。
@@ -260,7 +261,10 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 }
 
 // doRelay 向单个渠道发一次请求。
-func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, req protocol.Request, timeout time.Duration) core.Result {
+func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, req protocol.Request, timeout time.Duration) (result core.Result) {
+	if req.Operation() == protocol.Responses {
+		defer func() { result = sanitizeResponsesFailure(result, c.result.ResponseStatus) }()
+	}
 	a, ok := g.reg.getAdaptor(m.ChannelType)
 	if !ok {
 		return core.Result{Phase: core.NotDispatched, StatusCode: 500, Error: &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "no upstream adaptor", Type: "no_adaptor"}}}
@@ -327,7 +331,21 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, req protocol.Request,
 	}
 	// If an injected executor/transport panics, non-execution is not established.
 	c.result.Phase = core.Dispatching
-	result := g.executor.ExecuteTo(c.ctx, c.output, input)
+	result = g.executor.ExecuteTo(c.ctx, c.output, input)
+	if req.Operation() == protocol.Responses {
+		if decoder, ok := input.Decoder.(interface{ Observation() responses.Observation }); ok {
+			observation := decoder.Observation()
+			c.result.ResponseStatus, c.result.UpstreamResponseID = observation.Status, observation.ID
+			if observation.Usage != nil {
+				result.Usage = observation.Usage
+			}
+			if result.Error == nil && (observation.Status == "failed" || observation.Status == "cancelled") {
+				result.StatusCode, result.Termination = http.StatusBadGateway, core.UpstreamError
+				result.Error = &core.Error{StatusCode: http.StatusBadGateway, Error: core.ErrorDetail{Message: "Responses generation did not complete successfully", Type: "upstream_response_failed"}}
+			}
+		}
+		result.Replayable = false
+	}
 	if g.billingMode == billing.ModeStrict {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := g.strictBilling.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), result.Usage)
@@ -362,7 +380,7 @@ func (g *Gateway) rejectUnpricedAttempt(c *executionScope, pre *billing.PreDeduc
 // selectTarget 的注释）。
 //
 // The operation supplies the legacy adaptor mode; callers cannot override it.
-func buildMeta(ch *channel, cred *dbmodel.Credential, req protocol.Request) *meta.Meta {
+func buildMeta(ch *channel, cred *dbmodel.Credential, req protocol.Request, responseID string) *meta.Meta {
 	actual := req.Model()
 	if mapped, ok := ch.mapping[req.Model()]; ok && mapped != "" {
 		actual = mapped
@@ -371,7 +389,11 @@ func buildMeta(ch *channel, cred *dbmodel.Credential, req protocol.Request) *met
 	if req.Operation() == protocol.Embeddings {
 		mode = meta.ModeEmbeddings
 	}
+	if req.Operation() == protocol.Responses {
+		mode = meta.ModeResponses
+	}
 	return &meta.Meta{
+		ResponseID:        responseID,
 		ChannelID:         ch.id,
 		ChannelName:       ch.name,
 		ChannelType:       ch.typ,

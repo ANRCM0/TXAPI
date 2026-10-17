@@ -14,6 +14,74 @@ import (
 	"minigateway/internal/model"
 )
 
+func TestResponseV11UpgradePreservesV10FinancialAuthority(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v10-responses-upgrade.db")
+	st, err := Open(config.DatabaseConfig{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Where("version >= 11").Delete(&model.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().Migrator().DropTable(&model.ResponseRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	var released []model.SchemaMigration
+	if err := st.DB().Order("version").Find(&released).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(released) == 0 || released[len(released)-1].Version != 10 {
+		t.Fatal("fixture is not schema v10")
+	}
+	hold := model.BillingReservation{ID: "v10-original-hold", UserID: 7, TokenID: 8, State: "pending", ReservedUnits: 71, ProviderHeldUnits: 23, PriceVersion: "v10-original-price", LeaseUntil: time.Now().Add(time.Minute).UnixMilli()}
+	if err := st.DB().Create(&hold).Error; err != nil {
+		t.Fatal(err)
+	}
+	balance := model.BillingBalance{OwnerType: "user", OwnerID: 7, ReservedUnits: 71, UsedUnits: 9}
+	if err := st.DB().Create(&balance).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		st, err = Open(config.DatabaseConfig{Path: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []model.SchemaMigration
+		if err := st.DB().Order("version").Find(&got).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(released)+1 || got[len(got)-1].Version != 11 {
+			t.Fatalf("v11 ledger is not idempotent: %+v", got)
+		}
+		for i := range released {
+			if got[i].Version != released[i].Version || !got[i].AppliedAt.Equal(released[i].AppliedAt) {
+				t.Fatal("v11 altered released ledger")
+			}
+		}
+		var retained model.BillingReservation
+		if err := st.DB().First(&retained, "id = ?", hold.ID).Error; err != nil || retained.State != hold.State || retained.ReservedUnits != hold.ReservedUnits || retained.ProviderHeldUnits != hold.ProviderHeldUnits || retained.PriceVersion != hold.PriceVersion || retained.LeaseUntil != hold.LeaseUntil {
+			t.Fatalf("v11 changed original financial hold: %+v %v", retained, err)
+		}
+		var retainedBalance model.BillingBalance
+		if err := st.DB().First(&retainedBalance, "owner_type = ? AND owner_id = ?", balance.OwnerType, balance.OwnerID).Error; err != nil || retainedBalance.ReservedUnits != balance.ReservedUnits || retainedBalance.UsedUnits != balance.UsedUnits {
+			t.Fatalf("v11 changed original financial balance: %+v %v", retainedBalance, err)
+		}
+		var receipts int64
+		if err := st.DB().Model(&model.ResponseRequest{}).Count(&receipts).Error; err != nil || receipts != 0 {
+			t.Fatalf("v11 invented historical response authority: %d %v", receipts, err)
+		}
+		if err := checkMigrationVersion(st.DB(), 10); err == nil {
+			t.Fatal("v10 binary accepted schema v11")
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestIntentV10UpgradePreservesV9IntentAndOriginalFinancialAuthority(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v9-claim-upgrade.db")
 	st, err := Open(config.DatabaseConfig{Path: path})
@@ -142,8 +210,8 @@ func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+3 || got[len(got)-3].Version != 8 || got[len(got)-2].Version != 9 || got[len(got)-1].Version != 10 {
-			t.Fatalf("non-idempotent v8/v9/v10: %+v", got)
+		if len(got) != len(released)+4 || got[len(got)-4].Version != 8 || got[len(got)-3].Version != 9 || got[len(got)-2].Version != 10 || got[len(got)-1].Version != 11 {
+			t.Fatalf("non-idempotent v8/v9/v10/v11: %+v", got)
 		}
 		for i := range released {
 			if got[i].Version != released[i].Version || !got[i].AppliedAt.Equal(released[i].AppliedAt) {
@@ -206,8 +274,8 @@ func TestIntentV9UpgradePreservesV8OutputAndFinancialAuthority(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+2 || got[len(got)-2].Version != 9 || got[len(got)-1].Version != 10 {
-			t.Fatalf("non-idempotent v9/v10 migration: %+v", got)
+		if len(got) != len(released)+3 || got[len(got)-3].Version != 9 || got[len(got)-2].Version != 10 || got[len(got)-1].Version != 11 {
+			t.Fatalf("non-idempotent v9/v10/v11 migration: %+v", got)
 		}
 		for i := range released {
 			if got[i].Version != released[i].Version || !got[i].AppliedAt.Equal(released[i].AppliedAt) {

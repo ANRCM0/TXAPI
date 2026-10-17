@@ -56,7 +56,7 @@ func TestOperationRequestOwnsPayloadAndCapabilityFacts(t *testing.T) {
 		}
 	}
 	if _, err := ParseRequest(Responses, []byte(`{"model":"m"}`)); err == nil {
-		t.Fatal("independent Responses sample became a supported gateway operation")
+		t.Fatal("Responses request without input was accepted")
 	}
 }
 

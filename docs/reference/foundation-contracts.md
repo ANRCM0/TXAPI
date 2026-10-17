@@ -44,8 +44,11 @@ The A1-A4 evidence below remains scoped to its original source, not those change
 These are real consumers, not declarations of stable S7 product behavior. The
 A3-05 ports are accepted internal extension contracts for the existing operation
 scope. Changes still require coordinated consumer review; they are not a public
-SDK or native S7 wire/event contract. Public API contract remains
-OpenAPI 0.2.3, 79 operations; no new Responses/session/task/WS route is added.
+SDK or native S7 wire/event contract. At the accepted foundation/S6 baseline,
+OpenAPI was 0.2.3 with 79 operations and no Responses/session/task/WS route.
+The later unaccepted S7-A01 working tree adds the opt-in foreground Responses
+route (0.3.0 / 80 operations); its [separate contract](responses-http.md) and
+new verification evidence do not inherit acceptance from this matrix.
 
 ## Lifetime and failure invariants
 

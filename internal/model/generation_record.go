@@ -1,5 +1,9 @@
 package model
 
+// GenerationArchiveMaxSegments bounds both persistent rows and replay loading.
+// The final slot is reserved for the authenticated result observation.
+const GenerationArchiveMaxSegments = 8192
+
 // GenerationRecord is an output journal, not a task intent or financial ledger.
 // MaxBytes reserves ciphertext capacity until explicit deletion or expiry cleanup.
 type GenerationRecord struct {

@@ -292,6 +292,12 @@ func main() {
 		}
 	}()
 
+	responsesRuntime, err := startResponsesRuntime(cfg.Responses, st, gw)
+	if err != nil {
+		slog.Error("Responses initialization failed", "err", err)
+		os.Exit(1)
+	}
+	defer responsesRuntime.Close()
 	generationRuntime, err := startGenerationRuntime(cfg.Generation, st, engine, gw)
 	if err != nil {
 		slog.Error("durable generation initialization failed", "err", err)
@@ -311,6 +317,7 @@ func main() {
 	httpEngine := server.NewEngine(server.Deps{
 		Cfg:         cfg,
 		Gateway:     gw,
+		Responses:   responsesRuntime.Handler(),
 		Store:       st,
 		Billing:     engine,
 		RateLimiter: limiter,

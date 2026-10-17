@@ -106,7 +106,8 @@ func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id, X-Session-Id")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id, X-Session-Id, Idempotency-Key")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-Id, X-TXAPI-Generation-ID, X-TXAPI-Response-ID, X-TXAPI-Idempotency, X-TXAPI-Billing-ID, X-TXAPI-Price-Version, Retry-After")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return

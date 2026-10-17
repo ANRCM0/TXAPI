@@ -22,6 +22,8 @@ type Meta struct {
 	IsStream    bool
 	// Mode is the legacy adaptor mode. The operation envelope is authoritative.
 	Mode int
+	// ResponseID is a local public identity, never the upstream stored response ID.
+	ResponseID string
 	// CredentialID 是本次实际使用的凭据 ID，记账时要带上它——
 	// 否则「哪个 Key 出的问题」在日志里查不出来。
 	// P2 由 registry 在选 Key 时确定，P3 换成调度器后由调度器回填。
@@ -37,4 +39,5 @@ func (m *Meta) CredentialID() (uint, bool) {
 const (
 	ModeChatCompletions = iota + 1
 	ModeEmbeddings
+	ModeResponses
 )

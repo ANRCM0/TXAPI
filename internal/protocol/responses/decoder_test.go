@@ -85,7 +85,7 @@ func TestNativeSSEFramingToolsAndTerminalState(t *testing.T) {
 		{"native", strings.Join(events, ""), true},
 		{"truncated", strings.Join(events[:3], ""), false},
 		{"chat terminator", events[1] + "data: [DONE]\n\n", false},
-		{"failed", events[1] + "event: response.failed\ndata: {\"type\":\"response.failed\",\"sequence_number\":1,\"response\":{\"id\":\"resp-one\",\"object\":\"response\",\"status\":\"failed\"}}\n\n", false},
+		{"failed", events[1] + "event: response.failed\ndata: {\"type\":\"response.failed\",\"sequence_number\":1,\"response\":{\"id\":\"resp-one\",\"object\":\"response\",\"status\":\"failed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n", true},
 		{"wrong event", strings.Replace(strings.Join(events, ""), "event: response.completed", "event: response.incomplete", 1), false},
 		{"sequence replay", strings.Replace(strings.Join(events, ""), `"sequence_number":2`, `"sequence_number":1`, 1), false},
 	} {

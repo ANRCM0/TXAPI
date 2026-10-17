@@ -8,6 +8,7 @@ import (
 	"minigateway/internal/protocol/canonical"
 	"minigateway/internal/protocol/meta"
 	"minigateway/internal/protocol/model"
+	"minigateway/internal/protocol/responses"
 )
 
 func ConvertRequestBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, error) {
@@ -19,6 +20,16 @@ func ConvertRequestBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, e
 	requirements.Stream = requirements.Stream || m.IsStream
 	if !known || !Supports(a, requirements) {
 		return nil, fmt.Errorf("unsupported operation or capabilities")
+	}
+	if operation == Responses {
+		request, err := responses.ParseRequest(body)
+		if err != nil {
+			return nil, err
+		}
+		if err := request.ValidateHTTP(); err != nil {
+			return nil, err
+		}
+		return request.WithModel(m.ActualModel)
 	}
 	if operation == Embeddings {
 		// Only an explicitly capable adaptor may handle native embeddings.
@@ -57,6 +68,9 @@ func ConvertRequestBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, e
 // convertResponseBody 把上游非流式响应转换成客户端协议的响应体。
 // 返回转换后的 body 和抽取出的 usage（供计费）。
 func ConvertResponseBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, *model.Usage, error) {
+	if m != nil && m.Mode == meta.ModeResponses {
+		return responses.NewDecoderWithID(m.ResponseID).Decode(body)
+	}
 	if m != nil && m.Mode == meta.ModeEmbeddings {
 		return decodeEmbeddings(body)
 	}
@@ -100,6 +114,9 @@ func ConvertResponseBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, 
 // 上游的 [DONE] 之类的协议终止标记在这里被消费掉，由客户端适配器
 // 重新生成自己的终止标记（不同协议的 [DONE] 语义一致但位置不同）。
 func ConvertStreamLine(a adaptor.Adaptor, line []byte, session adaptor.StreamSession, m *meta.Meta) ([][]byte, error) {
+	if m != nil && m.Mode == meta.ModeResponses {
+		return nil, fmt.Errorf("native Responses streams require the operation stream decoder")
+	}
 	upstreamPA, ok := a.(adaptor.ProtocolAdaptor)
 	if !ok || upstreamPA.Name() == "openai" {
 		// openai 上游：原样透传（P1 行为）

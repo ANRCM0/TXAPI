@@ -27,7 +27,7 @@ import (
 type Adaptor struct{}
 
 func (*Adaptor) Supports(r adaptor.Requirements) bool {
-	return r.Operation == adaptor.Chat || (r.Operation == adaptor.Embeddings && !r.Stream && !r.Tools)
+	return r.Operation == adaptor.Chat || r.Operation == adaptor.Responses || (r.Operation == adaptor.Embeddings && !r.Stream && !r.Tools)
 }
 
 // 编译期断言：同时满足两个接口。
@@ -41,6 +41,8 @@ var (
 func (a *Adaptor) GetRequestURL(m *meta.Meta) (string, error) {
 	base := strings.TrimSuffix(m.BaseURL, "/")
 	switch m.Mode {
+	case meta.ModeResponses:
+		return base + "/v1/responses", nil
 	case meta.ModeEmbeddings:
 		return base + "/v1/embeddings", nil
 	default:

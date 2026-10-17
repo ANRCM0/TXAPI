@@ -26,9 +26,24 @@ func RequirementsFor(operation Operation, body []byte) Requirements {
 		Stream   bool            `json:"stream"`
 		Tools    json.RawMessage `json:"tools"`
 		Messages json.RawMessage `json:"messages"`
+		Input    json.RawMessage `json:"input"`
 	}
 	_ = json.Unmarshal(body, &request)
 	r := Requirements{Operation: operation, Source: "openai", Transport: HTTP, Stream: request.Stream, Tools: nonempty(request.Tools)}
+	if operation == Responses && nonempty(request.Input) {
+		var text string
+		if json.Unmarshal(request.Input, &text) != nil {
+			var items []struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(request.Input, &items) != nil {
+				r.Tools = true
+			}
+			for _, item := range items {
+				r.Tools = r.Tools || item.Type == "function_call" || item.Type == "function_call_output"
+			}
+		}
+	}
 	if nonempty(request.Messages) {
 		var messages []struct {
 			Role  string          `json:"role"`
@@ -62,14 +77,23 @@ func Supports(a adaptor.Adaptor, r Requirements) bool {
 	if r.Transport != "" && r.Transport != HTTP {
 		return false
 	}
-	if r.Operation != Chat && r.Operation != Embeddings {
+	if r.Operation != Chat && r.Operation != Embeddings && r.Operation != Responses {
 		return false
 	}
 	if r.Operation == Embeddings && (r.Stream || r.Tools) {
 		return false
 	}
 	if declaration, ok := a.(adaptor.Capability); ok {
+		if r.Operation == Responses {
+			native, ok := a.(adaptor.ProtocolAdaptor)
+			if !ok || native.Name() != "openai" {
+				return false
+			}
+		}
 		return declaration.Supports(r)
+	}
+	if r.Operation == Responses {
+		return false
 	}
 	// Existing extension declarations remain compatible; built-ins use Capability.
 	if declaration, ok := a.(interface{ SupportsOperation(string, bool, bool) bool }); ok {

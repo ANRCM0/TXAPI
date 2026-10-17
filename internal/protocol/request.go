@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"minigateway/internal/protocol/meta"
+	"minigateway/internal/protocol/responses"
 )
 
 // Payload projections are operation-specific; unmodeled fields stay in Body.
@@ -33,6 +34,7 @@ type Request struct {
 	body         []byte
 	chat         ChatRequest
 	embeddings   EmbeddingsRequest
+	responses    responses.Request
 	requirements Requirements
 }
 
@@ -42,6 +44,15 @@ func ParseRequest(operation Operation, body []byte) (Request, error) {
 		return Request{}, errors.New("request body is empty")
 	}
 	switch operation {
+	case Responses:
+		var err error
+		r.responses, err = responses.ParseRequest(r.body)
+		if err != nil {
+			return Request{}, err
+		}
+		if err := r.responses.ValidateHTTP(); err != nil {
+			return Request{}, err
+		}
 	case Chat:
 		if err := json.Unmarshal(r.body, &r.chat); err != nil {
 			return Request{}, fmt.Errorf("invalid chat request JSON: %w", err)
@@ -73,15 +84,31 @@ func (r Request) Body() []byte               { return bytes.Clone(r.body) }
 func (r Request) Requirements() Requirements { return r.requirements }
 func (r Request) Stream() bool               { return r.requirements.Stream }
 func (r Request) Model() string {
+	if r.operation == Responses {
+		return r.responses.Model
+	}
 	if r.operation == Embeddings {
 		return r.embeddings.Model
 	}
 	return r.chat.Model
 }
 
-// LegacyMaxTokens preserves the legacy Chat estimate, not a strict cost proof.
-// Embeddings has no Chat output-token limit.
-func (r Request) LegacyMaxTokens() int { return r.chat.MaxTokens }
+// LegacyMaxTokens projects the native output limit for legacy estimates, never
+// a strict cost proof. Embeddings has no output-token limit.
+func (r Request) LegacyMaxTokens() int {
+	if r.operation == Responses {
+		return r.responses.MaxOutputTokens()
+	}
+	return r.chat.MaxTokens
+}
+
+func (r Request) Responses() (responses.Request, bool) {
+	if r.operation != Responses {
+		return responses.Request{}, false
+	}
+	native, _ := responses.ParseRequest(r.body)
+	return native, true
+}
 
 func (r Request) Chat() (ChatRequest, bool) {
 	chat := r.chat
@@ -99,6 +126,8 @@ func (r Request) Embeddings() (EmbeddingsRequest, bool) {
 
 func modeForOperation(operation Operation) (int, bool) {
 	switch operation {
+	case Responses:
+		return meta.ModeResponses, true
 	case Chat:
 		return meta.ModeChatCompletions, true
 	case Embeddings:
@@ -112,6 +141,8 @@ func modeForOperation(operation Operation) (int, bool) {
 // Mode zero historically meant Chat; unknown modes must never fall back to it.
 func OperationForMode(mode int) (Operation, bool) {
 	switch mode {
+	case meta.ModeResponses:
+		return Responses, true
 	case 0, meta.ModeChatCompletions:
 		return Chat, true
 	case meta.ModeEmbeddings:

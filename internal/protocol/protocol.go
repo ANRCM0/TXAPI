@@ -15,6 +15,7 @@ import (
 	"minigateway/internal/protocol/adaptor/gemini"
 	"minigateway/internal/protocol/adaptor/openai"
 	"minigateway/internal/protocol/meta"
+	"minigateway/internal/protocol/responses"
 )
 
 func Resolve(name string) (adaptor.Adaptor, bool) {
@@ -81,7 +82,13 @@ func prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (core.Input, *core.Er
 	if err = a.SetupRequestHeader(req, &callbackMeta); err != nil {
 		return core.Input{}, &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "upstream authentication header failed", Type: "internal_error"}}
 	}
-	return core.Input{URL: url, Header: req.Header, Body: out, Stream: target.IsStream, Replayable: true, Decoder: NewDecoder(a, &target)}, nil
+	var decoder core.Decoder = NewDecoder(a, &target)
+	replayable := true
+	if target.Mode == meta.ModeResponses {
+		decoder = responses.NewDecoderWithID(target.ResponseID)
+		replayable = false
+	}
+	return core.Input{URL: url, Header: req.Header, Body: out, Stream: target.IsStream, Replayable: replayable, Decoder: decoder}, nil
 }
 
 type decoder struct {
@@ -90,6 +97,9 @@ type decoder struct {
 }
 
 func NewDecoder(a adaptor.Adaptor, m *meta.Meta) core.Decoder {
+	if m != nil && m.Mode == meta.ModeResponses {
+		return responses.NewDecoderWithID(m.ResponseID)
+	}
 	if m != nil && m.Mode == meta.ModeEmbeddings {
 		return embeddingsDecoder{}
 	}
