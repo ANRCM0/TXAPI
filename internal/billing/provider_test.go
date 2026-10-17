@@ -41,6 +41,17 @@ func providerTestTarget(c ProviderCostContract) ProviderTarget {
 	return ProviderTarget{c.ChannelID, c.BaseURL, c.Protocol, c.ActualModel, c.Operation}
 }
 
+// Arithmetic/ledger fixtures use abstract tariffs, not real network admission.
+// Public execution admission is covered separately with verified wire profiles.
+func (e *Engine) startDeclaredTestAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, target ProviderTarget, request StrictRequest) (err error) {
+	defer func() { err = e.RecordCostRefusal(ctx, pre, err) }()
+	contract, err := e.lookupCostContract(pre, attempt, target, request)
+	if err != nil {
+		return err
+	}
+	return e.startContractAttempt(ctx, pre, attempt, contract, request)
+}
+
 func TestProviderContractValidationAndExactBounds(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -110,14 +121,14 @@ func TestProviderRetryEnvelopesPersistAndDoNotReprice(t *testing.T) {
 	if err := e.StartAttempt(ctx, pre, attempt); !errors.Is(err, ErrProviderContract) {
 		t.Fatalf("ledger API bypassed provider admission: %v", err)
 	}
-	if err := e.StartCostedAttempt(ctx, pre, attempt, target, limits); err != nil {
+	if err := e.startDeclaredTestAttempt(ctx, pre, attempt, target, limits); err != nil {
 		t.Fatal(err)
 	}
 	// An uncertain failed attempt keeps its whole envelope.
 	if err := e.EndAttempt(ctx, pre, 1, 503, "upstream_error", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.StartCostedAttempt(ctx, pre, attempt, target, limits); err == nil {
+	if err := e.startDeclaredTestAttempt(ctx, pre, attempt, target, limits); err == nil {
 		t.Fatal("duplicate durable attempt accepted")
 	}
 	var row model.BillingReservation
@@ -126,7 +137,7 @@ func TestProviderRetryEnvelopesPersistAndDoNotReprice(t *testing.T) {
 		t.Fatalf("duplicate attempt leaked budget: %+v", row)
 	}
 	attempt.Number = 2
-	if err := e.StartCostedAttempt(ctx, pre, attempt, target, limits); err != nil {
+	if err := e.startDeclaredTestAttempt(ctx, pre, attempt, target, limits); err != nil {
 		t.Fatal(err)
 	}
 	u := &relaymodel.Usage{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18}
@@ -134,7 +145,7 @@ func TestProviderRetryEnvelopesPersistAndDoNotReprice(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempt.Number = 3
-	if err := e.StartCostedAttempt(ctx, pre, attempt, target, limits); !errors.Is(err, ErrProviderBudget) {
+	if err := e.startDeclaredTestAttempt(ctx, pre, attempt, target, limits); !errors.Is(err, ErrProviderBudget) {
 		t.Fatalf("aggregate retry budget bypassed: %v", err)
 	}
 	charge, state, err := e.Finish(ctx, pre, u, "m", "default", true)
@@ -173,7 +184,7 @@ func TestProviderAdmissionIsAtomicBeforeAttemptCreation(t *testing.T) {
 		wg.Add(1)
 		go func(number int) {
 			defer wg.Done()
-			err := e.StartCostedAttempt(context.Background(), pre, model.BillingAttempt{Number: number, ChannelID: 1, ActualModel: "m"},
+			err := e.startDeclaredTestAttempt(context.Background(), pre, model.BillingAttempt{Number: number, ChannelID: 1, ActualModel: "m"},
 				providerTestTarget(c), StrictRequest{32, "max_tokens"})
 			if err == nil {
 				accepted.Add(1)
@@ -210,7 +221,7 @@ func TestProviderAttemptWriteFailureRollsBackEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.DB().Callback().Create().Remove("provider-write-fault") })
-	err = e.StartCostedAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"},
+	err = e.startDeclaredTestAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"},
 		providerTestTarget(c), StrictRequest{32, "max_tokens"})
 	if err == nil {
 		t.Fatal("failed attempt write accepted")
@@ -250,7 +261,7 @@ func TestProviderExactTargetAndOutputContract(t *testing.T) {
 		case "output_cap":
 			limits.OutputLimit++
 		}
-		err := e.StartCostedAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: target.ChannelID, ActualModel: target.ActualModel}, target, limits)
+		err := e.startDeclaredTestAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: target.ChannelID, ActualModel: target.ActualModel}, target, limits)
 		if !errors.Is(err, ErrProviderContract) && !errors.Is(err, ErrProviderLimit) {
 			t.Fatalf("%s drift admitted: %v", field, err)
 		}
@@ -272,7 +283,7 @@ func TestProviderEmbeddingBoundCoversWholeBatchAndViolationsStayPending(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.StartCostedAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"}, providerTestTarget(c), limits); err != nil {
+	if err := e.startDeclaredTestAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"}, providerTestTarget(c), limits); err != nil {
 		t.Fatal(err)
 	}
 	var a model.BillingAttempt

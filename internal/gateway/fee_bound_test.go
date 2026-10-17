@@ -25,14 +25,14 @@ func TestStrictFeeBoundBeforeNetworkAndEveryRetry(t *testing.T) {
 		wantHits              int64
 		wantStatus            int
 	}{
-		{"one unit below full fee", "0.095999999", "", 1, false, 0, 400},
-		{"exact full fee", "0.096", "", 1, false, 1, 200},
-		{"mapped expensive selling price", "0.1", "expensive", 1, false, 0, 400},
-		{"group multiplier", "0.1", "", 2, false, 0, 400},
-		{"retry group becomes expensive", "0.1", "", 1, true, 1, 400},
+		{"one unit below full fee", "19.219199999", "", 1, false, 0, 400},
+		{"exact full fee", "19.2192", "", 1, false, 1, 200},
+		{"mapped expensive selling price", "20", "expensive", 1, false, 0, 400},
+		{"group multiplier", "20", "", 2, false, 0, 400},
+		{"retry group becomes expensive", "20", "", 1, true, 1, 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newTestGateway(t, 1)
+			fixture := newTestGateway(t, 0)
 			st := fixture.store
 			var hits, health atomic.Int64
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +47,7 @@ func TestStrictFeeBoundBeforeNetworkAndEveryRetry(t *testing.T) {
 			}))
 			defer upstream.Close()
 			if tc.actual != "" {
-				if err := st.UpsertModelPrice(&dbmodel.ModelPrice{Model: tc.actual, InputPricePer1K: 1, OutputPricePer1K: 1}); err != nil {
+				if err := st.UpsertModelPrice(&dbmodel.ModelPrice{Model: verifiedChatModel, InputPricePer1K: 1, OutputPricePer1K: 1}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -71,8 +71,9 @@ func TestStrictFeeBoundBeforeNetworkAndEveryRetry(t *testing.T) {
 			if err := engine.EnableStrict(tc.ceiling, 10*time.Second); err != nil {
 				t.Fatal(err)
 			}
-			configureTestProviderCosts(t, engine, channels)
-			gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2,
+			channels, client := verifiedChatChannels(t, channels, upstream.URL)
+			configureVerifiedChatCosts(t, engine, channels)
+			gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2,
 				HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) },
 			})
 			if err != nil {
@@ -82,7 +83,7 @@ func TestStrictFeeBoundBeforeNetworkAndEveryRetry(t *testing.T) {
 			router := gin.New()
 			router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(
-				`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":32}`))
+				`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":32,"service_tier":"default"}`))
 			req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
@@ -115,7 +116,7 @@ func TestStrictFeeBoundBeforeNetworkAndEveryRetry(t *testing.T) {
 				t.Fatalf("fee refusal lost from admin ledger: %+v", detail.Reservation)
 			}
 			if tc.retry {
-				if detail.Reservation.State != billing.Pending || detail.Reservation.ProviderHeldUnits != "5760000" {
+				if detail.Reservation.State != billing.Pending || detail.Reservation.ProviderHeldUnits != "19219200" {
 					t.Fatalf("retry fee refusal released unknown first execution: %+v", detail)
 				}
 				return
@@ -139,7 +140,7 @@ func TestStrictFeeBoundBeforeNetworkAndEveryRetry(t *testing.T) {
 				if err := json.Unmarshal([]byte(detail.Attempts[0].ProviderContractSnapshot), &snapshot); err != nil {
 					t.Fatal(err)
 				}
-				if snapshot.Format != 2 || snapshot.SellingBoundUnits != "96000000" || snapshot.SellingPriceVersion != detail.Reservation.PriceVersion {
+				if snapshot.Format != 2 || snapshot.SellingBoundUnits != "19219200000" || snapshot.SellingPriceVersion != detail.Reservation.PriceVersion {
 					t.Fatalf("fee admission proof not persisted: %+v", snapshot)
 				}
 			}
@@ -151,13 +152,15 @@ func TestStrictFeeBoundEmbeddingsRequiresWholeBatchCoverage(t *testing.T) {
 	fixture := newTestGateway(t, 1)
 	st := fixture.store
 	channels := st.Channels()
+	channels[0].BaseURL = "https://api.openai.com"
+	channels[0].ModelMapping = dbmodel.StringMap{"gpt-4o-mini": "text-embedding-3-small"}
 	engine := billing.New(st.DB(), billing.NewPriceTableWithHistory(st.PriceData, time.Hour, st.RecordPriceSnapshot))
 	if err := engine.EnableStrict("0.1", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := engine.ConfigureProviderCosts("0.1", []billing.ProviderCostContract{{
-		ChannelID: channels[0].ID, BaseURL: channels[0].BaseURL, Protocol: "openai", ActualModel: "gpt-4o-mini",
-		Operation: "embeddings", InputTokenCeiling: 1000, InputPricePer1K: "0.001", OutputPricePer1K: "0",
+		ChannelID: channels[0].ID, BaseURL: channels[0].BaseURL, Protocol: "openai", ActualModel: "text-embedding-3-small",
+		Operation: "embeddings", InputTokenCeiling: 300000, InputBoundProfile: billing.OpenAIEmbeddingsV1, InputPricePer1K: "0.00002", OutputPricePer1K: "0",
 		Evidence: "isolated whole-batch fixture",
 	}}); err != nil {
 		t.Fatal(err)

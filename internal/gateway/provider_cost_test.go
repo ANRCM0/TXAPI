@@ -28,7 +28,7 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 		{"output above contract", "0.1", "provider_cost_limit", true, 33, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newTestGateway(t, 1)
+			fixture := newTestGateway(t, 0)
 			st := fixture.store
 			var hits atomic.Int64
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,26 +38,26 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 				_, _ = w.Write([]byte(`{"error":{"message":"uncertain provider execution"}}`))
 			}))
 			defer upstream.Close()
-			channels := st.Channels()
-			channels[0].BaseURL = upstream.URL
+			channels, client := verifiedChatChannels(t, st.Channels(), upstream.URL)
 			channels[0].Credentials = append(channels[0].Credentials,
 				dbmodel.Credential{ID: 1001, APIKey: "isolated-test-second-key", Status: "active", Weight: 1},
 				dbmodel.Credential{ID: 1002, APIKey: "isolated-test-third-key", Status: "active", Weight: 1})
 			engine := billing.New(st.DB(), billing.NewPriceTableWithHistory(st.PriceData, time.Hour, st.RecordPriceSnapshot))
-			if err := engine.EnableStrict("0.2", 10*time.Second); err != nil {
+			if err := engine.EnableStrict("31", 10*time.Second); err != nil {
 				t.Fatal(err)
 			}
 			if tc.contract {
 				err := engine.ConfigureProviderCosts(tc.budget, []billing.ProviderCostContract{{
-					ChannelID: channels[0].ID, BaseURL: upstream.URL, Protocol: "openai", ActualModel: "gpt-4o-mini",
-					Operation: "chat", OutputLimitField: "max_tokens", InputTokenCeiling: 1000, MaxOutputTokens: 32,
-					InputPricePer1K: "0.001", OutputPricePer1K: "0.002", Evidence: "isolated fake upstream, failure can be billable",
+					ChannelID: channels[0].ID, BaseURL: channels[0].BaseURL, Protocol: "openai", ActualModel: verifiedChatModel,
+					Operation: "chat", OutputLimitField: "max_completion_tokens", InputTokenCeiling: 200000, MaxOutputTokens: 32,
+					InputBoundProfile: billing.OpenAIChatV1,
+					InputPricePer1K:   "0.000005", OutputPricePer1K: "0.002", Evidence: "isolated fake tariff for envelope arithmetic, not an approved provider price",
 				}})
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
-			gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2})
+			gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,7 +69,7 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 				output = "33"
 			}
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(
-				`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":`+output+`}`))
+				`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"service_tier":"default","max_completion_tokens":`+output+`}`))
 			req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
@@ -92,7 +92,7 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 			if tc.hits == 0 && (row.State != billing.Settled || row.ChargeUnits != 0) {
 				t.Fatalf("unexecuted request was charged or held: %+v", row)
 			}
-			if tc.hits > 0 && (row.State != billing.Pending || row.ReservedUnits != 200_000_000) {
+			if tc.hits > 0 && (row.State != billing.Pending || row.ReservedUnits != 31_000_000_000) {
 				t.Fatalf("uncertain first attempt was treated as free: %+v", row)
 			}
 		})
@@ -100,7 +100,7 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 }
 
 func TestStrictProviderEmbeddingBatchUsesIndependentInputEnvelope(t *testing.T) {
-	fixture := newTestGateway(t, 1)
+	fixture := newTestGateway(t, 0)
 	st := fixture.store
 	var hits atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -113,19 +113,20 @@ func TestStrictProviderEmbeddingBatchUsesIndependentInputEnvelope(t *testing.T) 
 	}))
 	defer upstream.Close()
 	channels := st.Channels()
-	channels[0].BaseURL = upstream.URL
+	channels[0].BaseURL = "https://api.openai.com"
+	channels[0].ModelMapping = dbmodel.StringMap{"gpt-4o-mini": "text-embedding-3-small"}
 	engine := billing.New(st.DB(), billing.NewPriceTableWithHistory(st.PriceData, time.Hour, st.RecordPriceSnapshot))
-	if err := engine.EnableStrict("0.2", 10*time.Second); err != nil {
+	if err := engine.EnableStrict("46", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := engine.ConfigureProviderCosts("0.1", []billing.ProviderCostContract{{
-		ChannelID: channels[0].ID, BaseURL: upstream.URL, Protocol: "openai", ActualModel: "gpt-4o-mini",
-		Operation: "embeddings", InputTokenCeiling: 1000,
-		InputPricePer1K: "0.001", OutputPricePer1K: "0", Evidence: "isolated whole-batch fake upstream",
+		ChannelID: channels[0].ID, BaseURL: channels[0].BaseURL, Protocol: "openai", ActualModel: "text-embedding-3-small",
+		Operation: "embeddings", InputTokenCeiling: 300000, InputBoundProfile: billing.OpenAIEmbeddingsV1,
+		InputPricePer1K: "0.00002", OutputPricePer1K: "0", Evidence: "isolated whole-batch fake upstream",
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict})
+	gw, err := New(Options{Channels: channels, Client: verifiedLoopbackClient(t, upstream.URL), Billing: engine, BillingMode: billing.ModeStrict})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestStrictProviderEmbeddingBatchUsesIndependentInputEnvelope(t *testing.T) 
 	if err := st.DB().First(&row, "id=?", w.Header().Get("X-TXAPI-Billing-ID")).Error; err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != 200 || hits.Load() != 1 || row.State != billing.Settled || row.ChargeUnits != 1_650_000 || row.ProviderHeldUnits != 1_000_000 {
+	if w.Code != 200 || hits.Load() != 1 || row.State != billing.Settled || row.ChargeUnits != 1_650_000 || row.ProviderHeldUnits != 6_000_000 {
 		t.Fatalf("embedding accounting regressed: status=%d hits=%d row=%+v body=%s", w.Code, hits.Load(), row, w.Body.String())
 	}
 }
@@ -153,10 +154,10 @@ func TestStrictProviderContractRejectsHotTargetDrift(t *testing.T) {
 	if err := engine.EnableStrict("0.1", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	channels := st.Channels()
-	configureTestProviderCosts(t, engine, channels)
+	channels, client := verifiedChatChannels(t, st.Channels(), fixture.upstream.URL)
+	configureVerifiedChatCosts(t, engine, channels)
 	channels[0].ModelMapping = dbmodel.StringMap{"gpt-4o-mini": "new-mapped-model"}
-	gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict})
+	gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +165,7 @@ func TestStrictProviderContractRejectsHotTargetDrift(t *testing.T) {
 	router := gin.New()
 	router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(
-		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":32}`))
+		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"service_tier":"default","max_completion_tokens":32}`))
 	req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)

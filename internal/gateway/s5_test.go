@@ -162,22 +162,23 @@ func TestS5GatewayPinsPersistedPriceVersion(t *testing.T) {
 func TestS5StrictGatewaySettlesWithoutOrdinaryLogs(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(map[bool]string{false: "json", true: "sse"}[stream], func(t *testing.T) {
-			fixture := newTestGateway(t, 1)
+			fixture := newTestGateway(t, 0)
 			st := fixture.store
 			table := billing.NewPriceTableWithHistory(st.PriceData, time.Hour, st.RecordPriceSnapshot)
 			engine := billing.New(st.DB(), table)
-			if err := engine.EnableStrict("0.1", time.Second*10); err != nil {
+			if err := engine.EnableStrict("20", time.Second*10); err != nil {
 				t.Fatal(err)
 			}
-			configureTestProviderCosts(t, engine, st.Channels())
-			gw, err := New(Options{Channels: st.Channels(), Billing: engine, BillingMode: billing.ModeStrict})
+			channels, client := verifiedChatChannels(t, st.Channels(), fixture.upstream.URL)
+			configureVerifiedChatCosts(t, engine, channels)
+			gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer gw.Close()
 			router := gin.New()
 			router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
-			body, _ := json.Marshal(map[string]any{"model": "gpt-4o-mini", "messages": []map[string]string{{"role": "user", "content": "hi"}}, "max_tokens": 32, "stream": stream})
+			body, _ := json.Marshal(map[string]any{"model": "gpt-4o-mini", "messages": []map[string]string{{"role": "user", "content": "hi"}}, "max_completion_tokens": 32, "service_tier": "default", "stream": stream})
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 			req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
 			w := httptest.NewRecorder()
@@ -208,7 +209,7 @@ func TestS5StrictGatewaySettlesWithoutOrdinaryLogs(t *testing.T) {
 }
 
 func TestS5StrictGatewayMissingUsageHoldsBudget(t *testing.T) {
-	fixture := newTestGateway(t, 1)
+	fixture := newTestGateway(t, 0)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"response without usage"}}]}`))
@@ -218,12 +219,13 @@ func TestS5StrictGatewayMissingUsageHoldsBudget(t *testing.T) {
 	channels[0].BaseURL = upstream.URL
 	table := billing.NewPriceTableWithHistory(fixture.store.PriceData, time.Hour, fixture.store.RecordPriceSnapshot)
 	engine := billing.New(fixture.store.DB(), table)
-	if err := engine.EnableStrict("0.1", time.Second*10); err != nil {
+	if err := engine.EnableStrict("20", time.Second*10); err != nil {
 		t.Fatal(err)
 	}
-	configureTestProviderCosts(t, engine, channels)
+	channels, client := verifiedChatChannels(t, channels, upstream.URL)
+	configureVerifiedChatCosts(t, engine, channels)
 	var entry *dbmodel.RequestLog
-	gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict, LogRecorder: func(row *dbmodel.RequestLog) { entry = row }})
+	gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, LogRecorder: func(row *dbmodel.RequestLog) { entry = row }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,14 +233,14 @@ func TestS5StrictGatewayMissingUsageHoldsBudget(t *testing.T) {
 	router := gin.New()
 	router.POST("/v1/chat/completions", middleware.NewAuth(fixture.store).Handle(), gw.HandleChatCompletions)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":32}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":32,"service_tier":"default"}`))
 	req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
 	router.ServeHTTP(w, req)
 	if w.Code != 200 || entry == nil || entry.BillingState != billing.Pending || !entry.IsEstimated {
 		t.Fatalf("missing usage silently finalized: %d %+v", w.Code, entry)
 	}
 	var row dbmodel.BillingReservation
-	if err := fixture.store.DB().First(&row, "id=?", entry.BillingID).Error; err != nil || row.ReservedUnits != 100_000_000 || row.State != billing.Pending {
+	if err := fixture.store.DB().First(&row, "id=?", entry.BillingID).Error; err != nil || row.ReservedUnits != 20_000_000_000 || row.State != billing.Pending {
 		t.Fatalf("missing usage became free: %+v err=%v", row, err)
 	}
 }

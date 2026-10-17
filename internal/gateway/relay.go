@@ -316,6 +316,8 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, body []byte, timeout 
 			switch {
 			case errors.Is(err, billing.ErrProviderContract):
 				kind, message = "provider_cost_contract_missing", err.Error()
+			case errors.Is(err, billing.ErrInputUnproven):
+				kind, message = "provider_input_unproven", err.Error()
 			case errors.Is(err, billing.ErrProviderBudget):
 				kind, message = "provider_budget_exhausted", err.Error()
 			case errors.Is(err, billing.ErrProviderLimit):

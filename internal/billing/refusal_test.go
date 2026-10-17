@@ -40,7 +40,7 @@ func TestProviderRefusalSurvivesRecoveryAndRepeatedFinish(t *testing.T) {
 			case "fee":
 				wantErr, wantReason = ErrFeeBound, "billing_fee_limit"
 			case "budget", "unpriced retry":
-				if err := e.StartCostedAttempt(context.Background(), pre, attempt, target, request); err != nil {
+				if err := e.startDeclaredTestAttempt(context.Background(), pre, attempt, target, request); err != nil {
 					t.Fatal(err)
 				}
 				attempt.Number = 2
@@ -51,7 +51,7 @@ func TestProviderRefusalSurvivesRecoveryAndRepeatedFinish(t *testing.T) {
 				wantErr, wantReason = ErrUnpricedDimension, "unsupported_billing_dimension"
 				err = e.RecordCostRefusal(context.Background(), pre, wantErr)
 			} else {
-				err = e.StartCostedAttempt(context.Background(), pre, attempt, target, request)
+				err = e.startDeclaredTestAttempt(context.Background(), pre, attempt, target, request)
 			}
 			if !errors.Is(err, wantErr) {
 				t.Fatalf("refusal=%v want=%v", err, wantErr)

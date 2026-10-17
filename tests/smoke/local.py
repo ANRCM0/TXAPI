@@ -2,6 +2,8 @@
 
 Uses only Python's standard library. Does not read config.yaml or call a real
 provider. Cross-provider compatibility is outside this smoke check's scope.
+Strict execution uses the production main in a Go test binary with a
+loopback-only network fixture; the production binary separately checks refusal.
 """
 
 import argparse
@@ -162,16 +164,17 @@ def strict_crash_workflow(gateway, config, config_path, work, env, gateway_port,
     with service([str(gateway), "-config", str(config_path)], work / "strict-setup.log", env) as process:
         ready(process, gateway_port)
         channel = api("/api/admin/channels", {
-            "name": "crash-fixture", "type": "openai", "base_url": upstream_url,
-            "models": ["crash-model"], "api_key": "sk-smoke-slow-upstream-only",
+            "name": "crash-fixture", "type": "openai", "base_url": "https://api.openai.com",
+            "models": ["crash-model"], "model_mapping": {"crash-model": "gpt-4o-mini-2024-07-18"},
+            "api_key": "sk-smoke-slow-upstream-only",
         }, "POST", 201)["data"]
         api("/api/admin/prices/crash-model", {"input_price_per_1k": 0.15, "output_price_per_1k": 0.6}, "PUT")
         key = api("/api/me/keys", {"name": "crash-client", "model_mode": "allowlist", "models": ["crash-model"]}, "POST", 201)["data"]
-    config["billing"]["provider_contracts"].append(provider_contract(channel["id"], upstream_url, "crash-model"))
+    config["billing"]["provider_contracts"].append(verified_provider_contract(channel["id"]))
     config_path.write_text(json.dumps(config))
     with service([str(gateway), "-config", str(config_path)], work / "strict-killed.log", env) as process:
         ready(process, gateway_port)
-        payload = {"model": "crash-model", "max_tokens": 32, "stream": True,
+        payload = {"model": "crash-model", "max_completion_tokens": 32, "service_tier": "default", "stream": True,
                    "messages": [{"role": "user", "content": "hi"}], "stream_options": {"include_usage": True}}
         stream_request = urllib.request.Request(base + "/v1/chat/completions", data=json.dumps(payload).encode(),
                                                 headers={"Authorization": "Bearer " + key["key"], "Content-Type": "application/json"})
@@ -183,7 +186,7 @@ def strict_crash_workflow(gateway, config, config_path, work, env, gateway_port,
     with contextlib.closing(sqlite3.connect((work / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
         state, lease = db.execute("SELECT state,lease_until FROM billing_reservations WHERE id=?", (billing_id,)).fetchone()
         assert state == "active", state
-        assert db.execute("SELECT reserved_units FROM billing_balances WHERE owner_type='key' AND owner_id=?", (key["id"],)).fetchone() == (100_000_000,)
+        assert db.execute("SELECT reserved_units FROM billing_balances WHERE owner_type='key' AND owner_id=?", (key["id"],)).fetchone() == (20_000_000_000,)
     time.sleep(max(0, lease / 1000 - time.time()) + 0.05)
     with service([str(gateway), "-config", str(config_path)], work / "strict-recovered.log", env) as process:
         ready(process, gateway_port)
@@ -195,13 +198,13 @@ def strict_crash_workflow(gateway, config, config_path, work, env, gateway_port,
                 break
             assert time.monotonic() < deadline, detail
             time.sleep(0.05)
-        assert detail["reservation"]["can_resolve"] and detail["reservation"]["reserved_units"] == "100000000"
+        assert detail["reservation"]["can_resolve"] and detail["reservation"]["reserved_units"] == "20000000000"
         assert not detail["attempts"][0]["cost_known"] and detail["resolution"] is None
-        assert detail["reservation"]["provider_held_units"] == "5760000"
+        assert detail["reservation"]["provider_held_units"] == "19219200"
         assert len(detail["attempts"][0]["provider_contract_version"]) == 64
         cost_snapshot = json.loads(detail["attempts"][0]["provider_contract_snapshot"])
-        assert cost_snapshot["contract"]["evidence"] == "isolated smoke fake upstream"
-        assert cost_snapshot["format"] == 2 and cost_snapshot["selling_bound_units"] == "96000000"
+        assert cost_snapshot["contract"]["input_bound_profile"] == "openai_chat_v1"
+        assert cost_snapshot["format"] == 2 and cost_snapshot["selling_bound_units"] == "19219200000"
         assert cost_snapshot["selling_price_version"] == detail["reservation"]["price_version"]
         decision = {"action": "waive", "reason": "test operator accepts uncertain upstream cost",
                     "evidence": "isolated forced-kill fixture; no free-execution assumption"}
@@ -211,11 +214,11 @@ def strict_crash_workflow(gateway, config, config_path, work, env, gateway_port,
         detail = api(path)["data"]
         assert detail["reservation"]["state"] == "settled" and detail["resolution"]["action"] == "waive"
         assert detail["resolution"]["actor_id"] == 1
-        assert detail["reservation"]["provider_held_units"] == "5760000"
+        assert detail["reservation"]["provider_held_units"] == "19219200"
     with contextlib.closing(sqlite3.connect((work / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
         assert db.execute("SELECT COUNT(*) FROM billing_resolutions WHERE reservation_id=?", (billing_id,)).fetchone() == (1,)
         assert db.execute("SELECT used_units,reserved_units FROM billing_balances WHERE owner_type='key' AND owner_id=?", (key["id"],)).fetchone() == (0, 0)
-    print("PASS: actual gateway forced kill during SSE, restart pending hold, audited idempotent waiver", flush=True)
+    print("PASS: production main with loopback test transport, SSE forced kill, restart pending hold, audited idempotent waiver", flush=True)
 
 
 def provider_contract(channel_id, upstream_url, model):
@@ -227,6 +230,17 @@ def provider_contract(channel_id, upstream_url, model):
     }
 
 
+def verified_provider_contract(channel_id):
+    return {
+        "channel_id": channel_id, "base_url": "https://api.openai.com", "protocol": "openai",
+        "actual_model": "gpt-4o-mini-2024-07-18", "operation": "chat",
+        "output_limit_field": "max_completion_tokens", "input_token_ceiling": 128000,
+        "input_bound_profile": "openai_chat_v1", "max_output_tokens": 32,
+        "input_price_per_1k": "0.00015", "output_price_per_1k": "0.0006",
+        "evidence": "isolated smoke tariff; test-only loopback transport, no real provider request",
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--go", default="go", help="Go executable")
@@ -234,12 +248,15 @@ def main():
     args = parser.parse_args()
     # Never inherit a real deployment's database path, bind address or secrets.
     clean_env = {key: value for key, value in os.environ.items()
-                 if not key.startswith(("GATEWAY_", "TXAPI_ADMIN_"))}
+                 if not key.startswith(("GATEWAY_", "TXAPI_ADMIN_", "TXAPI_SMOKE_"))}
     with tempfile.TemporaryDirectory(prefix="gateway-smoke-") as directory:
         work = Path(directory)
         gateway, upstream = work / "gateway", work / "upstream"
         for output, package in [(gateway, "./cmd/gateway"), (upstream, "./tests/upstream/openai")]:
             subprocess.run([args.go, "build", "-o", str(output), package], cwd=ROOT, check=True, timeout=240)
+        strict_gateway = work / "gateway-smoke"
+        subprocess.run([args.go, "test", "-c", "-o", str(strict_gateway), "./cmd/gateway"],
+                       cwd=ROOT, check=True, timeout=240)
         gateway_port, upstream_port = ports()
         key = "sk-local-smoke-only"
         # The management key is mandatory: config.Load refuses to start
@@ -337,6 +354,25 @@ def main():
                 status, body = request(base + "/api/admin/prices/smoke-model", admin,
                                        {"input_price_per_1k": 0.15, "output_price_per_1k": 0.6}, "PUT")
                 assert status == 200, body
+                status, body = request(base + "/v1/chat/completions", key, strict_payload)
+                assert status == 503 and json.loads(body)["error"]["type"] == "provider_input_unproven", (status, body)
+                # Create the profiled fixture only after the production refusal check.
+                status, body = request(base + "/api/admin/channels", admin, {
+                    "name": "verified-smoke", "type": "openai", "base_url": "https://api.openai.com",
+                    "api_key": "sk-verified-smoke-only", "models": ["smoke-model"],
+                    "model_mapping": {"smoke-model": "gpt-4o-mini-2024-07-18"}, "priority": 100,
+                }, "POST")
+                assert status == 201, body
+                verified_channel = json.loads(body)["data"]
+            config["billing"]["max_request_cost"] = "20"
+            config["billing"]["max_provider_request_cost"] = "1"
+            config["billing"]["provider_contracts"].append(verified_provider_contract(verified_channel["id"]))
+            config_path.write_text(json.dumps(config))
+            strict_env = dict(clean_env, TXAPI_SMOKE_MAIN="1", TXAPI_SMOKE_UPSTREAM=f"127.0.0.1:{upstream_port}")
+            with service([str(strict_gateway), "-config", str(config_path)], work / "strict-profile.log", strict_env) as strict_gw:
+                ready(strict_gw, gateway_port)
+                strict_payload = {"model": "smoke-model", "max_completion_tokens": 32, "service_tier": "default",
+                                  "messages": [{"role": "user", "content": "hello"}]}
                 for stream in [False, True]:
                     strict_payload.update(stream=stream, stream_options={"include_usage": True})
                     status, body = request(base + "/v1/chat/completions", key, strict_payload)
@@ -345,15 +381,15 @@ def main():
                 while True:
                     status, body = request(base + "/api/me/logs", admin)
                     assert status == 200, body
-                    billed = [row for row in json.loads(body)["data"] if row["billing_id"]]
+                    billed = [row for row in json.loads(body)["data"] if row["billing_id"] and row["cost"] > 0]
                     if len(billed) == 2:
                         break
                     assert time.monotonic() < deadline, "Strict request observations did not appear"
                     time.sleep(0.05)
                 assert all(row["billing_state"] == "settled" and abs(row["cost"] - 0.00585) < 1e-12 for row in billed), billed
-            strict_crash_workflow(gateway, config, config_path, work, clean_env, gateway_port,
+            strict_crash_workflow(strict_gateway, config, config_path, work, strict_env, gateway_port,
                                   f"http://127.0.0.1:{upstream_port}", admin)
-    print("PASS: startup, auth, normal/SSE, console, S5 mode isolation, strict missing-price rejection and durable settlement")
+    print("PASS: production startup/auth/normal/SSE/console, strict missing-price/unproved-input rejection; isolated main profile settlement and recovery")
 
 
 if __name__ == "__main__":

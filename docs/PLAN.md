@@ -8,13 +8,13 @@
 
 | 核对项 | 当前结论 |
 |---|---|
-| 当前代码 | `feat/s5-s6-mainline`，功能提交 `b7939543e55d827e5d9b9ebb4c4545b8e0fcb838` 已推送；包含既有 S5-C、Chat 边界档案、S6 协调/能力/工具切片及独立 Responses 协议实现，尚未合并 master |
+| 当前代码 | `feat/s5-s6-mainline`，基于已推送 `0171645` 推进输入档案强制门槛与最终正文上限绑定；既有功能提交 `b793954` 含 S5-C、S6 协调/能力/工具及独立 Responses 协议，尚未合并 master |
 | 本地集成基线 | `master/90df76b`，S0–S4 与 F0 已验收合并；开工/合并前重新确认最新基线 |
 | 产品形态 | Go/Gin 模块化单体、单二进制、单实例 SQLite；原生 ES Modules 控制台内嵌 |
 | 现有推理入口 | `/v1/models`、`/v1/chat/completions`（JSON/SSE）、`/v1/embeddings` |
 | HTTP 契约 | [OpenAPI](openapi.json) `0.2.3`，79 个操作；不是 79 种推理能力 |
 | S0–S4 / F0 | 正确性、极简 core、身份隔离、调度准入、控制台与配置交付已有阶段验收记录 |
-| S5 | 6 项中 5 项通过；本轮功能提交已通过本地检查及完整 Verify CI（Linux race、冒烟、Docker 交付）；成本契约仍存在未证明假设，S5-03 与完整阶段仍未验收/合并 |
+| S5 | 6 项中 5 项通过；当前输入门槛批次已通过本地构建/vet/全量测试与进程冒烟，远端 CI 随提交记录；既有功能提交完整 Verify 通过不能替本批背书。未证明费率/币种/失败收费假设仍在，S5-03 与完整阶段未验收/合并 |
 | 统一兼容框架 | Chat/embeddings 已迁入非 Gin 的类型化协调入口；操作/源协议/传输能力进入路由，跨协议无法保留的字段拒绝。仍使用 HTTP writer，尚非完整 WS/worker 框架，完整 S6 未验收 |
 | S6 / S7-A | S6 本轮切片已提交并通过完整 CI，尚未阶段验收合并；S7-A 仅独立 Responses 原生请求/JSON/SSE 协议与 core 样本，没有生产 Responses、持久会话、后台任务或 WS 入口 |
 | 安全与部署限制 | 上游 API Key 当前明文落库，响应掩码不是静态加密；客户端调用 Key 已摘要存储。没有实际生产升级或真实全客户端兼容验收承诺 |
@@ -44,7 +44,7 @@ S5-03 已实现双层事务与收取费用上限，但尚不据此宣称允许�
 
 ## 后续开发路线
 
-制定日期：2026-10-16；2026-10-17 更新实际进度。当前功能分支 `feat/s5-s6-mainline/b793954`，已核对集成基线 `origin/master/90df76b`；合并前重新确认最新集成状态。S0–S4 与 F0 已验收合并，S5 功能仍在分支，S5-03 未完成。下列清单为阶段验收目标；本轮实现与验证进展见页末，未勾选项不能据此视为已通过。
+制定日期：2026-10-16；2026-10-17 更新实际进度。当前功能分支 `feat/s5-s6-mainline`，本批基于 `0171645`，已核对集成基线 `origin/master/90df76b`；合并前重新确认最新集成状态。S0–S4 与 F0 已验收合并，S5 功能仍在分支，S5-03 未完成。下列清单为阶段验收目标；本轮实现与验证进展见页末，未勾选项不能据此视为已通过。
 
 本轮范围已由用户明确：**完成 S5、S6 和包含持久会话/后台任务/WebSocket 的 S7-A，不新增支付。** 三个参考项目已克隆到被 Git/Docker 忽略的 `.local/references/`，固定版本与代码阅读入口见[上游参考快照](reference/upstream-snapshots.md)。本方案同时纠正“先堆 Responses 功能、后补共用框架”的顺序：统一协调入口前移到 S6，S7-A 是框架的首组完整状态型功能，不是框架中心。不自动启动 S7-B、S8 或 S9。
 
@@ -415,3 +415,28 @@ gateway 改用 `StartPreparedAttempt` 将真实 URL/正文交给同一成本引�
 本记录及 README 的后续说明文档更新复用该功能 SHA 的执行证据：没有再次修改可执行代码、API 契约、配置或测试；只检查文档差异、链接和状态一致性。自动 push/PR CI 触发规则保持原样，不手动重复 dispatch。
 
 **剩余门槛不因 CI 绿灯消失：**未指定输入档案的成本契约仍依赖运营声明，最高费率/币种/失败请求收费没有统一可验证证明；不能将这些契约宣称为已认证，也不能勾选 S5-03。S6 的代码与工具切片已通过回归，但仍待成本边界收口及阶段集成评审；S7-A 的生产 HTTP、持久会话与加密、原生后台任务、native WS、跨模式恢复和指定客户端验收尚未完成。本轮不将“1–5”整体报为完成，也不绕过共同基线门槛提前接线。
+
+## 2026-10-17 继续推进：输入档案成为执行门槛
+
+本批基线 `feat/s5-s6-mainline/01716458af22b50b330b0e55559bd50c500c0c2c`，开工工作树干净；fetch 确认 `origin/master=90df76b0340e4cdfa6c332c781f7aa772a04ed07` 仍为分支祖先。继续现有 draft PR #5，不新建平行实现或提前接线 S7。负责 billing 的成本准入与持久拒绝、gateway 错误映射、相关行为回归和进程冒烟；依赖既有档案校验、唯一结算/恢复与资源收尾。无新路由/字段、迁移、第三方依赖、core/CI 变更，也没有移植参考项目实现或操作实际数据库。
+
+实现：
+
+- strict 的每个新 attempt 必须匹配已登记输入档案并提供最终 URL/正文；未指定档案的旧契约可继续加载/读取历史，但仅有 `evidence` 不再获准执行，返回 503 `provider_input_unproven`。Anthropic/Gemini、兼容代理及未登记模型当前没有可执行档案；legacy/disabled 的原兼容路径不受此门槛影响。
+- `StartPreparedAttempt` 重新解析最终正文，要求输出字段/数值与本次成本占用元数据完全一致，拒绝低报后发送更大上限；旧 metadata-only `StartCostedAttempt` 弃用且不能准入。继续使用真实原子 attempt、固定售价/分组覆盖和累计 provider 包络，不新增可配置豁免。
+- 本地拒绝不发送、不换凭据继续重试、不反馈健康、不生成 durable attempt；未执行请求释放双 hold。已有未知执行则保留原 attempt/provider 占用和 pending；拒绝原因在原账本和崩溃恢复中保持，不用新限制抹除历史财务事实。
+- 既有精确算术、重试、预算、快照和事务回归保留。billing 私有测试夹具只调用实际财务实现以构造声明包络/历史事实，不能作为生产输入证明；网关正向用例改为真实档案配合测试专用 loopback Transport，不给生产二进制添加测试开关。
+
+验证环境：Windows/PowerShell，Go 命令均设置 `GOARCH=amd64 GOFLAGS=-buildvcs=false`，沿用已记录的本地 VCS stamping 限制。以下命令针对本批工作树，而非复用 `b793954` 的旧 CI：
+
+| 实际执行 | 结果与适用范围 |
+|---|---|
+| `go test -json -count=1 ./internal/billing ./internal/gateway ./cmd/gateway` | 首轮定向通过；输入无依据拒绝、正文限制绑定、已发生未知执行后的保守恢复，以及 loopback-only 夹具边界通过。后补的 strict/legacy/disabled JSON/SSE 隔离用例由下列全量覆盖 |
+| `go build ./...`、`go vet ./...`、`go test -json -count=1 ./...` | 最终生产代码与本批测试全部通过，18 个测试包通过；包含依赖/契约、并发/账本/恢复与原有协议回归 |
+| `python tests/smoke/local.py --go go` | 通过；生产 `go build` 二进制验证启动/鉴权/原调用/控制台/模式隔离及无档案 strict 拒绝；`go test -c ./cmd/gateway` 测试二进制调用同一生产 main，在测试专用本地传输下验证带档案 JSON/SSE 结算、SSE 强杀/重启 pending 与幂等豁免。通过后只修改一条说明注释，复用此执行证据 |
+| 本批 Go 文件 `gofmt -l`、`git diff --check`、`git diff --exit-code -- go.mod go.sum` | 通过；只格式化本批文件，没有依赖变化 |
+| 一次性 `python -` Python AST / Markdown 路径 / OpenAPI 检查 | 通过；51 个本地路径/锚点和 12 个本批 Go 文件格式检查通过，OpenAPI 与 HEAD 排除 description 后完全一致，保持 0.2.3 / 79 操作，无 Responses 生产路由 |
+
+冒烟的测试传输仅连接本次随机 loopback 假上游、禁用部署代理并拒绝其他目标；不验证真实 TLS、厂商行为或费率。生产构建不包含 `_test.go` 的入口/环境变量与拨号器；真实财务、路由、生命周期和恢复代码没有被 mock。未改动前端源代码，本批未重复运行 Node/真实浏览器；未在本机运行 Linux race、Docker 或真实厂商/客户端验收。
+
+本批远端完整 Verify 由 push/PR 自动触发并按最终 SHA 单独记录于 PR；本地通过不替代该门槛，不手动重复 dispatch。当前仍为 draft，不合并、不新增 S5/S6/S7 阶段完成勾选。**输入无依据仍可执行的缺口已关闭，但完整 S5-C 尚未完成：**最高费率及币种、同渠道凭据的价格上界、失败请求收费假设仍未认证；后续先完成这些可计价边界，再验收共同基线，最后推进 Responses HTTP/持久会话/后台/WS 生产接线。

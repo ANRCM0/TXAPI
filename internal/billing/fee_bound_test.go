@@ -36,7 +36,7 @@ func TestFeeBoundAdmissionUsesSellingPriceAndExactHold(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = e.StartCostedAttempt(context.Background(), pre,
+			err = e.startDeclaredTestAttempt(context.Background(), pre,
 				model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"},
 				providerTestTarget(c), StrictRequest{32, "max_tokens"})
 			if tc.wantError {
@@ -119,7 +119,7 @@ func TestFeeBoundSelectsActualModelAndPinnedGroupRate(t *testing.T) {
 	}
 	attempt := model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "actual", Group: "relay"}
 	limits := StrictRequest{32, "max_tokens"}
-	if err := e.StartCostedAttempt(context.Background(), pre, attempt, providerTestTarget(c), limits); err != nil {
+	if err := e.startDeclaredTestAttempt(context.Background(), pre, attempt, providerTestTarget(c), limits); err != nil {
 		t.Fatal("old price/rate snapshot was not honored", err)
 	}
 	detail, err := e.ReservationDetail(context.Background(), pre.BillingID())
@@ -146,7 +146,7 @@ func TestFeeBoundSelectsActualModelAndPinnedGroupRate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.StartCostedAttempt(context.Background(), fresh, attempt, providerTestTarget(c), limits); !errors.Is(err, ErrFeeBound) {
+	if err := e.startDeclaredTestAttempt(context.Background(), fresh, attempt, providerTestTarget(c), limits); !errors.Is(err, ErrFeeBound) {
 		t.Fatalf("fresh expensive request was admitted: %v", err)
 	}
 }
@@ -173,7 +173,7 @@ func TestFeeBoundDoesNotUseLaterCeilingOrCheaperPublication(t *testing.T) {
 	if err := e.EnableStrict("0.2", time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	err = e.StartCostedAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: c.ActualModel},
+	err = e.startDeclaredTestAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: c.ActualModel},
 		providerTestTarget(c), StrictRequest{32, "max_tokens"})
 	if !errors.Is(err, ErrFeeBound) {
 		t.Fatalf("old hold or original-model price fallback was bypassed: %v", err)
@@ -212,7 +212,7 @@ func TestFeeBoundRoundingZeroAndWideInputCounts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = e.StartCostedAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"},
+			err = e.startDeclaredTestAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"},
 				providerTestTarget(c), StrictRequest{1, "max_tokens"})
 			if (tc.wantError && !errors.Is(err, ErrFeeBound)) || (!tc.wantError && err != nil) {
 				t.Fatalf("unsafe wide/rounded bound result: %v", err)
@@ -233,7 +233,7 @@ func TestFeeBoundSnapshotFormatsRemainReadableForReceipts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := e.StartCostedAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"},
+			if err := e.startDeclaredTestAttempt(context.Background(), pre, model.BillingAttempt{Number: 1, ChannelID: 1, ActualModel: "m"},
 				providerTestTarget(c), StrictRequest{32, "max_tokens"}); err != nil {
 				t.Fatal(err)
 			}

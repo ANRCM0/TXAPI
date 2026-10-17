@@ -25,94 +25,105 @@ func TestStrictConvertedLimitsBeforeUpstreamAndDurableAttempt(t *testing.T) {
 	}
 	for _, name := range []string{"openai", "anthropic", "gemini"} {
 		for _, field := range []string{"max_tokens", "max_completion_tokens"} {
-			t.Run(name+"/"+field, func(t *testing.T) {
-				fixture := newTestGateway(t, 1)
-				st := fixture.store
-				var hits atomic.Int64
-				type wireRequest struct {
-					body []byte
-					path string
-				}
-				wire := make(chan wireRequest, 1)
-				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					hits.Add(1)
-					body, _ := io.ReadAll(r.Body)
-					wire <- wireRequest{body: body, path: r.URL.Path}
-					w.Header().Set("Content-Type", "application/json")
-					_, _ = io.WriteString(w, responses[name])
-				}))
-				defer upstream.Close()
-				table := billing.NewPriceTableWithHistory(st.PriceData, time.Hour, st.RecordPriceSnapshot)
-				engine := billing.New(st.DB(), table)
-				if err := engine.EnableStrict("0.1", 10*time.Second); err != nil {
-					t.Fatal(err)
-				}
-				channels := st.Channels()
-				channels[0].Type, channels[0].BaseURL = name, upstream.URL
-				channels[0].ModelMapping = dbmodel.StringMap{"gpt-4o-mini": "mapped"}
-				configureTestProviderCosts(t, engine, channels)
-				gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 3})
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer gw.Close()
-				router := gin.New()
-				router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
-				body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"` + field + `":32}`
-				req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
-				req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
-				w := httptest.NewRecorder()
-				router.ServeHTTP(w, req)
-				reject := field == "max_completion_tokens" && name != "openai"
-				wantStatus, wantHits := 200, int64(1)
-				if reject {
-					wantStatus, wantHits = 400, 0
-				}
-				if w.Code != wantStatus || hits.Load() != wantHits {
-					t.Fatalf("unsafe forwarding: status=%d hits=%d body=%s", w.Code, hits.Load(), w.Body.String())
-				}
-				var row dbmodel.BillingReservation
-				id := w.Header().Get("X-TXAPI-Billing-ID")
-				if err := st.DB().First(&row, "id=?", id).Error; err != nil {
-					t.Fatal(err)
-				}
-				var attempts int64
-				st.DB().Model(&dbmodel.BillingAttempt{}).Where("reservation_id=?", id).Count(&attempts)
-				if row.State != billing.Settled || attempts != wantHits {
-					t.Fatalf("incorrect durable execution facts: reservation=%+v attempts=%d", row, attempts)
-				}
-				if reject && row.ChargeUnits != 0 {
-					t.Fatalf("unexecuted request charged: %+v", row)
-				}
-				if reject && row.Reason != "unsupported_billing_dimension" {
-					t.Fatalf("conversion refusal lost from ledger: %+v", row)
-				}
-				if !reject {
-					if row.ChargeUnits != 5_850_000 {
-						t.Fatalf("existing settlement regressed: %+v", row)
+			for _, mode := range []billing.Mode{billing.ModeStrict, billing.ModeLegacy} {
+				t.Run(string(mode)+"/"+name+"/"+field, func(t *testing.T) {
+					fixture := newTestGateway(t, 1)
+					st := fixture.store
+					var hits atomic.Int64
+					type wireRequest struct {
+						body []byte
+						path string
 					}
-					sentRequest := <-wire
-					var sent struct {
-						Model string `json:"model"`
-					}
-					if name == "gemini" {
-						if !strings.Contains(sentRequest.path, "/models/mapped:") {
-							t.Fatalf("Gemini URL mapping lost: %s", sentRequest.path)
+					wire := make(chan wireRequest, 1)
+					upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						hits.Add(1)
+						body, _ := io.ReadAll(r.Body)
+						wire <- wireRequest{body: body, path: r.URL.Path}
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = io.WriteString(w, responses[name])
+					}))
+					defer upstream.Close()
+					table := billing.NewPriceTableWithHistory(st.PriceData, time.Hour, st.RecordPriceSnapshot)
+					engine := billing.New(st.DB(), table)
+					if mode == billing.ModeStrict {
+						if err := engine.EnableStrict("0.1", 10*time.Second); err != nil {
+							t.Fatal(err)
 						}
-					} else if json.Unmarshal(sentRequest.body, &sent) != nil || sent.Model != "mapped" {
-						t.Fatalf("mapping lost: %s", sentRequest.body)
 					}
-				}
-				var balances []dbmodel.BillingBalance
-				if err := st.DB().Find(&balances).Error; err != nil || len(balances) != 2 {
-					t.Fatalf("missing dual budget facts: %+v %v", balances, err)
-				}
-				for _, balance := range balances {
-					if balance.ReservedUnits != 0 || balance.UsedUnits != row.ChargeUnits {
-						t.Fatalf("budget leaked or duplicated: %+v", balance)
+					channels := st.Channels()
+					channels[0].Type, channels[0].BaseURL = name, upstream.URL
+					channels[0].ModelMapping = dbmodel.StringMap{"gpt-4o-mini": "mapped"}
+					if mode == billing.ModeStrict {
+						configureTestProviderCosts(t, engine, channels)
 					}
-				}
-			})
+					gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: mode, RetryTimes: 3})
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer gw.Close()
+					router := gin.New()
+					router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+					body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"` + field + `":32}`
+					req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
+					req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
+					w := httptest.NewRecorder()
+					router.ServeHTTP(w, req)
+					reject := field == "max_completion_tokens" && name != "openai"
+					wantStatus, wantHits := 200, int64(1)
+					if reject {
+						wantStatus, wantHits = 400, 0
+					} else if mode == billing.ModeStrict {
+						wantStatus, wantHits = 503, 0
+					}
+					if w.Code != wantStatus || hits.Load() != wantHits {
+						t.Fatalf("unsafe forwarding: status=%d hits=%d body=%s", w.Code, hits.Load(), w.Body.String())
+					}
+					if wantHits > 0 {
+						sentRequest := <-wire
+						var sent struct {
+							Model string `json:"model"`
+						}
+						if name == "gemini" {
+							if !strings.Contains(sentRequest.path, "/models/mapped:") {
+								t.Fatalf("Gemini URL mapping lost: %s", sentRequest.path)
+							}
+						} else if json.Unmarshal(sentRequest.body, &sent) != nil || sent.Model != "mapped" {
+							t.Fatalf("mapping lost: %s", sentRequest.body)
+						}
+					}
+					if mode != billing.ModeStrict {
+						return
+					}
+					var row dbmodel.BillingReservation
+					id := w.Header().Get("X-TXAPI-Billing-ID")
+					if err := st.DB().First(&row, "id=?", id).Error; err != nil {
+						t.Fatal(err)
+					}
+					var attempts int64
+					st.DB().Model(&dbmodel.BillingAttempt{}).Where("reservation_id=?", id).Count(&attempts)
+					if row.State != billing.Settled || attempts != wantHits {
+						t.Fatalf("incorrect durable execution facts: reservation=%+v attempts=%d", row, attempts)
+					}
+					if row.ChargeUnits != 0 {
+						t.Fatalf("unexecuted request charged: %+v", row)
+					}
+					if reject && row.Reason != "unsupported_billing_dimension" {
+						t.Fatalf("conversion refusal lost from ledger: %+v", row)
+					}
+					if !reject && row.Reason != "provider_input_unproven" {
+						t.Fatalf("unproved input refusal lost from ledger: %+v", row)
+					}
+					var balances []dbmodel.BillingBalance
+					if err := st.DB().Find(&balances).Error; err != nil || len(balances) != 2 {
+						t.Fatalf("missing dual budget facts: %+v %v", balances, err)
+					}
+					for _, balance := range balances {
+						if balance.ReservedUnits != 0 || balance.UsedUnits != row.ChargeUnits {
+							t.Fatalf("budget leaked or duplicated: %+v", balance)
+						}
+					}
+				})
+			}
 		}
 	}
 }

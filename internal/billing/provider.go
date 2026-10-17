@@ -18,6 +18,7 @@ import (
 
 var (
 	ErrProviderContract = errors.New("no matching provider cost contract")
+	ErrInputUnproven    = errors.New("provider input bound requires a verified profile")
 	ErrProviderBudget   = errors.New("provider request budget exhausted")
 	ErrProviderLimit    = errors.New("request exceeds the provider cost contract")
 	ErrFeeBound         = errors.New("request fee bound exceeds the reserved user fee ceiling")
@@ -183,6 +184,8 @@ type providerBound struct {
 	version, snapshot string
 }
 
+// Deprecated: use StartPreparedAttempt. Metadata alone cannot prove the bounds
+// of the request actually sent, so this entry cannot admit an execution.
 func (e *Engine) StartCostedAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, target ProviderTarget, request StrictRequest) error {
 	return e.startCostedAttempt(ctx, pre, attempt, target, request, "", nil)
 }
@@ -197,27 +200,42 @@ func (e *Engine) startCostedAttempt(ctx context.Context, pre *PreDeduct, attempt
 	defer func() {
 		err = e.RecordCostRefusal(ctx, pre, err)
 	}()
-	if !e.StrictReady() || pre == nil || pre.reservation == nil || pre.reservation.providerCosts == nil {
+	contract, err := e.lookupCostContract(pre, attempt, target, request)
+	if err != nil {
+		return err
+	}
+	if contract.config.InputBoundProfile == "" {
+		return ErrInputUnproven
+	}
+	if preparedBody == nil {
 		return ErrProviderContract
 	}
-	if target.ChannelID != attempt.ChannelID || target.ActualModel != attempt.ActualModel {
-		return ErrProviderContract
+	wire, err := ParseStrictRequest(preparedBody, target.Operation == "embeddings")
+	if err != nil || wire != request {
+		return ErrProviderLimit
+	}
+	if err := checkProfileRequest(contract.config, preparedURL, preparedBody); err != nil {
+		return err
+	}
+	return e.startContractAttempt(ctx, pre, attempt, contract, request)
+}
+
+func (e *Engine) lookupCostContract(pre *PreDeduct, attempt model.BillingAttempt, target ProviderTarget, request StrictRequest) (providerContract, error) {
+	if !e.StrictReady() || pre == nil || pre.reservation == nil || pre.reservation.providerCosts == nil ||
+		target.ChannelID != attempt.ChannelID || target.ActualModel != attempt.ActualModel {
+		return providerContract{}, ErrProviderContract
 	}
 	contract, ok := pre.reservation.providerCosts.contracts[providerKey{target, request.OutputLimitField}]
 	if !ok {
-		return ErrProviderContract
+		return providerContract{}, ErrProviderContract
 	}
-	if contract.config.InputBoundProfile != "" {
-		if preparedBody == nil {
-			return ErrProviderContract
-		}
-		if err := checkProfileRequest(contract.config, preparedURL, preparedBody); err != nil {
-			return err
-		}
-	}
+	return contract, nil
+}
+
+func (e *Engine) startContractAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, contract providerContract, request StrictRequest) error {
 	if request.OutputLimit < 0 || int64(request.OutputLimit) > contract.config.MaxOutputTokens ||
-		(target.Operation == "chat" && request.OutputLimit == 0) ||
-		(target.Operation == "embeddings" && request.OutputLimit != 0) {
+		(contract.config.Operation == "chat" && request.OutputLimit == 0) ||
+		(contract.config.Operation == "embeddings" && request.OutputLimit != 0) {
 		return ErrProviderLimit
 	}
 	units, err := contract.bound(int64(request.OutputLimit))
@@ -266,6 +284,8 @@ func providerRefusalReason(err error) string {
 	switch {
 	case errors.Is(err, ErrProviderContract):
 		return "provider_cost_contract_missing"
+	case errors.Is(err, ErrInputUnproven):
+		return "provider_input_unproven"
 	case errors.Is(err, ErrProviderBudget):
 		return "provider_budget_exhausted"
 	case errors.Is(err, ErrProviderLimit):
@@ -282,7 +302,7 @@ func providerRefusalReason(err error) string {
 func persistedProviderRefusal(reason string) string {
 	reason = strings.TrimPrefix(reason, "execution_or_usage_unknown:")
 	switch reason {
-	case "provider_cost_contract_missing", "provider_budget_exhausted", "provider_cost_limit", "billing_fee_limit", "unsupported_billing_dimension":
+	case "provider_cost_contract_missing", "provider_input_unproven", "provider_budget_exhausted", "provider_cost_limit", "billing_fee_limit", "unsupported_billing_dimension":
 		return reason
 	default:
 		return ""

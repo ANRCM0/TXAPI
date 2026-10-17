@@ -55,13 +55,15 @@ Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模
 
 | 入站操作 → 目标 | disabled / legacy | strict |
 |---|---|---|
-| Chat JSON/SSE → OpenAI | 原生字段保留，function tools 走同协议路径；不承诺任意新扩展客户端均实测 | 严格文本白名单、显式输出限制、匹配成本契约；工具拒绝，完整 S5 成本证明仍未验收 |
-| Chat JSON/SSE → Anthropic | 已建模文本/function tools、多调用与结果往返；不可表示字段在执行前 400 | 仍只开放文本子集并检查转换后限制/计价维度；工具拒绝 |
-| Chat JSON/SSE → Gemini | 文本子集；signed tool history 无无损表示，因此包含 tools 或历史 tool_call/result 的请求路由拒绝 | 仅既有受约束文本路径；工具拒绝 |
-| embeddings → OpenAI | 非流式原生路径 | 文本/文本批次与精确契约；可选官方输入档案 |
+| Chat JSON/SSE → OpenAI | 原生字段保留，function tools 走同协议路径；不承诺任意新扩展客户端均实测 | 仅已登记官方 Chat 输入档案目标、严格文本、显式总输出与默认服务等级；工具拒绝，费率/失败收费证明尚未验收 |
+| Chat JSON/SSE → Anthropic | 已建模文本/function tools、多调用与结果往返；不可表示字段在执行前 400 | 无已登记输入档案，拒绝执行；原转换维度/输出限制守卫保留 |
+| Chat JSON/SSE → Gemini | 文本子集；signed tool history 无无损表示，因此包含 tools 或历史 tool_call/result 的请求路由拒绝 | 无已登记输入档案，拒绝执行；原转换维度/输出限制守卫保留 |
+| embeddings → OpenAI | 非流式原生路径 | 仅已登记官方 embeddings 输入档案目标；文本批次与精确契约 |
 | Responses / background / native WS | 不开放生产路由/能力；Responses 只有独立协议与 core 样本 | 不开放，不继承 Chat 的预算证明 |
 
 跨协议支持的是共同子集，不是“所有 OpenAI 字段换名”。`stream_options` 仅接受已映射的 `include_usage=true`，本地转换返回用量而不把该字段错发给厂商；未实现的 false/扩展拒绝。`n=1` 是显式单候选，其他候选数拒绝。`tool_choice`、strict schema、parallel_tool_calls 等未映射选项不做猜测。引用上游功能逻辑不能扩大本矩阵。
+
+strict 的 `StartPreparedAttempt` 是唯一可执行成本准入入口：必须匹配已登记档案及真实 URL/正文，最终输出限制还须与本次成本占用元数据一致。无档案契约可加载用于历史读取，但不能发起新 attempt，返回持久 `provider_input_unproven`。旧 `StartCostedAttempt` 无实际正文，已弃用且不能绕过检查。billing 单测的私有声明包络夹具只覆盖算术/账本事务，不构成生产许可；网关正向测试使用实际档案与注入 loopback Transport，生产没有测试豁免配置。
 
 新协议在自己的目录开发，集成人员在创建 gateway 时注册：
 
