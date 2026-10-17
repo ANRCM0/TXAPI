@@ -5,26 +5,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"minigateway/internal/model"
 	"minigateway/internal/store"
 )
 
 // 本文件是价格表 / 分组倍率 / 令牌额度的管理 API（SPEC 三交付物）。
 //
 // 和 relay 的计费引擎的联动：任何写操作成功后都要通知引擎失效价格
-// 缓存（见 Handler.notifyPricesChanged），否则会出现「API 显示改成功
+// 缓存（由 configuration 用例协调），否则会出现「API 显示改成功
 // 了、计费还用旧价格」的静默故障。
 
 // ListPrices 处理 GET /api/prices，返回价格表全量。
 //
 // 价格表是个位到百行的小表，全量返回即可，不做分页。
 func (h *Handler) ListPrices(c *gin.Context) {
-	prices, err := h.store.ModelPrices()
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	rates, err := h.store.GroupRates()
+	prices, rates, err := h.configuration.Prices()
 	if err != nil {
 		fail(c, err)
 		return
@@ -54,21 +48,10 @@ func (h *Handler) UpsertPrice(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	if err := in.Validate(); err != nil {
-		fail(c, err)
+	price, change, err := h.configuration.UpsertPrice(modelName, &in)
+	if !configurationResult(c, change, err) {
 		return
 	}
-	price := &model.ModelPrice{
-		Model:            modelName,
-		InputPricePer1K:  in.InputPricePer1K,
-		OutputPricePer1K: in.OutputPricePer1K,
-	}
-	if err := h.store.UpsertModelPrice(price); err != nil {
-		fail(c, err)
-		return
-	}
-	// 改价立即失效缓存——这就是「不重启网关就生效」的那一环
-	h.notifyPricesChanged(c)
 	c.JSON(http.StatusOK, gin.H{"data": price})
 }
 
@@ -78,11 +61,10 @@ func (h *Handler) UpsertPrice(c *gin.Context) {
 // SPEC 2.2 的选择是「宁可漏计费，不要因为价格表缺一项就拒绝服务」。
 func (h *Handler) DeletePrice(c *gin.Context) {
 	modelName := c.Param("model")
-	if err := h.store.DeleteModelPrice(modelName); err != nil {
-		fail(c, err)
+	change, err := h.configuration.DeletePrice(modelName)
+	if !configurationResult(c, change, err) {
 		return
 	}
-	h.notifyPricesChanged(c)
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "model": modelName})
 }
 
@@ -94,11 +76,10 @@ func (h *Handler) SetGroupRates(c *gin.Context) {
 	if !bindJSON(c, &rates) {
 		return
 	}
-	if err := h.store.SetGroupRates(rates); err != nil {
-		fail(c, err)
+	change, err := h.configuration.SetGroupRates(rates)
+	if !configurationResult(c, change, err) {
 		return
 	}
-	h.notifyPricesChanged(c)
 	c.JSON(http.StatusOK, gin.H{"data": rates})
 }
 
