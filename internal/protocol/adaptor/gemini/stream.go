@@ -27,8 +27,6 @@ type translator struct {
 	id            string
 	model         string
 	finished      bool
-	// usageSent 防止重复发 usage 帧
-	usageSent bool
 	// roleSent 首帧是否已发过 role（OpenAI 约定首帧 delta.role="assistant"）
 	roleSent bool
 }
@@ -91,6 +89,9 @@ func (t *translator) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, err
 				FinishReason: canonical.FinishContentFilter,
 			})
 		}
+		if chunk.Usage != nil {
+			chunks = append(chunks, t.usageChunk(chunk.Usage))
+		}
 		return chunks, nil
 	}
 
@@ -142,9 +143,8 @@ func (t *translator) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, err
 		})
 	}
 
-	// usage：通常只在最后一个 chunk 里出现，最后发
-	if chunk.Usage != nil && !t.usageSent {
-		t.usageSent = true
+	// Usage snapshots are cumulative; later events replace earlier observations.
+	if chunk.Usage != nil {
 		chunks = append(chunks, t.usageChunk(chunk.Usage))
 	}
 

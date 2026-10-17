@@ -63,6 +63,12 @@ func New(opts Options) (*Gateway, error) {
 	if err := opts.BillingMode.Validate(); err != nil {
 		return nil, err
 	}
+	if opts.Admission != nil && nilInterface(opts.Admission) {
+		return nil, fmt.Errorf("invalid gateway admission: typed nil dependency")
+	}
+	if opts.Limiter != nil && nilInterface(opts.Limiter) {
+		return nil, fmt.Errorf("invalid gateway limiter: typed nil dependency")
+	}
 	if nilBilling(opts.Billing) {
 		opts.Billing = nil
 	}
@@ -82,7 +88,7 @@ func New(opts Options) (*Gateway, error) {
 		opts.TotalTimeout = opts.AttemptTimeout
 	}
 	for name, a := range opts.Adaptors {
-		if name == "" || a == nil {
+		if name == "" || nilInterface(a) {
 			return nil, fmt.Errorf("invalid adaptor registration %q", name)
 		}
 	}

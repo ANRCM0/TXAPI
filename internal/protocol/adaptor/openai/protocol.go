@@ -291,7 +291,7 @@ func (a *Adaptor) BuildStreamLine(chunk *canonical.StreamChunk) ([]byte, error) 
 		}
 	}
 	if sb.Len() > 0 {
-		delta.Content = rawContent(sb.String())
+		delta.Content = sb.String()
 	}
 	for _, tc := range chunk.ToolCalls {
 		delta.ToolCalls = append(delta.ToolCalls, openAIToolCallDelta{
@@ -334,7 +334,7 @@ func (a *Adaptor) BuildStreamLine(chunk *canonical.StreamChunk) ([]byte, error) 
 	// 结束帧的 choices 被整个置 null，finish_reason 随之丢失，
 	// 客户端拿不到「为什么停」（stop / length / tool_calls）。
 	if empty && chunk.FinishReason == "" {
-		out.Choices = nil
+		out.Choices = []openAIChunkChoice{}
 	}
 	payload, err := json.Marshal(out)
 	if err != nil {

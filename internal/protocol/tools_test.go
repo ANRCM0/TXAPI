@@ -71,6 +71,8 @@ func TestAnthropicInterleavedToolArgumentsAndTruncation(t *testing.T) {
 		`data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"city\":"}}`,
 		`data: {"type":"content_block_delta","index":5,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"two\"}"}}`,
 		`data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\"\u676d\u5dde\"}"}}`,
+		`data: {"type":"content_block_stop","index":2}`,
+		`data: {"type":"content_block_stop","index":5}`,
 		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}`,
 		`data: {"type":"message_stop"}`,
 	}

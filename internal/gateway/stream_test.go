@@ -138,7 +138,9 @@ func TestConcurrentStreamsWithSameRequestID(t *testing.T) {
 				if protocol == "gemini" {
 					fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"!\"}]},\"finishReason\":\"STOP\"}]}\n\n")
 				} else {
+					fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
 					fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", label+"!")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
 					fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
 				}
 			}))

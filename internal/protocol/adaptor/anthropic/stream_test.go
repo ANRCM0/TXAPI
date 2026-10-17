@@ -31,6 +31,9 @@ func TestStreamSessionsKeepMessageStateSeparate(t *testing.T) {
 		model   string
 		text    string
 	}{{first, "msg-first", "claude-first", "alpha"}, {second, "msg-second", "claude-second", "beta"}} {
+		if _, err := tc.session.ParseStreamLine([]byte(`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)); err != nil {
+			t.Fatal(err)
+		}
 		line := []byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"` + tc.text + `"}}`)
 		chunks, err := tc.session.ParseStreamLine(line)
 		if err != nil || len(chunks) != 1 {

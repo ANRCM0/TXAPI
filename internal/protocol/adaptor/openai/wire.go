@@ -38,65 +38,37 @@ type rawToolCall struct {
 	} `json:"function"`
 }
 
-// rawContent 是「字符串或分片数组」的兼容类型。
-//
-// 为什么要自定义 UnmarshalJSON：OpenAI 的 content 在纯文本时是字符串，
-// 多模态时是数组。用 json.RawMessage 虽然也能活，但每个调用点都要特判，
-// 散落到各处容易漏。统一在这里折叠成一种表示。
-type rawContent string
+// Keep the JSON shape separate: text such as "[]" is never a content array.
+type rawContent struct {
+	text  string
+	parts []rawContentPart
+}
 
-// UnmarshalJSON 把字符串 / 数组 / null 三种形态统一成纯文本。
-// 注意：数组形态下只保留文本分片，图片分片在 toCanonical 里按原始 JSON 处理
-// （那边能看到完整的 type 字段，不会丢图片）。
+type rawContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	ImageURL struct {
+		URL string `json:"url"`
+	} `json:"image_url"`
+}
+
 func (c *rawContent) UnmarshalJSON(data []byte) error {
+	*c = rawContent{}
 	if len(data) == 0 || string(data) == "null" {
-		*c = ""
 		return nil
 	}
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
-		*c = rawContent(s)
+		c.text = s
 		return nil
 	}
-	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(data, &parts); err != nil {
-		return err
-	}
-	// Preserve structured content until every part can be inspected.
-	*c = rawContent(string(data))
-	return nil
+	return json.Unmarshal(data, &c.parts)
 }
 
 // toCanonical 把 OpenAI 消息转成规范消息。
-//
-// content 的数组形态要能拿到图片分片，所以直接对原始 JSON 再解一次
-// （rawContent 已经折叠过，只剩文本）。
 func (m rawMessage) toCanonical() canonical.Message {
 	msg := canonical.Message{Role: m.Role, ToolUseID: m.ToolCallID, Name: m.Name}
-
-	// 先按数组试：能解开说明是多模态形态，逐块映射（图片不丢）
-	var parts []struct {
-		Type     string `json:"type"`
-		Text     string `json:"text"`
-		ImageURL struct {
-			URL string `json:"url"`
-		} `json:"image_url"`
-	}
-	if json.Unmarshal([]byte(m.Content), &parts) == nil {
-		for _, p := range parts {
-			switch p.Type {
-			case "text":
-				msg.Content = append(msg.Content, canonical.ContentPart{Type: canonical.PartText, Text: p.Text})
-			case "image_url":
-				msg.Content = append(msg.Content, canonical.ContentPart{Type: canonical.PartImage, ImageURL: p.ImageURL.URL})
-			}
-		}
-	} else if m.Content != "" {
-		msg.Content = append(msg.Content, canonical.ContentPart{Type: canonical.PartText, Text: string(m.Content)})
-	}
+	msg.Content = m.Content.toParts()
 	if m.Role == canonical.RoleTool {
 		for i := range msg.Content {
 			msg.Content[i].Type = canonical.PartToolResult
@@ -117,21 +89,10 @@ func (m rawMessage) toCanonical() canonical.Message {
 
 // toParts 把已解析的内容转成规范内容块。
 // 纯文本形态直接包一个 PartText；多模态数组形态按 type 映射。
-// （解析入口是 toCanonical，那里处理了完整的图片分片）
 func (c rawContent) toParts() []canonical.ContentPart {
-	if c == "" {
-		return nil
-	}
-	var parts []struct {
-		Type     string `json:"type"`
-		Text     string `json:"text"`
-		ImageURL struct {
-			URL string `json:"url"`
-		} `json:"image_url"`
-	}
-	if json.Unmarshal([]byte(c), &parts) == nil {
+	if c.parts != nil {
 		var out []canonical.ContentPart
-		for _, p := range parts {
+		for _, p := range c.parts {
 			switch p.Type {
 			case "text":
 				out = append(out, canonical.ContentPart{Type: canonical.PartText, Text: p.Text})
@@ -141,7 +102,10 @@ func (c rawContent) toParts() []canonical.ContentPart {
 		}
 		return out
 	}
-	return []canonical.ContentPart{{Type: canonical.PartText, Text: string(c)}}
+	if c.text == "" {
+		return nil
+	}
+	return []canonical.ContentPart{{Type: canonical.PartText, Text: c.text}}
 }
 
 // rawTool 是 OpenAI 的 tools 数组元素。
@@ -208,7 +172,7 @@ type openAIChunkChoice struct {
 // openAIDelta 是流式增量。
 type openAIDelta struct {
 	Role      string                `json:"role,omitempty"`
-	Content   rawContent            `json:"content,omitempty"`
+	Content   string                `json:"content,omitempty"`
 	ToolCalls []openAIToolCallDelta `json:"tool_calls,omitempty"`
 }
 
