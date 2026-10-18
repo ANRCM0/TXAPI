@@ -8,49 +8,19 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"strings"
+
+	identity "minigateway/internal/foundation/contracts/identity/v1"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	All       = "all"
-	Allowlist = "allowlist"
+	All       = identity.All
+	Allowlist = identity.Allowlist
 )
 
-type Policy struct {
-	Mode   string   `json:"mode"`
-	Models []string `json:"models"`
-}
+type Policy = identity.Policy
 
-func (p Policy) Validate() error {
-	if p.Mode != All && p.Mode != Allowlist {
-		return errors.New("model_mode must be all or allowlist")
-	}
-	if p.Mode == All && len(p.Models) > 0 {
-		return errors.New("all policy must not contain an allowlist")
-	}
-	for _, m := range p.Models {
-		if strings.TrimSpace(m) == "" || m == "*" {
-			return errors.New("allowlist requires explicit non-wildcard model names")
-		}
-	}
-	return nil
-}
-func (p Policy) Allows(m string) bool {
-	if p.Mode == All {
-		return true
-	}
-	if p.Mode != Allowlist {
-		return false
-	}
-	for _, v := range p.Models {
-		if v == m {
-			return true
-		}
-	}
-	return false
-}
 func Intersect(policies ...Policy) Policy {
 	out := Policy{Mode: All}
 	for _, p := range policies {

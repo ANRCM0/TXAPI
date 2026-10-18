@@ -2,6 +2,8 @@ package generation
 
 import (
 	"context"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -55,9 +57,9 @@ func TestWorkerShutdownPreservesUnknownExecutionAndDualBudgetHolds(t *testing.T)
 			<-req.Context().Done()
 			return nil, req.Context().Err()
 		})}})
-	r := newRunner(t, st.ResolvePrincipal, g.ExecuteTo)
+	r := newRunner(t, st.ResolvePrincipal, bridge.NewExecutor(g).Execute)
 	out := &memoryOutput{}
-	f, err := r.Submit(context.Background(), binding, out, gateway.Execution{Operation: protocol.Chat,
+	f, err := r.Submit(context.Background(), binding, out, execv1.Invocation{Operation: protocol.Chat,
 		Body: []byte(`{"model":"m","max_completion_tokens":32,"service_tier":"default","messages":[{"role":"user","content":"hello"}]}`)})
 	if err != nil {
 		t.Fatal(err)

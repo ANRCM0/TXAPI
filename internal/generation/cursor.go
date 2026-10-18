@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"minigateway/internal/access"
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
 )
 
@@ -21,7 +21,7 @@ const cursorLifetime = 30 * time.Second
 // CursorPage contains encoded bytes, not independently framed protocol events.
 // Cursor points AFTER Body; consumers persist it only after accepting that page.
 type CursorPage struct {
-	Metadata *core.ResponseMetadata
+	Metadata *execv1.ResponseMetadata
 	Body     []byte
 	Result   *RecordedResult
 	Cursor   string

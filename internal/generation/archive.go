@@ -12,8 +12,7 @@ import (
 	"time"
 
 	"minigateway/internal/access"
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/secrets"
@@ -63,8 +62,8 @@ type RecordedResult struct {
 	Operation        protocol.Operation
 	Model            string
 	StatusCode       int
-	Phase            core.Phase
-	Termination      core.Termination
+	Phase            execv1.Phase
+	Termination      execv1.Termination
 	Committed        bool
 	ProtocolComplete bool
 	BillingState     string
@@ -72,7 +71,7 @@ type RecordedResult struct {
 }
 
 type Recording struct {
-	Metadata core.ResponseMetadata
+	Metadata execv1.ResponseMetadata
 	Body     []byte
 	Result   RecordedResult
 	record   model.GenerationRecord
@@ -252,7 +251,7 @@ type recordOutput struct {
 	mu      sync.Mutex
 	archive *Archive
 	record  model.GenerationRecord
-	state   core.OutputState
+	state   execv1.OutputState
 	failed  bool
 	closed  bool
 	model   string
@@ -296,7 +295,7 @@ func (o *recordOutput) append(ctx context.Context, kind string, data []byte) err
 	return nil
 }
 
-func (o *recordOutput) Commit(ctx context.Context, metadata core.ResponseMetadata) error {
+func (o *recordOutput) Commit(ctx context.Context, metadata execv1.ResponseMetadata) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.state.Committed {
@@ -353,13 +352,13 @@ func (o *recordOutput) Flush(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (o *recordOutput) State() core.OutputState {
+func (o *recordOutput) State() execv1.OutputState {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.state
 }
 
-func (o *recordOutput) finish(result gateway.RequestResult, executionErr error) (err error) {
+func (o *recordOutput) finish(result execv1.Outcome, executionErr error) (err error) {
 	defer func() {
 		if recover() != nil {
 			err = ErrArchiveUnavailable

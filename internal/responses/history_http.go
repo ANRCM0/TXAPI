@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"minigateway/internal/access"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
 	"minigateway/internal/model"
 )
 
@@ -55,7 +55,7 @@ func historyError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, model.ErrHistoryNotFound):
 		respond(w, 404, "not_found", "history is unavailable")
-	case errors.Is(err, access.ErrUnauthorized):
+	case errors.Is(err, identity.ErrUnauthorized):
 		respond(w, 401, "unauthorized", "identity is no longer authorized")
 	case errors.Is(err, model.ErrHistoryConflict):
 		respond(w, 409, "history_conflict", "history changed or a generation is active or uncertain")
@@ -184,7 +184,7 @@ func listHistoryItems(r *http.Request, items []json.RawMessage) (any, error) {
 	return map[string]any{"object": "list", "data": data, "first_id": first, "last_id": last, "has_more": end < len(copy)}, nil
 }
 
-func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b access.Binding) {
+func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity.Binding) {
 	h := s.history
 	w.Header().Set("Cache-Control", "no-store")
 	if !s.allowHistoryRead(b.UserID) {
@@ -429,7 +429,7 @@ func historyMatch(r *http.Request, row model.ResponseHistory) bool {
 	match := r.Header.Get("If-Match")
 	return match == "" || match == `"`+strconv.FormatUint(row.Version, 10)+`"`
 }
-func (h *History) delete(ctx context.Context, b access.Binding, row model.ResponseHistory, c historyContent, r *http.Request) error {
+func (h *History) delete(ctx context.Context, b identity.Binding, row model.ResponseHistory, c historyContent, r *http.Request) error {
 	if !historyMatch(r, row) {
 		return model.ErrHistoryConflict
 	}

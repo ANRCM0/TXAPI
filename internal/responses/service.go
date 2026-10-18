@@ -19,9 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"minigateway/internal/access"
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
 	"minigateway/internal/generation"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
@@ -36,16 +35,15 @@ type ReceiptStore interface {
 	FinishResponseRequest(context.Context, model.ResponseRequest, model.ResponseRequestCompletion) error
 }
 
-type Executor interface {
-	ExecuteTo(context.Context, core.Output, gateway.Execution) gateway.RequestResult
-}
+type Executor = execv1.Executor
 
 type Options struct {
 	History                       *History
 	Store                         ReceiptStore
 	Executor                      Executor
 	Archive                       *generation.Archive
-	Resolve                       func(context.Context, access.Binding) (access.Principal, error)
+	Identity                      identity.Authority
+	NewOutput                     func(http.ResponseWriter) execv1.DeadlineOutput
 	DigestKey                     []byte
 	Retention                     time.Duration
 	Limits                        model.ResponseRequestLimits
@@ -58,7 +56,8 @@ type Service struct {
 	store                       ReceiptStore
 	executor                    Executor
 	archive                     *generation.Archive
-	resolve                     func(context.Context, access.Binding) (access.Principal, error)
+	identity                    identity.Authority
+	newOutput                   func(http.ResponseWriter) execv1.DeadlineOutput
 	digest                      []byte
 	version                     string
 	retention                   time.Duration
@@ -73,13 +72,13 @@ func missing(v any) bool {
 }
 
 func New(ctx context.Context, opts Options) (*Service, error) {
-	if missing(opts.Store) || missing(opts.Executor) || opts.Archive == nil || opts.Resolve == nil || len(opts.DigestKey) != 32 ||
+	if missing(opts.Store) || missing(opts.Executor) || opts.Archive == nil || missing(opts.Identity) || opts.NewOutput == nil || len(opts.DigestKey) != 32 ||
 		opts.Retention < time.Minute || opts.Retention > 7*24*time.Hour || opts.Limits.OwnerRecords < 1 || opts.Limits.InstanceRecords <= opts.Limits.OwnerRecords ||
 		opts.ActiveRequests < 2 || opts.ActiveRequests > 128 || opts.OwnerRequests < 1 || opts.OwnerRequests >= opts.ActiveRequests {
 		return nil, errors.New("invalid Responses application configuration")
 	}
 	digest := sha256.Sum256(opts.DigestKey)
-	s := &Service{history: opts.History, store: opts.Store, executor: opts.Executor, archive: opts.Archive, resolve: opts.Resolve,
+	s := &Service{history: opts.History, store: opts.Store, executor: opts.Executor, archive: opts.Archive, identity: opts.Identity, newOutput: opts.NewOutput,
 		digest: bytes.Clone(opts.DigestKey), version: hex.EncodeToString(digest[:]), retention: opts.Retention, limits: opts.Limits,
 		maxActive: opts.ActiveRequests, maxOwner: opts.OwnerRequests, owners: make(map[uint]int)}
 	if err := s.store.InitializeResponseRequests(ctx, s.version); err != nil {
@@ -161,7 +160,7 @@ func respond(w http.ResponseWriter, status int, kind, message string) {
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p, ok := access.PrincipalFromContext(r.Context())
+	p, ok := s.identity.Current(r.Context())
 	if !ok || p.UserID == 0 || p.TokenID == 0 {
 		respond(w, 401, "unauthorized", "a verified identity is required")
 		return
@@ -172,9 +171,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(p.UserID)
-	binding := access.Binding{UserID: p.UserID, TokenID: p.TokenID}
-	current, err := s.resolve(r.Context(), binding)
-	if errors.Is(err, access.ErrUnauthorized) {
+	binding := identity.Binding{UserID: p.UserID, TokenID: p.TokenID}
+	ctx, current, err := s.identity.Refresh(r.Context(), binding)
+	if errors.Is(err, identity.ErrUnauthorized) {
 		respond(w, 401, "unauthorized", "identity is no longer authorized")
 		return
 	}
@@ -250,7 +249,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	receipt, fresh, err := s.store.BeginResponseRequest(r.Context(), receipt, s.limits)
 	if err != nil {
 		switch {
-		case errors.Is(err, access.ErrUnauthorized):
+		case errors.Is(err, identity.ErrUnauthorized):
 			respond(w, 401, "unauthorized", "identity is no longer authorized")
 		case errors.Is(err, model.ErrResponseConflict):
 			respond(w, 409, "idempotency_conflict", "Idempotency-Key was used for another request")
@@ -262,7 +261,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	headers(w, receipt)
-	ctx := access.WithPrincipal(r.Context(), current)
+	// Refresh returned the authenticated context; the public snapshot is not proof.
 	if !fresh {
 		if s.history != nil && receipt.Store && receipt.State != model.ResponseDispatching && receipt.State != model.ResponseUncertain && receipt.State != model.ResponseRejected {
 			_, content, err := s.history.read(ctx, binding, receipt.ResponseID)
@@ -287,7 +286,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.execute(ctx, w, binding, receipt, body, turn)
 }
 
-func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding access.Binding, receipt model.ResponseRequest) {
+func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding identity.Binding, receipt model.ResponseRequest) {
 	w.Header().Set("X-TXAPI-Idempotency", "replayed")
 	switch receipt.State {
 	case model.ResponseDispatching:
@@ -310,7 +309,7 @@ func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding acc
 	// Request tracing is per delivery; do not replay the first caller's trace ID.
 	delete(stored.Metadata.Values, "X-Request-Id")
 	delete(stored.Metadata.Values, "X-Request-ID")
-	output := core.NewHTTPOutput(w)
+	output := s.newOutput(w)
 	if err := output.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 		return
 	}
@@ -335,15 +334,15 @@ func (s *Service) finish(receipt model.ResponseRequest, completion model.Respons
 	return s.store.FinishResponseRequest(ctx, receipt, completion)
 }
 
-func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding access.Binding, receipt model.ResponseRequest, body []byte, turn *historyTurn) {
-	output := core.NewHTTPOutput(w)
+func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding identity.Binding, receipt model.ResponseRequest, body []byte, turn *historyTurn) {
+	output := s.newOutput(w)
 	var recording *generation.Foreground
 	finished := false
 	historyFinished := turn == nil
 	defer func() {
 		panicked := recover() != nil
 		if !historyFinished {
-			_ = s.history.finish(binding, turn, gateway.RequestResult{Result: core.Result{Phase: core.ResponseReceived}}, &captureOutput{}, receipt.Stream, false)
+			_ = s.history.finish(binding, turn, execv1.Outcome{Result: execv1.Result{Phase: execv1.ResponseReceived}}, &captureOutput{}, receipt.Stream, false)
 		}
 		if !finished {
 			_ = s.finish(receipt, model.ResponseRequestCompletion{State: model.ResponseUncertain, ErrorType: "execution_unknown"})
@@ -356,13 +355,13 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding ac
 			}
 		}
 	}()
-	var target core.Output = output
+	var target execv1.Output = output
 	if receipt.Store {
 		var err error
 		recording, err = s.archive.BeginForeground(ctx, binding, receipt.Model, output)
 		if err != nil {
 			if turn != nil {
-				_ = s.history.finish(binding, turn, gateway.RequestResult{Result: core.Result{Phase: core.NotDispatched}}, &captureOutput{}, receipt.Stream, false)
+				_ = s.history.finish(binding, turn, execv1.Outcome{Result: execv1.Result{Phase: execv1.NotDispatched}}, &captureOutput{}, receipt.Stream, false)
 				historyFinished = true
 			}
 			finished = s.finish(receipt, model.ResponseRequestCompletion{State: model.ResponseRejected, StatusCode: 503, ErrorType: "archive_unavailable"}) == nil
@@ -376,12 +375,12 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding ac
 		captured = &captureOutput{Output: target, parent: turn.content.Parent, conversation: turn.content.Conversation}
 		target = captured
 	}
-	input := gateway.Execution{Operation: protocol.Responses, Body: body, ResponseID: receipt.ResponseID}
+	input := execv1.Invocation{Operation: protocol.Responses, Body: body, OutputID: receipt.ResponseID}
 	if turn != nil {
-		input.ResponseTarget = turn.target
+		input.Target = turn.target
 	}
-	result := s.executor.ExecuteTo(ctx, target, input)
-	completion := model.ResponseRequestCompletion{State: model.ResponseUncertain, NativeStatus: result.ResponseStatus, UpstreamResponseID: result.UpstreamResponseID,
+	result := s.executor.Execute(ctx, target, input)
+	completion := model.ResponseRequestCompletion{State: model.ResponseUncertain, NativeStatus: result.Native.Status, UpstreamResponseID: result.Native.ID,
 		StatusCode: result.StatusCode, HTTPStatus: output.State().HTTPStatus}
 	if result.Error != nil {
 		completion.ErrorType = result.Error.Error.Type
@@ -389,15 +388,15 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding ac
 	if len(completion.UpstreamResponseID) > 256 {
 		completion.UpstreamResponseID = ""
 	}
-	if result.ProtocolComplete && result.Termination != core.ClientWriteError {
+	if result.ProtocolComplete && result.Termination != execv1.ClientWriteError {
 		completion.State = model.ResponseCompleted
-		if result.ResponseStatus == "failed" || result.ResponseStatus == "cancelled" || result.StatusCode >= 400 {
+		if result.Native.Status == "failed" || result.Native.Status == "cancelled" || result.StatusCode >= 400 {
 			completion.State = model.ResponseFailed
 		}
 	} else {
-		notDispatched := result.Phase == core.NotDispatched
+		notDispatched := result.Phase == execv1.NotDispatched
 		for _, attempt := range result.Attempts {
-			notDispatched = notDispatched && attempt.Phase == core.NotDispatched
+			notDispatched = notDispatched && attempt.Phase == execv1.NotDispatched
 		}
 		if notDispatched {
 			completion.State = model.ResponseRejected

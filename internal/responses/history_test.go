@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"minigateway/internal/compat/httpoutput"
+	authority "minigateway/internal/foundation/identity"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -13,8 +15,7 @@ import (
 
 	"minigateway/internal/access"
 	"minigateway/internal/config"
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/generation"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
@@ -26,18 +27,18 @@ type historyExecutor struct {
 	mu                sync.Mutex
 	calls             int
 	bodies            [][]byte
-	targets           []*gateway.ResponseTarget
+	targets           []*execv1.TargetConstraint
 	before            func()
 	unknown, panicNow bool
 	output            string
 }
 
-func (e *historyExecutor) ExecuteTo(ctx context.Context, out core.Output, in gateway.Execution) gateway.RequestResult {
+func (e *historyExecutor) Execute(ctx context.Context, out execv1.Output, in execv1.Invocation) execv1.Outcome {
 	e.mu.Lock()
 	e.calls++
 	n := e.calls
 	e.bodies = append(e.bodies, bytes.Clone(in.Body))
-	e.targets = append(e.targets, in.ResponseTarget)
+	e.targets = append(e.targets, in.Target)
 	before := e.before
 	e.mu.Unlock()
 	if before != nil {
@@ -54,20 +55,20 @@ func (e *historyExecutor) ExecuteTo(ctx context.Context, out core.Output, in gat
 		Stream bool `json:"stream"`
 	}
 	_ = json.Unmarshal(in.Body, &input)
-	body := fmt.Sprintf(`{"id":%q,"object":"response","status":"completed","model":"m","output":%s,"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}`, in.ResponseID, output)
+	body := fmt.Sprintf(`{"id":%q,"object":"response","status":"completed","model":"m","output":%s,"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}`, in.OutputID, output)
 	contentType := "application/json"
 	if input.Stream {
 		contentType = "text/event-stream"
 		body = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":" + body + "}\n\n"
 	}
-	result := gateway.RequestResult{Operation: protocol.Responses, ResponseStatus: "completed", UpstreamResponseID: "resp_upstream_private", ResponseTarget: gateway.ResponseTarget{ChannelID: 1, CredentialID: 2, ActualModel: "native-m", Fingerprint: "fixture-stable-target"}, Result: core.Result{StatusCode: 200, Phase: core.ResponseReceived, Termination: core.Success, ProtocolComplete: !e.unknown}}
-	if err := out.Commit(ctx, core.ResponseMetadata{StatusCode: 200, ContentType: contentType, Values: map[string]string{"X-TXAPI-Price-Version": "fixture-price"}}); err != nil {
+	result := execv1.Outcome{Operation: protocol.Responses, Native: execv1.NativeCompletion{Status: "completed", ID: "resp_upstream_private"}, Target: execv1.TargetConstraint{ChannelID: 1, CredentialID: 2, ActualModel: "native-m", Fingerprint: "fixture-stable-target"}, Result: execv1.Result{StatusCode: 200, Phase: execv1.ResponseReceived, Termination: execv1.Success, ProtocolComplete: !e.unknown}}
+	if err := out.Commit(ctx, execv1.ResponseMetadata{StatusCode: 200, ContentType: contentType, Values: map[string]string{"X-TXAPI-Price-Version": "fixture-price"}}); err != nil {
 		result.ProtocolComplete = false
 		return result
 	}
 	if _, err := out.Write(ctx, []byte(body)); err != nil {
 		result.ProtocolComplete = false
-		result.Termination = core.ClientWriteError
+		result.Termination = execv1.ClientWriteError
 	}
 	if input.Stream {
 		_ = out.Flush(ctx)
@@ -85,7 +86,7 @@ func historyService(t *testing.T, f *responseFixture, e app.Executor, active str
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := app.New(context.Background(), app.Options{History: history, Store: f.st, Executor: e, Archive: archive, Resolve: f.st.ResolvePrincipal, DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 64, OwnerRecords: 32}, ActiveRequests: 8, OwnerRequests: 4})
+	s, err := app.New(context.Background(), app.Options{History: history, Store: f.st, Executor: e, Archive: archive, Identity: authority.New(f.st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 64, OwnerRecords: 32}, ActiveRequests: 8, OwnerRequests: 4})
 	if err != nil {
 		t.Fatal(err)
 	}

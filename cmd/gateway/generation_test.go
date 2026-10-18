@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -110,7 +111,7 @@ func TestGenerationRuntimeAssemblyDispatchesAndJoinsWithRetainedKeyChecks(t *tes
 	}
 	defer runtime.Close(context.Background())
 	binding := access.Binding{UserID: user.ID, TokenID: key.ID}
-	receipt, err := runtime.acceptor.Admit(context.Background(), binding, "runtime-test", gateway.Execution{Operation: protocol.Chat, Body: []byte(`{"model":"m","max_completion_tokens":32,"service_tier":"default","messages":[{"role":"user","content":"hello"}]}`)})
+	receipt, err := runtime.acceptor.Admit(context.Background(), binding, "runtime-test", execv1.Invocation{Operation: protocol.Chat, Body: []byte(`{"model":"m","max_completion_tokens":32,"service_tier":"default","messages":[{"role":"user","content":"hello"}]}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

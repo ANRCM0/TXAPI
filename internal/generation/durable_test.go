@@ -3,6 +3,7 @@ package generation
 import (
 	"context"
 	"errors"
+	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -10,7 +11,7 @@ import (
 
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	relaymodel "minigateway/internal/protocol/model"
@@ -20,7 +21,7 @@ import (
 func durableOptions(t *testing.T, st *store.Store, engine *billing.Engine, g *gateway.Gateway) DurableOptions {
 	t.Helper()
 	return DurableOptions{Acceptor: intentAcceptor(t, intentOptions(st, engine)), Archive: testArchive(t, archiveOptions(st)), Leases: engine,
-		Workers: 1, PollInterval: 20 * time.Millisecond, LeaseDuration: time.Second, Execute: g.ExecuteClaimedTo}
+		Workers: 1, PollInterval: 20 * time.Millisecond, LeaseDuration: time.Second, Execute: bridge.NewExecutor(g).ExecuteClaimed}
 }
 
 func closeDurable(t *testing.T, r *DurableRunner) {
@@ -77,7 +78,7 @@ func TestDurableDispatchUsesOriginalReservationPriceAndEncryptedOutput(t *testin
 	st, binding, other := fixture(t)
 	engine, ch := strictRecordingFixture(t, st)
 	var hits atomic.Int64
-	var result gateway.RequestResult
+	var result execv1.Outcome
 	g, capacity := newGateway(t, gateway.Options{Channels: ch, StrictBilling: engine, BillingMode: billing.ModeStrict,
 		Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { hits.Add(1); return response(), nil })}})
 	opts := durableOptions(t, st, engine, g)
@@ -92,8 +93,8 @@ func TestDurableDispatchUsesOriginalReservationPriceAndEncryptedOutput(t *testin
 	if err := engine.Prices().ReloadPrices(); err != nil {
 		t.Fatal(err)
 	}
-	opts.Execute = func(ctx context.Context, output core.Output, in gateway.Execution, claim model.GenerationClaim) gateway.RequestResult {
-		result = g.ExecuteClaimedTo(ctx, output, in, claim)
+	opts.Execute = func(ctx context.Context, output execv1.Output, in execv1.Invocation, claim model.GenerationClaim) execv1.Outcome {
+		result = bridge.NewExecutor(g).ExecuteClaimed(ctx, output, in, claim)
 		return result
 	}
 	r := &DurableRunner{opts: opts}
@@ -174,7 +175,7 @@ func TestDurableDispatchRevocationTamperAndPreExecutionFailures(t *testing.T) {
 					return principal, nil
 				}
 			case "panic":
-				opts.Execute = func(context.Context, core.Output, gateway.Execution, model.GenerationClaim) gateway.RequestResult {
+				opts.Execute = func(context.Context, execv1.Output, execv1.Invocation, model.GenerationClaim) execv1.Outcome {
 					panic("private callback failure")
 				}
 			}

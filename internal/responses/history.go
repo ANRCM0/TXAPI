@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"time"
 
-	"minigateway/internal/access"
-	"minigateway/internal/gateway"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
 	"minigateway/internal/model"
 	"minigateway/internal/secrets"
 )
 
 type HistoryStore interface {
-	ReadResponseHistory(context.Context, access.Binding, string) (model.ResponseHistory, error)
-	ApplyResponseHistory(context.Context, access.Binding, []model.HistoryChange, []model.HistoryGuard, model.HistoryLimits) error
+	ReadResponseHistory(context.Context, identity.Binding, string) (model.ResponseHistory, error)
+	ApplyResponseHistory(context.Context, identity.Binding, []model.HistoryChange, []model.HistoryGuard, model.HistoryLimits) error
 }
 
 type HistoryOptions struct {
@@ -34,18 +34,18 @@ type History struct {
 }
 
 type historyContent struct {
-	Request      json.RawMessage        `json:"request,omitempty"`
-	Ready        bool                   `json:"ready"`
-	Active       string                 `json:"active,omitempty"`
-	Input        []json.RawMessage      `json:"input,omitempty"`
-	Items        []json.RawMessage      `json:"items,omitempty"`
-	Response     json.RawMessage        `json:"response,omitempty"`
-	Metadata     map[string]string      `json:"metadata,omitempty"`
-	Parent       string                 `json:"parent,omitempty"`
-	Conversation string                 `json:"conversation,omitempty"`
-	Target       gateway.ResponseTarget `json:"target"`
-	PriceVersion string                 `json:"price_version,omitempty"`
-	BillingID    string                 `json:"billing_id,omitempty"`
+	Request      json.RawMessage         `json:"request,omitempty"`
+	Ready        bool                    `json:"ready"`
+	Active       string                  `json:"active,omitempty"`
+	Input        []json.RawMessage       `json:"input,omitempty"`
+	Items        []json.RawMessage       `json:"items,omitempty"`
+	Response     json.RawMessage         `json:"response,omitempty"`
+	Metadata     map[string]string       `json:"metadata,omitempty"`
+	Parent       string                  `json:"parent,omitempty"`
+	Conversation string                  `json:"conversation,omitempty"`
+	Target       execv1.TargetConstraint `json:"target"`
+	PriceVersion string                  `json:"price_version,omitempty"`
+	BillingID    string                  `json:"billing_id,omitempty"`
 }
 
 func NewHistory(opts HistoryOptions) (*History, error) {
@@ -63,7 +63,7 @@ func historyIdentity(r model.ResponseHistory) []byte {
 	return []byte(fmt.Sprintf("TXAPI/response-history/v1/%s/%d/%d/%s/%s/%d/%d/%d/%d/%t/", r.ID, r.UserID, r.TokenID, r.Kind, r.Model, r.Version, r.CreatedAt, r.ExpiresAt, r.ReservedBytes, r.Deleted))
 }
 
-func (h *History) read(ctx context.Context, b access.Binding, id string) (r model.ResponseHistory, c historyContent, err error) {
+func (h *History) read(ctx context.Context, b identity.Binding, id string) (r model.ResponseHistory, c historyContent, err error) {
 	r, err = h.store.ReadResponseHistory(ctx, b, id)
 	if err != nil {
 		return
@@ -103,11 +103,11 @@ func (h *History) seal(r model.ResponseHistory, c historyContent) (model.Respons
 	return r, nil
 }
 
-func (h *History) fresh(id, kind, name string, b access.Binding) model.ResponseHistory {
+func (h *History) fresh(id, kind, name string, b identity.Binding) model.ResponseHistory {
 	now := time.Now()
 	return model.ResponseHistory{ID: id, UserID: b.UserID, TokenID: b.TokenID, Kind: kind, Model: name, Version: 1, CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(h.retention).UnixMilli()}
 }
 
-func (h *History) apply(ctx context.Context, b access.Binding, changes []model.HistoryChange, guards ...model.HistoryGuard) error {
+func (h *History) apply(ctx context.Context, b identity.Binding, changes []model.HistoryChange, guards ...model.HistoryGuard) error {
 	return h.store.ApplyResponseHistory(ctx, b, changes, guards, h.limits)
 }

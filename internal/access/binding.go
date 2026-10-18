@@ -1,12 +1,8 @@
 package access
 
-import "errors"
+import identity "minigateway/internal/foundation/contracts/identity/v1"
 
-var ErrUnauthorized = errors.New("generation identity is no longer authorized")
+var ErrUnauthorized = identity.ErrUnauthorized
 
-// Binding is a non-secret owner/Key reference from an authenticated boundary or
-// trusted task record. IDs supplied by a client are never proof of ownership.
-type Binding struct {
-	UserID  uint
-	TokenID uint
-}
+// Binding is an identity reference, never authentication proof.
+type Binding = identity.Binding

@@ -5,17 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	execution "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
 )
 
 // ResponseTarget is an application-owned continuity constraint, never client
 // routing authority. Ordinary model authorization and capability checks still run.
-type ResponseTarget struct {
-	ChannelID    uint   `json:"channel_id"`
-	CredentialID uint   `json:"credential_id"`
-	ActualModel  string `json:"actual_model"`
-	Fingerprint  string `json:"fingerprint"`
-}
+type ResponseTarget = execution.TargetConstraint
 
 func responseTarget(ch *channel, cred *model.Credential, name string) ResponseTarget {
 	actual := name

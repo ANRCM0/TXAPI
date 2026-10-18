@@ -131,6 +131,8 @@ type RequestResult struct {
 	reservation        *billing.PreDeduct
 	strictRequest      *billing.StrictRequest
 	BillingState       string
+	BillingID          string
+	PriceVersion       string
 	Identity           Identity
 	ChannelID          uint
 	CredentialID       uint

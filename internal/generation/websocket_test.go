@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,7 +19,7 @@ import (
 
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
@@ -39,16 +40,16 @@ type socketEvent struct {
 	Round    string
 	RecordID string
 	Status   int
-	Metadata core.ResponseMetadata
+	Metadata execv1.ResponseMetadata
 }
 
 type socketOutput struct {
 	conn  *transport.Conn
 	round string
-	state core.OutputState
+	state execv1.OutputState
 }
 
-func (o *socketOutput) Commit(ctx context.Context, metadata core.ResponseMetadata) error {
+func (o *socketOutput) Commit(ctx context.Context, metadata execv1.ResponseMetadata) error {
 	if o.state.Committed {
 		return errors.New("fixture output already committed")
 	}
@@ -68,7 +69,7 @@ func (o *socketOutput) Write(ctx context.Context, data []byte) (int, error) {
 	return len(data), nil
 }
 func (o *socketOutput) Flush(ctx context.Context) error { return ctx.Err() }
-func (o *socketOutput) State() core.OutputState         { return o.state }
+func (o *socketOutput) State() execv1.OutputState       { return o.state }
 
 func socketSend(ctx context.Context, c *transport.Conn, event socketEvent) error {
 	data, err := json.Marshal(event)
@@ -85,7 +86,7 @@ type socketHarness struct {
 	runner    *Runner
 	sessions  sync.WaitGroup
 	active    atomic.Int64
-	completed chan gateway.RequestResult
+	completed chan execv1.Outcome
 }
 
 func newSocketHarness(t *testing.T, st *store.Store, runner *Runner) *socketHarness {
@@ -99,7 +100,7 @@ func newSocketHarness(t *testing.T, st *store.Store, runner *Runner) *socketHarn
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &socketHarness{manager: manager, capacity: capacity, runner: runner, completed: make(chan gateway.RequestResult, 8)}
+	h := &socketHarness{manager: manager, capacity: capacity, runner: runner, completed: make(chan execv1.Outcome, 8)}
 	h.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		key := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
 		view, ok := st.LookupToken(key)
@@ -159,7 +160,7 @@ func (h *socketHarness) serve(conn *transport.Conn, binding access.Binding) {
 			return
 		}
 		ctx := access.WithRequestID(conn.Context(), cmd.Round)
-		in := gateway.Execution{Operation: protocol.Chat, Body: cmd.Body}
+		in := execv1.Invocation{Operation: protocol.Chat, Body: cmd.Body}
 		var f *Future
 		var id string
 		if cmd.Recorded {
@@ -221,7 +222,7 @@ func (h *socketHarness) dial(t *testing.T, key *model.Token) *ws.Conn {
 	return conn
 }
 
-func sendRound(t *testing.T, conn *ws.Conn, round string, in gateway.Execution, recorded bool) {
+func sendRound(t *testing.T, conn *ws.Conn, round string, in execv1.Invocation, recorded bool) {
 	t.Helper()
 	data, err := json.Marshal(socketCommand{Round: round, Body: in.Body, Recorded: recorded})
 	if err != nil {
@@ -281,7 +282,7 @@ func TestWebSocketIdleCapacityAndPerRoundAuthority(t *testing.T) {
 			var hits atomic.Int64
 			g, capacity := newGateway(t, gateway.Options{Channels: ch, StrictBilling: engine, BillingMode: billing.ModeStrict,
 				Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { hits.Add(1); return response(), nil })}})
-			h := newSocketHarness(t, st, newRunner(t, st.ResolvePrincipal, g.ExecuteTo))
+			h := newSocketHarness(t, st, newRunner(t, st.ResolvePrincipal, bridge.NewExecutor(g).Execute))
 			conn := h.dial(t, key)
 			_ = h.dial(t, idleKey)
 			socketEventually(t, func() bool { return h.capacity.Snapshot().Active == 2 })
@@ -325,8 +326,8 @@ func TestWebSocketIdleCapacityAndPerRoundAuthority(t *testing.T) {
 	}
 }
 
-func strictSocketExecution() gateway.Execution {
-	return gateway.Execution{Operation: protocol.Chat, Body: []byte(`{"model":"m","max_completion_tokens":32,"service_tier":"default","messages":[{"role":"user","content":"hello"}]}`)}
+func strictSocketExecution() execv1.Invocation {
+	return execv1.Invocation{Operation: protocol.Chat, Body: []byte(`{"model":"m","max_completion_tokens":32,"service_tier":"default","messages":[{"role":"user","content":"hello"}]}`)}
 }
 
 func TestWebSocketForegroundDisconnectPreservesUnknownStrictCost(t *testing.T) {
@@ -342,7 +343,7 @@ func TestWebSocketForegroundDisconnectPreservesUnknownStrictCost(t *testing.T) {
 			<-req.Context().Done()
 			return nil, req.Context().Err()
 		})}})
-	h := newSocketHarness(t, st, newRunner(t, st.ResolvePrincipal, g.ExecuteTo))
+	h := newSocketHarness(t, st, newRunner(t, st.ResolvePrincipal, bridge.NewExecutor(g).Execute))
 	conn := h.dial(t, key)
 	sendRound(t, conn, "disconnect", strictSocketExecution(), false)
 	signal(t, started)
@@ -350,7 +351,7 @@ func TestWebSocketForegroundDisconnectPreservesUnknownStrictCost(t *testing.T) {
 	socketEventually(t, func() bool { return h.active.Load() == 0 })
 	select {
 	case result := <-h.completed:
-		if result.BillingState != billing.Pending || len(result.Attempts) != 1 || result.Phase != core.Dispatching || result.ProtocolComplete || result.HTTPStatus != 0 {
+		if result.BillingState != billing.Pending || len(result.Attempts) != 1 || result.Phase != execv1.Dispatching || result.ProtocolComplete || result.HTTPStatus != 0 {
 			t.Fatalf("disconnect lost unknown execution facts: %+v", result)
 		}
 	default:
@@ -382,7 +383,7 @@ func TestWebSocketRecordedObserverDisconnectDoesNotCancelGeneration(t *testing.T
 				return nil, req.Context().Err()
 			}
 		})}})
-	h := newSocketHarness(t, st, recordingRunner(t, st, a, g.ExecuteTo))
+	h := newSocketHarness(t, st, recordingRunner(t, st, a, bridge.NewExecutor(g).Execute))
 	conn := h.dial(t, key)
 	sendRound(t, conn, "recorded", strictSocketExecution(), true)
 	accepted, _ := readSocketUntil(t, conn, "accepted")
@@ -439,7 +440,7 @@ func TestWebSocketConcurrentSameRoundIDKeepsOperationOutputIsolated(t *testing.T
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(wire))}, nil
 	})}})
 	r, err := New(context.Background(), Options{Workers: 2, QueueCapacity: 2, MaxRequestBytes: 4096, MaxDuration: 5 * time.Second,
-		Resolve: st.ResolvePrincipal, Execute: g.ExecuteTo})
+		Resolve: st.ResolvePrincipal, Execute: bridge.NewExecutor(g).Execute})
 	if err != nil {
 		t.Fatal(err)
 	}

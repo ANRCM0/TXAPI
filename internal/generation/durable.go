@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"minigateway/internal/access"
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
 )
 
@@ -33,7 +32,7 @@ type DurableOptions struct {
 	Workers       int
 	PollInterval  time.Duration
 	LeaseDuration time.Duration
-	Execute       func(context.Context, core.Output, gateway.Execution, model.GenerationClaim) gateway.RequestResult
+	Execute       func(context.Context, execv1.Output, execv1.Invocation, model.GenerationClaim) execv1.Outcome
 }
 
 func nilPort(port any) bool {
@@ -146,7 +145,7 @@ func (r *DurableRunner) consume(parent context.Context, in model.GenerationInten
 	defer func() { close(stop); <-joined }()
 	var output *recordOutput
 	quarantine := false
-	result := gateway.RequestResult{Result: core.Result{Phase: core.NotDispatched, StatusCode: 503}}
+	result := execv1.Outcome{Result: execv1.Result{Phase: execv1.NotDispatched, StatusCode: 503}}
 	defer func() {
 		if recover() != nil {
 			err = ErrExecutionPanic
@@ -208,7 +207,7 @@ func (r *DurableRunner) consume(parent context.Context, in model.GenerationInten
 	}
 	ctx = access.WithPrincipal(ctx, principal)
 	ctx = access.WithRequestID(ctx, in.ID)
-	result.Phase = core.Dispatching
+	result.Phase = execv1.Dispatching
 	result = r.opts.Execute(ctx, output, execution, claim)
 	return nil
 }

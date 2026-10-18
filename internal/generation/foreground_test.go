@@ -7,25 +7,24 @@ import (
 	"io"
 	"testing"
 
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/protocol"
 )
 
 type foregroundTarget struct {
-	state    core.OutputState
+	state    execv1.OutputState
 	onCommit func() error
 	onWrite  func([]byte) (int, error)
 	onFlush  func() error
 }
 
-func (o *foregroundTarget) Commit(context.Context, core.ResponseMetadata) error {
+func (o *foregroundTarget) Commit(context.Context, execv1.ResponseMetadata) error {
 	if o.onCommit != nil {
 		if err := o.onCommit(); err != nil {
 			return err
 		}
 	}
-	o.state = core.OutputState{Committed: true, HTTPStatus: 200}
+	o.state = execv1.OutputState{Committed: true, HTTPStatus: 200}
 	return nil
 }
 func (o *foregroundTarget) Write(_ context.Context, data []byte) (int, error) {
@@ -40,10 +39,10 @@ func (o *foregroundTarget) Flush(context.Context) error {
 	}
 	return nil
 }
-func (o *foregroundTarget) State() core.OutputState { return o.state }
+func (o *foregroundTarget) State() execv1.OutputState { return o.state }
 
-func foregroundResult() gateway.RequestResult {
-	return gateway.RequestResult{Operation: protocol.Responses, Result: core.Result{StatusCode: 200, Phase: core.ResponseReceived, Termination: core.Success, ProtocolComplete: true}}
+func foregroundResult() execv1.Outcome {
+	return execv1.Outcome{Operation: protocol.Responses, Result: execv1.Result{StatusCode: 200, Phase: execv1.ResponseReceived, Termination: execv1.Success, ProtocolComplete: true}}
 }
 
 func TestForegroundPersistsEncryptedOutputBeforeDownstreamAndSealsNativeFailures(t *testing.T) {
@@ -75,7 +74,7 @@ func TestForegroundPersistsEncryptedOutputBeforeDownstreamAndSealsNativeFailures
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := foreground.Commit(context.Background(), core.ResponseMetadata{StatusCode: 200, ContentType: "application/json"}); err != nil {
+		if err := foreground.Commit(context.Background(), execv1.ResponseMetadata{StatusCode: 200, ContentType: "application/json"}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := foreground.Write(context.Background(), secret); err != nil {
@@ -86,8 +85,8 @@ func TestForegroundPersistsEncryptedOutputBeforeDownstreamAndSealsNativeFailures
 		}
 		result := foregroundResult()
 		if failed {
-			result.StatusCode, result.Termination = 502, core.UpstreamError
-			result.ResponseStatus = "failed"
+			result.StatusCode, result.Termination = 502, execv1.UpstreamError
+			result.Native.Status = "failed"
 		}
 		if err := foreground.Finish(result); err != nil {
 			t.Fatal(err)
@@ -124,7 +123,7 @@ func TestForegroundIOFailureNeverSealsReplayableOutput(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = foreground.Commit(context.Background(), core.ResponseMetadata{StatusCode: 200})
+			err = foreground.Commit(context.Background(), execv1.ResponseMetadata{StatusCode: 200})
 			if err == nil {
 				_, err = foreground.Write(context.Background(), []byte("payload"))
 			}
@@ -155,7 +154,7 @@ func TestForegroundRejectsMissingOrCommittedTargetBeforeAllocatingRecord(t *test
 	st, binding, _ := fixture(t)
 	a := testArchive(t, archiveOptions(st))
 	var missing *memoryOutput
-	for _, target := range []core.Output{nil, missing, &memoryOutput{state: core.OutputState{Committed: true}}} {
+	for _, target := range []execv1.Output{nil, missing, &memoryOutput{state: execv1.OutputState{Committed: true}}} {
 		if foreground, err := a.BeginForeground(context.Background(), binding, "m", target); err == nil || foreground != nil {
 			t.Fatal("invalid target accepted")
 		}
