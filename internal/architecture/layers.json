@@ -33,6 +33,10 @@
     "layer": "L2",
     "owner": "example-summary-codec"
   },
+  "minigateway/internal/compat/websocket": {
+    "layer": "L2",
+    "owner": "compat-websocket"
+  },
   "minigateway/internal/config": {
     "layer": "L1",
     "owner": "config"
@@ -44,6 +48,11 @@
   "minigateway/internal/core": {
     "layer": "L0",
     "owner": "core",
+    "version": "1"
+  },
+  "minigateway/internal/core/websocket": {
+    "layer": "L0",
+    "owner": "core-websocket",
     "version": "1"
   },
   "minigateway/internal/examples/facts": {

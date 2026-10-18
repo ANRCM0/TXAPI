@@ -29,7 +29,7 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 		"generation":   {"access": true, "foundation": true, "secrets": true, "generation": true},
 		"responses":    {"foundation": true, "compat": true},
 		"transport":    {"transport": true},
-		"compat":       {"foundation": true, "compat": true, "protocol": true},
+		"compat":       {"foundation": true, "compat": true, "protocol": true, "transport": true},
 		"foundation":   {"store": true, "foundation": true, "access": true, "core": true, "gateway": true, "model": true},
 		"gateway":      {"access": true, "core": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true, "foundation": true, "generation": true},
 		"server":       {"foundation": true, "compat": true, "protocol": true, "server": true},
