@@ -29,6 +29,10 @@
     "layer": "L2",
     "owner": "compat"
   },
+  "minigateway/internal/compat/responsesws": {
+    "layer": "L2",
+    "owner": "compat-responsesws"
+  },
   "minigateway/internal/compat/summarycodec": {
     "layer": "L2",
     "owner": "example-summary-codec"

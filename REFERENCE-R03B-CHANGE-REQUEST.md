@@ -1,6 +1,8 @@
 # R03b 具体变更请求：默认关闭的 OpenAI 原生 Responses WS
 
-状态：候选，等待用户明确确认。本文件只提出契约，不批准实施、不登记冻结、不宣称原生 WS 已可用。2026-10-19，R03a 功能头 `2111467` 经 PR #26 合并为 `master/656362e`，功能头与合并后完整 CI 均通过。R02 的真实资源 close、管理发布接线及真实消费者验收尚未完成。
+状态：R03b-1 已获用户明确批准，正在实现和验证，尚未登记冻结或宣称原生 WS 产品可用。2026-10-19，用户先回复“批准 R03b-1 具体变更”，随后明确“后续不需要我的批准，你自己比较最优方案进行选择”；本任务后续设计由实现者比较取舍并先记录具体边界，不再以逐项用户审批阻塞。分层、兼容、验证和外部证据门槛不变。R03a 功能头 `2111467`、PR #26 及合并后完整 CI 已通过。
+
+本轮实现决定：R03b-1 为受控单轮 host，每轮新建上游 WS 并在返回前关闭，暂拒绝 previous_response_id 和配置了 TPM 限额的身份；不以零估算绕过 TPM。generate:false 缺少已确认的终态 fixture，明确拒绝；generate:true 保持普通生成。R03b-2 再实现持久会话、续接、生产路由与 TPM 策略。管理发布由真实 Configuration/SQLite 测试组装证明，尚未在 main 注册新的资源 owner。
 
 依据：[吸收设计 5.3/5.4](REFERENCE-ADOPTION-DESIGN.md)、[R03a 已批准请求](REFERENCE-R03A-CHANGE-REQUEST.md)。官方协议来源由集成任务查阅：[OpenAI WebSocket mode](https://developers.openai.com/api/docs/guides/websocket-mode)。本文没有真实账号或官方客户端兼容证据。
 
@@ -9,15 +11,15 @@
 | 批次 | 写入范围与结果 | gate |
 |---|---|---|
 | R03b-1 | L0 `internal/core/websocket` 增量单次双向 exchange；L1 `internal/gateway` host/资源 owner、`internal/generation` 受控运行接线；L2 `internal/transport/websocket` 上游 native dial、`internal/compat/responsesws` codec；组装根和公开契约 | 本请求获明确批准，R03a 合并验收；真实 WS 测试消费者先证明 R02 prepare/publish/close |
-| R03b-2 | L3 `internal/responsesws`；L2 `internal/server` 的 GET `/v1/responses` upgrade 和表示层；main 注册、OpenAPI、客户端回归 | R03b-1 验收及后续产品具体契约另批批准；默认关闭且 billing disabled；只启用一个 Provider 和显式模型 allowlist |
+| R03b-2 | L3 `internal/responsesws`；L2 `internal/server` 的 GET `/v1/responses` upgrade 和表示层；main 注册、OpenAPI、客户端回归 | R03b-1 验收后自主记录后续产品具体契约；默认关闭且 billing disabled；只启用一个 Provider 和显式模型 allowlist |
 
-R03b-1 可以有真实测试客户端和可控原生 WS 上游，但不能先注册产品路由或称真实 OpenAI 账号验证通过。R03b-2 当前仅为后续候选，必须另批明确批准，不能由 R03b-1 授权自动注册。其候选范围只开放文本输入/输出及客户端自执行 function tool 的事件与回传；不做托管工具、音频、图片、视频、background、跨连接持久续接、OAuth、收费或抢占。若模型/事件范围不足，明确拒绝，不能偷偷转 HTTP。
+R03b-1 可以有真实测试客户端和可控原生 WS 上游，但不能先注册产品路由或称真实 OpenAI 账号验证通过。R03b-2 当前仅为后续独立批次；按用户自主决策授权记录具体契约并验收后再注册，不混入 R03b-1。其候选范围只开放文本输入/输出及客户端自执行 function tool 的事件与回传；不做托管工具、音频、图片、视频、background、跨连接持久续接、OAuth、收费或抢占。若模型/事件范围不足，明确拒绝，不能偷偷转 HTTP。
 
 ## 2. 六项边界与已有能力不足
 
 1. 层级与目录见上表；新增包必须登记精确层级/owner。L3 只消费 `foundation/contracts/*` 和自己的用例，不导入 gateway/core/transport/compat 实现。组装根注入 L1/L2；L2 不建执行账本、调度器或第二条结算链。
 2. 复用 execution/v1 的 Phase/Termination、R01 execution/v2 Envelope/UsageObservation、R03a Connection/Lease、identity/v1 Authority、admission/v1 RequestGate、现有连接容量与生命周期端口。冻结状态以集成时登记为准，Go 导出符号不构成冻结。
-3. 触碰地基：下面的 execution/v2 增量 exchange 及相应 L0 机械执行新增，需要本次明确批准；responsesws/v1 候选须后续独立批准；不改已有 v1/v2 签名、不引入 execution/v3。
+3. 触碰地基：下面的 execution/v2 增量 exchange 及相应 L0 机械执行新增，需要本次明确批准；responsesws/v1 候选须后续独立记录取舍并验证；不改已有 v1/v2 签名、不引入 execution/v3。
 4. R03a Round 是“读同一连接 -> Handle -> 回写同连接”。它没有首个上游 response.create 的写入步骤，不能分别表达上游派发与下游交付；不能拿下游 Read 成功冒充上游已派发。现有 transport 只有服务端 Accept；需要受限的上游 WS dial。RuntimeLeaseSet 仅有 revision/ref 计数，没有资源 close、候选准备/失败清理或 management applied 接线，不能视为 R02 已验收。
 5. 验收见第 8 节：单次机械行为、真实 WS、权限/容量、发布排空、现有完整 CI 分开提供证据。
 6. HTTP/SSE/background 的行为、账本/schema 不迁移；仅配置发布组装点由集成 owner 串行修改。其他团队继续消费已有冻结端口，不依赖尚未批准的新增接口。
@@ -98,7 +100,7 @@ L1 桥把 v2.Connection 的 Read/Write 与 Frame 逐字段投影到 L0；忽略 
 - 同一 Upstream.ID 全局最多一个 active exchange，与已有 round guard 共用连接占用所有权；不允许两个 API 同时读同一物理连接。所有回调同步、有界、服从 context。ExecuteExchange 返回前本次读写/回调全部 join；不自动 Close 可复用连接，是否销毁由 L1 owner 决定。
 - 现有 transport Write 只有全成/失败时，不捏造精确部分字节；适配器失败可报 0，但 WriteStarted/Committed 必须保留不确定性。
 
-## 4. 后续独立审批的 L1 原生会话候选：responsesws/v1
+## 4. 后续独立批次的 L1 原生会话候选：responsesws/v1
 
 新路径 `internal/foundation/contracts/responsesws/v1`，layer L1、owner foundation；imports 为 context、time、identity/v1、execution/v2。此接口同时供 L3 用例及 L2 表示层消费，Provider/目标/密钥保持 L1 私有。
 
@@ -156,12 +158,12 @@ Execute 同时调用返回 busy，不抢占；Close 幂等，阻止新轮次、c
 
 ## 5. R02 真实资源：L1 私有生命周期 owner
 
-本批不新增 runtimegeneration/v1、公开 Manager/Factory 或 SDK。真实消费者只有 gateway 内部 host 和组装根，复用已批准 execution/v2.Lease 与现有 lifecycle 契约；资源查找、候选工厂、关闭任务和代次集合均留在 `internal/gateway` 私有实现。必要的组装构造函数可以按仓库规则导出给 assembly，但不登记为供 L3 消费的 frozen public 契约；若必须扩充现有公开端口，另列精确签名请求审批。
+本批不新增 runtimegeneration/v1、公开 Manager/Factory 或 SDK。真实消费者只有 gateway 内部 host 和组装根，复用已批准 execution/v2.Lease 与现有 lifecycle 契约；资源查找、候选工厂、关闭任务和代次集合均留在 `internal/gateway` 私有实现。必要的组装构造函数可以按仓库规则导出给 assembly，但不登记为供 L3 消费的 frozen public 契约；若必须扩充现有公开端口，先记录精确签名和兼容迁移决定。
 
 私有 owner 按 prepare -> validate -> publish current 管理每个不可变 revision 的真实 native WS host/transport。prepare 在锁外、有期限地创建并验证候选，失败清理全部部分资源；转交成功后由 owner 独占关闭责任。publish 先检查候选和退休容量，最终原子切换 current；失败保留旧 current，discard 清理候选。关闭失败保留可重试的待清理引用，不能丢指针或报已完成。新 Acquire 只针对 current；同 current revision 重复发布幂等，退休同名 revision 拒绝。candidate 最多一个，退休代次最多 2；上限命中拒绝发布，不强杀旧资源。
 
 lease 只标识和保活，不暴露 any、ORM 或 client。旧代次最后 lease Release 后只允许一个关闭任务；关闭先 cancel/join 本代次会话和回调再关闭 transport，成功后才从退休集合移除。失败可重试且 close 幂等，不并行重复关闭。drain 停新 acquire/发布，等全部 lease、会话/网络读写及关闭任务退出；超时保留 owner 跟踪和依赖存活。真实 consumer 必须证明旧代次在最后使用者退出之前不关闭，新轮次在代次边界重新建连。
-实际源码核对：`internal/management/configuration.go` 的 publication.publish 在互斥锁内调用既有 `apply func() error`，返回 error 时保留 AppliedRevision 并写 LastError，返回 nil 后直接以内存赋值推进 AppliedRevision；没有持久化 applied 步骤，也没有“发布已成功但 applied 写入失败”的专用恢复端口。`Configuration.Apply` 重试既有 desired revision，不重放保存。因此本批不能捏造该错误路径或承诺不存在的恢复 API。R03b-1 首先以现有组装注入的 apply callback 和既有串行 publication 顺序证明：所有可能失败的 candidate 准备/校验/容量检查先完成，唯一不可失败的最终提交点切换当前完整资源快照，返回 nil 后由既有 publication 推进 applied。现有 gateway.Publish 只校验/Reload 渠道，不是两个运行资源 owner 的原子提交接口；不得先 publish gateway 再 publish runtime（或反序）并声称任意失败保留旧全体资源。如果不能在现有 assembler/单一发布 owner 内实现并证明该最终提交点，则真实 management 接线保持未验收，先提交精确新增签名请求并另获批准，不扩大本请求或先改代码。真实测试 host 的资源 Prepare/Publish/close 证据仍须完成，但不替代 management 发布验收。Drain 停 acquire/发布，等待在途 lease 与真实资源 close；超时返回错误，main 不得继续关闭共享依赖。
+实际源码核对：`internal/management/configuration.go` 的 publication.publish 在互斥锁内调用既有 `apply func() error`，返回 error 时保留 AppliedRevision 并写 LastError，返回 nil 后直接以内存赋值推进 AppliedRevision；没有持久化 applied 步骤，也没有“发布已成功但 applied 写入失败”的专用恢复端口。`Configuration.Apply` 重试既有 desired revision，不重放保存。因此本批不能捏造该错误路径或承诺不存在的恢复 API。R03b-1 首先以现有组装注入的 apply callback 和既有串行 publication 顺序证明：所有可能失败的 candidate 准备/校验/容量检查先完成，唯一不可失败的最终提交点切换当前完整资源快照，返回 nil 后由既有 publication 推进 applied。现有 gateway.Publish 只校验/Reload 渠道，不是两个运行资源 owner 的原子提交接口；不得先 publish gateway 再 publish runtime（或反序）并声称任意失败保留旧全体资源。如果不能在现有 assembler/单一发布 owner 内实现并证明该最终提交点，则真实 management 接线保持未验收，先记录精确新增签名和单一提交点方案，再按后续批次实现，不将未证明的接线标记已验收。真实测试 host 的资源 Prepare/Publish/close 证据仍须完成，但不替代 management 发布验收。Drain 停 acquire/发布，等待在途 lease 与真实资源 close；超时返回错误，main 不得继续关闭共享依赖。
 
 ## 6. 协议、限额及错误
 
@@ -210,8 +212,8 @@ Problem 以 `{"type":"error","error":{"type":"txapi_error","code":"...","message
 | 真实供应商 | 只有获得合法账号后，单独记录真实 OpenAI endpoint/model/client 版本和日期；没有则标记未运行，不宣称供应商或官方客户端兼容 |
 | 分层与最终门槛 | 架构/可见性/精确签名及独立 L3 接入；批次稳定后本地完整检查，最新集成基线精确功能头完整 CI/Linux race/冒烟；合并后证据另记 |
 
-实施时记录真实命令、环境、源 SHA、基线、结果、未运行项。本提案为纯文档，未运行 Go、race、真实账号或客户端测试；文档存在不代表这些验收已通过。
+实施时记录真实命令、环境、源 SHA、基线、结果、未运行项。本文首次提交时为纯文档；实现后的命令与证据统一记入 REFERENCE-ADOPTION-PROGRESS.md。文档存在不代表验收通过，真实账号证据单列。
 
-## 9. 请求用户确认的精确范围
+## 9. 本任务授权与批次边界
 
-本次仅请求确认 R03b-1：第 3 节 execution/v2/L0 增量、第 5 节 L1 私有 owner 的真实 R02 发布/close 接线，以及第 6 节适用于真实 WS 测试 host 的限定协议/资源/关闭行为。必须交付真实 WS 受控消费者和真实资源关闭证据，不能仅接口/mock。第 4 节是后续独立评审的完整 Service 签名候选，帮助审视 consumer 方向；它与 R03b-2 产品路由、生产调度/会话接线均须另批明确批准，本次确认不授权实施。方向批准、用户允许并行和 R03a 批准都不自动批准这些新签名。确认前只评审本文件；不得先实现生产代码再追认。若评审改动上述签名、权限、生命周期或支持范围，先修订本请求再取得明确确认。
+R03b-1 的第 3 节 L0/execution-v2 增量、第 5 节私有资源 owner 和真实受控 WS 消费者已于 2026-10-19 获用户明确批准。随后用户明确授权后续最优方案自主选择，不再逐项请求批准。新增签名、行为和资源寿命仍先记录具体方案与取舍，保持兼容和真实消费者验证；不绕过完整 CI、真实供应商证据或发布门槛。第 4 节 Service、生产路由和持久会话仍作为 R03b-2 独立批次推进，不属于本批已验收能力。

@@ -101,7 +101,7 @@ func dependencyError(from, to string, rules map[string]packageRule) error {
 // Codec callbacks can build wire values, but network dispatch belongs to L1.
 func codecIOError(path string, file *ast.File) error {
 	pure := strings.HasPrefix(path, module+"internal/protocol") || path == module+"internal/compat/responses/v1" ||
-		path == module+"internal/compat/summarycodec"
+		path == module+"internal/compat/summarycodec" || path == module+"internal/compat/responsesws"
 	if !pure {
 		return nil
 	}

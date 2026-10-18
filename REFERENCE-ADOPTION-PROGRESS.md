@@ -106,9 +106,32 @@ R03a 新增执行快照只增加 execution/v2 WS 成员，并登记 L0 `core/web
 
 R03a 最终功能头 `2111467540ef31ee8ad9515be2298d1a5e7d5673` 的 push `39146611206` 与 PR #26 `39146612931` 均 check/delivery SUCCESS，覆盖 Linux 全量 race、主程序恢复冒烟与容器交付。PR #26 已合并为 `master/656362e378be66c6ab1a7cb98e8ddd42ab2c11bf`，远端合并树与功能头完全一致，tree 为 `3f5cb1f046890a1379fa688e70a1aeec47327483`。合并后自动运行 `39147165823` 的 check/delivery 也已 SUCCESS，机械子批的功能头、PR、合并及合并后完整 CI 闭环完成；不扩大为 R02 或原生 WS 产品验收，也不表示新增契约已冻结。
 
-## R03b-1：原生 WS exchange 与真实资源消费者候选
+## R03b-1：原生 WS exchange 与真实资源消费者
 
-具体新增 L0/execution-v2 签名与范围见 [R03b 变更请求](REFERENCE-R03B-CHANGE-REQUEST.md)，尚待用户明确确认；允许子代理并行不等于批准新地基契约。方案只请求首个受控原生 WS exchange、私有资源代次和排空验证；没有实施该新契约，不注册生产产品路由，不开放 OAuth 或收费。后续 Service 与产品路由另批审批。
+2026-10-19，用户明确批准 R03b-1，并进一步授权“后续不需要我的批准，你自己比较最优方案进行选择”。本任务后续设计自主比较并记录取舍，不再逐项请求方案或签名批准；兼容、分层、验收和外部证据门槛保持。具体范围见 [R03b 变更请求](REFERENCE-R03B-CHANGE-REQUEST.md)。
+
+本批已在本地实现 L0 单次 exchange、execution/v2 桥、受限上游 Dial、纯 native WS codec 与私有真实资源 owner。受控 host 逐轮刷新身份、校验模型/billing disabled，复用 RPM 和并发准入；每轮独立上游连接，暂拒绝续接和 TPM 限额身份，generate:false 缺少确认终态 fixture 因而明确拒绝。没有新增产品路由、schema、OAuth 或收费。
+
+真实 WS 客户端/host/上游回归证明 response.create、HTTP 推理调用为零、流中 N/N+1 保活与最后 lease 后关闭、下一轮新资源及 SQLite Key 撤销。真实 management.Configuration 与 SQLite 保存/Apply 测试证明 prepare 失败时 desired 已保存、applied 和旧路由/资源保留，重试只发布不重复保存。该接线目前是受控测试组装，main 尚未注册新 owner；不据此宣称生产 R02 或原生 WS 产品已完成。
+
+### R03b-1 最终本地检查
+
+基线 master/321272bb087d6a13439acc990782d0edb1451513。Windows/PowerShell，Go 1.26.3，GOOS=windows、GOARCH=amd64、CGO_ENABLED=0。18 个非文档来源文件的 LF 归一化清单摘要为 68e108c852f6ad1561ea048d3c0623914f57d82768e854e6ba643bc0e6d3ca2d；原始日志、阶段结果和 source-manifest-final.json 位于仓库外 D:/my-project/TXAPI-references/validation-r03b1。
+
+| 实际检查 | 最终结果 |
+|---|---|
+| go build ./...、go vet ./... | PASS |
+| go mod tidy + go.mod/go.sum 无差异 | PASS；没有新增依赖 |
+| go test -json -count=1 ./... | 1304 项测试/子用例、34 个测试包 PASS，6 个预期 helper SKIP；另 31 包无测试，零失败 |
+| 架构/可见性/精确签名 | 包含在最终全量测试；原声明逐项保留，仅增加 L0 的 3 项和 execution/v2 的 5 项 |
+| go list -deps ./internal/core ./internal/protocol/... + 禁止依赖过滤 | PASS |
+| gofmt -l 本批 Go 文件、git diff --check | PASS；未格式化无关文件 |
+| python -B tests/smoke/local.py --go go | PASS：真实 main 普通/SSE/控制台、strict 拒绝、结算/密钥轮换、加密重启及后台强杀恢复/续传/取消/TTL |
+| 前端五脚本语法和 10/10 API 回归 | 复用 R03a/2111467 的适用证据；相应五脚本、API 测试、HTTP 表示层、main 组装和 OpenAPI 与该提交无差异 |
+
+首轮集中通过 1303 项后，复核移除 codec 重复校验、为 prepare 增加 10 秒上界，并补充 prepare/drain 竞争及测试 close-worker join；随后重新执行最终 build/vet/tidy/全量 1304 项检查。主程序冒烟已通过，之后的私有 owner/codec 修复尚未接入 main，HTTP/SSE/background 组装与对应实现未变，因此其证据继续适用；新 owner 的最终行为由全量测试中的真实 WS/管理发布和排空用例覆盖。
+
+最终功能头自动 CI、PR 和合并后状态仍待更新；本地未运行 Linux race、容器 delivery 或真实 Provider，不提前宣称这些通过。新增契约尚未冻结，未发布标签或 release。
 
 ## 后续批次
 

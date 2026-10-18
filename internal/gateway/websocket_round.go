@@ -15,7 +15,7 @@ var activeWebSocketRounds sync.Map
 
 func (WebSocketRoundExecutor) ExecuteRound(ctx context.Context, round v2.Round) v2.RoundResult {
 	result := v2.RoundResult{Dispatch: v2.NotDispatched, Termination: v2.Failed}
-	if round.Connection == nil || round.Handle == nil {
+	if ctx == nil || nilInterface(round.Connection) || round.Handle == nil {
 		return result
 	}
 	id := round.Connection.ID()
