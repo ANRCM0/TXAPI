@@ -149,3 +149,11 @@ and exact-head automatic Linux race/container CI remain merge gates.
 
 No legitimate real account has been provided; controlled fixtures do not prove
 OpenAI endpoint/model or official SDK compatibility. Record those separately.
+
+## 6. Delivery State
+
+Implementation head 81d2afe passed automatic push/PR full CI and merged through
+PR #30 to master/a5c7a5f with an identical source tree. Post-merge acceptance
+and exact run IDs are maintained in REFERENCE-ADOPTION-PROGRESS.md.
+No real Provider/SDK, billing, persistent reconnection or new API freeze is
+claimed by this integration.

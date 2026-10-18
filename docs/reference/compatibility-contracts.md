@@ -78,7 +78,7 @@ FC-001 FND-01/02/03 have separately passed their exact-head and merged-master ga
 | Foreground Responses JSON/SSE / native OpenAI-compatible | Separately accepted A01 opt-in route; text/function tools, scoped durable idempotency and short encrypted replay | Rejected before admission/holds/attempt; no proven Responses subset |
 | Responses local history/conversations | Separately accepted A02 via PR #12; full-context text/function subset and scoped encrypted snapshots | All strict Responses refused |
 | Responses native background | FC-002 accepted default-off disabled/self-contained subset; encrypted recovery/events, not full A03 | Rejected; no inherited cost approval |
-| Responses native WebSocket | R03b-2 implemented default-off disabled single-lane text/function consumer; latest-ID continuation on the same live connection, pending CI/merge; [runtime limits](responses-websocket.md) | Rejected; no WS cost proof |
+| Responses native WebSocket | R03b-2 implemented default-off disabled single-lane text/function consumer; latest-ID continuation on the same live connection; PR #30 merged after full exact-head CI; [runtime limits](responses-websocket.md) | Rejected; no WS cost proof |
 
 The matrix states implementation scope, not independent provider billing or
 external client certification. S5-03 remains open. Existing `RequirementsFor`,

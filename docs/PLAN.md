@@ -4,7 +4,7 @@
 
 ## R03b-2 当前实施批次
 
-2026-10-19：默认关闭的原生 Responses WS 产品接线已在本地实现，尚待最终功能头完整 CI 与合并。范围为 billing disabled、显式实际模型、官方 OpenAI endpoint、单连接串行文本/函数轮次与连接内最新 response ID 续接；不支持持久重连、后台、OAuth 或收费。运行边界见 [WS 指南](reference/responses-websocket.md)，六项工作协议见 [实施决策](../REFERENCE-R03B2-IMPLEMENTATION.md)，精确验证见 [吸收记录](../REFERENCE-ADOPTION-PROGRESS.md)。S5-03、完整 A03/A04 和 R00-R07 总目标仍未完成；下文历史时点不扩大本批验收。
+2026-10-19：默认关闭的原生 Responses WS disabled 子批已经 PR #30 合并为 master/a5c7a5f，功能头 81d2afe 的 push/PR 完整 CI 均通过；合并后 CI 尚待确认。范围为 billing disabled、显式实际模型、官方 OpenAI endpoint、单连接串行文本/函数轮次与连接内最新 response ID 续接；不支持持久重连、后台、OAuth 或收费。运行边界见 [WS 指南](reference/responses-websocket.md)，六项工作协议见 [实施决策](../REFERENCE-R03B2-IMPLEMENTATION.md)，精确验证见 [吸收记录](../REFERENCE-ADOPTION-PROGRESS.md)。S5-03、完整 A03/A04 和 R00-R07 总目标仍未完成；下文历史时点不扩大本批验收。
 
 ## 地基符合性收口FC-001
 
