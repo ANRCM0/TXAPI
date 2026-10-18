@@ -27,6 +27,10 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"minigateway/internal/controlplane"
+	authentication "minigateway/internal/foundation/identity"
+	"minigateway/internal/foundation/persistence"
+	"minigateway/internal/management"
 	"minigateway/internal/protocol"
 	"net/http"
 	"os"
@@ -171,7 +175,7 @@ func main() {
 	stopBillingRecovery := engine.StartRecovery(30 * time.Second)
 	defer stopBillingRecovery()
 
-	limiter := middleware.NewMemoryLimiter()
+	limiter := access.NewMemoryLimiter()
 	ceilings := cfg.Server.Concurrency
 	capacity, err := access.NewCapacity(access.CapacityConfig{Instance: ceilings.Instance, User: ceilings.User, Key: ceilings.Key, Channel: ceilings.Channel})
 	if err != nil {
@@ -315,13 +319,33 @@ func main() {
 	// 管理 API 鉴权中间件在这里装配：密钥已由 config.Load 保证非空
 	// （缺失时 Load 直接拒绝启动），中间件内部用常量时间比较校验
 	// X-Admin-Key 头。/v1 转发面和 /healthz 不走这个中间件
+	configurationService := management.NewConfiguration(persistence.Configuration(st), func() error {
+		channels, err := st.ChannelSnapshot()
+		if err != nil {
+			return err
+		}
+		return gw.Publish(channels)
+	}, func() error {
+		if engine != nil && engine.Prices() != nil {
+			return engine.Prices().ReloadPrices()
+		}
+		return nil
+	})
+	gw.Metrics().SetCredentialStatsProvider(gw.CredentialStats)
+	gw.Metrics().SetLogStatsProvider(func() metrics.LogQueueStats {
+		stats := st.LogQueueStats()
+		return metrics.LogQueueStats{Depth: stats.Depth, Capacity: stats.Capacity, Dropped: stats.Dropped, Failed: stats.Failed}
+	})
 	httpEngine := server.NewEngine(server.Deps{
-		Cfg:         cfg,
-		Gateway:     gw,
-		Responses:   responsesRuntime.Handler(),
-		Store:       st,
-		Billing:     engine,
-		RateLimiter: limiter,
+		Generation:    gateway.NewHTTPExecutor(gw),
+		TokenAuth:     authentication.NewTokenAuthenticator(st),
+		Control:       controlplane.New(persistence.Control(st)),
+		Configuration: configurationService,
+		Ledger:        engine,
+		Metrics:       gw.Metrics(),
+		RateGate:      access.NewRateGate(limiter),
+		Responses:     responsesRuntime.Handler(),
+		RateLimiter:   limiter,
 		// IP 级兜底限流：防「拿随机 key 试」的探测请求（那种请求
 		// 过不了鉴权，令牌级限流根本轮不到它）。阈值取自配置，
 		// 0 = 不限。默认 0——自用场景（本机/内网单客户端）没有

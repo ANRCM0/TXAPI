@@ -1,4 +1,4 @@
-package middleware
+package access
 
 import (
 	"bytes"
@@ -17,7 +17,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"minigateway/internal/model"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
+	"minigateway/internal/server/middleware"
 )
 
 func init() {
@@ -35,11 +36,12 @@ func bytesReader(s string) io.Reader {
 // 直接往上下文塞 TokenView 等价于「Auth 已经跑完」——
 // 真实链路里 TokenRateLimit 也只在 Auth 之后执行，注入投影
 // 正是复刻那个前提。
-func newTestEngine(t *testing.T, limiter Limiter, view model.TokenView) *gin.Engine {
+func newTestEngine(t *testing.T, limiter Limiter, view identity.TokenView) *gin.Engine {
 	t.Helper()
 	e := gin.New()
 	e.POST("/v1/chat/completions", func(c *gin.Context) {
 		c.Set(CtxTokenView, view)
+		c.Request = c.Request.WithContext(WithPrincipal(c.Request.Context(), view.Principal()))
 		c.Set(CtxTokenID, view.ID)
 		c.Next()
 	}, TokenRateLimit(limiter), func(c *gin.Context) {
@@ -62,7 +64,7 @@ func post(t *testing.T, e *gin.Engine) (int, string) {
 // TestRateLimitAllowsUnderLimit：不超限全部放行。
 func TestRateLimitAllowsUnderLimit(t *testing.T) {
 	limiter := NewMemoryLimiter()
-	e := newTestEngine(t, limiter, model.TokenView{ID: 1, Name: "t", RPMLimit: 10})
+	e := newTestEngine(t, limiter, identity.TokenView{ID: 1, Name: "t", RPMLimit: 10})
 
 	for i := 0; i < 10; i++ {
 		code, retry := post(t, e)
@@ -78,7 +80,7 @@ func TestRateLimitAllowsUnderLimit(t *testing.T) {
 // TestRateLimitRejectsOverLimit：超限返回 429 且带 Retry-After。
 func TestRateLimitRejectsOverLimit(t *testing.T) {
 	limiter := NewMemoryLimiter()
-	e := newTestEngine(t, limiter, model.TokenView{ID: 2, Name: "t", RPMLimit: 3})
+	e := newTestEngine(t, limiter, identity.TokenView{ID: 2, Name: "t", RPMLimit: 3})
 
 	for i := 0; i < 3; i++ {
 		if code, _ := post(t, e); code != http.StatusOK {
@@ -107,7 +109,7 @@ func TestRateLimitRejectsOverLimit(t *testing.T) {
 // OpenAI 风格，客户端按同一套结构解析。
 func TestRateLimitErrorBodyIsOpenAIShape(t *testing.T) {
 	limiter := NewMemoryLimiter()
-	e := newTestEngine(t, limiter, model.TokenView{ID: 3, Name: "t", RPMLimit: 1})
+	e := newTestEngine(t, limiter, identity.TokenView{ID: 3, Name: "t", RPMLimit: 1})
 
 	post(t, e)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytesReader(`{}`))
@@ -170,7 +172,7 @@ func TestRateLimitWindowSlides(t *testing.T) {
 // TestRateLimitZeroLimitMeansUnlimited：0 = 不限（与 Quota 的语义一致）。
 func TestRateLimitZeroLimitMeansUnlimited(t *testing.T) {
 	limiter := NewMemoryLimiter()
-	e := newTestEngine(t, limiter, model.TokenView{ID: 4, Name: "t"}) // 两个阈值都是 0
+	e := newTestEngine(t, limiter, identity.TokenView{ID: 4, Name: "t"}) // 两个阈值都是 0
 
 	for i := 0; i < 50; i++ {
 		if code, _ := post(t, e); code != http.StatusOK {
@@ -242,15 +244,16 @@ func TestRateLimitTPMPreEstimateAndPostCorrection(t *testing.T) {
 func TestRateLimitRPMNotPollutedByTPMEvents(t *testing.T) {
 	limiter := NewMemoryLimiter()
 	// RPM=3、TPM 放到「token 维度永远不限」的量级，只考察 RPM 是否准确
-	view := model.TokenView{ID: 7, Name: "t", RPMLimit: 3, TPMLimit: 1 << 30}
+	view := identity.TokenView{ID: 7, Name: "t", RPMLimit: 3, TPMLimit: 1 << 30}
 
 	e := gin.New()
 	e.POST("/v1/chat/completions", func(c *gin.Context) {
 		c.Set(CtxTokenView, view)
+		c.Request = c.Request.WithContext(WithPrincipal(c.Request.Context(), view.Principal()))
 		c.Set(CtxTokenID, view.ID)
 		c.Next()
 		// 模拟 relay 收尾：真实用量(30)与预估不同，会产生一笔补差记录
-		FinishTokens(c, limiter, 30)
+		finishHTTP(c, limiter, 30)
 	}, TokenRateLimit(limiter), func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
@@ -286,7 +289,7 @@ func TestRateLimitRPMNotPollutedByTPMEvents(t *testing.T) {
 // 或预估值没读到（按 0 计），放行数都会偏。
 func TestRateLimitTPMWinsWhenRPMUnlimited(t *testing.T) {
 	limiter := NewMemoryLimiter()
-	view := model.TokenView{ID: 8, Name: "t", RPMLimit: 0, TPMLimit: 10}
+	view := identity.TokenView{ID: 8, Name: "t", RPMLimit: 0, TPMLimit: 10}
 	e := newTestEngine(t, limiter, view)
 
 	allowed := 0
@@ -473,19 +476,20 @@ func TestRateLimitEvictsOldKeys(t *testing.T) {
 // TestFinishTokensAppliesRealUsage：FinishTokens 把预估值修正成真实值。
 func TestFinishTokensAppliesRealUsage(t *testing.T) {
 	limiter := NewMemoryLimiter()
-	view := model.TokenView{ID: 9, Name: "t", TPMLimit: 1000}
+	view := identity.TokenView{ID: 9, Name: "t", TPMLimit: 1000}
 
 	e := gin.New()
 	var sawEstimate bool
 	e.POST("/v1/chat/completions", func(c *gin.Context) {
 		c.Set(CtxTokenView, view)
+		c.Request = c.Request.WithContext(WithPrincipal(c.Request.Context(), view.Principal()))
 		c.Set(CtxTokenID, view.ID)
 		c.Next()
 		// 模拟 relay 的收尾：拿真实用量修正窗口
 		if _, ok := c.Get(ctxTPMEstimate); ok {
 			sawEstimate = true
 		}
-		FinishTokens(c, limiter, 42)
+		finishHTTP(c, limiter, 42)
 	}, TokenRateLimit(limiter), func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
@@ -595,7 +599,11 @@ func TestS3TPMEmptyWindowAndLargeBodyPreserved(t *testing.T) {
 	}
 	e := gin.New()
 	body := `{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("x", estimateBodyLimit+100) + `"}]}`
-	e.POST("/", func(c *gin.Context) { c.Set(CtxTokenView, model.TokenView{ID: 1, TPMLimit: 1000000}) }, TokenRateLimit(limiter), func(c *gin.Context) {
+	e.POST("/", func(c *gin.Context) {
+		view := identity.TokenView{ID: 1, TPMLimit: 1000000}
+		c.Set(CtxTokenView, view)
+		c.Request = c.Request.WithContext(WithPrincipal(c.Request.Context(), view.Principal()))
+	}, TokenRateLimit(limiter), func(c *gin.Context) {
 		got, _ := io.ReadAll(c.Request.Body)
 		if string(got) != body {
 			t.Errorf("TPM sampling truncated body: got=%d want=%d", len(got), len(body))
@@ -626,3 +634,23 @@ func TestS3LiveRateBucketsCannotBeEvictedToBypassLimits(t *testing.T) {
 		t.Fatal("expired rate windows not reclaimed")
 	}
 }
+
+const (
+	CtxTokenView      = middleware.CtxTokenView
+	CtxTokenID        = middleware.CtxTokenID
+	ctxTPMEstimate    = "tpm_estimate"
+	estimateBodyLimit = 64 * 1024
+)
+
+func TokenRateLimit(limiter Limiter) gin.HandlerFunc {
+	return middleware.TokenRateLimit(NewRateGate(limiter))
+}
+func IPRateLimit(limiter Limiter, limit int) gin.HandlerFunc {
+	return middleware.IPRateLimit(limiter, limit)
+}
+func finishHTTP(c *gin.Context, limiter Limiter, actual int) {
+	FinishTokens(c.Request.Context(), limiter, actual)
+}
+func tokenBucketKey(id uint) string { return TokenBucketKey(id) }
+func tpmBucketKey(id uint) string   { return TokenUsageBucketKey(id) }
+func ipBucketKey(ip string) string  { return "ip:" + ip }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	ledger "minigateway/internal/foundation/contracts/ledger/v1"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,96 +19,35 @@ import (
 )
 
 var (
-	ErrLedgerNotFound    = errors.New("billing reservation not found")
-	ErrLedgerInput       = errors.New("invalid billing query or resolution")
-	ErrNotResolvable     = errors.New("only pending reservations with expired leases can be resolved")
-	ErrCostExceedsHold   = errors.New("verified cost exceeds hold; explicitly cap the charge or waive it")
-	ErrBillingForbidden  = errors.New("active administrator required")
+	ErrLedgerNotFound    = ledger.ErrLedgerNotFound
+	ErrLedgerInput       = ledger.ErrLedgerInput
+	ErrNotResolvable     = ledger.ErrNotResolvable
+	ErrCostExceedsHold   = ledger.ErrCostExceedsHold
+	ErrBillingForbidden  = ledger.ErrBillingForbidden
 	reservationIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 )
 
 const (
-	ResolveUsage = "settle_usage"
-	ResolveCap   = "cap_usage"
-	ResolveWaive = "waive"
+	ResolveUsage = ledger.ResolveUsage
+	ResolveCap   = ledger.ResolveCap
+	ResolveWaive = ledger.ResolveWaive
 )
 
 // Monetary units are decimal strings on the wire, preserving int64 precision
 // in browsers. These DTOs intentionally exclude internal fingerprints.
-type ReservationView struct {
-	ID                  string    `json:"id"`
-	UserID              uint      `json:"user_id"`
-	TokenID             uint      `json:"token_id"`
-	PriceVersion        string    `json:"price_version"`
-	OriginModel         string    `json:"origin_model"`
-	ReservedUnits       string    `json:"reserved_units"`
-	ChargeUnits         string    `json:"charge_units"`
-	ProviderBudgetUnits string    `json:"provider_budget_units"`
-	ProviderHeldUnits   string    `json:"provider_held_units"`
-	State               string    `json:"state"`
-	Reason              string    `json:"reason"`
-	LeaseUntil          int64     `json:"lease_until"`
-	CanResolve          bool      `json:"can_resolve"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
-}
+type ReservationView = ledger.ReservationView
 
-type AttemptView struct {
-	Number                   int       `json:"number"`
-	ChannelID                uint      `json:"channel_id"`
-	CredentialID             uint      `json:"credential_id"`
-	ActualModel              string    `json:"actual_model"`
-	Group                    string    `json:"group"`
-	Status                   int       `json:"status"`
-	Termination              string    `json:"termination"`
-	PromptTokens             int       `json:"prompt_tokens"`
-	OutputTokens             int       `json:"output_tokens"`
-	CostUnits                string    `json:"cost_units"`
-	CostKnown                bool      `json:"cost_known"`
-	ProviderBoundUnits       string    `json:"provider_bound_units"`
-	ProviderContractVersion  string    `json:"provider_contract_version"`
-	ProviderContractSnapshot string    `json:"provider_contract_snapshot"`
-	State                    string    `json:"state"`
-	CreatedAt                time.Time `json:"created_at"`
-}
+type AttemptView = ledger.AttemptView
 
-type ResolutionView struct {
-	ActorID         uint      `json:"actor_id"`
-	Action          string    `json:"action"`
-	Reason          string    `json:"reason"`
-	Evidence        string    `json:"evidence"`
-	PromptTokens    int       `json:"prompt_tokens"`
-	OutputTokens    int       `json:"output_tokens"`
-	CostKnown       bool      `json:"cost_known"`
-	CalculatedUnits string    `json:"calculated_units"`
-	ChargeUnits     string    `json:"charge_units"`
-	CreatedAt       time.Time `json:"created_at"`
-}
+type ResolutionView = ledger.ResolutionView
 
-type ReservationDetail struct {
-	Reservation   ReservationView `json:"reservation"`
-	Attempts      []AttemptView   `json:"attempts"`
-	Resolution    *ResolutionView `json:"resolution"`
-	PriceSnapshot string          `json:"price_snapshot"`
-}
+type ReservationDetail = ledger.ReservationDetail
 
-type LedgerQuery struct {
-	State           string
-	UserID, TokenID uint
-	Limit, Offset   int
-}
+type LedgerQuery = ledger.LedgerQuery
 
-type ResolutionInput struct {
-	Action   string           `json:"action"`
-	Reason   string           `json:"reason"`
-	Evidence string           `json:"evidence"`
-	Usage    *ResolutionUsage `json:"usage,omitempty"`
-}
+type ResolutionInput = ledger.ResolutionInput
 
-type ResolutionUsage struct {
-	PromptTokens *int `json:"prompt_tokens"`
-	OutputTokens *int `json:"completion_tokens"`
-}
+type ResolutionUsage = ledger.ResolutionUsage
 
 func reservationView(row model.BillingReservation, ready bool) ReservationView {
 	return ReservationView{
@@ -211,7 +151,7 @@ func (e *Engine) ReservationDetail(ctx context.Context, id string) (*Reservation
 	return detail, err
 }
 
-func (in *ResolutionInput) normalize() (*relaymodel.Usage, error) {
+func normalizeResolution(in *ResolutionInput) (*relaymodel.Usage, error) {
 	in.Reason, in.Evidence = strings.TrimSpace(in.Reason), strings.TrimSpace(in.Evidence)
 	if in.Reason == "" || len(in.Reason) > 1000 || in.Evidence == "" || len(in.Evidence) > 2000 {
 		return nil, ErrLedgerInput
@@ -246,7 +186,7 @@ func (e *Engine) ResolveReservation(ctx context.Context, id string, actorID uint
 	if !reservationIDPattern.MatchString(id) {
 		return nil, ErrLedgerInput
 	}
-	u, err := in.normalize()
+	u, err := normalizeResolution(&in)
 	if err != nil {
 		return nil, err
 	}

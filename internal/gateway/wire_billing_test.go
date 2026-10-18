@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	authentication "minigateway/internal/foundation/identity"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -75,9 +76,9 @@ func TestStrictPreparedDimensionsRejectBeforeNetwork(t *testing.T) {
 			router := gin.New()
 			if tc.embeddings {
 				path, body = "/v1/embeddings", `{"model":"gpt-4o-mini","input":["one","two"]}`
-				router.POST(path, middleware.NewAuth(st).Handle(), gw.HandleEmbeddings)
+				router.POST(path, middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleEmbeddings)
 			} else {
-				router.POST(path, middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+				router.POST(path, middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
 			}
 			req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
 			req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)

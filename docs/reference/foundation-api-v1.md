@@ -1,6 +1,6 @@
 # Foundation API v1：实施清单与迁移边界
 
-状态：FC-001 已由用户批准，FND-01/02 已验收，FND-03 本地集中验证通过、待完整 CI/合并；本清单是 v1 候选，不是 frozen 发布。
+状态：FC-001 已由用户批准，FND-01/02/03 已验收，FND-04 本地集中验证通过、待完整 CI/合并；本清单是 v1 候选，不是 frozen 发布。
 最终冻结需 FND-05 全部 DoD、独立上层样例和最新基线完整 CI/合并证明。
 排期与勾选只维护 [PLAN](../PLAN.md#地基符合性收口fc-001)，目标范围见
 [FC-001](../proposals/FC-001-foundation-contracts-v1.md)，实际验证见
@@ -29,8 +29,8 @@ generation 在派发前仍用原 resolver 校验当前主体，新的投影值�
 
 Output 的 Commit/Write/Flush/State 与可选写 deadline 保留原寿命规则：
 提交状态只能前进；短写/读错/取消不伪造完整协议成功；attempt 不关闭 writer。
-L2 HTTP 工厂在组装时注入 Responses 的既有 HTTP 交付入口，功能不直接构造 core.HTTPOutput。
-HTTP/业务包的完全分离仍在 FND-04，不能把本次移除 core 依赖宣称为全部分层完成。
+L2 HTTP 工厂由 main 注入 compat/responseshttp，功能只接收语义化 Delivery，不构造 core.HTTPOutput、
+HTTP writer 或解析 URL/Header。当前拆分已有集中验证，但整个四层 DoD 仍待 FND-05。
 
 Outcome 显式映射 phase、原始和已公开 HTTP 状态、committed、protocolComplete、
 termination、nil/已知 usage、错误码原始 JSON、耗时/字节数和每次尝试。
@@ -61,9 +61,9 @@ FND-01 增加契约实现依赖/无类型逃逸检查、受控拒绝样例、结
 | 剩余依赖 / 来源 | 退出批次 |
 |---|---|
 | gateway 注册/协议会话与 HTTP 隔离 | FND-02 已验收，PR #15 / master/e97e458 |
-| generation 的记录/claim/意图及状态端口已用中立值；access/secrets 仅留 L1 私有实现 | FND-03 待 CI/合并 |
-| responses 已消费 state.Archive/快照/回执/保护端口，不再导入 generation/model/secrets；HTTP 表示与协议边界待拆分 | FND-04 |
-| management 已仅消费 configuration/v1；server API 仍组装私有 store/billing/management，所有用例与表示隔离待完成 | FND-04 |
+| generation 的记录/claim/意图及状态端口已用中立值；access/secrets 仅留 L1 私有实现 | FND-03 已验收，PR #16 / master/3bf2540 |
+| Responses 通过命令/Call/Delivery 消费公开状态与编解码门面，HTTP/SSE 表示已归 L2 | FND-04 待 CI/合并 |
+| controlplane/management 只消费公开基础契约；server/API/middleware 不再导入 L1/L3 实现，构造回调由 main 注入 | FND-04 待 CI/合并 |
 | 全生产包四层映射、公开签名递归可见性、独立新增操作样例与零例外冻结 | FND-05 |
 
 这些是已知迁移来源，不是新增模块可复制的接入方式；本清单不降低旧检查或最终 CI 门槛。
@@ -109,4 +109,33 @@ Request.AffinityText 将旧首条 user/多模态文本投影留在协议侧，sc
 
 真实风险回归新增密文字节/嵌套片段所有权、fencing/原 hold/unknown/cancel 事实、提交后错误双层识别与保存时间，
 以及 typed-nil 后端不隐藏在 wrapper；既有归档/旧密文/重启/强杀/当前授权/CAS/发布测试保留。
-公开合同的递归类型检查和全部生产包分类仍留 FND-05；server API/Responses HTTP 拆分仍留 FND-04。
+公开合同的递归类型检查、全部生产包分类与独立接入证明仍留 FND-05；FND-04 的实际消费者见下节。
+
+
+## FND-04 应用与表示候选
+
+| 公开候选 / v1 | 实际消费者与边界 |
+|---|---|
+| identity.Authenticator / TokenView、Policy.Intersect | L2 Auth 只提取 Key、调用注入的认证器并使用返回 context；L1 私有实现调用原当前 Store.LookupToken 和 access 的可信 context。TokenView/Principal 是复制投影，不提供公开的认证 context 构造器 |
+| admission.Limiter / RequestGate | 既有 memoryLimiter 与 RPM/TPM 计数、reservation/once handoff 已归 L1 access；HTTP 只转发有界估算回调和映射拒绝。RPM 在估算读取前，TPM 仍走原 once 收尾 |
+| text/v1.EstimateTokens、observability/v1.RequestID | 原字符计数和请求关联的纯规则；billing 与 HTTP 复用同一计数，不把关联 ID 当授权 |
+| control/v1 Accounts/Keys/Statistics/ModelCatalog/Service | controlplane 拥有登录窗口、owner Key 与模型投影规则；持久适配继续调用原 Store。User/Token/日志/统计/输入均不含 ORM、密码/Key 摘要或 DB，空数组/null 形状保持 |
+| ledger/v1.Service 与 DTO/错误/金额单位 | 管理读/对账消费原 Engine 的同一事务；原账本类型名只向普通公开 DTO/错误引用，保留当前管理员决策与双 hold 权威，不增加结算器 |
+| responses/v1.Service.Begin / Call / Command / Delivery | 功能只处理具名操作和状态用例；身份、容量与历史速率先检查，正文经 L2 Payload 端口在原业务检查点有界读取。每个 Call 一次 Handle；Close join 后释放，错误或 panic 前未交接的容量由 Begin 退回 |
+| compat/responses/v1，Version=1 | 原生输入/终态的复制投影、SSE 终态/父链表示与回放元数据映射；公开签名不泄漏底层 protocol.Request/Decoder 类型。L3 不解析 URL、Header、HTTP 状态表示或 SSE 帧 |
+
+Control/Configuration/账本端口是由组装根显式授予管理入口的能力，不是任意客户端可调用的 API。
+L2 保持原管理员会话/旧管理密钥与 owner 会话边界，owner ID 来自当前会话而非正文；
+原 Store/Engine 继续持有其事务内当前权限/owner/管理员决策检查。功能接入只注入所需小能力，
+不能因拿到一个普通 DTO 或字符串 ID 获得管理权限。
+
+server 的 Deps 只接收公开执行/认证/准入/管理/配置/账本服务、metrics renderer 和 HTTP handler；
+main 单点组装原实现、配置发布回调与 metrics provider。Gin 路由/内部构造器是 L2 实现接线，
+不作为功能可导入的冻结公共 API。原测试中的 Store/Gateway 构造移入测试组装 harness，仍调用真实生产 handler，
+没有用测试文件替代生产实现或删除既有断言。
+
+compat/responseshttp 解析路由、重复查询、If-Match 和幂等头，映射错误/JSON/ETag/缓存/重试头；
+正文由其 Payload 实现按 1 MiB+1 读取，所有权交给应用。会话/历史的 CAS、字段限制、加密/AAD、
+前台幂等/unknown 和账本关联仍在应用/原事务；不通过搬到 HTTP 层来改变它们。
+请求 Scope 的关闭不关闭共享 Gateway/Store，也不把客户端断开解释为无成本或自动重新执行。
+新增应用层直接回归验证 owner/空 allowlist、工作 join/单次执行、身份回调 panic 的容量归还及 DTO 空数组/秘密隔离。

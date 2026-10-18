@@ -290,3 +290,9 @@ Responses WS 不通过 `background` 参数创建后台任务，HTTP 后台执行
 删除历史与取消生成分开；在途删除按协议及已声明策略处理，不静默放弃任务和预算。财务/最小审计事实不随内容清理级联删除，正文与敏感参数在允许期限后清除。管理员的诊断权限不默认意味着可以读取所有用户正文。
 
 关闭时先停止新接入/派发，再处理已升级 WS 和前台生成，保存任务/事件与必要终态，停止并等待 worker/恢复/清理，最后关闭连接执行器与 store。`http.Server.Shutdown` 不代替 WS 管理器显式关闭；已受理的远端后台任务保留恢复事实，不能为快速退出将其视为未执行全退。
+
+
+FC-001 FND-04 的当前迁移把 controlplane/Responses/management 应用规则与 server/API/compat HTTP 表示分开；
+后者仅消费公开能力，main 组装原 Store/Engine/Gateway 与发布/metrics。请求 Call、限流状态、
+编解码投影和权限范围见 [公开候选清单](reference/foundation-api-v1.md#fnd-04-应用与表示候选)。
+完整生产包归属、递归公开类型与独立接入证明仍须 FND-05，不由本次源码拆分提前宣称整个地基 frozen。

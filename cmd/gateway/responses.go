@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"minigateway/internal/compat/responseshttp"
 	"minigateway/internal/foundation/persistence"
 	"minigateway/internal/secrets"
 	"net/http"
@@ -71,7 +72,7 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	if err = st.RecoverResponseHistory(ctx); err != nil {
 		return nil, errors.New("Responses history recovery failed")
 	}
-	service, err := responses.New(ctx, responses.Options{History: history, Store: persistence.Receipts(st), Executor: bridge.NewExecutor(gw), Archive: generation.PublicArchive(archive), Identity: authority.New(st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: keys.Digest,
+	service, err := responses.New(ctx, responses.Options{History: history, Store: persistence.Receipts(st), Executor: bridge.NewExecutor(gw), Archive: generation.PublicArchive(archive), Identity: authority.New(st.ResolvePrincipal), DigestKey: keys.Digest,
 		Retention: time.Duration(cfg.RetentionSeconds) * time.Second, Limits: model.ResponseRequestLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords},
 		ActiveRequests: cfg.ActiveRequests, OwnerRequests: cfg.OwnerRequests})
 	if err != nil {
@@ -97,7 +98,7 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 		}
 	}
 	background, stop := context.WithCancel(context.Background())
-	r := &responsesRuntime{handler: service, cancel: stop, done: make(chan struct{})}
+	r := &responsesRuntime{handler: responseshttp.New(service, httpoutput.New), cancel: stop, done: make(chan struct{})}
 	go func() {
 		defer close(r.done)
 		ticker := time.NewTicker(time.Second)

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	authentication "minigateway/internal/foundation/identity"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -114,7 +115,7 @@ func TestUnprovedInputRefusesOnlyStrictWithoutNetworkOrHealthPenalty(t *testing.
 				}
 				defer gw.Close()
 				router := gin.New()
-				router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+				router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
 				body, _ := json.Marshal(map[string]any{"model": "gpt-4o-mini", "max_tokens": 32,
 					"stream": stream, "messages": []map[string]string{{"role": "user", "content": "hi"}}})
 				req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))

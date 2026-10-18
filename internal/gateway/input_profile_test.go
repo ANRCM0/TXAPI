@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	authentication "minigateway/internal/foundation/identity"
 	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
@@ -101,7 +102,7 @@ func TestStrictEmbeddingInputProfileBindsWireAndWholeRequestCap(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(body))
 			req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
 			router := gin.New()
-			router.POST("/v1/embeddings", middleware.NewAuth(st).Handle(), gw.HandleEmbeddings)
+			router.POST("/v1/embeddings", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleEmbeddings)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 			wantHits := 0

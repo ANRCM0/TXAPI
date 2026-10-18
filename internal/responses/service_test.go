@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"minigateway/internal/compat/httpoutput"
+	"minigateway/internal/compat/responseshttp"
 	authority "minigateway/internal/foundation/identity"
 	"minigateway/internal/foundation/persistence"
 	"net/http"
@@ -84,7 +85,7 @@ type responseFixture struct {
 	binding   access.Binding
 	principal access.Principal
 	executor  *responseExecutor
-	service   *app.Service
+	service   http.Handler
 }
 
 func newResponseFixture(t *testing.T) *responseFixture {
@@ -113,7 +114,7 @@ func newResponseFixture(t *testing.T) *responseFixture {
 	return f
 }
 
-func (f *responseFixture) newService(t *testing.T, receipts persistence.ReceiptBackend) *app.Service {
+func (f *responseFixture) newService(t *testing.T, receipts persistence.ReceiptBackend) http.Handler {
 	t.Helper()
 	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: persistence.Archive(f.st), Resolve: f.st.ResolvePrincipal,
 		ActiveKey: "fixture-key", Keys: map[string][]byte{"fixture-key": bytes.Repeat([]byte{23}, 32)}, Retention: time.Hour,
@@ -121,12 +122,12 @@ func (f *responseFixture) newService(t *testing.T, receipts persistence.ReceiptB
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := app.New(context.Background(), app.Options{Store: persistence.Receipts(receipts), Executor: f.executor, Archive: generation.PublicArchive(archive), Identity: authority.New(f.st.ResolvePrincipal), NewOutput: httpoutput.New,
+	service, err := app.New(context.Background(), app.Options{Store: persistence.Receipts(receipts), Executor: f.executor, Archive: generation.PublicArchive(archive), Identity: authority.New(f.st.ResolvePrincipal),
 		DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 32, OwnerRecords: 16}, ActiveRequests: 4, OwnerRequests: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return service
+	return responseshttp.New(service, httpoutput.New)
 }
 
 func (f *responseFixture) request(key, body string) *httptest.ResponseRecorder {

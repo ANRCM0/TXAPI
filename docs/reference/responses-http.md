@@ -54,3 +54,12 @@ A future Responses background consumer must atomically commit its immutable exec
 ## Source And Acceptance Scope
 
 Native semantics were checked against the [official OpenAI Responses create reference](https://developers.openai.com/api/reference/resources/responses/methods/create) and [API request-ID documentation](https://developers.openai.com/api/reference/overview) on 2026-10-18. X-Client-Request-Id is tracing, not a verified deduplication guarantee. This implementation relies on its own persisted receipt and never promises exactly-once provider execution after unknown network outcomes. Local test providers are isolated fixtures; no real account, real provider cost, SDK/Codex client or production database acceptance is implied. S5-03 and S7-A03-A06 remain independent; A02 has its own acceptance evidence above.
+
+
+FC-001 FND-04 preserves this accepted HTTP/persistence contract through the new
+`compat/responseshttp` entry and the neutral `responses/v1` Begin/Call/Command/Delivery
+port. The application does not parse URL/HTTP headers or construct writers; L2
+maps native documents, SSE/provenance and conditional metadata. Current scope,
+resource ownership and pending final acceptance are in
+[Foundation API v1](foundation-api-v1.md#fnd-04-应用与表示候选) and
+[FC-001 implementation evidence](../history/implementation-fc001.md).

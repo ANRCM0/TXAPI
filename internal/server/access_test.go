@@ -55,14 +55,14 @@ func newAccessFixture(t *testing.T) *accessFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(capacity.Close)
-	limiter := middleware.NewMemoryLimiter()
+	limiter := access.NewMemoryLimiter()
 	t.Cleanup(limiter.(interface{ Close() }).Close)
 	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), LogRecorder: st.WriteLog, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: capacity}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(gw.Close)
-	engine := NewEngine(Deps{Gateway: gw, Cfg: &config.Config{}, Store: st, RateLimiter: limiter, AdminAuth: middleware.AdminAuth(testSecret)})
+	engine := fixtureEngine(fixtureDeps{Gateway: gw, Cfg: &config.Config{}, Store: st, RateLimiter: limiter, AdminAuth: middleware.AdminAuth(testSecret)})
 	return &accessFixture{engine: engine, store: st, hits: &hits, capacity: capacity}
 }
 func (f *accessFixture) request(t *testing.T, method, path, body, token string) (int, map[string]json.RawMessage, string) {

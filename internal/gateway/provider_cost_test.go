@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	authentication "minigateway/internal/foundation/identity"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,7 +65,7 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 			}
 			defer gw.Close()
 			router := gin.New()
-			router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+			router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
 			output := "32"
 			if tc.output == 33 {
 				output = "33"
@@ -134,7 +135,7 @@ func TestStrictProviderEmbeddingBatchUsesIndependentInputEnvelope(t *testing.T) 
 	}
 	defer gw.Close()
 	router := gin.New()
-	router.POST("/v1/embeddings", middleware.NewAuth(st).Handle(), gw.HandleEmbeddings)
+	router.POST("/v1/embeddings", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleEmbeddings)
 	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewBufferString(
 		`{"model":"gpt-4o-mini","input":["one","two","three"]}`))
 	req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
@@ -165,7 +166,7 @@ func TestStrictProviderContractRejectsHotTargetDrift(t *testing.T) {
 	}
 	defer gw.Close()
 	router := gin.New()
-	router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+	router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(
 		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"service_tier":"default","max_completion_tokens":32}`))
 	req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)

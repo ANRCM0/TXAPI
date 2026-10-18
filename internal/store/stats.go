@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	control "minigateway/internal/foundation/contracts/control/v1"
 	"time"
 
 	"gorm.io/gorm"
@@ -157,24 +158,4 @@ func (s *Store) StatsByChannel(since time.Time) ([]ChannelStat, error) {
 //
 // 空值默认 7 天：大多数「最近用得怎么样」的问题关心的就是一周。
 // "all" 返回零值时间，调用方据此跳过时间过滤。
-func ParseSince(raw string, now time.Time) (time.Time, error) {
-	switch raw {
-	case "", "7d":
-		return now.Add(-7 * 24 * time.Hour), nil
-	case RangeAll:
-		return time.Time{}, nil
-	}
-	unit := raw[len(raw)-1]
-	numStr := raw[:len(raw)-1]
-	var n int
-	if _, err := fmt.Sscanf(numStr, "%d", &n); err != nil || n <= 0 {
-		return time.Time{}, fmt.Errorf("非法的 range: %q（支持 24h/7d/30d/all）", raw)
-	}
-	switch unit {
-	case 'h':
-		return now.Add(-time.Duration(n) * time.Hour), nil
-	case 'd':
-		return now.Add(-time.Duration(n) * 24 * time.Hour), nil
-	}
-	return time.Time{}, fmt.Errorf("非法的 range 单位: %q（支持 h/d）", raw)
-}
+func ParseSince(raw string, now time.Time) (time.Time, error) { return control.ParseSince(raw, now) }

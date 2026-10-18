@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"math/big"
+	ledger "minigateway/internal/foundation/contracts/ledger/v1"
 	"regexp"
 	"sync"
 	"time"
@@ -22,16 +23,16 @@ import (
 )
 
 var (
-	ErrStrictUnavailable  = errors.New("strict billing is unavailable")
+	ErrStrictUnavailable  = ledger.ErrStrictUnavailable
 	ErrPriceMissing       = errors.New("strict billing requires an applied model price")
-	ErrSettlementConflict = errors.New("conflicting settlement for the same reservation")
+	ErrSettlementConflict = ledger.ErrSettlementConflict
 )
 
 const (
-	Reserved             = "reserved"
-	Active               = "active"
-	Pending              = "pending"
-	Settled              = "settled"
+	Reserved             = ledger.Reserved
+	Active               = ledger.Active
+	Pending              = ledger.Pending
+	Settled              = ledger.Settled
 	StrictEnabledSetting = "billing.strict_enabled"
 )
 

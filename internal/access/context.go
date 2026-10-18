@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
+	"minigateway/internal/foundation/contracts/observability/v1"
 )
 
 // Principal is the verified model-calling identity. Only the authentication
@@ -11,7 +12,6 @@ import (
 type Principal = identity.Principal
 
 type principalKey struct{}
-type requestIDKey struct{}
 
 func clonePrincipal(p Principal) Principal {
 	p.Policy.Models = append([]string(nil), p.Policy.Models...)
@@ -25,6 +25,6 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	return clonePrincipal(p), ok
 }
 func WithRequestID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, requestIDKey{}, id)
+	return observability.WithRequestID(ctx, id)
 }
-func RequestID(ctx context.Context) string { id, _ := ctx.Value(requestIDKey{}).(string); return id }
+func RequestID(ctx context.Context) string { return observability.RequestID(ctx) }

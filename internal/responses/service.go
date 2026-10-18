@@ -12,9 +12,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	application "minigateway/internal/foundation/contracts/responses/v1"
+
 	"log/slog"
-	"net/http"
+
 	"reflect"
 	"sync"
 	"time"
@@ -22,24 +23,24 @@ import (
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 
+	native "minigateway/internal/compat/responses/v1"
+	jsonutil "minigateway/internal/foundation/contracts/json/v1"
 	state "minigateway/internal/foundation/contracts/state/v1"
-	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/jsonutil"
 )
 
-const MaxRequestBytes = 1 << 20
+const MaxRequestBytes = application.MaxRequestBytes
 
 type ReceiptStore = state.ReceiptStore
 
 type Executor = execv1.Executor
 
 type Options struct {
-	History                       *History
-	Store                         ReceiptStore
-	Executor                      Executor
-	Archive                       state.Archive
-	Identity                      identity.Authority
-	NewOutput                     func(http.ResponseWriter) execv1.DeadlineOutput
+	History  *History
+	Store    ReceiptStore
+	Executor Executor
+	Archive  state.Archive
+	Identity identity.Authority
+
 	DigestKey                     []byte
 	Retention                     time.Duration
 	Limits                        state.ResponseRequestLimits
@@ -47,13 +48,13 @@ type Options struct {
 }
 
 type Service struct {
-	readWindows                 map[uint]historyReadWindow
-	history                     *History
-	store                       ReceiptStore
-	executor                    Executor
-	archive                     state.Archive
-	identity                    identity.Authority
-	newOutput                   func(http.ResponseWriter) execv1.DeadlineOutput
+	readWindows map[uint]historyReadWindow
+	history     *History
+	store       ReceiptStore
+	executor    Executor
+	archive     state.Archive
+	identity    identity.Authority
+
 	digest                      []byte
 	version                     string
 	retention                   time.Duration
@@ -75,13 +76,13 @@ func missing(v any) bool {
 }
 
 func New(ctx context.Context, opts Options) (*Service, error) {
-	if missing(opts.Store) || missing(opts.Executor) || missing(opts.Archive) || missing(opts.Identity) || opts.NewOutput == nil || len(opts.DigestKey) != 32 ||
+	if missing(opts.Store) || missing(opts.Executor) || missing(opts.Archive) || missing(opts.Identity) || len(opts.DigestKey) != 32 ||
 		opts.Retention < time.Minute || opts.Retention > 7*24*time.Hour || opts.Limits.OwnerRecords < 1 || opts.Limits.InstanceRecords <= opts.Limits.OwnerRecords ||
 		opts.ActiveRequests < 2 || opts.ActiveRequests > 128 || opts.OwnerRequests < 1 || opts.OwnerRequests >= opts.ActiveRequests {
 		return nil, errors.New("invalid Responses application configuration")
 	}
 	digest := sha256.Sum256(opts.DigestKey)
-	s := &Service{history: opts.History, store: opts.Store, executor: opts.Executor, archive: opts.Archive, identity: opts.Identity, newOutput: opts.NewOutput,
+	s := &Service{history: opts.History, store: opts.Store, executor: opts.Executor, archive: opts.Archive, identity: opts.Identity,
 		digest: bytes.Clone(opts.DigestKey), version: hex.EncodeToString(digest[:]), retention: opts.Retention, limits: opts.Limits,
 		maxActive: opts.ActiveRequests, maxOwner: opts.OwnerRequests, owners: make(map[uint]int)}
 	if err := s.store.InitializeResponseRequests(ctx, s.version); err != nil {
@@ -151,169 +152,232 @@ func validKey(key string) bool {
 	return true
 }
 
-func headers(w http.ResponseWriter, receipt state.ResponseRequest) {
-	w.Header().Set("X-TXAPI-Generation-ID", receipt.ID)
-	w.Header().Set("X-TXAPI-Response-ID", receipt.ResponseID)
+func identify(delivery application.Delivery, receipt state.ResponseRequest) {
+	delivery.Annotate(application.Metadata{GenerationID: receipt.ID, ResponseID: receipt.ResponseID})
+}
+func problem(delivery application.Delivery, code, message string) {
+	delivery.Problem(application.Problem{Code: code, Message: message})
 }
 
-func respond(w http.ResponseWriter, status int, kind, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"type": kind, "message": message}})
+type requestCall struct {
+	mu        sync.Mutex
+	service   *Service
+	ctx       context.Context
+	principal identity.Principal
+	binding   identity.Binding
+	used      bool
+	closed    bool
+	action    application.Action
 }
 
-func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.identity.Current(r.Context())
+func (s *Service) Begin(parent context.Context, action application.Action) (application.Call, *application.Problem) {
+	p, ok := s.identity.Current(parent)
 	if !ok || p.UserID == 0 || p.TokenID == 0 {
-		respond(w, 401, "unauthorized", "a verified identity is required")
-		return
+		return nil, &application.Problem{Code: "unauthorized", Message: "a verified identity is required"}
 	}
 	if !s.acquire(p.UserID) {
-		w.Header().Set("Retry-After", "1")
-		respond(w, 429, "rate_limit_error", "Responses capacity is busy")
-		return
+		return nil, &application.Problem{Code: "rate_limit_error", Message: "Responses capacity is busy", Metadata: application.Metadata{RetryAfterSeconds: 1}}
 	}
-	defer s.release(p.UserID)
-	binding := identity.Binding{UserID: p.UserID, TokenID: p.TokenID}
-	ctx, current, err := s.identity.Refresh(r.Context(), binding)
-	if errors.Is(err, identity.ErrUnauthorized) {
-		respond(w, 401, "unauthorized", "identity is no longer authorized")
-		return
-	}
-	if err != nil || current.UserID != p.UserID || current.TokenID != p.TokenID || current.Policy.Validate() != nil ||
-		current.RPMLimit < 0 || current.TPMLimit < 0 || current.UserRPMLimit < 0 || current.UserConcurrencyLimit < 0 || current.KeyConcurrencyLimit < 0 {
-		respond(w, 503, "authorization_unavailable", "current identity cannot be verified")
-		return
-	}
-	if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
-		if s.history == nil {
-			respond(w, 503, "history_unavailable", "Responses history is not enabled")
-			return
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			s.release(p.UserID)
 		}
-		s.historyHTTP(w, r, binding)
+	}()
+	fail := func(code, message string, metadata application.Metadata) (application.Call, *application.Problem) {
+		return nil, &application.Problem{Code: code, Message: message, Metadata: metadata}
+	}
+	binding := identity.Binding{UserID: p.UserID, TokenID: p.TokenID}
+	ctx, current, err := s.identity.Refresh(parent, binding)
+	if errors.Is(err, identity.ErrUnauthorized) {
+		return fail("unauthorized", "identity is no longer authorized", application.Metadata{})
+	}
+	if err != nil || current.UserID != p.UserID || current.TokenID != p.TokenID || current.Policy.Validate() != nil || current.RPMLimit < 0 || current.TPMLimit < 0 || current.UserRPMLimit < 0 || current.UserConcurrencyLimit < 0 || current.KeyConcurrencyLimit < 0 {
+		return fail("authorization_unavailable", "current identity cannot be verified", application.Metadata{})
+	}
+	if action != application.CreateResponse {
+		if s.history == nil {
+			return fail("history_unavailable", "Responses history is not enabled", application.Metadata{})
+		}
+		if !s.allowHistoryRead(binding.UserID) {
+			return fail("rate_limit_error", "history delivery rate exceeded", application.Metadata{NoStore: true, RetryAfterSeconds: 60})
+		}
+	}
+	call := &requestCall{service: s, ctx: ctx, principal: current, binding: binding, action: action}
+	handedOff = true
+	return call, nil
+}
+func (c *requestCall) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.closed = true
+		c.service.release(c.binding.UserID)
+	}
+}
+func (c *requestCall) Handle(command application.Command, delivery application.Delivery) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.used {
+		if !missing(delivery) {
+			problem(delivery, "request_closed", "this request scope cannot be reused")
+		}
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBytes+1))
-	if err != nil {
-		respond(w, 400, "invalid_request_error", "could not read Responses body")
+	c.used = true
+	if missing(delivery) {
+		return
+	}
+	if command.Action != c.action {
+		problem(delivery, "request_closed", "this request scope cannot be reused")
+		return
+	}
+	if command.ExpectedVersion != nil {
+		value := *command.ExpectedVersion
+		command.ExpectedVersion = &value
+	}
+	command.IdempotencyKeys = append([]string(nil), command.IdempotencyKeys...)
+	if command.Action != application.CreateResponse {
+		c.service.historyCommand(c.ctx, delivery, command, c.binding)
+		return
+	}
+	c.service.create(c.ctx, delivery, c.principal, c.binding, command)
+}
+
+func readPayload(command application.Command) ([]byte, error) {
+	if missing(command.Payload) {
+		return nil, nil
+	}
+	body, err := command.Payload.Read()
+	if len(body) > MaxRequestBytes+1 {
+		body = body[:MaxRequestBytes+1]
+	}
+	return bytes.Clone(body), err
+}
+
+func (s *Service) create(ctx context.Context, delivery application.Delivery, current identity.Principal, binding identity.Binding, command application.Command) {
+	body, readErr := readPayload(command)
+	if readErr != nil {
+		problem(delivery, "invalid_request_error", "could not read Responses body")
 		return
 	}
 	if len(body) > MaxRequestBytes {
-		respond(w, 413, "request_too_large", "Responses request exceeds 1 MiB")
+		problem(delivery, "request_too_large", "Responses request exceeds 1 MiB")
 		return
 	}
 	validationBody := body
 	if s.history != nil {
 		fields, _, _, parseErr := stateFields(body)
 		if parseErr != nil {
-			respond(w, 400, "invalid_request_error", parseErr.Error())
+			problem(delivery, "invalid_request_error", parseErr.Error())
 			return
 		}
 		validationBody, _ = json.Marshal(fields)
 	}
-	request, err := protocol.ParseRequest(protocol.Responses, validationBody)
+	request, err := native.ParseHTTP(validationBody)
 	if err != nil {
-		respond(w, 400, "invalid_request_error", err.Error())
+		problem(delivery, "invalid_request_error", err.Error())
 		return
 	}
-	if !current.Policy.Allows(request.Model()) {
-		respond(w, 403, "forbidden", "model is not authorized")
+	if !current.Policy.Allows(request.Model) {
+		problem(delivery, "forbidden", "model is not authorized")
 		return
 	}
-	if len(request.Model()) > 256 {
-		respond(w, 400, "invalid_request_error", "model name is too long")
+	if len(request.Model) > 256 {
+		problem(delivery, "invalid_request_error", "model name is too long")
 		return
 	}
 	canonicalBody, err := canonical(body)
 	if err != nil {
-		respond(w, 400, "invalid_request_error", "invalid or ambiguous Responses JSON")
+		problem(delivery, "invalid_request_error", "invalid or ambiguous Responses JSON")
 		return
 	}
-	keys := r.Header.Values("Idempotency-Key")
-	key := r.Header.Get("Idempotency-Key")
+	keys := command.IdempotencyKeys
+	key := ""
+	if len(keys) > 0 {
+		key = keys[0]
+	}
 	if len(keys) > 1 || (len(keys) == 1 && !validKey(key)) {
-		respond(w, 400, "invalid_request_error", "Idempotency-Key must contain 1 to 256 visible ASCII bytes")
+		problem(delivery, "invalid_request_error", "Idempotency-Key must contain 1 to 256 visible ASCII bytes")
 		return
 	}
 	id, err := randomID()
 	if err != nil {
-		respond(w, 503, "responses_unavailable", "could not allocate generation identity")
+		problem(delivery, "responses_unavailable", "could not allocate generation identity")
 		return
 	}
 	if len(keys) == 0 {
 		key = id
 	}
-	native, _ := request.Responses()
 	now := time.Now()
-	receipt := state.ResponseRequest{ID: id, UserID: p.UserID, TokenID: p.TokenID, Operation: string(protocol.Responses),
-		KeyHash: s.hash("key", []byte(fmt.Sprintf("%d/%d/%s", p.UserID, p.TokenID, key))), RequestHash: s.hash("request", canonicalBody), DigestVersion: s.version,
-		ResponseID: "resp_" + id, Model: request.Model(), Stream: request.Stream(), Store: native.StoreEnabled(), State: state.ResponseDispatching,
+	receipt := state.ResponseRequest{ID: id, UserID: binding.UserID, TokenID: binding.TokenID, Operation: string(execv1.Responses),
+		KeyHash: s.hash("key", []byte(fmt.Sprintf("%d/%d/%s", binding.UserID, binding.TokenID, key))), RequestHash: s.hash("request", canonicalBody), DigestVersion: s.version,
+		ResponseID: "resp_" + id, Model: request.Model, Stream: request.Stream, Store: request.StoreEnabled(), State: state.ResponseDispatching,
 		CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(s.retention).UnixMilli()}
-	receipt, fresh, err := s.store.BeginResponseRequest(r.Context(), receipt, s.limits)
+	receipt, fresh, err := s.store.BeginResponseRequest(ctx, receipt, s.limits)
 	if err != nil {
 		switch {
 		case errors.Is(err, identity.ErrUnauthorized):
-			respond(w, 401, "unauthorized", "identity is no longer authorized")
+			problem(delivery, "unauthorized", "identity is no longer authorized")
 		case errors.Is(err, state.ErrResponseConflict):
-			respond(w, 409, "idempotency_conflict", "Idempotency-Key was used for another request")
+			problem(delivery, "idempotency_conflict", "Idempotency-Key was used for another request")
 		case errors.Is(err, state.ErrResponseCapacity):
-			respond(w, 429, "responses_capacity", "Responses receipt capacity is full")
+			problem(delivery, "responses_capacity", "Responses receipt capacity is full")
 		default:
-			respond(w, 503, "responses_unavailable", "Responses receipt could not be recorded")
+			problem(delivery, "responses_unavailable", "Responses receipt could not be recorded")
 		}
 		return
 	}
-	headers(w, receipt)
+	identify(delivery, receipt)
 	// Refresh returned the authenticated context; the public snapshot is not proof.
 	if !fresh {
 		if s.history != nil && receipt.Store && receipt.State != state.ResponseDispatching && receipt.State != state.ResponseUncertain && receipt.State != state.ResponseRejected {
 			_, content, err := s.history.read(ctx, binding, receipt.ResponseID)
 			if err != nil || !content.Ready {
-				respond(w, 409, "idempotency_result_unavailable", "retained response history is unavailable")
+				problem(delivery, "idempotency_result_unavailable", "retained response history is unavailable")
 				return
 			}
 		}
-		s.replay(ctx, w, binding, receipt)
+		s.replay(ctx, delivery, binding, receipt)
 		return
 	}
-	w.Header().Set("X-TXAPI-Idempotency", "created")
+	delivery.Annotate(application.Metadata{Idempotency: "created"})
 	var turn *historyTurn
 	if s.history != nil {
 		body, turn, err = s.history.prepare(ctx, binding, receipt, body)
 		if err != nil {
 			_ = s.finish(receipt, state.ResponseRequestCompletion{State: state.ResponseRejected, StatusCode: 409, ErrorType: "history_unavailable"})
-			historyError(w, err)
+			historyProblem(delivery, err)
 			return
 		}
 	}
-	s.execute(ctx, w, binding, receipt, body, turn)
+	s.execute(ctx, delivery, binding, receipt, body, turn)
 }
 
-func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding identity.Binding, receipt state.ResponseRequest) {
-	w.Header().Set("X-TXAPI-Idempotency", "replayed")
+func (s *Service) replay(ctx context.Context, delivery application.Delivery, binding identity.Binding, receipt state.ResponseRequest) {
+	delivery.Annotate(application.Metadata{Idempotency: "replayed"})
 	switch receipt.State {
 	case state.ResponseDispatching:
-		w.Header().Set("Retry-After", "1")
-		respond(w, 409, "idempotency_in_progress", "the original generation is still in progress")
+		delivery.Annotate(application.Metadata{RetryAfterSeconds: 1})
+		problem(delivery, "idempotency_in_progress", "the original generation is still in progress")
 		return
 	case state.ResponseUncertain:
-		respond(w, 409, "idempotency_unknown", "the original result is unknown; automatic re-execution is unsafe")
+		problem(delivery, "idempotency_unknown", "the original result is unknown; automatic re-execution is unsafe")
 		return
 	}
 	if receipt.OutputRecordID == "" {
-		respond(w, 409, "idempotency_result_unavailable", "the original generation is not re-executed; its body is not retained")
+		problem(delivery, "idempotency_result_unavailable", "the original generation is not re-executed; its body is not retained")
 		return
 	}
 	stored, err := s.archive.Read(ctx, binding, receipt.OutputRecordID)
-	if err != nil || !stored.Result.ProtocolComplete && receipt.State != state.ResponseRejected || stored.Result.Model != receipt.Model || stored.Result.Operation != protocol.Responses {
-		respond(w, 409, "idempotency_result_unavailable", "the original generation is not re-executed; its body is unavailable")
+	if err != nil || !stored.Result.ProtocolComplete && receipt.State != state.ResponseRejected || stored.Result.Model != receipt.Model || stored.Result.Operation != execv1.Responses {
+		problem(delivery, "idempotency_result_unavailable", "the original generation is not re-executed; its body is unavailable")
 		return
 	}
 	// Request tracing is per delivery; do not replay the first caller's trace ID.
-	delete(stored.Metadata.Values, "X-Request-Id")
-	delete(stored.Metadata.Values, "X-Request-ID")
-	output := s.newOutput(w)
-	if err := output.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+	stored.Metadata = native.ReplayMetadata(stored.Metadata)
+	output := delivery
+	if err := output.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil && !errors.Is(err, execv1.ErrDeadlineUnsupported) {
 		return
 	}
 	defer output.SetWriteDeadline(time.Time{})
@@ -337,8 +401,8 @@ func (s *Service) finish(receipt state.ResponseRequest, completion state.Respons
 	return s.store.FinishResponseRequest(ctx, receipt, completion)
 }
 
-func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding identity.Binding, receipt state.ResponseRequest, body []byte, turn *historyTurn) {
-	output := s.newOutput(w)
+func (s *Service) execute(ctx context.Context, delivery application.Delivery, binding identity.Binding, receipt state.ResponseRequest, body []byte, turn *historyTurn) {
+	output := delivery
 	var recording state.Foreground
 	finished := false
 	historyFinished := turn == nil
@@ -354,7 +418,7 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 			// A panic can follow dispatch. Never log payloads or make this key fresh.
 			slog.Error("Responses execution interrupted", "generation_id", receipt.ID)
 			if !output.State().Committed {
-				respond(w, 500, "internal_error", "Responses execution was interrupted")
+				problem(delivery, "internal_error", "Responses execution was interrupted")
 			}
 		}
 	}()
@@ -368,7 +432,7 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 				historyFinished = true
 			}
 			finished = s.finish(receipt, state.ResponseRequestCompletion{State: state.ResponseRejected, StatusCode: 503, ErrorType: "archive_unavailable"}) == nil
-			respond(w, 503, "archive_unavailable", "encrypted replay capacity is unavailable")
+			problem(delivery, "archive_unavailable", "encrypted replay capacity is unavailable")
 			return
 		}
 		target = recording
@@ -378,7 +442,7 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 		captured = &captureOutput{Output: target, parent: turn.content.Parent, conversation: turn.content.Conversation}
 		target = captured
 	}
-	input := execv1.Invocation{Operation: protocol.Responses, Body: body, OutputID: receipt.ResponseID}
+	input := execv1.Invocation{Operation: execv1.Responses, Body: body, OutputID: receipt.ResponseID}
 	if turn != nil {
 		input.Target = turn.target
 	}
@@ -423,12 +487,14 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 	if err := s.finish(receipt, completion); err != nil {
 		slog.Error("Responses receipt finalization failed", "generation_id", receipt.ID)
 		if !output.State().Committed {
-			respond(w, 503, "responses_unavailable", "generation result could not be finalized")
+			problem(delivery, "responses_unavailable", "generation result could not be finalized")
 		}
 		return
 	}
 	finished = true
 	if !output.State().Committed {
-		respond(w, 503, "responses_unavailable", "generation output is unavailable; the request is not automatically re-executed")
+		problem(delivery, "responses_unavailable", "generation output is unavailable; the request is not automatically re-executed")
 	}
 }
+
+var _ application.Service = (*Service)(nil)

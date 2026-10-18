@@ -10,8 +10,8 @@
 package store
 
 import (
-	"errors"
 	"fmt"
+	control "minigateway/internal/foundation/contracts/control/v1"
 	"sync"
 	"time"
 
@@ -154,7 +154,7 @@ func (s *Store) Close() error {
 func (s *Store) DB() *gorm.DB { return s.db }
 
 // ErrNotFound 供调用方用 errors.Is 判断「记录不存在」。
-var ErrNotFound = errors.New("记录不存在")
+var ErrNotFound = control.ErrNotFound
 
 // reloadCache 从数据库全量重读渠道和令牌，重建内存缓存。
 //

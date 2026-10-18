@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	authentication "minigateway/internal/foundation/identity"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -147,7 +148,7 @@ func newTestGateway(t *testing.T, tokenQuota float64) *testGateway {
 
 	e := gin.New()
 	e.Use(middleware.RequestID())
-	auth := middleware.NewAuth(st)
+	auth := middleware.NewAuth(authentication.NewTokenAuthenticator(st))
 	e.POST("/v1/chat/completions", auth.Handle(), gw.HandleChatCompletions)
 
 	return &testGateway{
@@ -462,7 +463,7 @@ func TestUsageEstimateFallback(t *testing.T) {
 	gw.SetLogRecorder(st.WriteLog)
 
 	e := gin.New()
-	auth := middleware.NewAuth(st)
+	auth := middleware.NewAuth(authentication.NewTokenAuthenticator(st))
 	e.POST("/v1/chat/completions", auth.Handle(), gw.HandleChatCompletions)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",

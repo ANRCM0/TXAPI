@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"minigateway/internal/compat/httpoutput"
+	"minigateway/internal/compat/responseshttp"
 	authority "minigateway/internal/foundation/identity"
 	"minigateway/internal/foundation/persistence"
 	"minigateway/internal/secrets"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -78,7 +80,7 @@ func (e *historyExecutor) Execute(ctx context.Context, out execv1.Output, in exe
 	return result
 }
 
-func historyService(t *testing.T, f *responseFixture, e app.Executor, active string, keys map[string][]byte) *app.Service {
+func historyService(t *testing.T, f *responseFixture, e app.Executor, active string, keys map[string][]byte) http.Handler {
 	t.Helper()
 	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: persistence.Archive(f.st), Resolve: f.st.ResolvePrincipal, ActiveKey: active, Keys: keys, Retention: time.Hour, MaxRecordBytes: 65536, Limits: model.GenerationArchiveLimits{InstanceBytes: 4 << 20, OwnerBytes: 2 << 20, InstanceRecords: 64, OwnerRecords: 32}})
 	if err != nil {
@@ -92,14 +94,14 @@ func historyService(t *testing.T, f *responseFixture, e app.Executor, active str
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := app.New(context.Background(), app.Options{History: history, Store: persistence.Receipts(f.st), Executor: e, Archive: generation.PublicArchive(archive), Identity: authority.New(f.st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 64, OwnerRecords: 32}, ActiveRequests: 8, OwnerRequests: 4})
+	s, err := app.New(context.Background(), app.Options{History: history, Store: persistence.Receipts(f.st), Executor: e, Archive: generation.PublicArchive(archive), Identity: authority.New(f.st.ResolvePrincipal), DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 64, OwnerRecords: 32}, ActiveRequests: 8, OwnerRequests: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s
+	return responseshttp.New(s, httpoutput.New)
 }
 
-func historyCall(s *app.Service, p access.Principal, method, path, body, key, match string) *httptest.ResponseRecorder {
+func historyCall(s http.Handler, p access.Principal, method, path, body, key, match string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	r = r.WithContext(access.WithPrincipal(r.Context(), p))
 	if key != "" {

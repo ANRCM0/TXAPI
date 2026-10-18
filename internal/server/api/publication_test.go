@@ -15,7 +15,7 @@ func TestPublicationFailureIsVisibleAndRetryDoesNotCreateRevision(t *testing.T) 
 	engine, st := newAPITestEngine(t)
 	_ = engine
 	fail := false
-	h := New(st, func() error {
+	h := fixtureHandler(st, func() error {
 		if fail {
 			return errors.New("private-key-should-not-escape")
 		}
@@ -55,7 +55,7 @@ func TestPublicationFailureIsVisibleAndRetryDoesNotCreateRevision(t *testing.T) 
 
 func TestCommittedSaveWithFailedCacheRefreshStillAdvancesPublication(t *testing.T) {
 	_, st := newAPITestEngine(t)
-	h := New(st, func() error { _, err := st.ChannelSnapshot(); return err }, nil)
+	h := fixtureHandler(st, func() error { _, err := st.ChannelSnapshot(); return err }, nil)
 	key, err := st.CreateToken(&store.TokenInput{Name: "corrupt-cache-fixture", Key: "fixture-key-only"})
 	if err != nil {
 		t.Fatal(err)

@@ -4,12 +4,15 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"time"
 
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 )
 
 const Version = "1"
+
+var ErrDeadlineUnsupported = http.ErrNotSupported
 
 type Operation string
 

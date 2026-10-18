@@ -1,16 +1,15 @@
 package api
 
 import (
+	control "minigateway/internal/foundation/contracts/control/v1"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-
-	"minigateway/internal/store"
 )
 
 // ListTokens 处理 GET /api/tokens。
 func (h *Handler) ListTokens(c *gin.Context) {
-	tokens := h.store.ListTokens()
+	tokens := h.control.ListTokens()
 	for i := range tokens {
 		// 与渠道列表同理：key 打码，只留头尾辨认
 		tokens[i].Key = ""
@@ -20,11 +19,11 @@ func (h *Handler) ListTokens(c *gin.Context) {
 
 // CreateToken 处理 POST /api/tokens。
 func (h *Handler) CreateToken(c *gin.Context) {
-	var in store.TokenInput
+	var in control.TokenInput
 	if !bindJSON(c, &in) {
 		return
 	}
-	tk, err := h.store.IssueToken(in.UserID, &in)
+	tk, err := h.control.IssueToken(in.UserID, &in)
 	if err != nil {
 		fail(c, err)
 		return
@@ -41,11 +40,11 @@ func (h *Handler) UpdateToken(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var in store.TokenInput
+	var in control.TokenInput
 	if !bindJSON(c, &in) {
 		return
 	}
-	tk, err := h.store.UpdateToken(id, &in)
+	tk, err := h.control.UpdateToken(id, &in)
 	if err != nil {
 		fail(c, err)
 		return
@@ -60,7 +59,7 @@ func (h *Handler) DeleteToken(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.store.DeleteToken(id); err != nil {
+	if err := h.control.DeleteToken(id); err != nil {
 		fail(c, err)
 		return
 	}
@@ -71,7 +70,7 @@ func (h *Handler) DeleteToken(c *gin.Context) {
 
 // ListAbilities 处理 GET /api/abilities，暴露路由加速表。
 func (h *Handler) ListAbilities(c *gin.Context) {
-	rows, err := h.store.Abilities()
+	rows, err := h.control.Abilities()
 	if err != nil {
 		fail(c, err)
 		return
