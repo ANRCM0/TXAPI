@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 13
+const latestMigrationVersion = 14
 
 type dataMigration struct {
 	Version int
@@ -62,6 +62,11 @@ var dataMigrations = []dataMigration{
 		return nil
 	}},
 	{Version: 13, Apply: func(tx *gorm.DB) error { return nil }},
+	{Version: 14, Apply: func(tx *gorm.DB) error {
+		// AutoMigrate adds terminal deletion and shared namespace metadata;
+		// retained v13 digests, bindings and ciphertext are never rewritten.
+		return nil
+	}},
 }
 
 func checkMigrationVersion(db *gorm.DB, supported int) error {

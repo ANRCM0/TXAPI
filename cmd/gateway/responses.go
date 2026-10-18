@@ -12,27 +12,57 @@ import (
 
 	"minigateway/internal/compat/httpoutput"
 	"minigateway/internal/config"
+	bg "minigateway/internal/foundation/contracts/background/v1"
 	authority "minigateway/internal/foundation/identity"
 	bridge "minigateway/internal/foundation/runtime"
 	"minigateway/internal/gateway"
 	"minigateway/internal/generation"
+	bs "minigateway/internal/generation/backgroundstate"
 	"minigateway/internal/model"
+	native "minigateway/internal/protocol/responses"
 	"minigateway/internal/responses"
 	"minigateway/internal/store"
 )
 
 type responsesRuntime struct {
+	worker  *generation.BackgroundRunner
 	handler http.Handler
 	cancel  context.CancelFunc
 	done    chan struct{}
 }
 
 func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gateway.Gateway) (*responsesRuntime, error) {
-	if !cfg.Enabled {
+	if cfg.Background.Enabled && !cfg.Enabled {
+		return nil, errors.New("background requires the Responses runtime")
+	}
+	if st == nil {
+		if cfg.Enabled {
+			return nil, errors.New("Responses store is required")
+		}
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if err := st.CleanupExpiredBackground(ctx); err != nil {
+		return nil, errors.New("background retention initialization failed")
+	}
+	if gw != nil && gw.BillingMode() != "disabled" {
+		guard, end := context.WithTimeout(context.Background(), 2*time.Second)
+		_, err := st.InitializeBackground(guard, "", gw.BillingMode())
+		end()
+		if err != nil {
+			return nil, errors.New("retained background tasks require disabled billing")
+		}
+	}
+	if !cfg.Enabled {
+		background, stop := context.WithCancel(context.Background())
+		r := &responsesRuntime{cancel: stop, done: make(chan struct{})}
+		go r.retention(background, st, false)
+		return r, nil
+	}
+	if gw == nil {
+		return nil, errors.New("Responses gateway is required")
+	}
 	if !st.CredentialEncryptionReady(ctx) {
 		return nil, errors.New("Responses requires activated upstream credential encryption")
 	}
@@ -72,7 +102,29 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	if err = st.RecoverResponseHistory(ctx); err != nil {
 		return nil, errors.New("Responses history recovery failed")
 	}
-	service, err := responses.New(ctx, responses.Options{History: history, Store: persistence.Receipts(st), Executor: bridge.NewExecutor(gw), Archive: generation.PublicArchive(archive), Identity: authority.New(st.ResolvePrincipal), DigestKey: keys.Digest,
+	var backgroundService *generation.BackgroundService
+	var remote *gateway.BackgroundRemote
+	var backgroundPort bg.Service
+	var resources bg.Resources
+	if cfg.Background.Enabled {
+		channels := map[uint]string{}
+		for _, id := range cfg.Background.ChannelIDs {
+			channels[id] = native.BackgroundRegistrationID
+		}
+		remote, err = gateway.NewBackgroundRemote(gw, gateway.BackgroundRemoteOptions{Registrations: []bg.Registration{native.BackgroundRegistration()}, Channels: channels})
+		if err != nil {
+			return nil, err
+		}
+		b := cfg.Background
+		backgroundService, err = generation.NewBackgroundService(ctx, generation.BackgroundOptions{Repository: st, Parser: native.BackgroundParser{}, BillingMode: gw.BillingMode(), ActiveKey: keys.Active, Keys: keys.Keys, DigestKey: keys.Digest,
+			Retention: time.Duration(b.RetentionSeconds) * time.Second, MetadataRetention: time.Duration(b.MetadataSeconds) * time.Second,
+			Limits: bs.Limits{InstanceRecords: b.InstanceRecords, OwnerRecords: b.OwnerRecords, InstanceBytes: b.InstanceBytes, OwnerBytes: b.OwnerBytes, InstanceActive: b.InstanceActive, OwnerActive: b.OwnerActive}})
+		if err != nil {
+			return nil, err
+		}
+		backgroundPort, resources = backgroundService, backgroundService
+	}
+	service, err := responses.New(ctx, responses.Options{Background: backgroundPort, Resources: resources, History: history, Store: persistence.Receipts(st), Executor: bridge.NewExecutor(gw), Archive: generation.PublicArchive(archive), Identity: authority.New(st.ResolvePrincipal), DigestKey: keys.Digest,
 		Retention: time.Duration(cfg.RetentionSeconds) * time.Second, Limits: model.ResponseRequestLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords},
 		ActiveRequests: cfg.ActiveRequests, OwnerRequests: cfg.OwnerRequests})
 	if err != nil {
@@ -99,31 +151,52 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	}
 	background, stop := context.WithCancel(context.Background())
 	r := &responsesRuntime{handler: responseshttp.New(service, httpoutput.New), cancel: stop, done: make(chan struct{})}
-	go func() {
-		defer close(r.done)
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-background.Done():
-				return
-			case <-ticker.C:
-				batch, end := context.WithTimeout(background, 2*time.Second)
-				_, err := st.CleanupResponseRequests(batch, time.Now(), 200)
-				if err == nil {
-					_, err = st.CleanupResponseHistory(batch, 200)
-				}
-				if err == nil {
-					_, err = st.CleanupGenerationRecords(batch, 200)
-				}
-				end()
-				if err != nil && background.Err() == nil {
-					slog.Warn("Responses retention cleanup did not finish")
-				}
+	if backgroundService != nil {
+		r.worker, err = generation.NewBackgroundRunner(background, generation.BackgroundRunnerOptions{Service: backgroundService, Remote: remote, Resolve: st.ResolvePrincipal})
+		if err != nil {
+			stop()
+			return nil, err
+		}
+		r.handler = responseshttp.NewV2(service.V2(), httpoutput.New)
+	}
+	go r.retention(background, st, true)
+	return r, nil
+}
+
+func (r *responsesRuntime) retention(ctx context.Context, st *store.Store, foreground bool) {
+	defer close(r.done)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			batch, end := context.WithTimeout(ctx, 2*time.Second)
+			// Background privacy retention is independent of all product toggles
+			// and of foreground maintenance failures. Expiry never reopens work.
+			err := st.CleanupBackground(batch, 200)
+			end()
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("background retention cleanup did not finish")
+			}
+			if !foreground {
+				continue
+			}
+			batch, end = context.WithTimeout(ctx, 2*time.Second)
+			_, err = st.CleanupResponseRequests(batch, time.Now(), 200)
+			if err == nil {
+				_, err = st.CleanupResponseHistory(batch, 200)
+			}
+			if err == nil {
+				_, err = st.CleanupGenerationRecords(batch, 200)
+			}
+			end()
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("Responses retention cleanup did not finish")
 			}
 		}
-	}()
-	return r, nil
+	}
 }
 
 func (r *responsesRuntime) Handler() http.Handler {
@@ -138,5 +211,6 @@ func (r *responsesRuntime) Close() {
 		return
 	}
 	r.cancel()
+	_ = r.worker.Close(context.Background())
 	<-r.done
 }

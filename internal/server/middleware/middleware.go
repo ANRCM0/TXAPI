@@ -107,7 +107,7 @@ func CORS() gin.HandlerFunc {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id, X-Session-Id, Idempotency-Key, If-Match")
-		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-Id, X-TXAPI-Generation-ID, X-TXAPI-Response-ID, X-TXAPI-Idempotency, X-TXAPI-Billing-ID, X-TXAPI-Price-Version, Retry-After, ETag")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-Id, X-TXAPI-Generation-ID, X-TXAPI-Response-ID, X-TXAPI-Idempotency, X-TXAPI-Billing-ID, X-TXAPI-Price-Version, X-TXAPI-Background-Retention, X-TXAPI-Background-Expires-At, Retry-After, ETag")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return

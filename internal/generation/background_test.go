@@ -3,6 +3,7 @@ package generation_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -310,7 +311,7 @@ func TestBackgroundDispatchRevalidatesAndRejectsStaleRevisions(t *testing.T) {
 
 func TestBackgroundResourceIDsCannotAliasForegroundReceiptsOrHistory(t *testing.T) {
 	f := newBackgroundFixture(t)
-	digest := strings.Repeat("d", 64)
+	digest := fmt.Sprintf("%x", sha256.Sum256(f.opts.DigestKey))
 	if e := f.st.InitializeResponseRequests(f.ctx, digest); e != nil {
 		t.Fatal(e)
 	}

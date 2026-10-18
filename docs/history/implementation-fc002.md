@@ -55,6 +55,62 @@ Windows PowerShell，所有 Go/冒烟子进程显式 `GOARCH=amd64`、`GOFLAGS=-
 
 ### 当前验收边界
 
-仍待最终功能头自动 push/PR 完整 CI 与合并后 master 验收。新契约仍为 FC-002 候选，
-当前没有 main 启动、原生后台 submit/inspect/cancel HTTP 或事件恢复承诺；A03-02/03 顺序补齐。
+PR #20 将最终功能头 `5119d349034e42ea4b4070857fb75b064451ffa3` 合并为
+`master/c1b826453d1ecfb9edc3d58322fbbaf42e172a41`；push `39121239200`、
+PR `39121268742` 和合并后 master `39121669860` 均为 check + delivery 全部 SUCCESS，
+包含 Linux 全量 race、主程序冒烟与 v13 容器安装/升级/备份恢复/退出。
+fetch 核对合并树与最终功能头相同，工作树干净；A03-01 已验收。
+新契约仍为 FC-002 候选，当前没有 main 启动、原生后台 submit/inspect/cancel HTTP
+或事件恢复承诺；A03-02/03 顺序补齐。
 旧 Chat/embeddings、前台 Responses、历史/会话、财务及恢复断言保留。
+
+## A03-02：原生后台接线（实施中，未验收）
+
+开工基线为已验收 `master/c1b8264`。接线审计发现原候选 Service 缺少资源分类与终态删除方法，
+不能满足 FC-002 原定的单一资源权威/DELETE 语义。用户已明确批准
+[FC-002-A 最小补充](../proposals/FC-002A-resource-ownership-v1.md)：同包新增 Resources.Kind/Delete，
+不改原十四组冻结入口、不扩大计费/父链/WS 范围，继续 A03-02 → A03-03。
+尚未将该批准或本节文字算作实现与验证通过。
+
+
+### A03-02 实现范围与集中验证起点
+
+- L1 owner 持久绑定、双 worker、单次真实 submit 与绑定后 inspect/cancel；原 core、选路/目标指纹、准入、健康和 generation RPM/TPM 复用。控制 RPC 不伪造旧 Principal，不走第二次生成/资金链。
+- L2 独立原生 parser/codec 保留 background=true；JSON RPC 的 queued/in_progress 不能当任务终态，原同步 decoder 不放宽。L3/v2 与原 v1 共用 Begin/Call 容量及当前授权，main 单点接线、停止和 join。
+- FC-002-A 的当前身份资源分类/仅终态 revision DELETE；前台/后台幂等键双向冲突；v14 只追加私有 deleted/共享命名空间 HMAC，保留 v13 摘要和已有 intent/账本/历史密文、AAD、迁移记录。
+- background 默认关闭，显式 channel_ids、实际凭据加密/内容密钥及 disabled 才能启用；未决任务时即使关闭开关也不能换计费模式。正文到期的访问拒绝及启动/周期清理不依赖产品开关，unknown 非内容保护不被清除。
+- 候选 OpenAPI 0.5.0 / 92 个操作，新增取消路径及临时 TTL 头；只支持非流后台、自包含输入。事件流恢复仍留 A03-03，不提前冻结候选，不勾选完整 A03/M3 或成本能力。
+
+初次测试编译遇到 generation 原测试 helper 名 execution 与新 import 冲突，已用 execv1 别名修复，保留 helper/断言。
+第一组原生 loopback/SQLite/HTTP 风险回归通过。扩展风险集的 main、codec、gateway、store、config 均通过，
+generation 仅新增删除测试的另一 Key 夹具因 owner 为 m allowlist 却请求 All 被原授权规则正确拒绝；
+将夹具改为同 m allowlist 后该失败项复验通过，没有放宽生产授权或删除断言。
+实现审计同时补齐开关关闭后的独立隐私清理、同请求 key 跨前台/后台权威冲突、控制凭据轮换拒绝和输出持久失败不惩罚上游。
+
+API 导出并逐项对照 c1b8264，仅候选 background/v1 新增 ResourceKind、两个常量和 Resources 四个符号；
+十七个快照项中的原十四组冻结公开包及 L0 与 master/5f90a20 完全相同，无删除或额外公开入口。
+`python .local/validation/check-foundation-all-docs.py` 检查全仓 32 份 Markdown / 338 本地链接锚点通过；
+`git diff --check` 通过。38 个本批 Go 文件 normalized-LF gofmt 通过，未格式化无关文件；
+五个 JS 语法检查与 10 项前端 API 行为通过。
+
+### A03-02 最终本地集中验证
+
+环境：Windows PowerShell / GOARCH=amd64 / GOFLAGS=-buildvcs=false；基线 `master/c1b8264`。
+最终来源为 379 个非 Markdown 路径，SHA-256
+`e126fee635c8576d12aebcf3c27548e178aef15256adebed91ba3006c7201077`，
+完整验证前后及提交前一致。下列结果来自该来源，不复用 A03-01 或早期定向通过。
+
+| 实际命令/检查 | 结果 |
+|---|---|
+| `go build ./...`; `go vet ./...` | PASS |
+| `go mod tidy`; `git diff --exit-code -- go.mod go.sum` | PASS；没有依赖变化 |
+| 38 个本批 Go 文件 normalized-LF gofmt；API 导出/原十四组和 L0 对照 | PASS；只有 FC-002-A 批准的四个背景资源符号新增 |
+| `go test -json -count=1 ./...` | PASS：1159 项测试/子用例、30 个测试包，5 个预期 helper SKIP，零失败 |
+| 五个 JS 语法；`node --test web/assets/api.test.mjs` | PASS；10 项前端 API 行为 |
+| `python tests/smoke/local.py --go go` | PASS；真实生产 main/auth/Chat/SSE/控制台、strict 拒绝、强杀 pending/审计豁免、凭据加密轮换/恢复及 runtime 关闭 |
+| `python tests/smoke/compatibility.py --go go --node node` | PASS；真实生产二进制/临时 SQLite/API 与 Playwright 桌面/移动、权限/模型/Key/发布与清理 |
+| 全仓 Markdown/链接与 `git diff --check` | PASS；32 份 Markdown / 338 本地链接锚点 |
+
+没有本地 Docker 可执行程序；Linux 全量 race 和 v14 容器安装/升级/备份恢复/退出由现有
+自动 CI 验证，不把 Windows 普通测试冒充这些结果。没有调用真实提供商、真实预算/生产库或宣称 SDK 认证。
+完整本地通过不等于已验收：最终提交头及合并后 master 的现有完整 CI 仍须全部通过，随后才进入 A03-03。

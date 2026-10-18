@@ -10,6 +10,7 @@ import (
 
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
+	"minigateway/internal/core"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
 	model "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/metrics"
@@ -83,27 +84,16 @@ func (g *Gateway) executeScope(c *executionScope, req execution.Request) {
 	}
 	defer requestLease()
 	c.requestAdmitted = true
-	if p, ok := access.PrincipalFromContext(ctx); ok && g.limiter != nil && !access.HasRateAdmission(ctx, p.TokenID) {
-		now := time.Now()
-		if p.RPMLimit > 0 {
-			if allowed, retry := g.limiter.AllowRequest(ctx, access.TokenBucketKey(p.TokenID), p.RPMLimit, now); !allowed {
-				c.output.setMetadata("Retry-After", strconv.Itoa(retry))
-				writeError(c, 429, "API key request rate exceeded", "rate_limit_error")
-				g.finishRequest(c, req, startedAt, nil, body)
-				return
-			}
+	var rateErr *core.Error
+	var retry int
+	c.ctx, _, retry, rateErr = g.admitGenerationRate(ctx, req)
+	if rateErr != nil {
+		if retry > 0 {
+			c.output.setMetadata("Retry-After", strconv.Itoa(retry))
 		}
-		if p.TPMLimit > 0 {
-			estimate := billing.EstimateUsage(requestPromptText(req), "").PromptTokens
-			if allowed, retry := g.limiter.AllowTokens(ctx, access.TokenUsageBucketKey(p.TokenID), p.TPMLimit, estimate, now); !allowed {
-				c.output.setMetadata("Retry-After", strconv.Itoa(retry))
-				writeError(c, 429, "API key token rate exceeded", "rate_limit_error")
-				g.finishRequest(c, req, startedAt, nil, body)
-				return
-			}
-			c.ctx = access.WithTokenReservation(ctx, p.TokenID, estimate)
-		}
-		c.ctx = access.WithRateAdmission(c.ctx, p.TokenID)
+		writeError(c, rateErr.StatusCode, rateErr.Error.Message, rateErr.Error.Type)
+		g.finishRequest(c, req, startedAt, nil, body)
+		return
 	}
 	pre, err := g.preRequest(c, req)
 	if errors.Is(err, billing.ErrQuotaExceeded) {

@@ -12,7 +12,7 @@ import (
 func foundationImportError(path, imported string) error {
 	const base = "minigateway/internal/"
 	const contracts = base + "foundation/contracts/"
-	if strings.HasPrefix(path, "store/") && strings.HasPrefix(imported, base+"generation") && imported != base+"generation/backgroundstate" {
+	if (strings.HasPrefix(path, "store/") || strings.HasPrefix(path, "gateway/")) && strings.HasPrefix(imported, base+"generation") && imported != base+"generation/backgroundstate" {
 		return fmt.Errorf("store must consume only the private background persistence seam, not %s", imported)
 	}
 	if strings.HasPrefix(path, "foundation/contracts/") {
@@ -57,6 +57,9 @@ func TestFoundationImportGuardRejectsImplementationLeaks(t *testing.T) {
 		{"store/background.go", "minigateway/internal/generation", true},
 		{"store/background.go", "minigateway/internal/generation/other", true},
 		{"store/background.go", "minigateway/internal/generation/backgroundstate", false},
+		{"gateway/background.go", "minigateway/internal/generation/backgroundstate", false},
+		{"gateway/background.go", "minigateway/internal/generation", true},
+		{"gateway/background.go", "minigateway/internal/generation/other", true},
 		{"protocol/decoder.go", "minigateway/internal/core", true},
 		{"compat/generationhttp/handler.go", "github.com/gin-gonic/gin", false},
 		{"foundation/contracts/execution/v1/api.go", "minigateway/internal/core", true},

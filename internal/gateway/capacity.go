@@ -11,6 +11,15 @@ import (
 // lease scopes. It reads limits only from the authenticated context snapshot.
 type CapacityAdmission struct{ Capacity *access.Capacity }
 
+// Called only after validating a durable claim and its immutable target binding.
+// Cleanup does not impersonate the now-revoked original request principal.
+func (a CapacityAdmission) acquireBackgroundControl(ctx context.Context, channel uint) (func(), error) {
+	if a.Capacity == nil {
+		return nil, errors.New("capacity admission is not configured")
+	}
+	return a.Capacity.AcquireAttempt(ctx, channel)
+}
+
 func (a CapacityAdmission) Acquire(ctx context.Context, scope AdmissionScope) (func(), error) {
 	if a.Capacity == nil {
 		return nil, errors.New("capacity admission is not configured")

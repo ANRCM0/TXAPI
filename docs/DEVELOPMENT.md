@@ -10,6 +10,15 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 
 2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 
+### FC-002 原生后台（A03-02 候选，尚未验收）
+
+A03-01 已经 PR #20 / `master/c1b8264` 精确头及合并后完整 CI 验收。当前工作树进一步实现
+默认关闭、仅 disabled 的原生后台 submit/inspect/cancel 与终态 DELETE，候选 OpenAPI 为
+0.5.0 / 92 操作；事件恢复仍留给顺序下一批 A03-03，完整 A03/M3 与收费后台不因此完成。
+启用、临时存储（包括 `store=false`）、幂等、资源隔离、重启和关闭边界见
+[后台运行约定](reference/responses-background.md)，实际命令与失败/修复见
+[FC-002 记录](history/implementation-fc002.md)。下文 A01/A02 段落保留其原验收范围。
+
 ### S7-A02 历史与会话（已验收合并）
 
 PR #12 从 `master/04fbfa6` 扩展 A01 并合并为 `master/765501a`，新增 11 个 API Key 鉴权的历史/Conversations/items 操作及本地完整上下文续链。schema v12 新增加密快照，不从旧回执/缓存回填历史；已验收 OpenAPI 0.4.0 / 91 操作。默认 `history_seconds: 86400`、history 实例/owner 预留 64/16 MiB，单快照 2 MiB；存储型展开请求上限 256 KiB / 1024 items，读取/修改另限每 owner 每分钟 120 次。仍默认关闭 Responses、必须实际凭据加密和挂载内容密钥，strict 全拒绝；后台/WS 未接入。

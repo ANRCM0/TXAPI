@@ -122,6 +122,14 @@ responses:
   owner_bytes: 4194304
   active_requests: 32
   owner_requests: 4
+  # Native background is a separate disabled-billing-only, self-contained input slice.
+  # Explicit channel opt-in is required; "openai" alone never declares support.
+  background:
+    enabled: false
+    channel_ids: []
+    # Temporary encrypted content also applies to store=false; not permanent history.
+    retention_seconds: 600
+    metadata_seconds: 86400
 
 # 渠道与令牌是**种子数据**：只在数据库为空时导入一次，之后通过管理 API 增删改。
 # 真实使用时替换 base_url、模型名和两个 key 占位符；

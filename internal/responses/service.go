@@ -24,6 +24,7 @@ import (
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 
 	native "minigateway/internal/compat/responses/v1"
+	background "minigateway/internal/foundation/contracts/background/v1"
 	jsonutil "minigateway/internal/foundation/contracts/json/v1"
 	state "minigateway/internal/foundation/contracts/state/v1"
 )
@@ -35,11 +36,13 @@ type ReceiptStore = state.ReceiptStore
 type Executor = execv1.Executor
 
 type Options struct {
-	History  *History
-	Store    ReceiptStore
-	Executor Executor
-	Archive  state.Archive
-	Identity identity.Authority
+	Background background.Service
+	Resources  background.Resources
+	History    *History
+	Store      ReceiptStore
+	Executor   Executor
+	Archive    state.Archive
+	Identity   identity.Authority
 
 	DigestKey                     []byte
 	Retention                     time.Duration
@@ -48,6 +51,8 @@ type Options struct {
 }
 
 type Service struct {
+	background  background.Service
+	resources   background.Resources
 	readWindows map[uint]historyReadWindow
 	history     *History
 	store       ReceiptStore
@@ -76,13 +81,16 @@ func missing(v any) bool {
 }
 
 func New(ctx context.Context, opts Options) (*Service, error) {
+	if (opts.Background != nil || opts.Resources != nil) && (missing(opts.Background) || missing(opts.Resources)) {
+		return nil, errors.New("both background resource and task authorities are required")
+	}
 	if missing(opts.Store) || missing(opts.Executor) || missing(opts.Archive) || missing(opts.Identity) || len(opts.DigestKey) != 32 ||
 		opts.Retention < time.Minute || opts.Retention > 7*24*time.Hour || opts.Limits.OwnerRecords < 1 || opts.Limits.InstanceRecords <= opts.Limits.OwnerRecords ||
 		opts.ActiveRequests < 2 || opts.ActiveRequests > 128 || opts.OwnerRequests < 1 || opts.OwnerRequests >= opts.ActiveRequests {
 		return nil, errors.New("invalid Responses application configuration")
 	}
 	digest := sha256.Sum256(opts.DigestKey)
-	s := &Service{history: opts.History, store: opts.Store, executor: opts.Executor, archive: opts.Archive, identity: opts.Identity,
+	s := &Service{background: opts.Background, resources: opts.Resources, history: opts.History, store: opts.Store, executor: opts.Executor, archive: opts.Archive, identity: opts.Identity,
 		digest: bytes.Clone(opts.DigestKey), version: hex.EncodeToString(digest[:]), retention: opts.Retention, limits: opts.Limits,
 		maxActive: opts.ActiveRequests, maxOwner: opts.OwnerRequests, owners: make(map[uint]int)}
 	if err := s.store.InitializeResponseRequests(ctx, s.version); err != nil {

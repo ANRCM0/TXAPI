@@ -165,7 +165,7 @@ func (d *delivery) Problem(p app.Problem) {
 	d.Annotate(p.Metadata)
 	status := 500
 	switch p.Code {
-	case "invalid_request_error":
+	case "invalid_request_error", "unsupported_background", "unsupported_background_billing":
 		status = 400
 	case "unauthorized":
 		status = 401
@@ -173,13 +173,13 @@ func (d *delivery) Problem(p app.Problem) {
 		status = 403
 	case "not_found":
 		status = 404
-	case "idempotency_conflict", "idempotency_result_unavailable", "idempotency_in_progress", "idempotency_unknown", "history_conflict", "history_context_unavailable", "request_closed":
+	case "idempotency_conflict", "idempotency_result_unavailable", "idempotency_in_progress", "idempotency_unknown", "history_conflict", "history_context_unavailable", "request_closed", "background_conflict", "background_unknown", "background_result_unavailable":
 		status = 409
 	case "request_too_large":
 		status = 413
-	case "rate_limit_error", "responses_capacity", "history_capacity":
+	case "rate_limit_error", "responses_capacity", "history_capacity", "background_capacity":
 		status = 429
-	case "authorization_unavailable", "history_unavailable", "responses_unavailable", "archive_unavailable":
+	case "authorization_unavailable", "history_unavailable", "responses_unavailable", "archive_unavailable", "background_unavailable":
 		status = 503
 	}
 	d.writer.Header().Set("Content-Type", "application/json")

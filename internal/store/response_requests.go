@@ -43,6 +43,13 @@ func responseNamespace(tx *gorm.DB, version string, initialize bool) error {
 		Update("value", gorm.Expr("value")).Error; err != nil {
 		return err
 	}
+	var background model.Setting
+	if e := tx.Where("key = ?", backgroundDigestSetting).Limit(1).Find(&background).Error; e != nil {
+		return e
+	}
+	if background.Value != "" && background.Value != version {
+		return model.ErrResponseUnavailable
+	}
 	var setting model.Setting
 	found := tx.Where("key = ?", responseDigestSetting).Limit(1).Find(&setting)
 	if found.Error != nil {
@@ -145,6 +152,15 @@ func (s *Store) BeginResponseRequest(ctx context.Context, in model.ResponseReque
 			if count >= maximum {
 				return model.ErrResponseCapacity
 			}
+		}
+		var background int64
+		// An unresolved v13 namespace cannot safely be assumed unrelated. Keep
+		// its owner's foreground admission closed until replay/backfill or expiry.
+		if e := tx.Model(&model.BackgroundJob{}).Where("user_id = ? AND token_id = ? AND (namespace_hash = ? OR namespace_hash = '')", in.UserID, in.TokenID, in.KeyHash).Count(&background).Error; e != nil {
+			return e
+		}
+		if background != 0 {
+			return model.ErrResponseConflict
 		}
 		if err := noBackgroundResource(tx, in.ResponseID); err != nil {
 			return err

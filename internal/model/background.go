@@ -9,6 +9,7 @@ type BackgroundJob struct {
 	Operation        string `gorm:"not null"`
 	Model            string `gorm:"not null"`
 	KeyHash          string `gorm:"not null;uniqueIndex:idx_background_key,priority:3;size:64"`
+	NamespaceHash    string `gorm:"not null;default:'';size:64;index"`
 	RequestHash      string `gorm:"not null"`
 	DigestVersion    string `gorm:"not null"`
 	Stage            string `gorm:"not null"`
@@ -30,6 +31,7 @@ type BackgroundJob struct {
 	LastSequence     int64  `gorm:"not null"`
 	StoredBytes      int64  `gorm:"not null"`
 	EventCount       int64  `gorm:"not null"`
+	Deleted          bool   `gorm:"not null;default:false"`
 }
 
 type BackgroundEvent struct {
