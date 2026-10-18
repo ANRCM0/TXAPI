@@ -10,9 +10,10 @@ import (
 	"testing"
 
 	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	"minigateway/internal/gateway"
 	"minigateway/internal/protocol/adaptor/openai"
 	"minigateway/internal/protocol/meta"
-	"minigateway/internal/protocol/model"
 )
 
 var errUpstreamRead = errors.New("upstream connection reset")
@@ -35,10 +36,10 @@ type staticResponse struct{ body io.Reader }
 func (s staticResponse) RoundTrip(r *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: 200, Body: io.NopCloser(s.body), Header: make(http.Header)}, nil
 }
-func callStreamResponse(body io.Reader) (*httptest.ResponseRecorder, *model.ErrorWithStatusCode) {
+func callStreamResponse(body io.Reader) (*httptest.ResponseRecorder, *core.Error) {
 	rec := httptest.NewRecorder()
 	e := core.New(core.Options{Client: &http.Client{Transport: staticResponse{body: body}}})
-	result := e.Execute(context.Background(), rec, core.Input{URL: "http://upstream.test", Stream: true, Decoder: NewDecoder(&openai.Adaptor{}, &meta.Meta{IsStream: true})})
+	result := e.Execute(context.Background(), rec, gateway.ToCoreInput(execv1.Input{URL: "http://upstream.test", Stream: true, Decoder: NewDecoder(&openai.Adaptor{}, &meta.Meta{IsStream: true})}))
 	return rec, result.Error
 }
 

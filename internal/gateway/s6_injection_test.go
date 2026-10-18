@@ -13,14 +13,29 @@ import (
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/adaptor"
+	"minigateway/internal/protocol/meta"
 )
 
 type nilRegisteredAdaptor struct{ adaptor.Adaptor }
+
+type nilRegisteredFunction func()
+
+func (nilRegisteredFunction) GetRequestURL(*meta.Meta) (string, error) {
+	panic("nil function adaptor accepted")
+}
+func (nilRegisteredFunction) SetupRequestHeader(*http.Request, *meta.Meta) error {
+	panic("nil function adaptor accepted")
+}
+func (nilRegisteredFunction) ConvertRequest([]byte, *meta.Meta) ([]byte, error) {
+	panic("nil function adaptor accepted")
+}
+func (nilRegisteredFunction) GetChannelName() string { panic("nil function adaptor accepted") }
 
 func TestS6ConstructionRejectsTypedNilDependencies(t *testing.T) {
 	var admission admissionFunc
 	var limiter *generationLimiter
 	var registered *nilRegisteredAdaptor
+	var function nilRegisteredFunction
 	for _, tc := range []struct {
 		name string
 		opts Options
@@ -28,11 +43,12 @@ func TestS6ConstructionRejectsTypedNilDependencies(t *testing.T) {
 	}{
 		{"admission", Options{Admission: admission}, "admission"},
 		{"limiter", Options{Limiter: limiter}, "limiter"},
-		{"adaptor", Options{Adaptors: map[string]adaptor.Adaptor{"custom": registered}}, "adaptor"},
-		{"nil_adaptor", Options{Adaptors: map[string]adaptor.Adaptor{"custom": nil}}, "adaptor"},
+		{"adaptor", Options{Protocols: protocol.Protocols(map[string]adaptor.Adaptor{"custom": registered})}, "adaptor"},
+		{"nil_adaptor", Options{Protocols: protocol.Protocols(map[string]adaptor.Adaptor{"custom": nil})}, "adaptor"},
+		{"nil_function_adaptor", Options{Protocols: protocol.Protocols(map[string]adaptor.Adaptor{"custom": function})}, "adaptor"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g, err := New(tc.opts)
+			g, err := newRegisteredGateway(tc.opts)
 			if g != nil {
 				g.Close()
 				t.Fatal("invalid dependency produced a gateway")
@@ -45,7 +61,7 @@ func TestS6ConstructionRejectsTypedNilDependencies(t *testing.T) {
 }
 
 func TestS6AbsentOptionalDependenciesKeepDefaults(t *testing.T) {
-	g, err := New(Options{})
+	g, err := newRegisteredGateway(Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +73,7 @@ func TestS6AbsentOptionalDependenciesKeepDefaults(t *testing.T) {
 
 func TestS6TypedNilOutputRejectedBeforeAdmissionOrDispatch(t *testing.T) {
 	var acquisitions, dispatches int
-	g, err := New(Options{
+	g, err := newRegisteredGateway(Options{
 		Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
 			acquisitions++
 			return func() {}, nil
@@ -91,7 +107,7 @@ func TestS6TypedNilOutputRejectedBeforeAdmissionOrDispatch(t *testing.T) {
 
 func TestS6HTTPHandlerPreservesExistingRateAdmission(t *testing.T) {
 	limiter := &generationLimiter{}
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Limiter: limiter,
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Limiter: limiter,
 		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))}, nil
 		})}})

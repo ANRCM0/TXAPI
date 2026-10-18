@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,8 +85,8 @@ func TestStrictEmbeddingInputProfileBindsWireAndWholeRequestCap(t *testing.T) {
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}},
 					Body: io.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1]}],"usage":{"prompt_tokens":5,"total_tokens":5}}`))}, nil
 			})}
-			gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict, Client: client,
-				Adaptors:       map[string]adaptor.Adaptor{"openai": &embeddingProfileAdaptor{url: tc.url, model: tc.model}},
+			gw, err := newRegisteredGateway(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict, Client: client,
+				Protocols:      protocol.Protocols(map[string]adaptor.Adaptor{"openai": &embeddingProfileAdaptor{url: tc.url, model: tc.model}}),
 				HealthReporter: func(*dbmodel.Credential, int, string) { health++ },
 			})
 			if err != nil {

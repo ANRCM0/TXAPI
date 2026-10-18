@@ -10,7 +10,7 @@ import (
 
 func testCoordinator(t *testing.T) *Gateway {
 	t.Helper()
-	g, err := New(Options{})
+	g, err := newRegisteredGateway(Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

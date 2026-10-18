@@ -73,7 +73,7 @@ func TestStrictFeeBoundBeforeNetworkAndEveryRetry(t *testing.T) {
 			}
 			channels, client := verifiedChatChannels(t, channels, upstream.URL)
 			configureVerifiedChatCosts(t, engine, channels)
-			gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2,
+			gw, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2,
 				HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) },
 			})
 			if err != nil {
@@ -166,7 +166,7 @@ func TestStrictFeeBoundEmbeddingsRequiresWholeBatchCoverage(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict})
+	gw, err := newRegisteredGateway(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict})
 	if err != nil {
 		t.Fatal(err)
 	}

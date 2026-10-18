@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	"minigateway/internal/protocol"
 	"os"
 	"strings"
 	"sync"
@@ -19,7 +20,7 @@ import (
 )
 
 func intentOptions(st *store.Store, admission IntentAdmission) IntentOptions {
-	return IntentOptions{Admission: admission, Resolve: st.ResolvePrincipal, ActiveKey: "content-1",
+	return IntentOptions{Parser: protocol.BuiltinParser{}, Admission: admission, Resolve: st.ResolvePrincipal, ActiveKey: "content-1",
 		Keys: map[string][]byte{"content-1": bytes.Repeat([]byte{41}, 32)}, DigestKey: bytes.Repeat([]byte{72}, 32),
 		QueueTTL: 10 * time.Second, Retention: time.Hour,
 		Limits: model.GenerationIntentLimits{InstanceRecords: 32, OwnerRecords: 16, InstanceBytes: 4 << 20, OwnerBytes: 2 << 20}}
@@ -381,6 +382,8 @@ func TestIntentInvalidConfigurationFailsClosed(t *testing.T) {
 		func(o *IntentOptions) { o.Admission = nil },
 		func(o *IntentOptions) { var nilEngine *billing.Engine; o.Admission = nilEngine },
 		func(o *IntentOptions) { o.Resolve = nil },
+		func(o *IntentOptions) { o.Parser = nil },
+		func(o *IntentOptions) { var parser *protocol.BuiltinParser; o.Parser = parser },
 		func(o *IntentOptions) { o.DigestKey = o.Keys[o.ActiveKey] },
 		func(o *IntentOptions) { o.DigestKey = nil },
 		func(o *IntentOptions) { o.QueueTTL = 0 },

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"minigateway/internal/protocol"
 	"net/http"
 	"reflect"
 	"strings"
@@ -48,7 +49,7 @@ func TestAdmissionLeaseOrderingAcrossRetry(t *testing.T) {
 		}
 		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})}
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, RetryTimes: 1, Admission: gate})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, RetryTimes: 1, Admission: gate})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func TestAdmissionRejectsWithoutUpstreamOrHealthPenalty(t *testing.T) {
 			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) { hits++; return nil, errors.New("unexpected upstream") })}
 			opts := Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate, Client: client}
 			opts.HealthReporter = func(_ *dbmodel.Credential, _ int, _ string) { health++ }
-			g, err := New(opts)
+			g, err := newRegisteredGateway(opts)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +98,7 @@ func TestAdmissionReleasesDuringPanic(t *testing.T) {
 		return func() { events = append(events, string(s.Level)) }, nil
 	})
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { panic("upstream extension panic") })}
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate, Client: client})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate, Client: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,7 @@ func TestAdmissionCancellationDoesNotLeakLateLease(t *testing.T) {
 		<-ctx.Done()
 		return func() { released++ }, nil
 	})
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate, TotalTimeout: 20 * time.Millisecond})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate, TotalTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestRegisteredAdaptorIsCopiedAndUsed(t *testing.T) {
 		calls++
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`)), Header: make(http.Header)}, nil
 	})}
-	g, err := New(Options{Channels: channels, Adaptors: adaptors, Client: client})
+	g, err := newRegisteredGateway(Options{Channels: channels, Protocols: protocol.Protocols(adaptors), Client: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func (a *customAdaptor) GetRequestURL(m *meta.Meta) (string, error) {
 func TestAdmissionIsNotReachedForDeniedModel(t *testing.T) {
 	calls := 0
 	gate := admissionFunc(func(context.Context, AdmissionScope) (func(), error) { calls++; return func() {}, nil })
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,7 @@ func TestAdmissionIsNotReachedForDeniedModel(t *testing.T) {
 func TestAdmissionMisconfigurationFailsClosedWithoutExposingBackendError(t *testing.T) {
 	for _, backendErr := range []error{nil, errors.New("redis://private-backend:1234 secret-value")} {
 		gate := admissionFunc(func(context.Context, AdmissionScope) (func(), error) { return nil, backendErr })
-		g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate})
+		g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate})
 		if err != nil {
 			t.Fatal(err)
 		}

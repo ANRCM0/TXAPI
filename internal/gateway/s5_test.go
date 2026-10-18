@@ -38,7 +38,7 @@ func TestS5BillingModesAtModelBoundary(t *testing.T) {
 					engine = billing.New(nil, nil)
 				}
 				var logs []*dbmodel.RequestLog
-				gw, err := New(Options{Channels: fixture.store.Channels(), Billing: engine, BillingMode: mode, LogRecorder: func(row *dbmodel.RequestLog) {
+				gw, err := newRegisteredGateway(Options{Channels: fixture.store.Channels(), Billing: engine, BillingMode: mode, LogRecorder: func(row *dbmodel.RequestLog) {
 					logs = append(logs, row)
 				}})
 				if err != nil {
@@ -92,7 +92,7 @@ func TestS5BillingModesAtModelBoundary(t *testing.T) {
 }
 
 func TestS5StrictDirectRelayCannotBypassGate(t *testing.T) {
-	gw, err := New(Options{BillingMode: billing.ModeStrict})
+	gw, err := newRegisteredGateway(Options{BillingMode: billing.ModeStrict})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestS5StrictDirectRelayCannotBypassGate(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable || len(state(c).Attempts) != 0 {
 		t.Fatalf("direct relay bypassed strict gate: status=%d result=%+v", w.Code, state(c))
 	}
-	if _, err := New(Options{BillingMode: "typo"}); err == nil {
+	if _, err := newRegisteredGateway(Options{BillingMode: "typo"}); err == nil {
 		t.Fatal("unknown billing mode accepted")
 	}
 }
@@ -118,7 +118,7 @@ func TestS5GatewayPinsPersistedPriceVersion(t *testing.T) {
 	}
 	initial := table.Snapshot().Version()
 	var entry *dbmodel.RequestLog
-	gw, err := New(Options{
+	gw, err := newRegisteredGateway(Options{
 		Channels: st.Channels(), Billing: billing.New(st.DB(), table),
 		LogRecorder: func(row *dbmodel.RequestLog) { entry = row },
 		// Change the applied price after pre-deduction, before the HTTP attempt.
@@ -171,7 +171,7 @@ func TestS5StrictGatewaySettlesWithoutOrdinaryLogs(t *testing.T) {
 			}
 			channels, client := verifiedChatChannels(t, st.Channels(), fixture.upstream.URL)
 			configureVerifiedChatCosts(t, engine, channels)
-			gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict})
+			gw, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -225,7 +225,7 @@ func TestS5StrictGatewayMissingUsageHoldsBudget(t *testing.T) {
 	channels, client := verifiedChatChannels(t, channels, upstream.URL)
 	configureVerifiedChatCosts(t, engine, channels)
 	var entry *dbmodel.RequestLog
-	gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, LogRecorder: func(row *dbmodel.RequestLog) { entry = row }})
+	gw, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, LogRecorder: func(row *dbmodel.RequestLog) { entry = row }})
 	if err != nil {
 		t.Fatal(err)
 	}

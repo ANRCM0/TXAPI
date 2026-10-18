@@ -22,7 +22,7 @@ A02 已由 PR #12 从基线 `master/04fbfa6` 合并为 `master/765501a`；功能
 |---|---|---|
 | core 中转内核 | 执行一次上游尝试，管理连接/流式读写、超时取消、背压、提交事实和执行结果 | `internal/core` 已实现标准库 HTTP 执行。纯 WS I/O 仍隔离在 `transport/websocket`，新传输通过受约束的执行适配接入；身份、路由策略、账本和页面不进入内核 |
 | 业务层 | 用户/Key/模型授权、准入、路由、重试策略、计费、会话/任务及统一收尾 | `gateway/access/scheduler/billing/generation` 已有真实消费者与持久基础。gateway 是执行业务协调者；已合并的 `management.Configuration` 承担已有渠道/凭据/价格保存与配置发布用例。业务结果与外部协议表示分离，现有账本和恢复保持唯一权威；S6 本地、功能头 push/PR 与合并后 master 完整 CI 证据见批次记录 |
-| 统一兼容层 | 对外 API 与协议、上游编解码、错误/事件/能力映射、扩展接入与前端应用契约 | `server/protocol/transport`、gateway 的 HTTP 适配及 `web` 实际消费现有 Chat/embeddings 和管理 API。S6 已合并公开契约、构造扩展/生命周期及真实 API/前端闭环；新增操作按支持矩阵独立验收，Responses 原生 HTTP/SSE 已由 A01 独立验收合并 |
+| 统一兼容层 | 对外 API 与协议、上游编解码、错误/事件/能力映射、扩展接入与前端应用契约 | `server/protocol/transport`、compat/generationhttp 的 HTTP 适配及 `web` 实际消费现有 Chat/embeddings 和管理 API。S6 已合并公开契约、构造扩展/生命周期及真实 API/前端闭环；新增操作按支持矩阵独立验收，Responses 原生 HTTP/SSE 已由 A01 独立验收合并 |
 | 支撑与组装 | 持久化、统一迁移、密钥保护、配置与实例启动/关闭 | `model/store/secrets/config/cmd` 提供支撑。A3 已有原子意图/预算、领取/fencing、历史恢复、加密输出游标及默认关闭的 runtime；依赖由应用入口注入 |
 
 ### 兼容层的接入边界
@@ -150,7 +150,7 @@ API 目标分区：`/api/admin/*` 为管理员操作，`/api/me/*` 为个人资�
 7. gateway 根据错误分类和剩余预算决定是否重试，更新健康状态。
 8. 统一收尾：释放并发/凭据资源、保存结果、结算或可靠标记待处理。异常与取消也必须走收尾。
 
-现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。`protocol.Request` 将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。当前通过 `core.Output` 的 Commit/Write/Flush/State 输出，标准 HTTP writer 仅由 HTTP 适配器持有；A3-01 的 `internal/generation` 已作为有界进程内 worker 真实调用同一入口并重新解析派发身份，A3-02 又为它增加可选加密输出记录和中断标记；A3-03 的真实 socket 消费者验证同一执行链与独立连接容量；A3-04 通过 IntentAdmission 小端口原子保存加密意图和原账本双 hold，不把意图接入 volatile Runner；A3-05 经独立 DurableRunner/ExecuteClaimedTo 领取/fencing，接管原预留与历史售价，未知 attempt 不重发；main 有默认关闭接线。sealed 输出字节游标不等于原生协议事件，native WS 等 S7 产品能力仍单独验收；S6 既有支持范围的功能与集成状态见其批次记录。
+现有身份使用类型化 context，请求与 attempt 结果分离，不依赖 Gin 字符串键传递业务身份；本轮 gateway 已将共用执行信封/结果与 Gin HTTP 适配分开，Chat/embeddings 真正复用同一协调函数；公开 Execute 要求可信身份并逐次建立准入状态。FND-02 将 gateway 的 Gin/具体协议依赖移出，改为注册的中立 Request/Input/Decoder/Observation；protocol 不再导入 core。原内建 `protocol.Request` 在 L2 工厂将操作、载荷投影、原始正文和能力需求绑定，准入/attempt/结果记录同一 Operation；每次准备使用正文和目标元数据副本，旧 Mode 不能替换操作语义。功能消费者当前通过公开 execution/v1.Output 的 Commit/Write/Flush/State 输出，L1 内部显式桥接 core.Output；标准 HTTP writer 仅由 HTTP 适配器持有；A3-01 的 `internal/generation` 已作为有界进程内 worker 真实调用同一入口并重新解析派发身份，A3-02 又为它增加可选加密输出记录和中断标记；A3-03 的真实 socket 消费者验证同一执行链与独立连接容量；A3-04 通过 IntentAdmission 小端口原子保存加密意图和原账本双 hold，不把意图接入 volatile Runner；A3-05 经独立 DurableRunner/ExecuteClaimedTo 领取/fencing，接管原预留与历史售价，未知 attempt 不重发；main 有默认关闭接线。sealed 输出字节游标不等于原生协议事件，native WS 等 S7 产品能力仍单独验收；S6 既有支持范围的功能与集成状态见其批次记录。
 
 ## 6. 内核契约与重试边界
 

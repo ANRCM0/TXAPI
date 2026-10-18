@@ -24,7 +24,7 @@ func TestTypedCoordinatorRequiresIdentityAndIsolatesExecutions(t *testing.T) {
 		hits.Add(1)
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))}, nil
 	})}
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func (l *generationLimiter) AddTokens(_ context.Context, key string, n int, _ ti
 
 func TestTypedCoordinatorEachGenerationOwnsRateReservation(t *testing.T) {
 	limiter := &generationLimiter{adjustments: map[string]int{}}
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Limiter: limiter,
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Limiter: limiter,
 		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))}, nil
 		})}})
@@ -103,7 +103,7 @@ func TestTypedCoordinatorEachGenerationOwnsRateReservation(t *testing.T) {
 
 func TestTypedCoordinatorPanicReleasesAdmission(t *testing.T) {
 	var active atomic.Int64
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
 		active.Add(1)
 		return func() { active.Add(-1) }, nil
 	}), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { panic("injected transport panic") })}})
@@ -130,7 +130,7 @@ func TestTypedCoordinatorRefundsTPMOnConversionRejection(t *testing.T) {
 	channels := lifecycleChannels("http://upstream.test")
 	channels[0].Type = "anthropic"
 	var hits atomic.Int64
-	g, err := New(Options{Channels: channels, Limiter: limiter, Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { hits.Add(1); panic("rejection reached upstream") })}})
+	g, err := newRegisteredGateway(Options{Channels: channels, Limiter: limiter, Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { hits.Add(1); panic("rejection reached upstream") })}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestTypedCoordinatorRefundsTPMOnConversionRejection(t *testing.T) {
 	if result.StatusCode != 400 || result.Phase != core.NotDispatched || hits.Load() != 0 {
 		t.Fatalf("unsafe conversion result: %+v", result)
 	}
-	want := -billing.EstimateUsage(billing.PromptTextFromBody(body), "").PromptTokens
+	want := -billing.EstimateUsage(protocol.PromptTextFromBody(body), "").PromptTokens
 	if want == 0 || limiter.adjustments[access.TokenUsageBucketKey(1)] != want {
 		t.Fatalf("TPM leaked on unsent request: %+v want=%d", limiter.adjustments, want)
 	}
@@ -160,7 +160,7 @@ func TestTypedCoordinatorRoutesByCapabilityBeforePriority(t *testing.T) {
 	other.Credentials = []dbmodel.Credential{{ID: 10, APIKey: "isolated-fixture", Weight: 1, Status: dbmodel.CredentialActive}}
 	channels = append(channels, other)
 	var hits atomic.Int64
-	g, err := New(Options{Channels: channels, Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	g, err := newRegisteredGateway(Options{Channels: channels, Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Host != "anthropic.test" {
 			t.Errorf("unsupported target selected: %s", r.URL.Host)
 		}
@@ -188,7 +188,7 @@ func TestTypedCoordinatorRetainsCapacityThroughFinalization(t *testing.T) {
 		}
 		return func() {}, nil
 	})
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate,
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: gate,
 		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[]}`))}, nil
 		})}, LogRecorder: func(*dbmodel.RequestLog) {

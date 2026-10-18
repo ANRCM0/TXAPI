@@ -95,7 +95,7 @@ func TestGenerationRuntimeAssemblyDispatchesAndJoinsWithRetainedKeyChecks(t *tes
 		t.Fatal(err)
 	}
 	var hits atomic.Int64
-	g, err := gateway.New(gateway.Options{Channels: st.Channels(), StrictBilling: engine, BillingMode: billing.ModeStrict, TotalTimeout: 3 * time.Second,
+	g, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), StrictBilling: engine, BillingMode: billing.ModeStrict, TotalTimeout: 3 * time.Second,
 		Client: &http.Client{Transport: generationTransport(func(*http.Request) (*http.Response, error) {
 			hits.Add(1)
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))}, nil

@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	"minigateway/internal/gateway"
 )
 
 func TestRequestRetainsNativeOptionsAndRejectsAmbiguousIdentity(t *testing.T) {
@@ -65,7 +67,7 @@ func TestNativeJSONAndReadUseCoreWithoutChatConversion(t *testing.T) {
 	e := core.New(core.Options{})
 	defer e.Close()
 	rec := httptest.NewRecorder()
-	result := e.Execute(context.Background(), rec, core.Input{Method: http.MethodGet, URL: server.URL + "/v1/responses/resp-one", Decoder: NewDecoder()})
+	result := e.Execute(context.Background(), rec, gateway.ToCoreInput(execv1.Input{Method: http.MethodGet, URL: server.URL + "/v1/responses/resp-one", Decoder: NewDecoder()}))
 	if result.Error != nil || !result.ProtocolComplete || result.Usage == nil || result.Usage.PromptTokens != 7 || result.Usage.TotalTokens != 9 || rec.Body.String() != response {
 		t.Fatalf("native response changed: %+v; %s", result, rec.Body)
 	}
@@ -95,7 +97,7 @@ func TestNativeSSEFramingToolsAndTerminalState(t *testing.T) {
 			e := core.New(core.Options{})
 			defer e.Close()
 			rec := httptest.NewRecorder()
-			result := e.Execute(context.Background(), rec, core.Input{URL: server.URL, Stream: true, Decoder: NewDecoder()})
+			result := e.Execute(context.Background(), rec, gateway.ToCoreInput(execv1.Input{URL: server.URL, Stream: true, Decoder: NewDecoder()}))
 			if (result.Error == nil) != test.good || result.ProtocolComplete != test.good {
 				t.Fatalf("native SSE result: %+v; %s", result, rec.Body)
 			}

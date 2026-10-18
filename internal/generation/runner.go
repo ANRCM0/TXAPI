@@ -13,7 +13,6 @@ import (
 
 	"minigateway/internal/access"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
-	"minigateway/internal/protocol"
 )
 
 var (
@@ -25,6 +24,7 @@ var (
 )
 
 type Options struct {
+	Parser        execv1.Parser
 	Workers       int
 	QueueCapacity int
 	// Configuration caps the combined queued/active body copies at 64 MiB.
@@ -86,7 +86,7 @@ type job struct {
 }
 
 func New(ctx context.Context, opts Options) (*Runner, error) {
-	if ctx == nil || opts.Resolve == nil || opts.Execute == nil || opts.Workers < 1 || opts.Workers > 1024 ||
+	if ctx == nil || (opts.Archive != nil && nilPort(opts.Parser)) || opts.Resolve == nil || opts.Execute == nil || opts.Workers < 1 || opts.Workers > 1024 ||
 		opts.QueueCapacity < 1 || opts.QueueCapacity > 4096 || opts.MaxRequestBytes < 1 || opts.MaxRequestBytes > 20<<20 ||
 		int64(opts.Workers+opts.QueueCapacity)*int64(opts.MaxRequestBytes) > 64<<20 ||
 		opts.MaxDuration <= 0 || opts.MaxDuration > 24*time.Hour ||
@@ -145,7 +145,7 @@ func (r *Runner) submit(observer context.Context, binding access.Binding, output
 		return nil, "", access.ErrUnauthorized
 	}
 	requestID := access.RequestID(observer)
-	if (!recorded && output == nil) || (in.Operation != protocol.Chat && in.Operation != protocol.Embeddings) ||
+	if (!recorded && output == nil) || (in.Operation != execv1.Chat && in.Operation != execv1.Embeddings) ||
 		len(in.Body) == 0 || len(in.Body) > r.opts.MaxRequestBytes || len(in.SessionID) > 256 || len(requestID) > 256 {
 		return nil, "", fmt.Errorf("invalid or oversized generation handoff")
 	}
@@ -174,8 +174,8 @@ func (r *Runner) submit(observer context.Context, binding access.Binding, output
 	id := ""
 	var preparationErr error
 	if recorded {
-		request, err := protocol.ParseRequest(in.Operation, in.Body)
-		if err != nil || len(request.Model()) > 256 {
+		request, err := r.opts.Parser.ParseRequest(in.Operation, in.Body)
+		if err != nil || nilPort(request) || len(request.Model()) > 256 {
 			preparationErr = fmt.Errorf("invalid recorded generation request")
 		} else {
 			ctx, cancel := context.WithTimeout(observer, 2*time.Second)

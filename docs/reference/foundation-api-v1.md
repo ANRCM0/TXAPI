@@ -1,6 +1,6 @@
 # Foundation API v1：实施清单与迁移边界
 
-状态：FC-001 已由用户批准，FND-01 实施中；本清单是 v1 候选，不是 frozen 发布。
+状态：FC-001 已由用户批准，FND-01 已验收，FND-02 本地集中验证通过、待完整 CI/合并；本清单是 v1 候选，不是 frozen 发布。
 最终冻结需 FND-05 全部 DoD、独立上层样例和最新基线完整 CI/合并证明。
 排期与勾选只维护 [PLAN](../PLAN.md#地基符合性收口fc-001)，目标范围见
 [FC-001](../proposals/FC-001-foundation-contracts-v1.md)，实际验证见
@@ -21,7 +21,7 @@
 
 ## 执行、身份和结果
 
-`Executor.Execute(ctx, output, invocation)` 继续调用原 Gateway.ExecuteTo 一次。
+`Executor.Execute(ctx, output, invocation)` 继续调用原 Gateway.ExecuteTo 一次。FND-02 将该桥归入 gateway.PublicExecutor，原 foundation/runtime 仅保留组装兼容转发。
 Invocation 提供 operation/body/session/output ID/受限 target，不接受用户/Key/价格或余额作为授权。
 可信身份由原认证边界产生，Authority.Refresh 在每次 Responses 交付时重新读取；
 generation 在派发前仍用原 resolver 校验当前主体，新的投影值不替代这些检查。
@@ -59,10 +59,32 @@ FND-01 增加契约实现依赖/无类型逃逸检查、受控拒绝样例、结
 
 | 剩余依赖 / 来源 | 退出批次 |
 |---|---|
-| gateway 的 protocol.Request、操作 switch、Responses Observation，及同包 Gin handler | FND-02 |
-| generation 的 protocol 意图校验和 model claim/记录、access 解析实现 | FND-02/FND-03 |
+| gateway 操作/协议通过中立注册，Observation 与 Gin handler 已迁出；本批最终集中/CI 证明 | FND-02 待 CI/合并 |
+| generation 意图校验已注入注册 Parser；model claim/记录、access 解析实现仍待迁移 | FND-03 |
 | responses 的 generation.Archive、model 快照/回执、secrets 与原生 item 解析 | FND-03/FND-04 |
 | management.ConfigurationStore 的 store 输入 DTO；server API 的直接 store/billing 调用 | FND-03/FND-04 |
 | 全生产包四层映射、公开签名递归可见性、独立新增操作样例与零例外冻结 | FND-05 |
 
 这些是已知迁移来源，不是新增模块可复制的接入方式；本清单不降低旧检查或最终 CI 门槛。
+
+## FND-02 注册与会话候选
+
+execution v1 同组增加 OperationRegistration/ProtocolRegistration、Parser/Request、Adapter、Target、
+Input/Decoder/StreamDecoder/Frame、Observer/Observation 和 ModelCatalog。它们只引用标准库与契约值；
+Target 的凭据只在已授权选中后交给可信编译期 codec，不能认证调用或自行发网络。
+main 显式调用 protocol.Operations()/Protocols(overrides) 并注入 gateway；注册是构造时复制后只读，
+无动态载入、自动路由或财务许可。注册缺失/重复/版本不兼容/typed nil/必要回调缺失拒绝启动。
+新操作提供自己的 Parse 与协议 Adapter，不修改 L1 操作分支；L1 将解析投影复制为自持 Request，
+并统一执行授权、准入、成本、attempt 和收尾。准备后 body/header 和 decoder/frames 经显式 core 桥，
+每次 attempt 必须新建 decoder/session；观察只有中立原生 ID/状态/usage/失败事实，L1 不断言 Responses Observation。
+
+NonReplayable/OpaqueErrors/Continuity 只收紧既有执行安全；错误消息来自可信注册，框架按通用终止原因选择，
+不解释厂商状态。strict 新操作默认拒绝，Chat/embeddings 也仍需原成本证明，注册不能绕过 StartPreparedAttempt。
+旧 adaptor 的 ProtocolAdaptor/整数 mode 保留在 L2 兼容工厂内；framework 不导入这些实现。
+纯 JSON 约束统一为 foundation/contracts/json/v1，旧 protocol/jsonutil 仅转发，避免财务/worker 反向依赖 L2。
+该组与 HTTP 接入尚待本批最终 CI/合并，不据源码编译或 FND-01 历史 CI 提前冻结。
+
+HTTP 适配的准入交接由组装根注入的 gateway.NewHTTPExecutor 处理；普通 NewPublicExecutor 保持每次新准入。
+私有上下文标记只可绑定当前可信 Key 并原子接管一次，Invocation 无跳过限流字段；原 TPM 预留仍由原 once 收尾。
+Request.AffinityText 将旧首条 user/多模态文本投影留在协议侧，scheduler.SessionKey 只做原 owner/Key 哈希。
+该迁移不改变显式头与旧回退亲和键字节，也不把亲和摘要当作授权或会话持久化。

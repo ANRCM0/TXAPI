@@ -11,21 +11,15 @@ const (
 	Responses  Operation = "responses"
 )
 
-type Transport string
+type Transport = execution.Transport
 
 const (
-	HTTP       Transport = "http"
-	Background Transport = "background"
-	WebSocket  Transport = "websocket"
+	HTTP       = execution.HTTP
+	Background = execution.Background
+	WebSocket  = execution.WebSocket
 )
 
-type Requirements struct {
-	Operation Operation
-	Source    string
-	Transport Transport
-	Stream    bool
-	Tools     bool
-}
+type Requirements = execution.Requirements
 
 // Capability is the typed, operation-specific opt-in consumed by protocol.
 // It does not authorize a model, price, credential or strict execution.

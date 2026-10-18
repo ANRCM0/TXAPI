@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -56,7 +57,7 @@ func TestPublicExecutorUsesOriginalCoordinatorAndPreservesShortWrite(t *testing.
 		_, _ = io.WriteString(w, `{"id":"chat-id","choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
 	}))
 	defer upstream.Close()
-	g, err := gateway.New(gateway.Options{BillingMode: billing.ModeDisabled, Channels: []model.Channel{{ID: 1, Name: "fixture", Type: "openai", BaseURL: upstream.URL, Status: model.StatusEnabled, Weight: 1, Models: model.StringList{"m"}, Credentials: []model.Credential{{ID: 2, APIKey: "fixture", Status: model.CredentialActive, Weight: 1}}}}})
+	g, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), BillingMode: billing.ModeDisabled, Channels: []model.Channel{{ID: 1, Name: "fixture", Type: "openai", BaseURL: upstream.URL, Status: model.StatusEnabled, Weight: 1, Models: model.StringList{"m"}, Credentials: []model.Credential{{ID: 2, APIKey: "fixture", Status: model.CredentialActive, Weight: 1}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

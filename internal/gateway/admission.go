@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"minigateway/internal/core"
-	"minigateway/internal/protocol"
+	execution "minigateway/internal/foundation/contracts/execution/v1"
 )
 
 // Admission is the S3 implementation seam. It does not authorize models or
@@ -28,7 +28,7 @@ const (
 
 type AdmissionScope struct {
 	Level        AdmissionLevel
-	Operation    protocol.Operation
+	Operation    execution.Operation
 	UserID       uint
 	TokenID      uint
 	Model        string

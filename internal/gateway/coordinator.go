@@ -7,14 +7,14 @@ import (
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/core"
+	execution "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
-	"minigateway/internal/protocol"
 )
 
 // Execution keeps operation payloads intact; it does not translate them to Chat.
 // Context must contain the principal verified by the caller's authentication boundary.
 type Execution struct {
-	Operation      protocol.Operation
+	Operation      execution.Operation
 	Body           []byte
 	SessionID      string
 	ResponseID     string
@@ -24,18 +24,22 @@ type Execution struct {
 // ExecuteTo owns one generation, including admission, attempts and finalization.
 // Result and decoder state are fresh even when callers reuse a parent context.
 func (g *Gateway) ExecuteTo(ctx context.Context, output core.Output, in Execution) RequestResult {
-	return g.executeTo(ctx, output, in, nil)
+	return g.executeTo(ctx, output, in, nil, false)
 }
 
 // ExecuteClaimedTo consumes an authenticated durable intent through the same
 // authorization/admission/routing/attempt/finalization chain as HTTP. The caller
 // refreshes the Principal and owns lease renewal, output and shutdown joining.
 func (g *Gateway) ExecuteClaimedTo(ctx context.Context, output core.Output, in Execution, claim model.GenerationClaim) RequestResult {
-	return g.executeTo(ctx, output, in, &claim)
+	return g.executeTo(ctx, output, in, &claim, false)
 }
 
-func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Execution, claim *model.GenerationClaim) RequestResult {
-	ctx = access.NewGenerationContext(ctx)
+func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Execution, claim *model.GenerationClaim, httpAdmission bool) RequestResult {
+	if httpAdmission {
+		ctx = access.NewHTTPGenerationContext(ctx)
+	} else {
+		ctx = access.NewGenerationContext(ctx)
+	}
 	result := newRequestResult(ctx)
 	result.Operation = in.Operation
 	if nilInterface(output) {
@@ -56,10 +60,6 @@ func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Executio
 		c.responseTarget = &copy
 	}
 	c.claim = claim
-	if claim != nil && in.Operation == protocol.Responses {
-		writeError(c, http.StatusBadRequest, "Responses cannot consume a strict generation intent", "unsupported_billing_dimension")
-		return *result
-	}
 	if claim != nil && g.billingMode != billing.ModeStrict {
 		writeError(c, http.StatusServiceUnavailable, "durable execution requires strict billing", "billing_unavailable")
 		return *result
@@ -85,21 +85,24 @@ func (g *Gateway) execute(c *executionScope, in Execution) {
 		}
 	}()
 	c.result.Operation = in.Operation
-	if in.Operation == protocol.Responses && (c.claim != nil || g.billingMode == billing.ModeStrict) {
-		writeError(c, http.StatusBadRequest, "Responses has no verified strict billing dimension", "unsupported_billing_dimension")
+	if _, known := g.operations[in.Operation]; known && in.Operation != execution.Chat && in.Operation != execution.Embeddings && (c.claim != nil || g.billingMode == billing.ModeStrict) {
+		message := g.operations[in.Operation].Errors.StrictDenied
+		if message == "" {
+			message = "operation has no verified strict billing dimension"
+		}
+		writeError(c, http.StatusBadRequest, message, "unsupported_billing_dimension")
 		return
 	}
-	switch in.Operation {
-	case protocol.Chat, protocol.Embeddings, protocol.Responses:
-		request, err := protocol.ParseRequest(in.Operation, in.Body)
-		if err != nil {
-			writeError(c, http.StatusBadRequest, err.Error(), "invalid_request_error")
-			return
+	request, err := g.ParseRequest(in.Operation, in.Body)
+	if err != nil {
+		kind := "invalid_request_error"
+		if _, known := g.operations[in.Operation]; !known {
+			kind = "unsupported_operation"
 		}
-		g.executeScope(c, request)
-	default:
-		writeError(c, http.StatusBadRequest, "unsupported operation", "unsupported_operation")
+		writeError(c, http.StatusBadRequest, err.Error(), kind)
+		return
 	}
+	g.executeScope(c, request)
 }
 
 type executionScope struct {

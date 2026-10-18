@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	"minigateway/internal/gateway"
 	"minigateway/internal/protocol/meta"
 )
 
@@ -36,7 +38,7 @@ func TestGeminiUsageTailRequiresAnIndependentTerminalState(t *testing.T) {
 			executor := core.New(core.Options{Client: &http.Client{Transport: staticResponse{body: body}}})
 			defer executor.Close()
 			rec := httptest.NewRecorder()
-			result := executor.Execute(context.Background(), rec, core.Input{URL: "http://upstream.test", Stream: true, Decoder: NewDecoder(a, &meta.Meta{ActualModel: "gemini-test", IsStream: true})})
+			result := executor.Execute(context.Background(), rec, gateway.ToCoreInput(execv1.Input{URL: "http://upstream.test", Stream: true, Decoder: NewDecoder(a, &meta.Meta{ActualModel: "gemini-test", IsStream: true})}))
 			if result.Usage == nil || result.Usage.TotalTokens != 7 {
 				t.Fatalf("final observed usage lost: %+v", result)
 			}

@@ -3,24 +3,23 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net/http"
 	"time"
 
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/core"
+	execution "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
-	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/adaptor"
 )
 
 // Options fixes instance dependencies before it starts serving requests.
 type Options struct {
 	Admission Admission
-	// Adaptors extends the built-in protocols during construction, not at runtime.
-	Adaptors       map[string]adaptor.Adaptor
+	// Registrations are copied once; an absent registration never falls back.
+	Protocols      []execution.ProtocolRegistration
+	Operations     []execution.OperationRegistration
 	Channels       []dbmodel.Channel
 	Client         *http.Client
 	RetryTimes     int
@@ -40,7 +39,8 @@ type Options struct {
 
 type Gateway struct {
 	admission      Admission
-	adaptors       map[string]adaptor.Adaptor
+	adaptors       map[string]execution.Adapter
+	operations     map[execution.Operation]execution.OperationRegistration
 	reg            *registry
 	executor       *core.Executor
 	retryTimes     int
@@ -57,6 +57,9 @@ type Gateway struct {
 }
 
 func New(opts Options) (*Gateway, error) {
+	if len(opts.Operations) == 0 || len(opts.Protocols) == 0 {
+		return nil, fmt.Errorf("operation and protocol registrations are required")
+	}
 	if opts.BillingMode == "" {
 		opts.BillingMode = billing.ModeLegacy
 	}
@@ -87,15 +90,34 @@ func New(opts Options) (*Gateway, error) {
 	if opts.TotalTimeout <= 0 {
 		opts.TotalTimeout = opts.AttemptTimeout
 	}
-	for name, a := range opts.Adaptors {
-		if name == "" || nilInterface(a) {
-			return nil, fmt.Errorf("invalid adaptor registration %q", name)
+	protocols := make(map[string]execution.Adapter, len(opts.Protocols))
+	for _, registration := range opts.Protocols {
+		if registration.ID == "" || registration.Version != execution.Version || nilInterface(registration.Adapter) {
+			return nil, fmt.Errorf("invalid adaptor registration %q", registration.ID)
 		}
+		if _, duplicate := protocols[registration.ID]; duplicate {
+			return nil, fmt.Errorf("duplicate protocol %q", registration.ID)
+		}
+		protocols[registration.ID] = registration.Adapter
+	}
+	operations := make(map[execution.Operation]execution.OperationRegistration, len(opts.Operations))
+	for _, registration := range opts.Operations {
+		if registration.ID == "" || registration.Version != execution.Version || registration.Parse == nil {
+			return nil, fmt.Errorf("invalid operation registration %q", registration.ID)
+		}
+		if registration.Continuity && !registration.NonReplayable || registration.OpaqueErrors && (!registration.NonReplayable ||
+			registration.Errors.Upstream == "" || registration.Errors.Canceled == "" || registration.Errors.Deadline == "" || registration.Errors.Output == "" || registration.Errors.Generation == "") {
+			return nil, fmt.Errorf("incomplete operation safety registration %q", registration.ID)
+		}
+		if _, duplicate := operations[registration.ID]; duplicate {
+			return nil, fmt.Errorf("duplicate operation %q", registration.ID)
+		}
+		operations[registration.ID] = registration
 	}
 	if opts.Metrics == nil {
 		opts.Metrics = metrics.New()
 	}
-	g := &Gateway{admission: opts.Admission, adaptors: maps.Clone(opts.Adaptors), executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout,
+	g := &Gateway{admission: opts.Admission, adaptors: protocols, operations: operations, executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout,
 		billing: opts.Billing, strictBilling: opts.StrictBilling, billingMode: opts.BillingMode, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter}
 	if err := g.initRegistry(opts.Channels); err != nil {
 		g.Close()
@@ -116,7 +138,7 @@ type Identity struct {
 }
 
 type AttemptResult struct {
-	Operation    protocol.Operation
+	Operation    execution.Operation
 	ChannelID    uint
 	CredentialID uint
 	Model        string
@@ -127,7 +149,8 @@ type RequestResult struct {
 	ResponseTarget     ResponseTarget
 	ResponseStatus     string
 	UpstreamResponseID string
-	Operation          protocol.Operation
+	nativeFailed       bool
+	Operation          execution.Operation
 	reservation        *billing.PreDeduct
 	strictRequest      *billing.StrictRequest
 	BillingState       string

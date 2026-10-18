@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -56,7 +57,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	t.Cleanup(capacity.Close)
 	limiter := middleware.NewMemoryLimiter()
 	t.Cleanup(limiter.(interface{ Close() }).Close)
-	gw, err := gateway.New(gateway.Options{Channels: st.Channels(), LogRecorder: st.WriteLog, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: capacity}})
+	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), LogRecorder: st.WriteLog, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: capacity}})
 	if err != nil {
 		t.Fatal(err)
 	}

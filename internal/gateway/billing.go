@@ -6,8 +6,8 @@ import (
 	"reflect"
 
 	"minigateway/internal/billing"
+	model "minigateway/internal/foundation/contracts/execution/v1"
 	dbmodel "minigateway/internal/model"
-	"minigateway/internal/protocol/model"
 )
 
 // LegacyBilling is the existing best-effort fee path, not a strict guarantee.

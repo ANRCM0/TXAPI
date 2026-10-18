@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	"minigateway/internal/gateway"
 	"minigateway/internal/protocol/meta"
 )
 
@@ -83,7 +85,7 @@ func TestAnthropicInterleavedToolArgumentsAndTruncation(t *testing.T) {
 		}
 		executor := core.New(core.Options{Client: &http.Client{Transport: staticResponse{body: strings.NewReader(payload)}}})
 		rec := httptest.NewRecorder()
-		result := executor.Execute(context.Background(), rec, core.Input{URL: "http://upstream.test", Stream: true, Decoder: NewDecoder(a, &meta.Meta{})})
+		result := executor.Execute(context.Background(), rec, gateway.ToCoreInput(execv1.Input{URL: "http://upstream.test", Stream: true, Decoder: NewDecoder(a, &meta.Meta{})}))
 		executor.Close()
 		if truncated {
 			if result.Error == nil || result.ProtocolComplete || strings.Contains(rec.Body.String(), "[DONE]") {

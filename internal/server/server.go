@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"minigateway/internal/billing"
+	"minigateway/internal/compat/generationhttp"
 	"minigateway/internal/config"
 	"minigateway/internal/gateway"
 	"minigateway/internal/metrics"
@@ -143,7 +144,8 @@ func NewEngine(deps Deps) *gin.Engine {
 	// 两段式，真实 usage 只有 relay 的收尾逻辑拿得到（见 handler.go）。
 
 	// 模型列表：让客户端知道这个令牌能用哪些模型
-	engine.GET("/v1/models", auth.Handle(), deps.Gateway.ListModels)
+	generationHTTP := generationhttp.New(gateway.NewHTTPExecutor(deps.Gateway))
+	engine.GET("/v1/models", auth.Handle(), generationHTTP.ListModels)
 
 	// 转发主入口：对话补全。
 	// 鉴权 → 令牌限流 → 转发：限流必须挂在 Auth **之后**，
@@ -153,13 +155,13 @@ func NewEngine(deps Deps) *gin.Engine {
 	// 防不住 1000 个并发在结算前全打到上游（见 ratelimit.go 头注）。
 	engine.POST("/v1/chat/completions", auth.Handle(),
 		middleware.TokenRateLimit(deps.RateLimiter),
-		deps.Gateway.HandleChatCompletions)
+		generationHTTP.HandleChatCompletions)
 
 	// embeddings：与对话共用整条转发链路，区别只有 Mode 一个值。
 	// 限流同样按令牌生效——embedding 请求同样在烧上游 Key。
 	engine.POST("/v1/embeddings", auth.Handle(),
 		middleware.TokenRateLimit(deps.RateLimiter),
-		deps.Gateway.HandleEmbeddings)
+		generationHTTP.HandleEmbeddings)
 
 	// Deduplication precedes generation RPM/TPM admission inside ExecuteTo.
 	responsesHandler := func(c *gin.Context) {

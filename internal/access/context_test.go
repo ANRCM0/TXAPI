@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -76,5 +77,36 @@ func TestGenerationDoesNotInheritMutableAdmission(t *testing.T) {
 	FinishTokens(parent, limiter, 30)
 	if !HasRateAdmission(parent, 12) || limiter.calls != 1 || limiter.delta != -70 {
 		t.Fatal("child changed parent's admission")
+	}
+}
+
+func TestHTTPAdmissionAndReservationHaveOneConsumer(t *testing.T) {
+	parent := WithPrincipal(context.Background(), Principal{UserID: 7, TokenID: 12})
+	parent = WithRateAdmission(WithTokenReservation(parent, 12, 100), 12)
+	limiter := &completionLimiter{}
+	var adopted atomic.Int64
+	var group sync.WaitGroup
+	for range 20 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			child := NewHTTPGenerationContext(parent)
+			if HasRateAdmission(child, 12) {
+				adopted.Add(1)
+			}
+			FinishTokens(child, limiter, 30)
+		}()
+	}
+	group.Wait()
+	if adopted.Load() != 1 || limiter.calls != 1 || limiter.delta != -70 {
+		t.Fatalf("adopted=%d limiter=%+v", adopted.Load(), limiter)
+	}
+	other := WithPrincipal(WithRateAdmission(context.Background(), 12), Principal{UserID: 9, TokenID: 13})
+	if HasRateAdmission(NewHTTPGenerationContext(other), 12) {
+		t.Fatal("HTTP admission crossed the authenticated key")
+	}
+	unauthenticated := WithRateAdmission(context.Background(), 12)
+	if HasRateAdmission(NewHTTPGenerationContext(unauthenticated), 12) {
+		t.Fatal("HTTP admission authenticated a missing principal")
 	}
 }

@@ -106,7 +106,7 @@ func TestUnprovedInputRefusesOnlyStrictWithoutNetworkOrHealthPenalty(t *testing.
 					configureTestProviderCosts(t, engine, st.Channels())
 				}
 				var health atomic.Int64
-				gw, err := New(Options{Channels: st.Channels(), Billing: engine, BillingMode: mode, RetryTimes: 3,
+				gw, err := newRegisteredGateway(Options{Channels: st.Channels(), Billing: engine, BillingMode: mode, RetryTimes: 3,
 					HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) },
 				})
 				if err != nil {

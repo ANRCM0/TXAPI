@@ -17,6 +17,7 @@ import (
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/model"
+	"minigateway/internal/protocol"
 )
 
 // 本文件实现请求前限流（P6 批次 3）。
@@ -446,7 +447,7 @@ func estimatePromptTokens(c *gin.Context) int {
 	// 把读走的字节装回去：relay 的 handler 还要原样透传 body，
 	// 中间件把它吃掉等于破坏了「透明代理」这个基本承诺。
 
-	return billing.EstimateTokens(billing.PromptTextFromBody(body))
+	return billing.EstimateTokens(protocol.PromptTextFromBody(body))
 }
 
 // estimateBodyLimit 是估算时最多读多少字节。

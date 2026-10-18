@@ -27,6 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"minigateway/internal/protocol"
 	"net/http"
 	"os"
 	"os/signal"
@@ -195,7 +196,7 @@ func main() {
 		return st.GetCredential(id)
 	})
 	defer health.Close()
-	gw, err = gateway.New(gateway.Options{
+	gw, err = gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(),
 		Admission: gateway.CapacityAdmission{Capacity: capacity},
 		Channels:  st.Channels(), RetryTimes: cfg.Server.RetryTimes,
 		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,

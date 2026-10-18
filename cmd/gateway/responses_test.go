@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -63,7 +64,7 @@ func TestResponsesRuntimeRestartRetainedKeysAndUnknownExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	var hits atomic.Int64
-	gw, err := gateway.New(gateway.Options{Channels: st.Channels(), Client: &http.Client{Transport: generationTransport(func(r *http.Request) (*http.Response, error) {
+	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), Client: &http.Client{Transport: generationTransport(func(r *http.Request) (*http.Response, error) {
 		hits.Add(1)
 		if r.URL.Path != "/v1/responses" {
 			t.Error("wrong native route", r.URL.Path)

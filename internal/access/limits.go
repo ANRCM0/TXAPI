@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,19 +21,35 @@ func TokenUsageBucketKey(tokenID uint) string { return TokenBucketKey(tokenID) +
 
 type reservationKey struct{}
 type rateAdmissionKey struct{}
+type rateAdmission struct {
+	tokenID  uint
+	consumed atomic.Bool
+}
 
 func WithRateAdmission(ctx context.Context, tokenID uint) context.Context {
-	return context.WithValue(ctx, rateAdmissionKey{}, tokenID)
+	return context.WithValue(ctx, rateAdmissionKey{}, &rateAdmission{tokenID: tokenID})
 }
 func HasRateAdmission(ctx context.Context, tokenID uint) bool {
-	id, _ := ctx.Value(rateAdmissionKey{}).(uint)
-	return tokenID != 0 && id == tokenID
+	admission, _ := ctx.Value(rateAdmissionKey{}).(*rateAdmission)
+	return admission != nil && tokenID != 0 && admission.tokenID == tokenID
+}
+
+// Only the assembly-owned HTTP executor adopts an existing middleware lease.
+// Reusing the parent context cannot reuse its RPM/TPM admission or reservation.
+func NewHTTPGenerationContext(ctx context.Context) context.Context {
+	principal, ok := PrincipalFromContext(ctx)
+	admission, _ := ctx.Value(rateAdmissionKey{}).(*rateAdmission)
+	if ok && principal.UserID != 0 && principal.TokenID != 0 && admission != nil &&
+		admission.tokenID == principal.TokenID && admission.consumed.CompareAndSwap(false, true) {
+		return ctx
+	}
+	return NewGenerationContext(ctx)
 }
 
 // A new generation never inherits a previous generation's mutable reservation.
 func NewGenerationContext(ctx context.Context) context.Context {
 	ctx = context.WithValue(ctx, reservationKey{}, (*tokenReservation)(nil))
-	return context.WithValue(ctx, rateAdmissionKey{}, uint(0))
+	return context.WithValue(ctx, rateAdmissionKey{}, (*rateAdmission)(nil))
 }
 
 type tokenReservation struct {

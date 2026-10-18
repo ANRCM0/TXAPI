@@ -3,7 +3,7 @@ package billing
 import (
 	"fmt"
 
-	relaymodel "minigateway/internal/protocol/model"
+	relaymodel "minigateway/internal/foundation/contracts/execution/v1"
 )
 
 // PreDeduct 是请求前额度处理的快照，响应后原样传给 Settle。

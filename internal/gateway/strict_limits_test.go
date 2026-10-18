@@ -56,7 +56,7 @@ func TestStrictConvertedLimitsBeforeUpstreamAndDurableAttempt(t *testing.T) {
 					if mode == billing.ModeStrict {
 						configureTestProviderCosts(t, engine, channels)
 					}
-					gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: mode, RetryTimes: 3})
+					gw, err := newRegisteredGateway(Options{Channels: channels, Billing: engine, BillingMode: mode, RetryTimes: 3})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -162,7 +162,7 @@ func TestStrictMalformedRequestsDoNotReserveOrForward(t *testing.T) {
 	if err := engine.EnableStrict("0.1", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	gw, err := New(Options{Channels: st.Channels(), Billing: engine, BillingMode: billing.ModeStrict})
+	gw, err := newRegisteredGateway(Options{Channels: st.Channels(), Billing: engine, BillingMode: billing.ModeStrict})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestStrictEmbeddingsCannotBecomeCrossProtocolChat(t *testing.T) {
 			}
 			channels := st.Channels()
 			channels[0].Type = name
-			gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict})
+			gw, err := newRegisteredGateway(Options{Channels: channels, Billing: engine, BillingMode: billing.ModeStrict})
 			if err != nil {
 				t.Fatal(err)
 			}

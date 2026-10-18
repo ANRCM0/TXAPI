@@ -59,7 +59,7 @@ func TestCapacityRetryRetainsRequestAndReleasesEachAttempt(t *testing.T) {
 		}
 		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})}
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, RetryTimes: 1, Admission: CapacityAdmission{Capacity: capacity}})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, RetryTimes: 1, Admission: CapacityAdmission{Capacity: capacity}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestCapacityRealLeaseCleanupOnCancelDeadlineAndPanic(t *testing.T) {
 				<-r.Context().Done()
 				return nil, r.Context().Err()
 			})}
-			g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, TotalTimeout: 30 * time.Millisecond, Admission: CapacityAdmission{Capacity: capacity}, HealthReporter: func(*dbmodel.Credential, int, string) { health++ }})
+			g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, TotalTimeout: 30 * time.Millisecond, Admission: CapacityAdmission{Capacity: capacity}, HealthReporter: func(*dbmodel.Credential, int, string) { health++ }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +129,7 @@ func TestCapacityChannelRejectionDoesNotExecuteOrPenalize(t *testing.T) {
 	defer occupied()
 	var hits, health atomic.Int64
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { hits.Add(1); panic("unexpected upstream") })}
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, Admission: CapacityAdmission{Capacity: capacity}, HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) }})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, Admission: CapacityAdmission{Capacity: capacity}, HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) }})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,8 +17,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	relaymodel "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
-	relaymodel "minigateway/internal/protocol/model"
 )
 
 var (

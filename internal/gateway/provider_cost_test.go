@@ -58,7 +58,7 @@ func TestStrictProviderAdmissionBeforeNetworkAndAcrossRetries(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2})
+			gw, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -128,7 +128,7 @@ func TestStrictProviderEmbeddingBatchUsesIndependentInputEnvelope(t *testing.T) 
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	gw, err := New(Options{Channels: channels, Client: verifiedLoopbackClient(t, upstream.URL), Billing: engine, BillingMode: billing.ModeStrict})
+	gw, err := newRegisteredGateway(Options{Channels: channels, Client: verifiedLoopbackClient(t, upstream.URL), Billing: engine, BillingMode: billing.ModeStrict})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestStrictProviderContractRejectsHotTargetDrift(t *testing.T) {
 	channels, client := verifiedChatChannels(t, st.Channels(), fixture.upstream.URL)
 	configureVerifiedChatCosts(t, engine, channels)
 	channels[0].ModelMapping = dbmodel.StringMap{"gpt-4o-mini": "new-mapped-model"}
-	gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict})
+	gw, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict})
 	if err != nil {
 		t.Fatal(err)
 	}

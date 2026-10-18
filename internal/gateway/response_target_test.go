@@ -13,7 +13,7 @@ import (
 func TestResponsesContinuationPinsOriginalCredentialAndRejectsChangedMappingOrSecret(t *testing.T) {
 	hits := 0
 	channels := lifecycleChannels("http://upstream.test")
-	g, err := New(Options{BillingMode: billing.ModeDisabled, Channels: channels, RetryTimes: 2, Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, Channels: channels, RetryTimes: 2, Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		hits++
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"resp_native","object":"response","model":"m","status":"completed","output":[]}`))}, nil
 	})}})

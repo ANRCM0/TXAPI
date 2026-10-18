@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	relaymodel "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
-	relaymodel "minigateway/internal/protocol/model"
 )
 
 // Units are billionths of the configured currency. Prices retain the existing

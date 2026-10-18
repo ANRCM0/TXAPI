@@ -10,15 +10,15 @@ import (
 
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
+	execution "minigateway/internal/foundation/contracts/execution/v1"
+	model "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
-	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/model"
 )
 
 const captureLimit = 64 * 1024
 
-func (g *Gateway) executeScope(c *executionScope, req protocol.Request) {
+func (g *Gateway) executeScope(c *executionScope, req execution.Request) {
 	body := req.Body()
 
 	result := c.result
@@ -64,7 +64,7 @@ func (g *Gateway) executeScope(c *executionScope, req protocol.Request) {
 		return
 	}
 	if g.billingMode == billing.ModeStrict && g.strictReady() {
-		limits, err := billing.ParseStrictRequest(body, req.Operation() == protocol.Embeddings)
+		limits, err := billing.ParseStrictRequest(body, req.Operation() == execution.Embeddings)
 		if err != nil {
 			result.StatusCode = http.StatusBadRequest
 			result.ErrorMessage = err.Error()
@@ -166,7 +166,7 @@ func (g *Gateway) executeScope(c *executionScope, req protocol.Request) {
 // preRequest 做请求前的额度检查与预扣。返回的快照要传给 finishRequest。
 //
 // legacy 跳过 ID=0 的目标；strict 要求可信用户与 Key 归属都存在。
-func (g *Gateway) preRequest(c *executionScope, req protocol.Request) (*billing.PreDeduct, error) {
+func (g *Gateway) preRequest(c *executionScope, req execution.Request) (*billing.PreDeduct, error) {
 	if g.billingMode == billing.ModeStrict {
 		if !g.strictReady() {
 			return nil, billing.ErrStrictUnavailable
@@ -193,7 +193,7 @@ func (g *Gateway) preRequest(c *executionScope, req protocol.Request) (*billing.
 // finishRequest 收尾：估算用量 → 算费 → 结算额度差额 → 写日志。
 //
 // 无论 Relay 成功、失败还是 panic 都会走到这里。
-func (g *Gateway) finishRequest(c *executionScope, req protocol.Request, startedAt time.Time, pre *billing.PreDeduct, reqBody []byte) {
+func (g *Gateway) finishRequest(c *executionScope, req execution.Request, startedAt time.Time, pre *billing.PreDeduct, reqBody []byte) {
 	status := scopeStatus(c)
 	tokenID := c.result.Identity.TokenID
 	userID := c.result.Identity.UserID
@@ -289,7 +289,7 @@ func (g *Gateway) finishRequest(c *executionScope, req protocol.Request, started
 // 失败的渠道信息已经由 scheduler 的凭据失败指标和 relay 的 warn
 // 日志覆盖；请求级指标记的是「这次请求最终结果」，重复记会把
 // gateway_requests_total 撑成重试次数，rate() 算出来的 QPS 是假的。
-func (g *Gateway) finishObservability(c *executionScope, req protocol.Request, startedAt time.Time,
+func (g *Gateway) finishObservability(c *executionScope, req execution.Request, startedAt time.Time,
 	status int, cost float64, usage *model.Usage, priceMissing bool) {
 	latency := time.Since(startedAt)
 	channel := c.result.ChannelName
@@ -368,7 +368,7 @@ func captureBytes(c *executionScope) []byte { return c.output.capture.Bytes() }
 // writeRequestLog 组装并写一条请求日志。
 //
 // 普通日志允许有界丢弃，不影响已提交的响应；严格账本已单独同步持久化。
-func (g *Gateway) writeRequestLog(c *executionScope, req protocol.Request, startedAt time.Time,
+func (g *Gateway) writeRequestLog(c *executionScope, req execution.Request, startedAt time.Time,
 	cost float64, usage *model.Usage, isEstimated, priceMissing bool, pre *billing.PreDeduct) {
 	if g.logRecorder == nil {
 		return
@@ -424,7 +424,7 @@ func relayUsage(c *executionScope) *model.Usage {
 	if u != nil && u.TotalTokens == 0 {
 		u.TotalTokens = u.PromptTokens + u.CompletionTokens
 	}
-	return u
+	return fromCoreUsage(u)
 }
 func relayActualModel(c *executionScope, fallback string) string {
 	if m := c.result.ActualModel; m != "" {

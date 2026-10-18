@@ -11,14 +11,12 @@ import (
 	"errors"
 	"fmt"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
-	"reflect"
 	"time"
 	"unicode/utf8"
 
 	"minigateway/internal/access"
+	jsonutil "minigateway/internal/foundation/contracts/json/v1"
 	"minigateway/internal/model"
-	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/jsonutil"
 	"minigateway/internal/secrets"
 )
 
@@ -33,6 +31,7 @@ type IntentAdmission interface {
 }
 
 type IntentOptions struct {
+	Parser    execv1.Parser
 	Admission IntentAdmission
 	Resolve   func(context.Context, access.Binding) (access.Principal, error)
 	ActiveKey string
@@ -46,6 +45,7 @@ type IntentOptions struct {
 }
 
 type IntentAcceptor struct {
+	parser    execv1.Parser
 	admission IntentAdmission
 	resolve   func(context.Context, access.Binding) (access.Principal, error)
 	keys      *secrets.Ring
@@ -62,13 +62,13 @@ type IntentReceipt struct {
 }
 
 type intentPayload struct {
-	Operation protocol.Operation
+	Operation execv1.Operation
 	Body      json.RawMessage
 	SessionID string
 }
 
 func NewIntentAcceptor(opts IntentOptions) (*IntentAcceptor, error) {
-	if opts.Admission == nil || (reflect.ValueOf(opts.Admission).Kind() == reflect.Pointer && reflect.ValueOf(opts.Admission).IsNil()) || opts.Resolve == nil || len(opts.DigestKey) != 32 ||
+	if nilPort(opts.Parser) || nilPort(opts.Admission) || opts.Resolve == nil || len(opts.DigestKey) != 32 ||
 		opts.QueueTTL < time.Second || opts.QueueTTL > 5*time.Minute || opts.Retention < time.Minute || opts.Retention > 7*24*time.Hour || opts.Retention < opts.QueueTTL ||
 		opts.Limits.InstanceRecords < 2 || opts.Limits.InstanceRecords > 4096 || opts.Limits.OwnerRecords < 1 || opts.Limits.OwnerRecords >= opts.Limits.InstanceRecords ||
 		opts.Limits.OwnerBytes < 68<<10 || opts.Limits.InstanceBytes < opts.Limits.OwnerBytes || opts.Limits.InstanceBytes > 64<<20 {
@@ -83,7 +83,7 @@ func NewIntentAcceptor(opts IntentOptions) (*IntentAcceptor, error) {
 			return nil, fmt.Errorf("generation digest and content keys must be independent")
 		}
 	}
-	return &IntentAcceptor{admission: opts.Admission, resolve: opts.Resolve, keys: keys,
+	return &IntentAcceptor{parser: opts.Parser, admission: opts.Admission, resolve: opts.Resolve, keys: keys,
 		digestKey: bytes.Clone(opts.DigestKey), queueTTL: opts.QueueTTL, retention: opts.Retention, limits: opts.Limits}, nil
 }
 
@@ -151,8 +151,8 @@ func (a *IntentAcceptor) openIntent(in model.GenerationIntent) (execv1.Invocatio
 	if json.Unmarshal(plain, &payload) != nil || in.RequestDigest != a.requestDigest(plain) || string(payload.Operation) != in.Operation {
 		return execv1.Invocation{}, ErrIntentIntegrity
 	}
-	req, err := protocol.ParseRequest(payload.Operation, payload.Body)
-	if err != nil || req.Model() != in.Model {
+	req, err := a.parser.ParseRequest(payload.Operation, payload.Body)
+	if err != nil || nilPort(req) || req.Model() != in.Model {
 		return execv1.Invocation{}, ErrIntentIntegrity
 	}
 	return execv1.Invocation{Operation: payload.Operation, Body: payload.Body, SessionID: payload.SessionID}, nil
@@ -190,8 +190,8 @@ func (a *IntentAcceptor) Admit(ctx context.Context, binding access.Binding, idem
 	if err != nil {
 		return IntentReceipt{}, err
 	}
-	req, err := protocol.ParseRequest(payload.Operation, payload.Body)
-	if err != nil || len(req.Model()) > 256 {
+	req, err := a.parser.ParseRequest(payload.Operation, payload.Body)
+	if err != nil || nilPort(req) || len(req.Model()) > 256 {
 		return IntentReceipt{}, model.ErrIntentConflict
 	}
 	principal, err := currentPrincipal(ctx, a.resolve, binding)

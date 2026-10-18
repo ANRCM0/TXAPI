@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"minigateway/internal/core"
+	"minigateway/internal/gateway"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/meta"
 )
@@ -99,7 +100,7 @@ func BenchmarkExecutor(b *testing.B) {
 						}
 						w := &benchWriter{header: make(http.Header), delay: scenario.slow}
 						started := time.Now()
-						result := e.Execute(context.Background(), w, input)
+						result := e.Execute(context.Background(), w, gateway.ToCoreInput(input))
 						samples[index] = time.Since(started)
 						if result.StatusCode != 200 {
 							b.Errorf("result=%+v", result)
