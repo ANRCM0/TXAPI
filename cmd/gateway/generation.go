@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	lifecycle "minigateway/internal/foundation/contracts/lifecycle/v1"
+	"minigateway/internal/foundation/persistence"
 	"time"
 
 	"minigateway/internal/billing"
@@ -20,7 +22,7 @@ import (
 type generationRuntime struct {
 	acceptor *generation.IntentAcceptor
 	archive  *generation.Archive
-	runner   *generation.DurableRunner
+	runner   lifecycle.Drainer
 	cancel   context.CancelFunc
 	done     chan struct{}
 }
@@ -61,14 +63,14 @@ func startGenerationRuntime(cfg config.GenerationConfig, st *store.Store, engine
 	if err := keys.ValidateRequirements(requirements, version); err != nil {
 		return nil, fmt.Errorf("retained generation content requires missing or incompatible keys")
 	}
-	acceptor, err := generation.NewIntentAcceptor(generation.IntentOptions{Parser: gw, Admission: engine, Resolve: st.ResolvePrincipal,
+	acceptor, err := generation.NewIntentAcceptor(generation.IntentOptions{Parser: gw, Admission: persistence.Admission(engine), Resolve: st.ResolvePrincipal,
 		ActiveKey: keys.Active, Keys: keys.Keys, DigestKey: keys.Digest,
 		QueueTTL: time.Duration(cfg.DeadlineSeconds) * time.Second, Retention: time.Duration(cfg.RetentionSeconds) * time.Second,
 		Limits: model.GenerationIntentLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords, InstanceBytes: cfg.InstanceBytes, OwnerBytes: cfg.OwnerBytes}})
 	if err != nil {
 		return nil, err
 	}
-	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: st, Resolve: st.ResolvePrincipal, ActiveKey: keys.Active, Keys: keys.Keys,
+	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: persistence.Archive(st), Resolve: st.ResolvePrincipal, ActiveKey: keys.Active, Keys: keys.Keys,
 		Retention: time.Duration(cfg.RetentionSeconds) * time.Second, MaxRecordBytes: cfg.MaxOutputBytes,
 		Limits: model.GenerationArchiveLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords, InstanceBytes: cfg.InstanceBytes, OwnerBytes: cfg.OwnerBytes}})
 	if err != nil {
@@ -84,7 +86,7 @@ func startGenerationRuntime(cfg config.GenerationConfig, st *store.Store, engine
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	runner, err := generation.NewDurableRunner(ctx, generation.DurableOptions{Acceptor: acceptor, Leases: engine, Archive: archive, Workers: cfg.Workers,
+	runner, err := generation.NewDurableRunner(ctx, generation.DurableOptions{Acceptor: acceptor, Leases: persistence.Leases(engine), Archive: archive, Workers: cfg.Workers,
 		PollInterval: time.Duration(cfg.PollMilliseconds) * time.Millisecond, LeaseDuration: time.Duration(cfg.LeaseSeconds) * time.Second, Execute: bridge.NewExecutor(gw).ExecuteClaimed})
 	if err != nil {
 		cancel()

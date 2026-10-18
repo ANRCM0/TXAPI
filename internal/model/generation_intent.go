@@ -1,13 +1,13 @@
 package model
 
-import "errors"
+import state "minigateway/internal/foundation/contracts/state/v1"
 
 var (
-	ErrIntentConflict = errors.New("generation intent conflicts with its idempotency scope")
-	ErrIntentCapacity = errors.New("generation intent capacity exceeded")
-	ErrIntentNotFound = errors.New("generation intent was not found")
-	ErrIntentUnsafe   = errors.New("generation intent cannot be safely released")
-	ErrClaimLost      = errors.New("generation claim is no longer owned")
+	ErrIntentConflict = state.ErrIntentConflict
+	ErrIntentCapacity = state.ErrIntentCapacity
+	ErrIntentNotFound = state.ErrIntentNotFound
+	ErrIntentUnsafe   = state.ErrIntentUnsafe
+	ErrClaimLost      = state.ErrClaimLost
 )
 
 const (
@@ -49,22 +49,10 @@ type GenerationIntent struct {
 
 // GenerationClaim is an in-process capability for one fenced ownership epoch.
 // It carries neither a Principal snapshot nor permission to bypass cost checks.
-type GenerationClaim struct {
-	ID    string
-	Epoch int64
-	Token string
-}
+type GenerationClaim = state.GenerationClaim
 
 // GenerationKeyRequirement contains only a content-format/key-ID header and an
 // optional digest-key fingerprint, never request, output, or secret key bytes.
-type GenerationKeyRequirement struct {
-	Header        []byte
-	DigestVersion string
-}
+type GenerationKeyRequirement = state.GenerationKeyRequirement
 
-type GenerationIntentLimits struct {
-	InstanceRecords int64
-	OwnerRecords    int64
-	InstanceBytes   int64
-	OwnerBytes      int64
-}
+type GenerationIntentLimits = state.GenerationIntentLimits

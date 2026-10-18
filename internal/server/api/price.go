@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"minigateway/internal/store"
+	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 )
 
 // 本文件是价格表 / 分组倍率 / 令牌额度的管理 API（SPEC 三交付物）。
@@ -44,7 +44,7 @@ func (h *Handler) UpsertPrice(c *gin.Context) {
 		})
 		return
 	}
-	var in store.PriceInput
+	var in cfg.PriceInput
 	if !bindJSON(c, &in) {
 		return
 	}

@@ -7,50 +7,21 @@ import (
 	"sync"
 	"time"
 
-	"minigateway/internal/model"
-	"minigateway/internal/store"
+	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 )
 
 // ConfigurationStore is the persistence consumed by configuration use cases.
 // Store owns validation, transactions and cache refresh; this service owns
 // save/publication ordering and distinguishes a committed save from a rollback.
-type ConfigurationStore interface {
-	ListChannels() []model.Channel
-	GetChannel(uint) (*model.Channel, error)
-	CreateChannel(*store.ChannelInput) (*model.Channel, error)
-	UpdateChannel(uint, *store.ChannelInput) (*model.Channel, error)
-	DeleteChannel(uint) error
-	ListCredentials(uint) []model.Credential
-	CreateCredential(uint, *store.CredentialInput) (*model.Credential, error)
-	UpdateCredential(uint, *store.CredentialInput) (*model.Credential, error)
-	DeleteCredential(uint) error
-	SetCredentialStatus(uint, string) (*model.Credential, error)
-	ModelPrices() ([]model.ModelPrice, error)
-	GroupRates() (map[string]float64, error)
-	UpsertModelPrice(*model.ModelPrice) error
-	DeleteModelPrice(string) error
-	SetGroupRates(map[string]float64) error
-}
+type ConfigurationStore = cfg.Repository
 
-type PublicationStatus struct {
-	DesiredRevision uint64    `json:"desired_revision"`
-	AppliedRevision uint64    `json:"applied_revision"`
-	LastError       string    `json:"last_error"`
-	UpdatedAt       time.Time `json:"updated_at"`
-}
+type PublicationStatus = cfg.PublicationStatus
 
-type ConfigStatus struct {
-	Epoch    string            `json:"epoch"`
-	Channels PublicationStatus `json:"channels"`
-	Prices   PublicationStatus `json:"prices"`
-}
+type ConfigStatus = cfg.ConfigStatus
 
 // Change describes persistence separately from runtime publication, including
 // an error returned after the database commit. HTTP status does not encode this.
-type Change struct {
-	Saved       bool
-	Publication PublicationStatus
-}
+type Change = cfg.Change
 
 type publication struct {
 	mu     sync.Mutex
@@ -126,7 +97,7 @@ func (s *Configuration) Apply() ConfigStatus {
 
 func finishChange(p *publication, err error) Change {
 	if err != nil {
-		var committed *store.SavedConfigurationError
+		var committed *cfg.SavedError
 		if !errors.As(err, &committed) {
 			return Change{}
 		}
@@ -134,15 +105,15 @@ func finishChange(p *publication, err error) Change {
 	return Change{Saved: true, Publication: p.publish(true)}
 }
 
-func (s *Configuration) ListChannels() []model.Channel { return s.store.ListChannels() }
-func (s *Configuration) GetChannel(id uint) (*model.Channel, error) {
+func (s *Configuration) ListChannels() []cfg.Channel { return s.store.ListChannels() }
+func (s *Configuration) GetChannel(id uint) (*cfg.Channel, error) {
 	return s.store.GetChannel(id)
 }
-func (s *Configuration) ListCredentials(id uint) []model.Credential {
+func (s *Configuration) ListCredentials(id uint) []cfg.Credential {
 	return s.store.ListCredentials(id)
 }
 
-func (s *Configuration) CreateChannel(in *store.ChannelInput) (*model.Channel, Change, error) {
+func (s *Configuration) CreateChannel(in *cfg.ChannelInput) (*cfg.Channel, Change, error) {
 	if in == nil {
 		return nil, Change{}, errors.New("channel input is required")
 	}
@@ -152,7 +123,7 @@ func (s *Configuration) CreateChannel(in *store.ChannelInput) (*model.Channel, C
 	return channel, finishChange(&s.channels, err), err
 }
 
-func (s *Configuration) UpdateChannel(id uint, in *store.ChannelInput) (*model.Channel, Change, error) {
+func (s *Configuration) UpdateChannel(id uint, in *cfg.ChannelInput) (*cfg.Channel, Change, error) {
 	if in == nil {
 		return nil, Change{}, errors.New("channel input is required")
 	}
@@ -169,7 +140,7 @@ func (s *Configuration) DeleteChannel(id uint) (Change, error) {
 	return finishChange(&s.channels, err), err
 }
 
-func (s *Configuration) CreateCredential(id uint, in *store.CredentialInput) (*model.Credential, Change, error) {
+func (s *Configuration) CreateCredential(id uint, in *cfg.CredentialInput) (*cfg.Credential, Change, error) {
 	if in == nil {
 		return nil, Change{}, errors.New("credential input is required")
 	}
@@ -179,7 +150,7 @@ func (s *Configuration) CreateCredential(id uint, in *store.CredentialInput) (*m
 	return credential, finishChange(&s.channels, err), err
 }
 
-func (s *Configuration) UpdateCredential(id uint, in *store.CredentialInput) (*model.Credential, Change, error) {
+func (s *Configuration) UpdateCredential(id uint, in *cfg.CredentialInput) (*cfg.Credential, Change, error) {
 	if in == nil {
 		return nil, Change{}, errors.New("credential input is required")
 	}
@@ -196,14 +167,14 @@ func (s *Configuration) DeleteCredential(id uint) (Change, error) {
 	return finishChange(&s.channels, err), err
 }
 
-func (s *Configuration) SetCredentialStatus(id uint, status string) (*model.Credential, Change, error) {
+func (s *Configuration) SetCredentialStatus(id uint, status string) (*cfg.Credential, Change, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	credential, err := s.store.SetCredentialStatus(id, status)
 	return credential, finishChange(&s.channels, err), err
 }
 
-func (s *Configuration) Prices() ([]model.ModelPrice, map[string]float64, error) {
+func (s *Configuration) Prices() ([]cfg.ModelPrice, map[string]float64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prices, err := s.store.ModelPrices()
@@ -214,7 +185,7 @@ func (s *Configuration) Prices() ([]model.ModelPrice, map[string]float64, error)
 	return prices, rates, err
 }
 
-func (s *Configuration) UpsertPrice(name string, in *store.PriceInput) (*model.ModelPrice, Change, error) {
+func (s *Configuration) UpsertPrice(name string, in *cfg.PriceInput) (*cfg.ModelPrice, Change, error) {
 	if name == "" {
 		return nil, Change{}, errors.New("model name is required")
 	}
@@ -226,7 +197,7 @@ func (s *Configuration) UpsertPrice(name string, in *store.PriceInput) (*model.M
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	price := &model.ModelPrice{Model: name, InputPricePer1K: in.InputPricePer1K, OutputPricePer1K: in.OutputPricePer1K}
+	price := &cfg.ModelPrice{Model: name, InputPricePer1K: in.InputPricePer1K, OutputPricePer1K: in.OutputPricePer1K}
 	err := s.store.UpsertModelPrice(price)
 	return price, finishChange(&s.prices, err), err
 }
@@ -244,3 +215,5 @@ func (s *Configuration) SetGroupRates(rates map[string]float64) (Change, error) 
 	err := s.store.SetGroupRates(rates)
 	return finishChange(&s.prices, err), err
 }
+
+var _ cfg.Service = (*Configuration)(nil)

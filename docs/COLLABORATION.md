@@ -16,7 +16,7 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 
 ## 1. 可以并行推进的分工
 
-S7-A02 已从 `master/04fbfa6` 经 PR #12 独立验收合并为 `master/765501a`；功能头 `2084bcd` 的 push/PR 与合并后 master 完整 CI 均通过。responses 通过 HistoryStore 消费 store 的统一 v12/CAS/当前授权，通过 secrets 复用 AEAD；gateway 只增加原目标约束，继续不依赖 responses/store。共享 main/config/路由/OpenAPI 已同步为已验收 0.4.0 / 91 操作。权限、存储/删除/CAS 与限制见 [历史契约](reference/responses-history.md)，精确验收见 [A02 记录](history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。A02/M2 已完成；下一批 A03 仍须独立验收。
+S7-A02 已从 `master/04fbfa6` 经 PR #12 独立验收合并为 `master/765501a`；功能头 `2084bcd` 的 push/PR 与合并后 master 完整 CI 均通过。Responses 现通过 state/v1.HistoryStore/ReceiptStore 和注入的 ContentProtection 消费统一 v12/CAS/当前授权与既有 AEAD，不导入 store/model/secrets；gateway 只增加原目标约束，继续不依赖 responses/store。共享 main/config/路由/OpenAPI 已同步为已验收 0.4.0 / 91 操作。权限、存储/删除/CAS 与限制见 [历史契约](reference/responses-history.md)，精确验收见 [A02 记录](history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。A02/M2 已完成；下一批 A03 仍须独立验收。
 
 | 责任角色 | 主要写入目录 | 受控工作范围 | 需要与集成负责人协调的文件 |
 |---|---|---|---|
@@ -61,7 +61,7 @@ HTTP 入口通过 compat/httpoutput 返回公开 Output，L1 版本化门面内�
 
 ### 最小 worker、输出记录与意图：internal/generation（A3-01 至 A3-05 基础消费者）
 
-L1 generation 当前只通过公开 execution/Parser 消费执行与载荷校验，不导入 core/gateway/protocol。其 access/model/secrets 实现依赖将在 FND-03 按状态和生命周期端口迁移，不是新增 L3 的接入许可。组装者注入当前身份解析、注册 Parser 与公开 Executor；不能导入 store/GORM、Gin 或另建 billing 引擎。固定 worker 和有界队列实际消费现有 Chat/embeddings，正文副本总预算最高 64 MiB，排队起算取消期限。交接不会预占 generation/network 槽、预留预算或持久受理。每次派发重新解析可信绑定，旧 context 的身份/准入标记不能带入；排队后撤销禁止新执行，已派发轮次仍用本轮快照，尚无后台任务撤销传播服务。
+L1 generation 通过公开 execution/Parser 和 state/v1 消费执行与持久快照，不导入 core/gateway/protocol/model。access/secrets 仅为 L1 私有实现；功能通过 state.Archive/Foreground/Cursor 等注入端口消费，不能导入 generation 或密钥实现。组装者注入当前身份解析、注册 Parser 与公开 Executor；不能导入 store/GORM、Gin 或另建 billing 引擎。固定 worker 和有界队列实际消费现有 Chat/embeddings，正文副本总预算最高 64 MiB，排队起算取消期限。交接不会预占 generation/network 槽、预留预算或持久受理。每次派发重新解析可信绑定，旧 context 的身份/准入标记不能带入；排队后撤销禁止新执行，已派发轮次仍用本轮快照，尚无后台任务撤销传播服务。
 
 观察者取消不取消已交接工作；显式 `Future.Cancel`、服务关闭和期限可取消生成，均继续走 gateway 既有收尾。输出属于本次生成，结果仅一次接收；commit 后 panic 保守标记执行可能未知，不重放、不伪造未派发或清零账本。`Close` 等待所有 worker 与收尾；超时后不得提前关闭 gateway/store，同进程不合作回调无法被隔离或强杀。
 
@@ -142,7 +142,7 @@ type Admission interface {
 
 ### 配置管理用例：internal/management
 
-S6 的 `Configuration` 是已有渠道/凭据/价格操作的真实应用服务，消费 `ConfigurationStore` 与两个运行快照发布回调；旧管理密钥和新管理员会话路由共用同一实例。保存、发布、状态读取和 Apply 在一个用例锁内排序，store 继续持有校验与事务；回调不得反向进入该实例以免重入。`Change.Saved` 表示数据库已提交，即使随后缓存读取报错；HTTP 层据此返回既有 `saved:true`、publication 头和错误表示，不重新保存。
+`management.Configuration` 是已有渠道/凭据/价格操作的真实应用服务，现只消费 `configuration/v1.Repository` 与两个运行快照发布回调，对外实现同组 `Service`，不再引用 model/store DTO；旧管理密钥和新管理员会话路由共用同一实例。保存、发布、状态读取和 Apply 在一个用例锁内排序，store 继续持有校验与事务；回调不得反向进入该实例以免重入。`Change.Saved` 表示数据库已提交，即使随后缓存读取报错；HTTP 层据此返回既有 `saved:true`、publication 头和错误表示，不重新保存。
 
 `Apply` 只重新应用已有 desired revision，不创建资源或增加版本；前端对 pending 与已 applied 的保存后错误分别提示。`ConfigStatus` 的 epoch/revision 是进程运行状态，不是持久事务或 schema 版本。该新增用例及前端风险回归在开发后期集中验证，当前支持/缺口与消费者见 [S6 契约清单](reference/compatibility-contracts.md)。
 
@@ -230,3 +230,8 @@ S7-A 由协议/HTTP、持久状态/任务、WS transport、账务/集成、前�
 F0 的阶段勾选、提交和原始 CI 已归入 [S0–S5 历史验收](history/acceptance-s0-s5.md#f0-多团队协作框架收口s2-之后)。本轮 S5/S6/A1–A3 切片已通过 PR #5 合入 `master/5004c57`，合并前后完整 CI 通过，具体范围见 [S5–A3 批次记录](history/implementation-s5-a3.md#2026-10-17-合并与最终验证结果)。
 
 A3-05/A4 随 PR #6 完成基础层验收，PR #7 同步了验收记录；这些证据不替代 S5-03 或 S6 的独立验收。S6/M1 已由 PR #8 验收合并，精确功能头、合并提交和分阶段 CI 见 [S6 记录](history/implementation-s6.md)。现有模块继续按本页边界维护；状态/后台/WS 产品和同类项目能力接入沿用同一授权、预算、任务恢复与资源释放。M1 验收证据、完整支持范围和下一步以 PLAN 为准。
+
+
+FC-001 FND-03 的状态、配置与生命周期候选入口/消费者、密文/资源语义和剩余 FND-04/05 债务见
+[Foundation API v1](reference/foundation-api-v1.md#fnd-03-状态配置与生命周期候选)。状态原始持久端口只注入可信服务，
+不把 owner/claim 快照当作身份；公开功能使用当前授权与归档等受限服务，不能自行关闭共享底层依赖。

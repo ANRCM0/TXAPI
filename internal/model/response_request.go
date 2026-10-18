@@ -1,11 +1,11 @@
 package model
 
-import "errors"
+import state "minigateway/internal/foundation/contracts/state/v1"
 
 var (
-	ErrResponseConflict    = errors.New("response request conflicts with its idempotency scope")
-	ErrResponseCapacity    = errors.New("response request capacity exceeded")
-	ErrResponseUnavailable = errors.New("response request persistence is unavailable")
+	ErrResponseConflict    = state.ErrResponseConflict
+	ErrResponseCapacity    = state.ErrResponseCapacity
+	ErrResponseUnavailable = state.ErrResponseUnavailable
 )
 
 const (
@@ -42,18 +42,6 @@ type ResponseRequest struct {
 	ExpiresAt          int64  `gorm:"not null;index:idx_response_expiry,priority:2"`
 }
 
-type ResponseRequestLimits struct {
-	InstanceRecords int64
-	OwnerRecords    int64
-}
+type ResponseRequestLimits = state.ResponseRequestLimits
 
-type ResponseRequestCompletion struct {
-	State              string
-	NativeStatus       string
-	UpstreamResponseID string
-	OutputRecordID     string
-	StatusCode         int
-	HTTPStatus         int
-	BillingID          string
-	ErrorType          string
-}
+type ResponseRequestCompletion = state.ResponseRequestCompletion

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"minigateway/internal/foundation/persistence"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,7 +57,7 @@ func TestIntentAdmissionCrashWorker(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	opts := intentOptions(st, engine)
+	opts := intentOptions(st, persistence.Admission(engine))
 	opts.QueueTTL = 2 * time.Second
 	a := intentAcceptor(t, opts)
 	in := strictSocketExecution()
@@ -156,7 +157,7 @@ func TestIntentForcedProcessDeathPreservesAtomicAdmission(t *testing.T) {
 				t.Fatal(err)
 			}
 			engine, _ := strictRecordingFixture(t, st)
-			opts := intentOptions(st, engine)
+			opts := intentOptions(st, persistence.Admission(engine))
 			opts.QueueTTL = 2 * time.Second
 			a := intentAcceptor(t, opts)
 			binding := access.Binding{UserID: stored.UserID, TokenID: stored.TokenID}

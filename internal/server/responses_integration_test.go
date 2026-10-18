@@ -8,8 +8,10 @@ import (
 	"io"
 	"minigateway/internal/compat/httpoutput"
 	authority "minigateway/internal/foundation/identity"
+	"minigateway/internal/foundation/persistence"
 	bridge "minigateway/internal/foundation/runtime"
 	"minigateway/internal/protocol"
+	"minigateway/internal/secrets"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -111,15 +113,19 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(gw.Close)
-				archive, err := generation.NewArchive(generation.ArchiveOptions{Store: st, Resolve: st.ResolvePrincipal, ActiveKey: "fixture", Keys: map[string][]byte{"fixture": bytes.Repeat([]byte{23}, 32)}, Retention: time.Hour, MaxRecordBytes: 65536, Limits: model.GenerationArchiveLimits{InstanceBytes: 1 << 20, OwnerBytes: 1 << 19, InstanceRecords: 16, OwnerRecords: 8}})
+				archive, err := generation.NewArchive(generation.ArchiveOptions{Store: persistence.Archive(st), Resolve: st.ResolvePrincipal, ActiveKey: "fixture", Keys: map[string][]byte{"fixture": bytes.Repeat([]byte{23}, 32)}, Retention: time.Hour, MaxRecordBytes: 65536, Limits: model.GenerationArchiveLimits{InstanceBytes: 1 << 20, OwnerBytes: 1 << 19, InstanceRecords: 16, OwnerRecords: 8}})
 				if err != nil {
 					t.Fatal(err)
 				}
-				history, err := responsesapp.NewHistory(responsesapp.HistoryOptions{Store: st, ActiveKey: "fixture", Keys: map[string][]byte{"fixture": bytes.Repeat([]byte{23}, 32)}, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 32, OwnerRecords: 16, InstanceBytes: 16 << 20, OwnerBytes: 8 << 20}})
+				protector, err := secrets.NewRing("fixture", map[string][]byte{"fixture": bytes.Repeat([]byte{23}, 32)})
 				if err != nil {
 					t.Fatal(err)
 				}
-				service, err := responsesapp.New(context.Background(), responsesapp.Options{History: history, Store: st, Executor: bridge.NewExecutor(gw), Archive: archive, Identity: authority.New(st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: bytes.Repeat([]byte{17}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 16, OwnerRecords: 8}, ActiveRequests: 4, OwnerRequests: 2})
+				history, err := responsesapp.NewHistory(responsesapp.HistoryOptions{Store: persistence.History(st), Protector: protector, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 32, OwnerRecords: 16, InstanceBytes: 16 << 20, OwnerBytes: 8 << 20}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				service, err := responsesapp.New(context.Background(), responsesapp.Options{History: history, Store: persistence.Receipts(st), Executor: bridge.NewExecutor(gw), Archive: generation.PublicArchive(archive), Identity: authority.New(st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: bytes.Repeat([]byte{17}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 16, OwnerRecords: 8}, ActiveRequests: 4, OwnerRequests: 2})
 				if err != nil {
 					t.Fatal(err)
 				}

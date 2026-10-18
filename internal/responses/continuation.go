@@ -11,7 +11,7 @@ import (
 
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
-	"minigateway/internal/model"
+	state "minigateway/internal/foundation/contracts/state/v1"
 	native "minigateway/internal/protocol/responses"
 )
 
@@ -67,7 +67,7 @@ func normalizeItems(raw json.RawMessage) ([]json.RawMessage, error) {
 		return nil, errors.New("input must be text or items")
 	}
 	if len(items) > maxHistoryItems {
-		return nil, model.ErrHistoryCapacity
+		return nil, state.ErrHistoryCapacity
 	}
 	for i, raw := range items {
 		var item map[string]json.RawMessage
@@ -109,14 +109,14 @@ func normalizeItems(raw json.RawMessage) ([]json.RawMessage, error) {
 }
 
 type historyTurn struct {
-	record              model.ResponseHistory
+	record              state.ResponseHistory
 	content             historyContent
-	conversation        model.ResponseHistory
+	conversation        state.ResponseHistory
 	conversationContent historyContent
 	target              *execv1.TargetConstraint
 }
 
-func (h *History) prepare(ctx context.Context, b identity.Binding, receipt model.ResponseRequest, body []byte) ([]byte, *historyTurn, error) {
+func (h *History) prepare(ctx context.Context, b identity.Binding, receipt state.ResponseRequest, body []byte) ([]byte, *historyTurn, error) {
 	fields, parent, conv, err := stateFields(body)
 	if err != nil {
 		return nil, nil, err
@@ -132,7 +132,7 @@ func (h *History) prepare(ctx context.Context, b identity.Binding, receipt model
 		return nil, nil, errHistoryRequest
 	}
 	t := &historyTurn{record: h.fresh(receipt.ResponseID, "response", receipt.Model, b), content: historyContent{Parent: parent, Conversation: conv}}
-	var guards []model.HistoryGuard
+	var guards []state.HistoryGuard
 	if parent != "" || conv != "" {
 		id := parent
 		if conv != "" {
@@ -143,10 +143,10 @@ func (h *History) prepare(ctx context.Context, b identity.Binding, receipt model
 			return nil, nil, err
 		}
 		if !c.Ready || r.Busy != "" || c.Active != "" || r.Model != "" && r.Model != receipt.Model {
-			return nil, nil, model.ErrHistoryConflict
+			return nil, nil, state.ErrHistoryConflict
 		}
 		if parent != "" && r.Kind != "response" || conv != "" && r.Kind != "conversation" {
-			return nil, nil, model.ErrHistoryNotFound
+			return nil, nil, state.ErrHistoryNotFound
 		}
 		input = append(append([]json.RawMessage(nil), c.Items...), input...)
 		if c.Target.Fingerprint != "" {
@@ -154,13 +154,13 @@ func (h *History) prepare(ctx context.Context, b identity.Binding, receipt model
 			t.target = &copy
 		}
 		if parent != "" {
-			guards = append(guards, model.HistoryGuard{ID: r.ID, Version: r.Version})
+			guards = append(guards, state.HistoryGuard{ID: r.ID, Version: r.Version})
 		} else {
 			t.conversation, t.conversationContent = r, c
 		}
 	}
 	if len(input) > maxHistoryItems {
-		return nil, nil, model.ErrHistoryCapacity
+		return nil, nil, state.ErrHistoryCapacity
 	}
 	seen := map[string]bool{}
 	for _, raw := range input {
@@ -181,7 +181,7 @@ func (h *History) prepare(ctx context.Context, b identity.Binding, receipt model
 	// are retained as private provenance and are never simultaneously sent.
 	effective, err := json.Marshal(fields)
 	if err != nil || len(effective) > maxHistoryContextBytes {
-		return nil, nil, model.ErrHistoryCapacity
+		return nil, nil, state.ErrHistoryCapacity
 	}
 	t.content.Request = effective
 	parsed, err := native.ParseRequest(effective)
@@ -189,13 +189,13 @@ func (h *History) prepare(ctx context.Context, b identity.Binding, receipt model
 		return nil, nil, err
 	}
 	if err = parsed.ValidateHTTP(); err != nil {
-		return nil, nil, model.ErrHistoryContext
+		return nil, nil, state.ErrHistoryContext
 	}
 	t.record, err = h.seal(t.record, t.content)
 	if err != nil {
 		return nil, nil, err
 	}
-	changes := []model.HistoryChange{{Record: t.record}}
+	changes := []state.HistoryChange{{Record: t.record}}
 	if conv != "" {
 		old := t.conversation.Version
 		t.conversation.Version++
@@ -206,7 +206,7 @@ func (h *History) prepare(ctx context.Context, b identity.Binding, receipt model
 		if err != nil {
 			return nil, nil, err
 		}
-		changes = append(changes, model.HistoryChange{Expected: old, Record: t.conversation})
+		changes = append(changes, state.HistoryChange{Expected: old, Record: t.conversation})
 	}
 	if err = h.apply(ctx, b, changes, guards...); err != nil {
 		return nil, nil, err
@@ -252,7 +252,7 @@ func (o *captureOutput) Write(ctx context.Context, p []byte) (int, error) {
 	}
 	n, err := o.Output.Write(ctx, p)
 	if n > 0 && n <= len(p) {
-		if o.body.Len()+n > model.ResponseHistoryMaxBytes {
+		if o.body.Len()+n > state.ResponseHistoryMaxBytes {
 			o.overflow = true
 		} else if !o.overflow {
 			_, _ = o.body.Write(p[:n])
@@ -321,7 +321,7 @@ func (o *captureOutput) SetWriteDeadline(t time.Time) error {
 
 func terminalObject(o *captureOutput, stream bool) (json.RawMessage, error) {
 	if o.overflow {
-		return nil, model.ErrHistoryCapacity
+		return nil, state.ErrHistoryCapacity
 	}
 	if !stream {
 		r, _, err := native.ParseResponse(o.body.Bytes())
@@ -383,7 +383,7 @@ func (h *History) finish(b identity.Binding, t *historyTurn, result execv1.Outco
 				}
 				content.Response, _ = json.Marshal(response)
 			} else {
-				resultErr = model.ErrHistoryCapacity
+				resultErr = state.ErrHistoryCapacity
 			}
 		}
 	}
@@ -404,7 +404,7 @@ func (h *History) finish(b identity.Binding, t *historyTurn, result execv1.Outco
 	previous := t.record.Version
 	t.record.Version++
 	sealed, err := h.seal(t.record, content)
-	if errors.Is(err, model.ErrHistoryCapacity) {
+	if errors.Is(err, state.ErrHistoryCapacity) {
 		content.Ready = false
 		content.Items = nil
 		content.Input = nil
@@ -417,7 +417,7 @@ func (h *History) finish(b identity.Binding, t *historyTurn, result execv1.Outco
 	if err != nil {
 		return err
 	}
-	changes := []model.HistoryChange{{Expected: previous, Record: sealed}}
+	changes := []state.HistoryChange{{Expected: previous, Record: sealed}}
 	if t.conversation.ID != "" {
 		conv := t.conversation
 		c := t.conversationContent
@@ -441,7 +441,7 @@ func (h *History) finish(b identity.Binding, t *historyTurn, result execv1.Outco
 		if err != nil {
 			return err
 		}
-		changes = append(changes, model.HistoryChange{Expected: old, Record: conv})
+		changes = append(changes, state.HistoryChange{Expected: old, Record: conv})
 	}
 	if err = h.apply(ctx, b, changes); err != nil {
 		return err

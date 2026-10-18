@@ -21,19 +21,15 @@ import (
 
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
-	"minigateway/internal/generation"
-	"minigateway/internal/model"
+
+	state "minigateway/internal/foundation/contracts/state/v1"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/jsonutil"
 )
 
 const MaxRequestBytes = 1 << 20
 
-type ReceiptStore interface {
-	InitializeResponseRequests(context.Context, string) error
-	BeginResponseRequest(context.Context, model.ResponseRequest, model.ResponseRequestLimits) (model.ResponseRequest, bool, error)
-	FinishResponseRequest(context.Context, model.ResponseRequest, model.ResponseRequestCompletion) error
-}
+type ReceiptStore = state.ReceiptStore
 
 type Executor = execv1.Executor
 
@@ -41,12 +37,12 @@ type Options struct {
 	History                       *History
 	Store                         ReceiptStore
 	Executor                      Executor
-	Archive                       *generation.Archive
+	Archive                       state.Archive
 	Identity                      identity.Authority
 	NewOutput                     func(http.ResponseWriter) execv1.DeadlineOutput
 	DigestKey                     []byte
 	Retention                     time.Duration
-	Limits                        model.ResponseRequestLimits
+	Limits                        state.ResponseRequestLimits
 	ActiveRequests, OwnerRequests int
 }
 
@@ -55,24 +51,31 @@ type Service struct {
 	history                     *History
 	store                       ReceiptStore
 	executor                    Executor
-	archive                     *generation.Archive
+	archive                     state.Archive
 	identity                    identity.Authority
 	newOutput                   func(http.ResponseWriter) execv1.DeadlineOutput
 	digest                      []byte
 	version                     string
 	retention                   time.Duration
-	limits                      model.ResponseRequestLimits
+	limits                      state.ResponseRequestLimits
 	mu                          sync.Mutex
 	active, maxActive, maxOwner int
 	owners                      map[uint]int
 }
 
 func missing(v any) bool {
-	return v == nil || (reflect.ValueOf(v).Kind() == reflect.Pointer && reflect.ValueOf(v).IsNil())
+	if v == nil {
+		return true
+	}
+	switch reflect.ValueOf(v).Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflect.ValueOf(v).IsNil()
+	}
+	return false
 }
 
 func New(ctx context.Context, opts Options) (*Service, error) {
-	if missing(opts.Store) || missing(opts.Executor) || opts.Archive == nil || missing(opts.Identity) || opts.NewOutput == nil || len(opts.DigestKey) != 32 ||
+	if missing(opts.Store) || missing(opts.Executor) || missing(opts.Archive) || missing(opts.Identity) || opts.NewOutput == nil || len(opts.DigestKey) != 32 ||
 		opts.Retention < time.Minute || opts.Retention > 7*24*time.Hour || opts.Limits.OwnerRecords < 1 || opts.Limits.InstanceRecords <= opts.Limits.OwnerRecords ||
 		opts.ActiveRequests < 2 || opts.ActiveRequests > 128 || opts.OwnerRequests < 1 || opts.OwnerRequests >= opts.ActiveRequests {
 		return nil, errors.New("invalid Responses application configuration")
@@ -148,7 +151,7 @@ func validKey(key string) bool {
 	return true
 }
 
-func headers(w http.ResponseWriter, receipt model.ResponseRequest) {
+func headers(w http.ResponseWriter, receipt state.ResponseRequest) {
 	w.Header().Set("X-TXAPI-Generation-ID", receipt.ID)
 	w.Header().Set("X-TXAPI-Response-ID", receipt.ResponseID)
 }
@@ -242,18 +245,18 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	native, _ := request.Responses()
 	now := time.Now()
-	receipt := model.ResponseRequest{ID: id, UserID: p.UserID, TokenID: p.TokenID, Operation: string(protocol.Responses),
+	receipt := state.ResponseRequest{ID: id, UserID: p.UserID, TokenID: p.TokenID, Operation: string(protocol.Responses),
 		KeyHash: s.hash("key", []byte(fmt.Sprintf("%d/%d/%s", p.UserID, p.TokenID, key))), RequestHash: s.hash("request", canonicalBody), DigestVersion: s.version,
-		ResponseID: "resp_" + id, Model: request.Model(), Stream: request.Stream(), Store: native.StoreEnabled(), State: model.ResponseDispatching,
+		ResponseID: "resp_" + id, Model: request.Model(), Stream: request.Stream(), Store: native.StoreEnabled(), State: state.ResponseDispatching,
 		CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(s.retention).UnixMilli()}
 	receipt, fresh, err := s.store.BeginResponseRequest(r.Context(), receipt, s.limits)
 	if err != nil {
 		switch {
 		case errors.Is(err, identity.ErrUnauthorized):
 			respond(w, 401, "unauthorized", "identity is no longer authorized")
-		case errors.Is(err, model.ErrResponseConflict):
+		case errors.Is(err, state.ErrResponseConflict):
 			respond(w, 409, "idempotency_conflict", "Idempotency-Key was used for another request")
-		case errors.Is(err, model.ErrResponseCapacity):
+		case errors.Is(err, state.ErrResponseCapacity):
 			respond(w, 429, "responses_capacity", "Responses receipt capacity is full")
 		default:
 			respond(w, 503, "responses_unavailable", "Responses receipt could not be recorded")
@@ -263,7 +266,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headers(w, receipt)
 	// Refresh returned the authenticated context; the public snapshot is not proof.
 	if !fresh {
-		if s.history != nil && receipt.Store && receipt.State != model.ResponseDispatching && receipt.State != model.ResponseUncertain && receipt.State != model.ResponseRejected {
+		if s.history != nil && receipt.Store && receipt.State != state.ResponseDispatching && receipt.State != state.ResponseUncertain && receipt.State != state.ResponseRejected {
 			_, content, err := s.history.read(ctx, binding, receipt.ResponseID)
 			if err != nil || !content.Ready {
 				respond(w, 409, "idempotency_result_unavailable", "retained response history is unavailable")
@@ -278,7 +281,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.history != nil {
 		body, turn, err = s.history.prepare(ctx, binding, receipt, body)
 		if err != nil {
-			_ = s.finish(receipt, model.ResponseRequestCompletion{State: model.ResponseRejected, StatusCode: 409, ErrorType: "history_unavailable"})
+			_ = s.finish(receipt, state.ResponseRequestCompletion{State: state.ResponseRejected, StatusCode: 409, ErrorType: "history_unavailable"})
 			historyError(w, err)
 			return
 		}
@@ -286,14 +289,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.execute(ctx, w, binding, receipt, body, turn)
 }
 
-func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding identity.Binding, receipt model.ResponseRequest) {
+func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding identity.Binding, receipt state.ResponseRequest) {
 	w.Header().Set("X-TXAPI-Idempotency", "replayed")
 	switch receipt.State {
-	case model.ResponseDispatching:
+	case state.ResponseDispatching:
 		w.Header().Set("Retry-After", "1")
 		respond(w, 409, "idempotency_in_progress", "the original generation is still in progress")
 		return
-	case model.ResponseUncertain:
+	case state.ResponseUncertain:
 		respond(w, 409, "idempotency_unknown", "the original result is unknown; automatic re-execution is unsafe")
 		return
 	}
@@ -302,7 +305,7 @@ func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding ide
 		return
 	}
 	stored, err := s.archive.Read(ctx, binding, receipt.OutputRecordID)
-	if err != nil || !stored.Result.ProtocolComplete && receipt.State != model.ResponseRejected || stored.Result.Model != receipt.Model || stored.Result.Operation != protocol.Responses {
+	if err != nil || !stored.Result.ProtocolComplete && receipt.State != state.ResponseRejected || stored.Result.Model != receipt.Model || stored.Result.Operation != protocol.Responses {
 		respond(w, 409, "idempotency_result_unavailable", "the original generation is not re-executed; its body is unavailable")
 		return
 	}
@@ -328,15 +331,15 @@ func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding ide
 	}
 }
 
-func (s *Service) finish(receipt model.ResponseRequest, completion model.ResponseRequestCompletion) error {
+func (s *Service) finish(receipt state.ResponseRequest, completion state.ResponseRequestCompletion) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	return s.store.FinishResponseRequest(ctx, receipt, completion)
 }
 
-func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding identity.Binding, receipt model.ResponseRequest, body []byte, turn *historyTurn) {
+func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding identity.Binding, receipt state.ResponseRequest, body []byte, turn *historyTurn) {
 	output := s.newOutput(w)
-	var recording *generation.Foreground
+	var recording state.Foreground
 	finished := false
 	historyFinished := turn == nil
 	defer func() {
@@ -345,7 +348,7 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 			_ = s.history.finish(binding, turn, execv1.Outcome{Result: execv1.Result{Phase: execv1.ResponseReceived}}, &captureOutput{}, receipt.Stream, false)
 		}
 		if !finished {
-			_ = s.finish(receipt, model.ResponseRequestCompletion{State: model.ResponseUncertain, ErrorType: "execution_unknown"})
+			_ = s.finish(receipt, state.ResponseRequestCompletion{State: state.ResponseUncertain, ErrorType: "execution_unknown"})
 		}
 		if panicked {
 			// A panic can follow dispatch. Never log payloads or make this key fresh.
@@ -364,7 +367,7 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 				_ = s.history.finish(binding, turn, execv1.Outcome{Result: execv1.Result{Phase: execv1.NotDispatched}}, &captureOutput{}, receipt.Stream, false)
 				historyFinished = true
 			}
-			finished = s.finish(receipt, model.ResponseRequestCompletion{State: model.ResponseRejected, StatusCode: 503, ErrorType: "archive_unavailable"}) == nil
+			finished = s.finish(receipt, state.ResponseRequestCompletion{State: state.ResponseRejected, StatusCode: 503, ErrorType: "archive_unavailable"}) == nil
 			respond(w, 503, "archive_unavailable", "encrypted replay capacity is unavailable")
 			return
 		}
@@ -380,7 +383,7 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 		input.Target = turn.target
 	}
 	result := s.executor.Execute(ctx, target, input)
-	completion := model.ResponseRequestCompletion{State: model.ResponseUncertain, NativeStatus: result.Native.Status, UpstreamResponseID: result.Native.ID,
+	completion := state.ResponseRequestCompletion{State: state.ResponseUncertain, NativeStatus: result.Native.Status, UpstreamResponseID: result.Native.ID,
 		StatusCode: result.StatusCode, HTTPStatus: output.State().HTTPStatus}
 	if result.Error != nil {
 		completion.ErrorType = result.Error.Error.Type
@@ -389,9 +392,9 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 		completion.UpstreamResponseID = ""
 	}
 	if result.ProtocolComplete && result.Termination != execv1.ClientWriteError {
-		completion.State = model.ResponseCompleted
+		completion.State = state.ResponseCompleted
 		if result.Native.Status == "failed" || result.Native.Status == "cancelled" || result.StatusCode >= 400 {
-			completion.State = model.ResponseFailed
+			completion.State = state.ResponseFailed
 		}
 	} else {
 		notDispatched := result.Phase == execv1.NotDispatched
@@ -399,20 +402,20 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding id
 			notDispatched = notDispatched && attempt.Phase == execv1.NotDispatched
 		}
 		if notDispatched {
-			completion.State = model.ResponseRejected
+			completion.State = state.ResponseRejected
 		}
 	}
 	if recording != nil {
-		if err := recording.Finish(result); err == nil && completion.State != model.ResponseUncertain {
+		if err := recording.Finish(result); err == nil && completion.State != state.ResponseUncertain {
 			completion.OutputRecordID = recording.ID()
-		} else if err != nil && completion.State != model.ResponseRejected {
-			completion.State = model.ResponseUncertain
+		} else if err != nil && completion.State != state.ResponseRejected {
+			completion.State = state.ResponseUncertain
 		}
 	}
 	if turn != nil {
-		known := completion.State == model.ResponseCompleted || completion.State == model.ResponseFailed
+		known := completion.State == state.ResponseCompleted || completion.State == state.ResponseFailed
 		if err := s.history.finish(binding, turn, result, captured, receipt.Stream, known); err != nil {
-			completion.State = model.ResponseUncertain
+			completion.State = state.ResponseUncertain
 			completion.OutputRecordID = ""
 		}
 		historyFinished = true

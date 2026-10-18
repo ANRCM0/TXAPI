@@ -7,6 +7,7 @@ import (
 	"errors"
 	"minigateway/internal/compat/httpoutput"
 	authority "minigateway/internal/foundation/identity"
+	"minigateway/internal/foundation/persistence"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -112,15 +113,15 @@ func newResponseFixture(t *testing.T) *responseFixture {
 	return f
 }
 
-func (f *responseFixture) newService(t *testing.T, receipts app.ReceiptStore) *app.Service {
+func (f *responseFixture) newService(t *testing.T, receipts persistence.ReceiptBackend) *app.Service {
 	t.Helper()
-	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: f.st, Resolve: f.st.ResolvePrincipal,
+	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: persistence.Archive(f.st), Resolve: f.st.ResolvePrincipal,
 		ActiveKey: "fixture-key", Keys: map[string][]byte{"fixture-key": bytes.Repeat([]byte{23}, 32)}, Retention: time.Hour,
 		MaxRecordBytes: 65536, Limits: model.GenerationArchiveLimits{InstanceBytes: 1 << 20, OwnerBytes: 1 << 19, InstanceRecords: 16, OwnerRecords: 8}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := app.New(context.Background(), app.Options{Store: receipts, Executor: f.executor, Archive: archive, Identity: authority.New(f.st.ResolvePrincipal), NewOutput: httpoutput.New,
+	service, err := app.New(context.Background(), app.Options{Store: persistence.Receipts(receipts), Executor: f.executor, Archive: generation.PublicArchive(archive), Identity: authority.New(f.st.ResolvePrincipal), NewOutput: httpoutput.New,
 		DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 32, OwnerRecords: 16}, ActiveRequests: 4, OwnerRequests: 2})
 	if err != nil {
 		t.Fatal(err)

@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"minigateway/internal/store"
+	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 )
 
 // 本文件是凭据（渠道下的上游 Key）的管理 API。
@@ -39,7 +39,7 @@ func (h *Handler) CreateCredential(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var in store.CredentialInput
+	var in cfg.CredentialInput
 	if !bindJSON(c, &in) {
 		return
 	}
@@ -62,7 +62,7 @@ func (h *Handler) UpdateCredential(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var in store.CredentialInput
+	var in cfg.CredentialInput
 	if !bindJSON(c, &in) {
 		return
 	}

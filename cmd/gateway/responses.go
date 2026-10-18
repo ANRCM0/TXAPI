@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"minigateway/internal/foundation/persistence"
+	"minigateway/internal/secrets"
 	"net/http"
 	"time"
 
@@ -51,13 +53,17 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	if err != nil || keys.ValidateRequirements(requirements, version) != nil {
 		return nil, errors.New("retained content requires missing or incompatible keys")
 	}
-	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: st, Resolve: st.ResolvePrincipal, ActiveKey: keys.Active, Keys: keys.Keys,
+	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: persistence.Archive(st), Resolve: st.ResolvePrincipal, ActiveKey: keys.Active, Keys: keys.Keys,
 		Retention: time.Duration(cfg.ReplaySeconds) * time.Second, MaxRecordBytes: cfg.MaxOutputBytes,
 		Limits: model.GenerationArchiveLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords, InstanceBytes: cfg.InstanceBytes, OwnerBytes: cfg.OwnerBytes}})
 	if err != nil {
 		return nil, err
 	}
-	history, err := responses.NewHistory(responses.HistoryOptions{Store: st, ActiveKey: keys.Active, Keys: keys.Keys, Retention: time.Duration(cfg.HistorySeconds) * time.Second,
+	protector, err := secrets.NewRing(keys.Active, keys.Keys)
+	if err != nil {
+		return nil, err
+	}
+	history, err := responses.NewHistory(responses.HistoryOptions{Store: persistence.History(st), Protector: protector, Retention: time.Duration(cfg.HistorySeconds) * time.Second,
 		Limits: model.HistoryLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords, InstanceBytes: cfg.HistoryInstanceBytes, OwnerBytes: cfg.HistoryOwnerBytes}})
 	if err != nil {
 		return nil, err
@@ -65,7 +71,7 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	if err = st.RecoverResponseHistory(ctx); err != nil {
 		return nil, errors.New("Responses history recovery failed")
 	}
-	service, err := responses.New(ctx, responses.Options{History: history, Store: st, Executor: bridge.NewExecutor(gw), Archive: archive, Identity: authority.New(st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: keys.Digest,
+	service, err := responses.New(ctx, responses.Options{History: history, Store: persistence.Receipts(st), Executor: bridge.NewExecutor(gw), Archive: generation.PublicArchive(archive), Identity: authority.New(st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: keys.Digest,
 		Retention: time.Duration(cfg.RetentionSeconds) * time.Second, Limits: model.ResponseRequestLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords},
 		ActiveRequests: cfg.ActiveRequests, OwnerRequests: cfg.OwnerRequests})
 	if err != nil {

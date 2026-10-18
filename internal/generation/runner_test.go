@@ -18,6 +18,7 @@ import (
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	lifecycle "minigateway/internal/foundation/contracts/lifecycle/v1"
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
@@ -390,7 +391,8 @@ func TestRunnerShutdownTimeoutKeepsOwnershipUntilCallbacksReturn(t *testing.T) {
 	signal(t, started)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := r.Close(ctx); !errors.Is(err, context.Canceled) {
+	var owner lifecycle.Drainer = r
+	if err := owner.Close(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("close pretended callback was joined: %v", err)
 	}
 	close(release)

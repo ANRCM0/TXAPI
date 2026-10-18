@@ -3,6 +3,7 @@ package generation
 import (
 	"context"
 	"errors"
+	"minigateway/internal/foundation/persistence"
 	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"sync/atomic"
@@ -20,7 +21,7 @@ import (
 
 func durableOptions(t *testing.T, st *store.Store, engine *billing.Engine, g *gateway.Gateway) DurableOptions {
 	t.Helper()
-	return DurableOptions{Acceptor: intentAcceptor(t, intentOptions(st, engine)), Archive: testArchive(t, archiveOptions(st)), Leases: engine,
+	return DurableOptions{Acceptor: intentAcceptor(t, intentOptions(st, persistence.Admission(engine))), Archive: testArchive(t, archiveOptions(st)), Leases: persistence.Leases(engine),
 		Workers: 1, PollInterval: 20 * time.Millisecond, LeaseDuration: time.Second, Execute: bridge.NewExecutor(g).ExecuteClaimed}
 }
 
@@ -210,7 +211,7 @@ func TestDurableOutputSealFailureDoesNotUndoSettlementOrReplay(t *testing.T) {
 		Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { hits.Add(1); return response(), nil })}})
 	opts := durableOptions(t, st, engine, g)
 	archiveOpts := archiveOptions(st)
-	archiveOpts.Store = failingArchiveStore{ArchiveStore: st, kind: "result"}
+	archiveOpts.Store = failingArchiveStore{ArchiveStore: persistence.Archive(st), kind: "result"}
 	opts.Archive = testArchive(t, archiveOpts)
 	receipt := admitIntent(t, opts.Acceptor, binding, "output-seal-failure")
 	r := &DurableRunner{opts: opts}

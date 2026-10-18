@@ -12,21 +12,14 @@ import (
 	"time"
 
 	"minigateway/internal/access"
-	execv1 "minigateway/internal/foundation/contracts/execution/v1"
-	"minigateway/internal/model"
+	state "minigateway/internal/foundation/contracts/state/v1"
 )
 
 const cursorLifetime = 30 * time.Second
 
 // CursorPage contains encoded bytes, not independently framed protocol events.
 // Cursor points AFTER Body; consumers persist it only after accepting that page.
-type CursorPage struct {
-	Metadata *execv1.ResponseMetadata
-	Body     []byte
-	Result   *RecordedResult
-	Cursor   string
-	Done     bool
-}
+type CursorPage = state.CursorPage
 
 // CursorReader owns one authenticated sealed snapshot (at most 8 MiB). Its
 // observation context/Close cannot cancel, replay or settle the generation.
@@ -72,7 +65,7 @@ func (a *Archive) acquireCursor(userID uint) (func(), error) {
 	}, nil
 }
 
-func cursorAAD(record model.GenerationRecord) []byte {
+func cursorAAD(record state.GenerationRecord) []byte {
 	return []byte(fmt.Sprintf("TXAPI/generation-cursor/v1/%s/%d/%d/%d/%d/%d/%d/%d/",
 		record.ID, record.UserID, record.TokenID, record.CreatedAt, record.ExpiresAt, record.MaxBytes, record.StoredBytes, record.NextSequence))
 }

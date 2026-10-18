@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	state "minigateway/internal/foundation/contracts/state/v1"
+	"minigateway/internal/foundation/persistence"
 	"minigateway/internal/protocol"
 	"os"
 	"strings"
@@ -72,7 +74,7 @@ func assertIntentBudget(t *testing.T, st *store.Store, intents, reservations int
 func TestIntentAtomicAdmissionRetryAndCancellation(t *testing.T) {
 	st, binding, otherKey := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	opts := intentOptions(st, engine)
+	opts := intentOptions(st, persistence.Admission(engine))
 	a := intentAcceptor(t, opts)
 	receipt := admitIntent(t, a, binding, "first-admission")
 	if receipt.State != model.IntentQueued || len(receipt.ID) != 64 || receipt.BillingID != receipt.ID[:32] {
@@ -122,7 +124,7 @@ func TestIntentAtomicAdmissionRetryAndCancellation(t *testing.T) {
 func TestIntentInsertFailureRollsBackDualHoldAndConfigurationMarker(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	a := intentAcceptor(t, intentOptions(st, engine))
+	a := intentAcceptor(t, intentOptions(st, persistence.Admission(engine)))
 	if err := st.DB().Exec("CREATE TRIGGER fail_intent_insert BEFORE INSERT ON generation_intents BEGIN SELECT RAISE(ABORT, 'controlled intent insert failure'); END").Error; err != nil {
 		t.Fatal(err)
 	}
@@ -145,10 +147,10 @@ type lostIntentConfirmation struct {
 	lost atomic.Bool
 }
 
-func (p *lostIntentConfirmation) AdmitGenerationIntent(ctx context.Context, in model.GenerationIntent, limits model.GenerationIntentLimits) (model.GenerationIntent, error) {
+func (p *lostIntentConfirmation) AdmitGenerationIntent(ctx context.Context, in state.GenerationIntent, limits state.GenerationIntentLimits) (state.GenerationIntent, error) {
 	out, err := p.IntentAdmission.AdmitGenerationIntent(ctx, in, limits)
 	if err == nil && p.lost.CompareAndSwap(false, true) {
-		return model.GenerationIntent{}, errors.New("isolated post-commit confirmation loss")
+		return state.GenerationIntent{}, errors.New("isolated post-commit confirmation loss")
 	}
 	return out, err
 }
@@ -156,7 +158,7 @@ func (p *lostIntentConfirmation) AdmitGenerationIntent(ctx context.Context, in m
 func TestIntentLostCommitConfirmationRetriesWithoutAnotherHold(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	a := intentAcceptor(t, intentOptions(st, &lostIntentConfirmation{IntentAdmission: engine}))
+	a := intentAcceptor(t, intentOptions(st, &lostIntentConfirmation{IntentAdmission: persistence.Admission(engine)}))
 	if got, err := a.Admit(context.Background(), binding, "ambiguous-commit", strictSocketExecution()); err == nil || got.ID != "" {
 		t.Fatalf("confirmation loss exposed a successful receipt: %+v %v", got, err)
 	}
@@ -171,7 +173,7 @@ func TestIntentLostCommitConfirmationRetriesWithoutAnotherHold(t *testing.T) {
 func TestIntentConcurrentRetriesAndCancelRecoveryAreAtomic(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	a := intentAcceptor(t, intentOptions(st, engine))
+	a := intentAcceptor(t, intentOptions(st, persistence.Admission(engine)))
 	var wg sync.WaitGroup
 	ids := make(chan string, 24)
 	for range 24 {
@@ -226,7 +228,7 @@ func TestIntentConcurrentRetriesAndCancelRecoveryAreAtomic(t *testing.T) {
 func TestIntentCurrentAuthorityCapacityAndExpiryRecovery(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	opts := intentOptions(st, engine)
+	opts := intentOptions(st, persistence.Admission(engine))
 	opts.Limits.OwnerRecords = 1
 	a := intentAcceptor(t, opts)
 	receipt := admitIntent(t, a, binding, "capacity")
@@ -257,7 +259,7 @@ func TestIntentCurrentAuthorityCapacityAndExpiryRecovery(t *testing.T) {
 func TestIntentCryptographicBindingRotationAndDigestKeyMismatch(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	opts := intentOptions(st, engine)
+	opts := intentOptions(st, persistence.Admission(engine))
 	a := intentAcceptor(t, opts)
 	in := strictSocketExecution()
 	in.Body = bytes.ReplaceAll(in.Body, []byte("hello"), []byte("input-marker-must-not-be-plaintext-513a"))
@@ -292,11 +294,11 @@ func TestIntentCryptographicBindingRotationAndDigestKeyMismatch(t *testing.T) {
 		if _, ok := tamper["ciphertext"]; ok {
 			copy.Ciphertext = bytes.Repeat([]byte{1}, len(copy.Ciphertext))
 		}
-		if _, err := a.openIntent(copy); !errors.Is(err, ErrIntentIntegrity) {
+		if _, err := a.openIntent(persistence.GenerationIntentSnapshot(copy)); !errors.Is(err, ErrIntentIntegrity) {
 			t.Fatalf("tampered immutable metadata was accepted: %v", err)
 		}
 	}
-	rotated := intentOptions(st, engine)
+	rotated := intentOptions(st, persistence.Admission(engine))
 	rotated.ActiveKey = "content-2"
 	rotated.Keys["content-2"] = bytes.Repeat([]byte{42}, 32)
 	rotated.QueueTTL = 5 * time.Second
@@ -307,7 +309,7 @@ func TestIntentCryptographicBindingRotationAndDigestKeyMismatch(t *testing.T) {
 	if got, err := reader.Admit(context.Background(), binding, "private-idempotency-marker-7cf2", in); err != nil || got != receipt {
 		t.Fatalf("rotation changed idempotency: %+v %v", got, err)
 	}
-	wrong := intentOptions(st, engine)
+	wrong := intentOptions(st, persistence.Admission(engine))
 	wrong.DigestKey = bytes.Repeat([]byte{73}, 32)
 	wrongReader := intentAcceptor(t, wrong)
 	if _, err := wrongReader.Admit(context.Background(), binding, "private-idempotency-marker-7cf2", in); !errors.Is(err, model.ErrIntentConflict) {
@@ -323,7 +325,7 @@ func TestIntentCryptographicBindingRotationAndDigestKeyMismatch(t *testing.T) {
 func TestIntentInputSnapshotBeforeAuthorityCallbackAndValidation(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	opts := intentOptions(st, engine)
+	opts := intentOptions(st, persistence.Admission(engine))
 	in := strictSocketExecution()
 	opts.Resolve = func(ctx context.Context, b access.Binding) (access.Principal, error) {
 		for i := range in.Body {
@@ -355,7 +357,7 @@ func TestIntentInputSnapshotBeforeAuthorityCallbackAndValidation(t *testing.T) {
 func TestIntentKeyScopesAndNarrowedModelAuthorityRemainIndependent(t *testing.T) {
 	st, binding, otherKey := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	a := intentAcceptor(t, intentOptions(st, engine))
+	a := intentAcceptor(t, intentOptions(st, persistence.Admission(engine)))
 	first := admitIntent(t, a, binding, "shared-idempotency-key")
 	second := admitIntent(t, a, otherKey, "shared-idempotency-key")
 	if first.ID == second.ID || first.BillingID == second.BillingID {
@@ -380,7 +382,8 @@ func TestIntentInvalidConfigurationFailsClosed(t *testing.T) {
 	engine, _ := strictRecordingFixture(t, st)
 	for _, mutate := range []func(*IntentOptions){
 		func(o *IntentOptions) { o.Admission = nil },
-		func(o *IntentOptions) { var nilEngine *billing.Engine; o.Admission = nilEngine },
+		func(o *IntentOptions) { var nilEngine *billing.Engine; o.Admission = persistence.Admission(nilEngine) },
+		func(o *IntentOptions) { var nilAdmission *lostIntentConfirmation; o.Admission = nilAdmission },
 		func(o *IntentOptions) { o.Resolve = nil },
 		func(o *IntentOptions) { o.Parser = nil },
 		func(o *IntentOptions) { var parser *protocol.BuiltinParser; o.Parser = parser },
@@ -391,7 +394,7 @@ func TestIntentInvalidConfigurationFailsClosed(t *testing.T) {
 		func(o *IntentOptions) { o.Limits.OwnerRecords = o.Limits.InstanceRecords },
 		func(o *IntentOptions) { o.Limits.InstanceBytes = 65 << 20 },
 	} {
-		opts := intentOptions(st, engine)
+		opts := intentOptions(st, persistence.Admission(engine))
 		mutate(&opts)
 		if _, err := NewIntentAcceptor(opts); err == nil {
 			t.Fatal("invalid/unbounded intent configuration accepted")

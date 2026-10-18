@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"minigateway/internal/foundation/persistence"
 	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"os"
@@ -31,7 +32,7 @@ func TestRecordedOutputFailureRetainsStrictUnknownCost(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, ch := strictRecordingFixture(t, st)
 	opts := archiveOptions(st)
-	opts.Store = failingArchiveStore{ArchiveStore: st, kind: "body"}
+	opts.Store = failingArchiveStore{ArchiveStore: persistence.Archive(st), kind: "body"}
 	a := testArchive(t, opts)
 	var hits atomic.Int64
 	g, capacity := newGateway(t, gateway.Options{Channels: ch, StrictBilling: engine, BillingMode: billing.ModeStrict, RetryTimes: 2,
@@ -76,7 +77,7 @@ func TestArchiveFinalObservationFailureDoesNotUndoSettledBill(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, ch := strictRecordingFixture(t, st)
 	opts := archiveOptions(st)
-	opts.Store = failingArchiveStore{ArchiveStore: st, kind: "result"}
+	opts.Store = failingArchiveStore{ArchiveStore: persistence.Archive(st), kind: "result"}
 	a := testArchive(t, opts)
 	var hits atomic.Int64
 	g, _ := newGateway(t, gateway.Options{Channels: ch, StrictBilling: engine, BillingMode: billing.ModeStrict, RetryTimes: 2,

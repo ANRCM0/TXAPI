@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"minigateway/internal/model"
+	state "minigateway/internal/foundation/contracts/state/v1"
 	"minigateway/internal/secrets"
 )
 
@@ -23,7 +23,7 @@ func ReadContentKeyFile(path string) (ContentKeyConfig, error) {
 	return ContentKeyConfig{Active: key.Active, Keys: key.Keys, Digest: key.Digest}, nil
 }
 
-func (k ContentKeyConfig) ValidateRequirements(requirements []model.GenerationKeyRequirement, digestVersion string) error {
+func (k ContentKeyConfig) ValidateRequirements(requirements []state.GenerationKeyRequirement, digestVersion string) error {
 	if _, err := secrets.NewRing(k.Active, k.Keys); err != nil {
 		return err
 	}

@@ -1,6 +1,6 @@
 # Foundation API v1：实施清单与迁移边界
 
-状态：FC-001 已由用户批准，FND-01 已验收，FND-02 本地集中验证通过、待完整 CI/合并；本清单是 v1 候选，不是 frozen 发布。
+状态：FC-001 已由用户批准，FND-01/02 已验收，FND-03 本地集中验证通过、待完整 CI/合并；本清单是 v1 候选，不是 frozen 发布。
 最终冻结需 FND-05 全部 DoD、独立上层样例和最新基线完整 CI/合并证明。
 排期与勾选只维护 [PLAN](../PLAN.md#地基符合性收口fc-001)，目标范围见
 [FC-001](../proposals/FC-001-foundation-contracts-v1.md)，实际验证见
@@ -39,8 +39,9 @@ NativeCompletion 保存原生终态/ID，Target 保存原目标连续性，Billi
 不是任意 Go 值。源 usage、策略/模型切片、错误、attempt 与元数据不与消费者共享可变引用。
 
 `foundation/runtime.Executor` 是 L1 私有转换实现，不能成为 L3 导入入口。
-其 ExecuteClaimed 暂时接受旧 model.GenerationClaim，仅供原 durable runtime 组装使用，
-FND-03 将迁入状态契约；它没有进入 execution v1 的公开 Executor 接口。
+其 ExecuteClaimed 现接受 state/v1.GenerationClaim，由 state.ClaimedExecutor 描述；
+原 durable runtime 继续调用原 fenced 预留。它没有进入普通 execution.Executor 接口，
+不能通过构造相同 ID/Epoch 值获得 claim token 或绕过原 hold/attempt 检查。
 
 ## 持久与外部兼容
 
@@ -59,10 +60,10 @@ FND-01 增加契约实现依赖/无类型逃逸检查、受控拒绝样例、结
 
 | 剩余依赖 / 来源 | 退出批次 |
 |---|---|
-| gateway 操作/协议通过中立注册，Observation 与 Gin handler 已迁出；本批最终集中/CI 证明 | FND-02 待 CI/合并 |
-| generation 意图校验已注入注册 Parser；model claim/记录、access 解析实现仍待迁移 | FND-03 |
-| responses 的 generation.Archive、model 快照/回执、secrets 与原生 item 解析 | FND-03/FND-04 |
-| management.ConfigurationStore 的 store 输入 DTO；server API 的直接 store/billing 调用 | FND-03/FND-04 |
+| gateway 注册/协议会话与 HTTP 隔离 | FND-02 已验收，PR #15 / master/e97e458 |
+| generation 的记录/claim/意图及状态端口已用中立值；access/secrets 仅留 L1 私有实现 | FND-03 待 CI/合并 |
+| responses 已消费 state.Archive/快照/回执/保护端口，不再导入 generation/model/secrets；HTTP 表示与协议边界待拆分 | FND-04 |
+| management 已仅消费 configuration/v1；server API 仍组装私有 store/billing/management，所有用例与表示隔离待完成 | FND-04 |
 | 全生产包四层映射、公开签名递归可见性、独立新增操作样例与零例外冻结 | FND-05 |
 
 这些是已知迁移来源，不是新增模块可复制的接入方式；本清单不降低旧检查或最终 CI 门槛。
@@ -82,9 +83,30 @@ NonReplayable/OpaqueErrors/Continuity 只收紧既有执行安全；错误消息
 不解释厂商状态。strict 新操作默认拒绝，Chat/embeddings 也仍需原成本证明，注册不能绕过 StartPreparedAttempt。
 旧 adaptor 的 ProtocolAdaptor/整数 mode 保留在 L2 兼容工厂内；framework 不导入这些实现。
 纯 JSON 约束统一为 foundation/contracts/json/v1，旧 protocol/jsonutil 仅转发，避免财务/worker 反向依赖 L2。
-该组与 HTTP 接入尚待本批最终 CI/合并，不据源码编译或 FND-01 历史 CI 提前冻结。
+该组与 HTTP 接入已由 FND-02 最终头及合并后完整 CI 验收；整个 v1 仍待 FND-05，不据此提前冻结。
 
 HTTP 适配的准入交接由组装根注入的 gateway.NewHTTPExecutor 处理；普通 NewPublicExecutor 保持每次新准入。
 私有上下文标记只可绑定当前可信 Key 并原子接管一次，Invocation 无跳过限流字段；原 TPM 预留仍由原 once 收尾。
 Request.AffinityText 将旧首条 user/多模态文本投影留在协议侧，scheduler.SessionKey 只做原 owner/Key 哈希。
 该迁移不改变显式头与旧回退亲和键字节，也不把亲和摘要当作授权或会话持久化。
+
+
+## FND-03 状态、配置与生命周期候选
+
+| 路径 / 版本 | 内容与实际消费者 | 语义与限制 |
+|---|---|---|
+| foundation/contracts/state/v1 / Version=1 | 无 ORM 的生成记录/片段、意图/claim、回执/历史、守卫和限额；ArchiveStore/IntentAdmission/IntentLeases/ReceiptStore/HistoryStore；generation 与 Responses 实际消费 | 持久数据由 foundation/persistence 显式转换后调用原 store/billing 事务，不导出 DB、SQL 或事务回调。快照数据不构成身份/claim 授权 |
+| 同上 Archive/Foreground/Recording/Cursor | Responses 通过 generation.PublicArchive 注入，只面对公开输出与记录值 | 记录前台持久输出再交付；Finish 是观察终态，不断言财务成功。读取/删除/游标继续重新授权；Close 只释放该观察快照，不取消生成或退款 |
+| 同上 ContentProtection | main 注入原 secrets.Ring 给 Responses 历史 | 同步有界的既有 v1 AEAD 格式及 Active key ID；保持 header、12-byte nonce、16-byte tag 和原 AAD。不是通用替换加密算法或修改历史格式的许可 |
+| foundation/contracts/configuration/v1 / Version=1 | Repository、Service、Channel/Credential/ModelPrice 与输入、Change/ConfigStatus/SavedError；management、HTTP API 实际消费 | 隐藏 ORM/软删除/密文和内部健康并发列；特权凭据表示与一次性创建/掩码由原 HTTP 权限路径保持。保存/发布/Apply 仍在同一应用锁排序；提交后错误仍 Saved=true |
+| foundation/contracts/lifecycle/v1 / Version=1 | Drainer.Close(context.Context)；main 的 durable runner 所有权与原 Runner 关闭回归消费 | 关闭停止接收并 join，context 返回错误不代表依赖可关闭；所有者继续保留 gateway/store，直到再次 Close 成功。保留现有单点启动和停止顺序 |
+
+转换桥逐字段保留原 ID、owner/Key、原账本/价格、版本、期限、claim epoch/hash/取消/输出关联和错误身份，
+复制密文/嵌套片段/策略与配置 map/slice，不共享回调可改数据。旧模型只对无 ORM 的普通限额/claim/错误
+引用公开值；ORM 行继续独立定义并保留原标签，不能通过 type alias 把持久实现暴露进契约。
+端口注入给可信编译期服务：绑定值和快照不是授权，用户入口必须用当前认证，存储仍持有原事务内权限检查；
+领取/续租/隔离/完成继续由原账本权威执行，不能把原始状态端口当成面向不可信客户端的公开 API。
+
+真实风险回归新增密文字节/嵌套片段所有权、fencing/原 hold/unknown/cancel 事实、提交后错误双层识别与保存时间，
+以及 typed-nil 后端不隐藏在 wrapper；既有归档/旧密文/重启/强杀/当前授权/CAS/发布测试保留。
+公开合同的递归类型检查和全部生产包分类仍留 FND-05；server API/Responses HTTP 拆分仍留 FND-04。
