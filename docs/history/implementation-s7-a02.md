@@ -167,3 +167,24 @@ HTTP behavior was instead reverified on the repaired source, not inferred
 from the prior browser result. No dependency, workflow, financial or migration
 behavior changed in this repair. Matching new automatic push/PR/master complete
 CI remains mandatory before final functional acceptance.
+
+### Authenticated Unknown Marker Repair
+
+A further boundary review found that a completed uncertain conversation had
+its blocker only in the plaintext busy column. The repair keeps an uncertain
+marker in authenticated ciphertext too. A regression clears the database busy
+column and proves repeated new keys still return 409 with no new execution.
+Success and proven never-dispatched paths explicitly clear the encrypted marker.
+The two changed source files affect private history state only; no route/schema,
+financial, migration, protocol wire, frontend or lifecycle interface changed.
+
+Final current source: 296 non-Markdown paths, fingerprint
+`7bf33379b9ddcccceab59c0a075b03e0333415a387f734aebb7268931b627fd7`.
+`GOARCH=amd64 go test -count=1 ./internal/responses ./internal/server ./internal/store`
+passed all three affected packages, including the new actual tamper/re-execution
+regression; `go build ./...` and `go vet ./...` passed again. The complete local
+1016-test result remains explicitly scoped to prior head 8ca8901 / fingerprint
+41d33e32, reused only for unchanged packages/behavior. Its full push/PR CI is
+also source-specific. The final current head must pass the existing complete
+automatic Linux race/main smoke/container jobs before merge; no gate or source
+change is inferred from earlier green results.

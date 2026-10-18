@@ -105,6 +105,8 @@ The first generation admission binds the conversation to its public model.
 A request rejected before dispatch releases the local conversation slot without
 appending new items. After a partial write, cancellation, panic, persistence
 failure or interrupted restart, unknown execution cannot be automatically reused.
+The uncertain marker is also retained inside the authenticated encrypted content,
+so clearing the plaintext busy column cannot authorize another turn.
 Startup marks abandoned slots uncertain before producers start. The last
 committed conversation prefix remains readable, but no new generation may append
 over the missing outcome. Its owner may explicitly delete an uncertain local

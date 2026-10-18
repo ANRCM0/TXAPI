@@ -424,15 +424,19 @@ func (h *History) finish(b access.Binding, t *historyTurn, result gateway.Reques
 		c := t.conversationContent
 		old := conv.Version
 		conv.Version++
-		c.Active = ""
+		// The encrypted marker also guards against an altered plaintext busy
+		// column reopening an unknown generation after a crash or I/O failure.
+		c.Active = "uncertain"
 		conv.Busy = "uncertain"
 		if content.Ready {
 			c.Items = content.Items
 			c.Target = content.Target
 			conv.Busy = ""
+			c.Active = ""
 		}
 		if notDispatched {
 			conv.Busy = ""
+			c.Active = ""
 		}
 		conv, err = h.seal(conv, c)
 		if err != nil {
