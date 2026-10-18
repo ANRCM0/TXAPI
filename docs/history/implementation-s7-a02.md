@@ -2,9 +2,10 @@
 
 Date: 2026-10-18. Source base: `04fbfa62aad2ad6c3bbc2b4a153b634095c0b6a0`,
 fetched latest master before starting a clean
-`feat/s7-a02-persistent-conversations` branch. This is a working-batch record,
-not matching remote CI/PR/merge acceptance. No A02/M2, full S7 or S5 checkbox
-is closed by implementation or local results alone.
+`feat/s7-a02-persistent-conversations` branch. Earlier checkpoints below retain
+their source-specific pending status. Final A02/M2 acceptance through PR #12
+is recorded in [functional acceptance](#2026-10-18-s7-a02-functional-acceptance).
+Full S7 and S5 remain incomplete; local results alone do not close them.
 
 ## Scope And Ownership
 
@@ -188,3 +189,61 @@ regression; `go build ./...` and `go vet ./...` passed again. The complete local
 also source-specific. The final current head must pass the existing complete
 automatic Linux race/main smoke/container jobs before merge; no gate or source
 change is inferred from earlier green results.
+
+## 2026-10-18 S7-A02 Functional Acceptance
+
+Final feature head `2084bcddf3d39d7f62f65ff138072431427fea43` was integrated
+on unchanged latest base `04fbfa62aad2ad6c3bbc2b4a153b634095c0b6a0` through
+[PR #12](https://github.com/ANRCM0/TXAPI/pull/12), merged at
+2026-10-18T03:09:06Z as `master/765501a93f22c6daf125aa98b718fd74dd316abf`.
+The merged tree exactly matched the feature head (`git diff --exit-code`
+between them passed). Its 296 non-Markdown source paths retain fingerprint
+`7bf33379b9ddcccceab59c0a075b03e0333415a387f734aebb7268931b627fd7`.
+
+| Exact source / automatic run | Actual result |
+|---|---|
+| Final feature push [39092263704](https://github.com/ANRCM0/TXAPI/actions/runs/39092263704), `2084bcd` | check SUCCESS / delivery SUCCESS |
+| Final feature PR [39092266694](https://github.com/ANRCM0/TXAPI/actions/runs/39092266694), `2084bcd` | check SUCCESS / delivery SUCCESS |
+| Merged master [39092604090](https://github.com/ANRCM0/TXAPI/actions/runs/39092604090), `765501a` | check SUCCESS / delivery SUCCESS |
+
+Authoritative results were read with `gh run view --json headSha,status,conclusion,jobs`;
+head/base and mergeability were checked with `git fetch origin master`, `git rev-parse`
+and `gh pr view`. Merge used `gh pr merge 12 --merge --match-head-commit` with
+the exact final feature SHA after all four push/PR checks succeeded. No manual
+dispatch, workflow modification, gate bypass or administrator override was used.
+
+All three existing Verify runs completed dependency/contract checks, build,
+vet, gofmt, frontend checks, **Linux full race**, coverage, real-main loopback
+smoke and report-only performance baseline. Delivery ran the actual Docker/Compose
+fresh install, S3-to-v12 upgrade, stopped consistent backup/restoration and normal
+shutdown, preserving old identity/price/financial assertions. These are real CI
+outcomes, superseding the earlier AST-only/pending delivery checkpoints for the
+final source. Local 1016-test results remain scoped to `8ca8901`; final `2084bcd`
+additionally passed affected-package tests and these exact-source full CI runs.
+
+The six A02 requirements and M2 (A01 plus A02) are accepted: stored response/
+conversation/items operations, one complete local context source, target/price
+provenance, creating user/Key/current-model authority, bounded encrypted storage,
+restart/branch/CAS/deletion/expiry and uncertainty behavior. No new financial
+authority, authentication system or migration runner was introduced.
+
+Acceptance remains the declared single-model native text/function/opaque-encrypted
+subset. Missing reasoning content refuses continuation before execution;
+unknown execution remains blocked even after the plaintext busy field is cleared.
+Responses stays disabled by default and requires actual credential encryption and
+mounted content keys. All strict Responses remain refused before billing.
+No real vendor account, production database, SDK/Codex or new history UI was tested.
+A03 background, A04 WS, A05/A06 reliability/client delivery, full S7 and S5-03
+are still incomplete. The next independent batch is A03.
+
+The subsequent acceptance documentation batch changes Markdown only. It checks
+diff, links/anchors and state consistency without repeating Go tests or manually
+dispatching CI; its ordinary automatic push/PR/master integration remains separate
+from the functional evidence above.
+
+Windows/PowerShell `git diff --check` and the ignored local
+`python .local/validation/check-foundation-docs.py` passed for ten changed
+Markdown documents and 180 local links/anchors. State review confirms only the
+six A02 checkboxes changed; A03-A06, full S7 and S5-03 remain incomplete.
+The non-Markdown source fingerprint above was unchanged after the documentation
+edits. No new local Go/browser test or manual CI dispatch was required.

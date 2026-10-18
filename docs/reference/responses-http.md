@@ -1,14 +1,15 @@
 # Responses HTTP/SSE foreground contract
 
-Status (2026-10-18): S7-A01 accepted and merged by PR #10. Final feature head `3195d09` on base `bea97fa` and actual merged `master/a925140` passed their own complete automatic push/PR/master CI, including Linux race and container delivery. See [exact acceptance evidence](../history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance), including the failed initial delivery run and repair. This extends, rather than reopens, the accepted [S6 contracts](compatibility-contracts.md). Responses remains opt-in; A02-A06 and M2 are not complete.
+Status (2026-10-18): S7-A01 accepted and merged by PR #10. Final feature head `3195d09` on base `bea97fa` and actual merged `master/a925140` passed their own complete automatic push/PR/master CI, including Linux race and container delivery. See [exact acceptance evidence](../history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance), including the failed initial delivery run and repair. This extends, rather than reopens, the accepted [S6 contracts](compatibility-contracts.md). Responses remains opt-in. A02/M2 was subsequently accepted separately through PR #12; A03-A06 remain incomplete.
 
-## A02 Working Extension
+## A02 Accepted Extension
 
-The current A02 worktree separately implements local encrypted response/history
-and Conversations APIs with full-context continuation. Its 0.4.0 / 91-operation
-contract is **not yet remotely accepted**. See [history contract](responses-history.md)
-and [A02 evidence](../history/implementation-s7-a02.md). The A01 acceptance and its
-exclusions below describe its original scope, not an acceptance of this extension.
+A02 separately implements local encrypted response/history and Conversations
+APIs with full-context continuation. Its 0.4.0 / 91-operation contract was accepted
+through PR #12 / `master/765501a`: final head `2084bcd` and merged master passed
+their own complete push/PR/master CI. See [history contract](responses-history.md)
+and [A02 evidence](../history/implementation-s7-a02.md). The A01 exclusions below
+describe its original scope; current history support follows the A02 contract.
 
 ## Supported Surface
 
@@ -16,7 +17,7 @@ exclusions below describe its original scope, not an acceptance of this extensio
 
 Responses is opt-in. An authenticated request returns 503 when disabled; anonymous requests remain 401. Strict billing rejects Responses with 400 `unsupported_billing_dimension` before admission/reservation/attempt. Disabled and legacy billing use the existing ports; legacy estimates are not a strict cost guarantee. Existing Chat/embeddings routes and middleware remain unchanged.
 
-This batch does not implement public retrieval/deletion, previous_response_id, conversation, item references, background=true, hosted tools, media, sessions or WebSocket. These are explicit unsupported behaviors, not substitutes for S7-A02 through A06. Provider-side `store` is preserved: omitted means the provider default, not an injected `false`. Native provider state is not automatically local conversation state.
+A01 originally excluded public retrieval/deletion, previous_response_id and conversation; A02 now supplies these through the local-history contract above. Item references, background=true, hosted tools, media, sessions and WebSocket remain unsupported. Provider-side `store` is preserved: omitted means the provider default, not an injected `false`. Native provider state is not automatically local conversation state.
 
 ## Request Identity And Deduplication
 
@@ -52,4 +53,4 @@ A future Responses background consumer must atomically commit its immutable exec
 
 ## Source And Acceptance Scope
 
-Native semantics were checked against the [official OpenAI Responses create reference](https://developers.openai.com/api/reference/resources/responses/methods/create) and [API request-ID documentation](https://developers.openai.com/api/reference/overview) on 2026-10-18. X-Client-Request-Id is tracing, not a verified deduplication guarantee. This implementation relies on its own persisted receipt and never promises exactly-once provider execution after unknown network outcomes. Local test providers are isolated fixtures; no real account, real provider cost, SDK/Codex client or production database acceptance is implied. S5-03 and S7-A02-A06 remain independent.
+Native semantics were checked against the [official OpenAI Responses create reference](https://developers.openai.com/api/reference/resources/responses/methods/create) and [API request-ID documentation](https://developers.openai.com/api/reference/overview) on 2026-10-18. X-Client-Request-Id is tracing, not a verified deduplication guarantee. This implementation relies on its own persisted receipt and never promises exactly-once provider execution after unknown network outcomes. Local test providers are isolated fixtures; no real account, real provider cost, SDK/Codex client or production database acceptance is implied. S5-03 and S7-A03-A06 remain independent; A02 has its own acceptance evidence above.

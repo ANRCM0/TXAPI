@@ -19,11 +19,12 @@ consumer are specified in [Responses HTTP](responses-http.md), with
 [exact A01 evidence](../history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance).
 The historical S6 inventory and evidence below do not validate that extension.
 
-The current unaccepted A02 worktree extends OpenAPI to 0.4.0 / 91 operations
+A02 accepted through PR #12 / `master/765501a` extends OpenAPI to 0.4.0 / 91 operations
 with 11 history/conversation routes and full local-context continuation. See
 [history contract](responses-history.md) and [A02 evidence](../history/implementation-s7-a02.md).
 It has its own encrypted snapshot/CAS/target consumers; no historical S6/A01 CI
-is substituted for matching A02 verification.
+is substituted for A02 verification. Exact head `2084bcd` and merged master
+passed their own complete push/PR/master CI; M2 is accepted.
 
 ## Responsibilities and actual consumers
 
@@ -73,7 +74,7 @@ is substituted for matching A02 verification.
 | Chat JSON/SSE / Gemini | Text subset, cumulative usage; tool definitions/history reject | No registered input profile; execution rejected |
 | Non-stream embeddings / OpenAI-compatible | Independent native body/vector decoder, including supported extension opt-in | Registered official input/tariff/credential profile only |
 | Foreground Responses JSON/SSE / native OpenAI-compatible | Separately accepted A01 opt-in route; text/function tools, scoped durable idempotency and short encrypted replay | Rejected before admission/holds/attempt; no proven Responses subset |
-| Responses local history/conversations | Implemented in current A02 worktree, pending complete CI/merge; full-context text/function subset and scoped encrypted snapshots | All strict Responses refused |
+| Responses local history/conversations | Separately accepted A02 via PR #12; full-context text/function subset and scoped encrypted snapshots | All strict Responses refused |
 | Responses background/native WS product | Not implemented; independent foundation consumers do not provide these products | No inherited Chat or A01 approval |
 
 The matrix states implementation scope, not independent provider billing or

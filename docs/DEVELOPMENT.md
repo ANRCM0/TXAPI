@@ -2,17 +2,17 @@
 
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
-S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确源码/命令/结果统一见 [PLAN](PLAN.md) 和 [S6 批次记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29`（PR #6）及其 [完整验证](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。没有新增公开任务/会话/原生 WS 产品 API，完整 S5 和 S7 继续独立验收。
+S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确源码/命令/结果统一见 [PLAN](PLAN.md) 和 [S6 批次记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29`（PR #6）及其 [完整验证](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。A3/S6 原验收未新增公开任务/会话/原生 WS 产品 API；当前 A02 另行交付了会话/历史 API，完整 S5 和 S7 继续独立验收。
 
 ## 工具与工作目录
 
-2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该 A01 验收当时 A02+ 尚未交付；当前 A02 工作实现仍待独立验收，M2 未完成，S5 成本门槛继续独立验收。
+2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 
-### S7-A02 历史与会话（工作树待验收）
+### S7-A02 历史与会话（已验收合并）
 
-当前分支从 `master/04fbfa6` 扩展 A01，新增 11 个 API Key 鉴权的历史/Conversations/items 操作及本地完整上下文续链。schema v12 新增加密快照，不从旧回执/缓存回填历史；OpenAPI 工作版本 0.4.0 / 91 操作。默认 `history_seconds: 86400`、history 实例/owner 预留 64/16 MiB，单快照 2 MiB；存储型展开请求上限 256 KiB / 1024 items，读取/修改另限每 owner 每分钟 120 次。仍默认关闭 Responses、必须实际凭据加密和挂载内容密钥，strict 全拒绝；后台/WS 未接入。
+PR #12 从 `master/04fbfa6` 扩展 A01 并合并为 `master/765501a`，新增 11 个 API Key 鉴权的历史/Conversations/items 操作及本地完整上下文续链。schema v12 新增加密快照，不从旧回执/缓存回填历史；已验收 OpenAPI 0.4.0 / 91 操作。默认 `history_seconds: 86400`、history 实例/owner 预留 64/16 MiB，单快照 2 MiB；存储型展开请求上限 256 KiB / 1024 items，读取/修改另限每 owner 每分钟 120 次。仍默认关闭 Responses、必须实际凭据加密和挂载内容密钥，strict 全拒绝；后台/WS 未接入。
 
-用户/创建 Key/当前模型范围、完整上下文与原渠道/凭据/映射约束、ETag/CAS、TTL/删除和未知执行均由业务/存储层负责。GET/修改不走生成计费；`store:false` 不建历史且不能引用会话。具体使用和限制见 [历史契约](reference/responses-history.md)，实际验证和未运行项见 [A02 记录](history/implementation-s7-a02.md)。本批尚无匹配提交的完整远端 CI/合并，不能勾选 A02 或 M2。
+用户/创建 Key/当前模型范围、完整上下文与原渠道/凭据/映射约束、ETag/CAS、TTL/删除和未知执行均由业务/存储层负责。GET/修改不走生成计费；`store:false` 不建历史且不能引用会话。具体使用和限制见 [历史契约](reference/responses-history.md)，实际验证和未运行项见 [A02 记录](history/implementation-s7-a02.md)。功能头 `2084bcd` 的 push `39092263704`、PR `39092266694` 与合并后 master `39092604090` 均为 check + delivery SUCCESS，含 Linux 全量 race、主程序冒烟及 v12 容器安装/升级/停止备份恢复；A02 与 M2 已完成，真实提供商/SDK/Codex、A03-A06 和 S5-03 仍单独验收。
 
 ### S7-A01 Responses 前台（已验收合并）
 
@@ -20,9 +20,9 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 
 默认限制：请求正文 1 MiB，幂等元数据保留 24 小时、私有重放 1 小时，编码后归档容量每条 256 KiB、总段数最多 8192（元数据/终态占段）；重放保留期须覆盖总超时及额外 5 秒收尾，按受理时间计时。实例/owner 回执上限 1024/128，在途请求上限 32/4。schema v11 只新增无正文幂等回执，不推断历史请求；已知终态按 TTL 清理，未知结果即使过期也不删除或自动重发，容量满时保守拒绝。升级前按既有约定停写备份；旧二进制不能直接打开 schema v11。
 
-`store` 省略保持提供商原生默认 true；true 时额外保存加密私有短期重放，false 不存请求/输出正文，完成后重试返回 409，不重新执行。幂等作用域隔离 owner/Key，重试重新校验当前权限，但不重复计费/准入；它不是 A02 历史或通用恢复接口。strict 在预留/发送前拒绝 Responses；A01 原验收不含 GET/续链/会话；这些已在上文 A02 工作树扩展且尚未验收，background 和原生 WS 仍未实现。
+`store` 省略保持提供商原生默认 true；true 时额外保存加密私有短期重放，false 不存请求/输出正文，完成后重试返回 409，不重新执行。幂等作用域隔离 owner/Key，重试重新校验当前权限，但不重复计费/准入；它不是 A02 历史或通用恢复接口。strict 在预留/发送前拒绝 Responses；A01 原验收不含 GET/续链/会话；这些已在上文 A02 独立验收合并，background 和原生 WS 仍未实现。
 
-配置、支持矩阵和恢复细节以 [Responses HTTP 运行约定](reference/responses-http.md) 为准。集中验证和提交/CI/合并事实统一记在 [S7-A01 批次](history/implementation-s7-a01.md)；A01 已完成独立验收，不把 S6 历史 CI 作为本批通过证据，A02+ 与 M2 完成状态仍独立保留。
+配置、支持矩阵和恢复细节以 [Responses HTTP 运行约定](reference/responses-http.md) 为准。集中验证和提交/CI/合并事实统一记在 [S7-A01 批次](history/implementation-s7-a01.md)；A01 已完成独立验收，不把 S6 历史 CI 作为本批通过证据，A02/M2 已由独立验收收口，A03+ 仍未完成。
 
 当前开发方向按三层职责执行：core 处理中转，业务层处理授权/调度/计费/状态，兼容层统一 API/协议、扩展与前端接入。S6 已通过真实消费者补齐并合并既有支持范围的契约；S6/M1 已完成集成验收；默认关闭的 S7-A01 原生 Responses HTTP/SSE 已完成独立 CI/合并验收，并按明确目标吸收适用参考能力。接入与验证方式见 [S6 兼容框架接入与验收](#s6-兼容框架接入与验收)，只按真实缺口增量扩展。
 
@@ -93,7 +93,7 @@ python tests/smoke/local.py --go go --preview
 
 ### 安装、容器与升级边界
 
-本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前功能基线追加 S5 v5/v6/v7、A3-02 输出记录 v8 和 A3-04 任务意图 v9、A3-05 领取/输出关联与凭据加密 v10；已验收 S7-A01 追加前台幂等回执 v11，见 [Responses 运行约定](reference/responses-http.md)。旧库无主 Key 的认领规则不变。
+本机全新安装：`make init` → 编辑本地配置/环境中的管理密钥（可清空示例 channels/tokens，改用页面创建）→ `make build` → `-init-admin` → 正常启动 → 访问 `/`。S4 发布时升级 S3 不增加 schema（v4）；当前功能基线追加 S5 v5/v6/v7、A3-02 输出记录 v8 和 A3-04 任务意图 v9、A3-05 领取/输出关联与凭据加密 v10；已验收 S7-A01 追加前台幂等回执 v11、A02 追加加密历史 v12，见 [Responses 运行约定](reference/responses-http.md)。旧库无主 Key 的认领规则不变。
 
 Compose 显式使用 `GATEWAY_DATABASE_PATH=/app/data/gateway.db`；此环境变量优先于 YAML 的 database.path。已有部署若实际库在 `/app/.local/data/` 或其他位置，直接重建可能看到空库，**不是数据自动迁移**。先停止旧进程，确认实际路径并一致备份主库及 WAL/SHM，再恢复到目标卷、检查所有权为容器 app 用户（UID 10001），验证数据后切换；切勿删除旧容器/卷或执行 down -v 来“修复”。
 
@@ -130,7 +130,7 @@ python3 tests/smoke/delivery.py --go go
 
 - 全新卷初始化管理员、拒绝重复初始化、UID 10001、镜像健康检查、内嵌静态资源和管理员→用户→Key→调用→本人用量闭环。
 - 重启容器进程，确认原 Key、用户、日志和用量仍在数据卷中；故意将 YAML database.path 指向不可写位置，验证 Compose 的卷内路径环境覆盖真实生效。
-- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。当前功能基线预期 v10，历史迁移记录保持原前缀、新增 v5/v6/v7/v8/v9/v10，旧日志不虚构价格版本，新价格快照可核对内容摘要。
+- 运行旧 S3 镜像创建用户/渠道/凭据/Key，完成非流式和 SSE 调用；停写、正常关闭后备份，再用当前镜像打开同一个卷，验证原身份、授权、Key、凭据 ID 和用量保留。当前功能基线预期 v12，历史迁移记录保持原前缀、新增 v5/v6/v7/v8/v9/v10/v11/v12，旧日志不虚构价格版本，新价格快照可核对内容摘要。
 - SSE 在途时发起 Compose stop，要求完整 DONE、退出码 0 且已接收日志排空；Compose 为正常关闭和日志排空预留 30 秒，不将该时间承诺为任意负载下的恢复保证。
 - 升级后先另存一份备份，再恢复升级前主库及存在的 WAL/SHM；检查 SQLite integrity_check 和关键表逐行一致，重启原 S3 镜像验证原 Key/数据可用，升级后新增数据不在旧备份中。
 
@@ -223,7 +223,7 @@ schema v5 增加 `billing_price_versions`、`billing_balances`、`billing_reserv
 
 ### 管理员账本与最终决策
 
-控制台管理员菜单的 **Billing ledger** 默认列出 pending；支持状态/用户筛选及分页，详情展示逐次执行、售价快照、独立上游包络/契约快照、双预算占用和最终决策。金额使用十进制整数字符串传输，`unit_scale="1000000000"`；浏览器使用 BigInt 展示，不把未知成本显示为免费。字段和错误封装以当前 OpenAPI 为准；当前已验收版本为 0.3.0 / 80 个操作，S6 验收基线为 0.2.3 / 79 个操作。
+控制台管理员菜单的 **Billing ledger** 默认列出 pending；支持状态/用户筛选及分页，详情展示逐次执行、售价快照、独立上游包络/契约快照、双预算占用和最终决策。金额使用十进制整数字符串传输，`unit_scale="1000000000"`；浏览器使用 BigInt 展示，不把未知成本显示为免费。字段和错误封装以当前 OpenAPI 为准；当前已验收版本为 0.4.0 / 91 个操作（A02，PR #12），S6 验收基线为 0.2.3 / 79 个操作。
 
 | 方法与路径 | 行为 |
 |---|---|
