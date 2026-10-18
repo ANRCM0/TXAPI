@@ -6,7 +6,9 @@
 
 ## 当前能做什么
 
-2026-10-18，S7-A02 已完成独立验收：PR #12 将功能头 `2084bcd`（基线 `04fbfa6`）合并为 `master/765501a`，功能头 push/PR 与合并后 master 完整 CI 均通过。M2 的 HTTP/SSE 与持久会话已交付，OpenAPI 0.4.0 / 91 个操作；下一批为 A03 原生后台任务。运行、容量与权限规则见 [历史契约](docs/reference/responses-history.md)，精确提交和验证见 [A02 验收](docs/history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。
+当前优先进行 [FC-001 四层地基符合性提案](docs/proposals/FC-001-foundation-contracts-v1.md)。已有 A1–A4/S6/M2 功能验收保留；新的公开接口冻结与四层 DoD 尚未完成，先确认迁移方案，再收口地基并开放新功能并行。活动排期见 [PLAN](docs/PLAN.md#地基符合性收口fc-001)。
+
+2026-10-18，S7-A02 已完成独立验收：PR #12 将功能头 `2084bcd`（基线 `04fbfa6`）合并为 `master/765501a`，功能头 push/PR 与合并后 master 完整 CI 均通过。M2 的 HTTP/SSE 与持久会话已交付，OpenAPI 0.4.0 / 91 个操作；下一产品批次为 A03 原生后台任务，开工前先完成上述地基收口。运行、容量与权限规则见 [历史契约](docs/reference/responses-history.md)，精确提交和验证见 [A02 验收](docs/history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。
 
 2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](docs/history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 
