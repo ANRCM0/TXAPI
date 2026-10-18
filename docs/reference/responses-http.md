@@ -11,6 +11,15 @@ their own complete push/PR/master CI. See [history contract](responses-history.m
 and [A02 evidence](../history/implementation-s7-a02.md). The A01 exclusions below
 describe its original scope; current history support follows the A02 contract.
 
+## FC-002 Background Candidate
+
+A03-01's owner-state baseline was accepted through PR #20 / `master/c1b8264`.
+A03-02 now implements an opt-in disabled-billing-only native background chain;
+its OpenAPI 0.5.0 / 92 operations are a worktree candidate, not yet accepted.
+See [background runtime](responses-background.md) for fixed temporary retention,
+positive resource authority, restart/cancel/delete and the unimplemented event
+recovery boundary. The foreground sections retain A01/A02 acceptance semantics.
+
 ## Supported Surface
 
 `POST /v1/responses` uses API-key authentication and the existing gateway generation/attempt/admission/finalization chain. The native OpenAI-compatible adaptor handles text, instructions, function tools, function_call/function_call_output history and opaque reasoning items without Chat conversion. JSON and native SSE preserve output items, usage details and completed/incomplete/failed/cancelled semantics. A native failure can follow HTTP 200; it is not rewritten to a fabricated success or Chat `[DONE]`. Provider error details are sanitized. Other upstream protocols are not bridged through Chat.
@@ -49,7 +58,7 @@ Replay retention must cover the configured total request timeout plus five secon
 
 ## Background Extension Boundary
 
-A future Responses background consumer must atomically commit its immutable execution intent and BOTH financial holds through the existing intent admission transaction before acknowledging acceptance. The current `generation.IntentAcceptor` / `IntentAdmission` port is real for Chat/embeddings and preserves rollback and CAS behavior; `ExecuteClaimedTo` explicitly refuses Responses until its operation metering and durable payload semantics are added. A foreground `ResponseRequest` receipt is NOT a runnable intent and cannot authorize worker execution or reserve/release strict holds. S7-A03 must extend the owner-owned transaction, not append a queue write after reserving money or reuse this receipt as a second task authority.
+A future **charged** Responses background consumer must atomically commit its immutable execution intent and BOTH financial holds through the existing intent admission transaction before acknowledging acceptance. The current `generation.IntentAcceptor` / `IntentAdmission` port is real for Chat/embeddings and preserves rollback and CAS behavior; `ExecuteClaimedTo` explicitly refuses Responses until its operation metering and durable payload semantics are added. A foreground `ResponseRequest` receipt is NOT a runnable intent and cannot authorize worker execution or reserve/release strict holds. S7-A03 must extend the owner-owned transaction, not append a queue write after reserving money or reuse this receipt as a second task authority.
 
 ## Source And Acceptance Scope
 

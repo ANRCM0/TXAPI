@@ -1,0 +1,332 @@
+package generation
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"sync"
+	"time"
+
+	"minigateway/internal/access"
+	bg "minigateway/internal/foundation/contracts/background/v1"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	lifecycle "minigateway/internal/foundation/contracts/lifecycle/v1"
+	bs "minigateway/internal/generation/backgroundstate"
+)
+
+type backgroundSnapshot struct {
+	Version  int `json:"private_version"`
+	Target   execv1.TargetConstraint
+	RemoteID string
+	Document json.RawMessage
+	Usage    *execv1.Usage
+	Rate     bs.RateReservation
+	Failures int
+}
+
+func (s *BackgroundService) openSnapshot(r bs.Record) (backgroundSnapshot, error) {
+	if len(r.Snapshot) == 0 {
+		return backgroundSnapshot{}, nil
+	}
+	plain, e := s.keys.Open(r.Snapshot, backgroundAAD(r, "snapshot"))
+	var out backgroundSnapshot
+	if e != nil || json.Unmarshal(plain, &out) != nil || out.Version != 1 || len(out.Document) > 1<<20 || out.Target.ChannelID == 0 || out.Target.CredentialID == 0 || out.Target.Fingerprint == "" {
+		return backgroundSnapshot{}, bg.ErrUnavailable
+	}
+	if r.Stage == string(bg.StageRemoteActive) && out.RemoteID == "" {
+		return backgroundSnapshot{}, bg.ErrUnavailable
+	}
+	return out, nil
+}
+func (s *BackgroundService) sealSnapshot(r bs.Record, in backgroundSnapshot) ([]byte, error) {
+	in.Version = 1
+	plain, e := json.Marshal(in)
+	if e != nil || len(plain) > bs.MaxContent {
+		return nil, bg.ErrCapacity
+	}
+	return s.keys.Seal(plain, backgroundAAD(r, "snapshot"))
+}
+
+type BackgroundRunnerOptions struct {
+	Service *BackgroundService
+	Remote  bs.Remote
+	Resolve func(context.Context, access.Binding) (access.Principal, error)
+}
+type BackgroundRunner struct {
+	opts   BackgroundRunnerOptions
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// Fixed, queue-less workers bound control traffic separately from generation
+// admission. Client observation contexts are never retained by this owner.
+func NewBackgroundRunner(parent context.Context, o BackgroundRunnerOptions) (*BackgroundRunner, error) {
+	if parent == nil || o.Service == nil || nilPort(o.Remote) || o.Resolve == nil {
+		return nil, bg.ErrUnavailable
+	}
+	if e := parent.Err(); e != nil {
+		return nil, e
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := context.AfterFunc(parent, cancel)
+	r := &BackgroundRunner{opts: o, cancel: cancel, done: make(chan struct{})}
+	var group sync.WaitGroup
+	for range 2 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			timer := time.NewTimer(0)
+			defer timer.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-timer.C:
+					if e := r.runOne(ctx); e != nil && !errors.Is(e, bg.ErrNotFound) && ctx.Err() == nil {
+						slog.Warn("background task control deferred; inspect retained task state")
+					}
+					timer.Reset(time.Second)
+				}
+			}
+		}()
+	}
+	go func() { group.Wait(); stop(); cancel(); close(r.done) }()
+	return r, nil
+}
+func (r *BackgroundRunner) Close(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	r.cancel()
+	select {
+	case <-r.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (r *BackgroundRunner) runOne(parent context.Context) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = bg.ErrUnavailable
+		}
+	}()
+	ctx, cancel := context.WithTimeout(parent, 12*time.Second)
+	defer cancel()
+	s := r.opts.Service
+	row, claim, e := s.repository.ClaimBackground(ctx, 30*time.Second)
+	if e != nil {
+		return e
+	}
+	p := &backgroundProgress{service: s, remote: r.opts.Remote, row: row, claim: claim}
+	defer func() {
+		cleanup, end := context.WithTimeout(context.Background(), 2*time.Second)
+		defer end()
+		due := max(time.Now().Add(time.Second).UnixMilli(), p.row.DueAt)
+		_ = s.repository.ReleaseBackground(cleanup, claim, due)
+	}()
+	p.snapshot, e = s.openSnapshot(row)
+	if e != nil {
+		return e
+	}
+	call := bs.RemoteCall{Operation: execv1.Operation(row.Operation), Model: row.Model, PublicID: row.PublicID}
+	if row.Stage == string(bg.StageQueued) {
+		if row.CancelRequested || row.Deadline <= time.Now().UnixMilli() {
+			return p.rejectQueued(ctx)
+		}
+		principal, e := currentPrincipal(ctx, r.opts.Resolve, access.Binding{UserID: row.UserID, TokenID: row.TokenID})
+		if errors.Is(e, access.ErrUnauthorized) || e == nil && !principal.Policy.Allows(row.Model) {
+			return p.rejectQueued(ctx)
+		}
+		if e != nil {
+			return e
+		}
+		ctx = access.WithPrincipal(access.NewGenerationContext(ctx), principal)
+		plain, e := s.keys.Open(row.Ciphertext, backgroundAAD(row, "input"))
+		if e != nil {
+			return e
+		}
+		var payload backgroundPayload
+		if json.Unmarshal(plain, &payload) != nil || payload.Operation != call.Operation {
+			return bg.ErrUnavailable
+		}
+		call.Action = bg.RemoteSubmit
+		call.Body = bytes.Clone(payload.Body)
+	} else if row.Stage == string(bg.StageRemoteActive) {
+		call.Action = bg.RemoteInspect
+		// Revocation blocks content and new work, not cleanup of already-bound
+		// work. Cancellation uses its fenced claim, never a synthetic principal.
+		principal, e := currentPrincipal(ctx, r.opts.Resolve, access.Binding{UserID: row.UserID, TokenID: row.TokenID})
+		if row.CancelRequested || row.Deadline <= time.Now().UnixMilli() || errors.Is(e, access.ErrUnauthorized) || e == nil && !principal.Policy.Allows(row.Model) {
+			call.Action = bg.RemoteCancel
+		}
+		if e != nil && !errors.Is(e, access.ErrUnauthorized) {
+			return e
+		}
+		if call.Action == bg.RemoteCancel && !row.CancelRequested {
+			p.row, e = s.repository.RequestBackgroundCancel(ctx, claim)
+			if e != nil {
+				return e
+			}
+		}
+		target := p.snapshot.Target
+		call.Target = &target
+		call.RemoteID = p.snapshot.RemoteID
+	} else {
+		return bg.ErrConflict
+	}
+	e = r.opts.Remote.Execute(ctx, call, p)
+	if call.Action == bg.RemoteSubmit && (errors.Is(e, bg.ErrCapacity) || errors.Is(e, bg.ErrUnsupportedCapability) || errors.Is(e, bg.ErrUnauthorized)) {
+		if end := p.rejectQueued(ctx); end != nil {
+			return end
+		}
+	}
+	if e != nil && call.Action != bg.RemoteSubmit {
+		_ = p.backoff(ctx)
+	}
+	return e
+}
+
+type backgroundProgress struct {
+	service  *BackgroundService
+	remote   bs.Remote
+	row      bs.Record
+	claim    bs.Claim
+	snapshot backgroundSnapshot
+}
+
+func (p *backgroundProgress) refresh(ctx context.Context) error {
+	row, e := p.service.repository.ReadClaimedBackground(ctx, p.claim)
+	if e != nil {
+		return e
+	}
+	if row.ID != p.row.ID || row.PublicID != p.row.PublicID || row.Deleted || row.ContentExpiresAt <= time.Now().UnixMilli() {
+		return bs.ErrClaimLost
+	}
+	p.row = row
+	return nil
+}
+func (p *backgroundProgress) Validate(ctx context.Context, call bs.RemoteCall) error {
+	if e := p.refresh(ctx); e != nil {
+		return e
+	}
+	if call.Operation != execv1.Operation(p.row.Operation) || call.Model != p.row.Model || call.PublicID != p.row.PublicID {
+		return bg.ErrConflict
+	}
+	if call.Action == bg.RemoteSubmit {
+		if p.row.Stage != string(bg.StageQueued) || call.Target != nil || call.RemoteID != "" {
+			return bg.ErrConflict
+		}
+		plain, e := p.service.keys.Open(p.row.Ciphertext, backgroundAAD(p.row, "input"))
+		var payload backgroundPayload
+		if e != nil || json.Unmarshal(plain, &payload) != nil || !bytes.Equal(payload.Body, call.Body) {
+			return bg.ErrConflict
+		}
+		return nil
+	}
+	if p.row.Stage != string(bg.StageRemoteActive) || call.Target == nil || *call.Target != p.snapshot.Target || call.RemoteID != p.snapshot.RemoteID || len(call.Body) != 0 || call.Action != bg.RemoteInspect && call.Action != bg.RemoteCancel {
+		return bg.ErrConflict
+	}
+	return nil
+}
+func (p *backgroundProgress) rejectQueued(ctx context.Context) error {
+	if e := p.refresh(ctx); e != nil {
+		return e
+	}
+	if p.row.Stage != string(bg.StageQueued) {
+		return bg.ErrConflict
+	}
+	_, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.StageTerminal})
+	return e
+}
+func (p *backgroundProgress) Dispatch(ctx context.Context, target execv1.TargetConstraint, rate bs.RateReservation) error {
+	if e := p.refresh(ctx); e != nil {
+		return e
+	}
+	if p.row.Stage != string(bg.StageQueued) || target.ChannelID == 0 || target.CredentialID == 0 || target.Fingerprint == "" {
+		return bg.ErrConflict
+	}
+	p.snapshot = backgroundSnapshot{Target: target, Rate: rate}
+	snapshot, e := p.service.sealSnapshot(p.row, p.snapshot)
+	if e != nil {
+		return e
+	}
+	row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.StageDispatching, Snapshot: snapshot})
+	if e == nil {
+		p.row = row
+	}
+	return e
+}
+func (p *backgroundProgress) Observe(ctx context.Context, o bg.Observation) error {
+	if o.RemoteID == "" || len(o.Document) == 0 || len(o.Document) > 1<<20 || !json.Valid(o.Document) || len(o.Events) > 0 {
+		return bg.ErrUnsupportedCapability
+	}
+	if p.snapshot.RemoteID != "" && p.snapshot.RemoteID != o.RemoteID {
+		return bg.ErrConflict
+	}
+	stage := bg.StageRemoteActive
+	switch o.State {
+	case bg.RemoteAccepted, bg.RemoteRunning:
+	case bg.RemoteSucceeded, bg.RemoteIncomplete, bg.RemoteFailed, bg.RemoteCancelled:
+		stage = bg.StageTerminal
+	default:
+		return bg.ErrConflict
+	}
+	next := p.snapshot
+	next.RemoteID = o.RemoteID
+	next.Document = bytes.Clone(o.Document)
+	next.Failures = 0
+	if o.Usage != nil {
+		u := *o.Usage
+		next.Usage = &u
+	}
+	for range 3 {
+		if e := p.refresh(ctx); e != nil {
+			return e
+		}
+		snapshot, e := p.service.sealSnapshot(p.row, next)
+		if e != nil {
+			return e
+		}
+		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: stage, Snapshot: snapshot, DueAt: time.Now().Add(time.Second).UnixMilli()})
+		if errors.Is(e, bg.ErrConflict) {
+			continue
+		}
+		if e != nil {
+			return e
+		}
+		p.row = row
+		p.snapshot = next
+		if stage == bg.StageTerminal {
+			p.remote.FinishRate(ctx, row.TokenID, next.Rate, next.Usage)
+		}
+		return nil
+	}
+	return bg.ErrConflict
+}
+
+func (p *backgroundProgress) backoff(ctx context.Context) error {
+	if e := p.refresh(ctx); e != nil {
+		return e
+	}
+	if p.row.Stage != string(bg.StageRemoteActive) {
+		return bg.ErrConflict
+	}
+	next := p.snapshot
+	next.Failures = min(5, max(0, next.Failures)+1)
+	snapshot, e := p.service.sealSnapshot(p.row, next)
+	if e != nil {
+		return e
+	}
+	due := time.Now().Add(time.Duration(1<<next.Failures) * time.Second).UnixMilli()
+	row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.StageRemoteActive, Snapshot: snapshot, DueAt: due})
+	if e == nil {
+		p.row = row
+		p.snapshot = next
+	}
+	return e
+}
+
+var _ lifecycle.Drainer = (*BackgroundRunner)(nil)

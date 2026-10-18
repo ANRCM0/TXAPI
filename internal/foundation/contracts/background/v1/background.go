@@ -72,6 +72,20 @@ type Service interface {
 	Events(context.Context, string, EventQuery) (EventPage, error)
 }
 
+type ResourceKind string
+
+const (
+	ForegroundResource ResourceKind = "foreground"
+	BackgroundResource ResourceKind = "background"
+)
+
+// Resources resolves the current owner's resource authority before delivery.
+// Delete removes only known terminal background content, retaining its tombstone.
+type Resources interface {
+	Kind(context.Context, string) (ResourceKind, error)
+	Delete(context.Context, string, *uint64) error
+}
+
 type RemoteAction string
 
 const (

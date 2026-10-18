@@ -1,5 +1,9 @@
 # 架构设计：中转内核、业务层与统一兼容层
 
+FC-002 的 A03-01 已独立验收至 `master/c1b8264`；当前 A03-02 正在原十四组冻结入口之外
+实现候选的 disabled 原生后台 submit/inspect/cancel 和终态删除，尚未验收。原生后台事件恢复仍留给
+A03-03，收费后台与完整 A03/M3 不因此完成；隔离、幂等和临时保留见 [后台运行约定](reference/responses-background.md)。
+
 2026-10-18，用户批准的 L0 内核、L1 基础框架、L2 兼容层、L3 功能层约束已按 [FC-001](proposals/FC-001-foundation-contracts-v1.md) 的 FND-01 至 FND-05 完成。代码基线 `master/889ecbd` 经最终功能头与合并后完整 CI 验收，L0/L1/L2 v1 已冻结；全部包归属、公开入口、资源规则、独立接入与 DoD 见 [v1 接入清单](reference/foundation-integration-v1.md)。下文三层表保留产品职责视角，生产编译依赖以四层规则为准；状态与下一批以 [PLAN](PLAN.md#地基符合性收口fc-001) 为准。
 
 状态：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确提交与验证记录见 [PLAN.md](PLAN.md) 和 [S6 记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29` 及其 [验收证据](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；完整 S5 和 S7-A 仍未完成。命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，本页不维护第二份活动计划。

@@ -163,7 +163,7 @@ func NewEngine(deps Deps) *gin.Engine {
 	}
 	engine.POST("/v1/responses", auth.Handle(), responsesHandler)
 	for _, route := range []struct{ method, path string }{
-		{"GET", "/v1/responses/:response_id"}, {"DELETE", "/v1/responses/:response_id"}, {"GET", "/v1/responses/:response_id/input_items"},
+		{"GET", "/v1/responses/:response_id"}, {"DELETE", "/v1/responses/:response_id"}, {"GET", "/v1/responses/:response_id/input_items"}, {"POST", "/v1/responses/:response_id/cancel"},
 		{"POST", "/v1/conversations"}, {"GET", "/v1/conversations/:conversation_id"}, {"POST", "/v1/conversations/:conversation_id"}, {"DELETE", "/v1/conversations/:conversation_id"},
 		{"GET", "/v1/conversations/:conversation_id/items"}, {"POST", "/v1/conversations/:conversation_id/items"}, {"GET", "/v1/conversations/:conversation_id/items/:item_id"}, {"DELETE", "/v1/conversations/:conversation_id/items/:item_id"},
 	} {

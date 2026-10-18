@@ -24,6 +24,7 @@ type Record struct {
 	Operation        string
 	Model            string
 	KeyHash          string
+	NamespaceHash    string
 	RequestHash      string
 	DigestVersion    string
 	Stage            string
@@ -45,6 +46,7 @@ type Record struct {
 	LastSequence     int64
 	StoredBytes      int64
 	EventCount       int64
+	Deleted          bool
 }
 type Event struct {
 	TaskID     string
@@ -67,6 +69,10 @@ type Repository interface {
 	InitializeBackground(context.Context, string, string) ([]Record, error)
 	AdmitBackground(context.Context, Record, Limits) (Record, error)
 	ReadBackground(context.Context, identity.Binding, string) (Record, error)
+	BackgroundKind(context.Context, identity.Binding, string) (bg.ResourceKind, error)
+	DeleteBackground(context.Context, identity.Binding, string, *uint64) error
+	ReadClaimedBackground(context.Context, Claim) (Record, error)
+	RequestBackgroundCancel(context.Context, Claim) (Record, error)
 	CancelBackground(context.Context, identity.Binding, string) (Record, error)
 	ReadBackgroundEvents(context.Context, identity.Binding, string, int64, int) ([]Event, error)
 	ClaimBackground(context.Context, time.Duration) (Record, Claim, error)

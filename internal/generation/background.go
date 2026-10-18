@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -90,7 +91,7 @@ func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*Background
 			}
 		}
 		if len(r.Snapshot) > 0 {
-			if _, err := s.keys.Open(r.Snapshot, backgroundAAD(r, "snapshot")); err != nil {
+			if _, err := s.openSnapshot(r); err != nil {
 				return nil, bg.ErrUnavailable
 			}
 		}
@@ -113,6 +114,14 @@ func (s *BackgroundService) hash(domain string, b []byte) string {
 	_, _ = h.Write(b)
 	return hex.EncodeToString(h.Sum(nil))
 }
+func (s *BackgroundService) foregroundNamespace(b identity.Binding, key string) string {
+	// Match the released Responses receipt key domain without changing the
+	// v13 background key digest or retaining the plaintext idempotency key.
+	h := hmac.New(sha256.New, s.digest)
+	_, _ = h.Write([]byte("TXAPI/responses/key/v1\x00"))
+	_, _ = h.Write([]byte(fmt.Sprintf("%d/%d/%s", b.UserID, b.TokenID, key)))
+	return hex.EncodeToString(h.Sum(nil))
+}
 func backgroundRandom() (string, error) {
 	var raw [32]byte
 	if _, e := rand.Read(raw[:]); e != nil {
@@ -128,6 +137,9 @@ func backgroundBinding(ctx context.Context) (identity.Binding, error) {
 	return identity.Binding{UserID: p.UserID, TokenID: p.TokenID}, nil
 }
 func safeBackgroundError(err error) error {
+	if err == nil {
+		return nil
+	}
 	for _, known := range []error{bg.ErrUnavailable, bg.ErrUnauthorized, bg.ErrNotFound, bg.ErrConflict, bg.ErrCapacity, bg.ErrUncertain, bg.ErrCursorUnavailable, bg.ErrUnsupportedBilling, bg.ErrUnsupportedCapability, context.Canceled, context.DeadlineExceeded} {
 		if errors.Is(err, known) {
 			return known
@@ -199,11 +211,17 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 	if request.Operation() != in.Operation || request.Requirements().Operation != in.Operation || request.Requirements().Transport != execv1.Background || request.Stream() != in.Stream || request.Requirements().Stream != in.Stream || !bytes.Equal(request.Body(), body) || request.Model() == "" {
 		return bg.Receipt{}, bg.ErrUnsupportedCapability
 	}
-	var flags struct {
-		Stream bool
-		Store  *bool
+	var flags map[string]json.RawMessage
+	if json.Unmarshal(body, &flags) != nil {
+		return bg.Receipt{}, bg.ErrConflict
 	}
-	if json.Unmarshal(body, &flags) != nil || flags.Stream != in.Stream || ((flags.Store == nil || *flags.Store) != in.Store) {
+	stream, store := false, true
+	for name, target := range map[string]*bool{"stream": &stream, "store": &store} {
+		if raw, ok := flags[name]; ok && (bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, target) != nil) {
+			return bg.Receipt{}, bg.ErrConflict
+		}
+	}
+	if stream != in.Stream || store != in.Store {
 		return bg.Receipt{}, bg.ErrConflict
 	}
 	now := time.Now()
@@ -226,7 +244,7 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 		return bg.Receipt{}, bg.ErrCapacity
 	}
 	r := bs.Record{ID: id, PublicID: in.ID, UserID: binding.UserID, TokenID: binding.TokenID, Operation: string(in.Operation), Model: request.Model(),
-		KeyHash: s.hash("key", []byte(key)), RequestHash: s.hash("request", plain), DigestVersion: s.version, Stage: string(bg.StageQueued), Stream: in.Stream, Store: in.Store,
+		KeyHash: s.hash("key", []byte(key)), NamespaceHash: s.foregroundNamespace(binding, key), RequestHash: s.hash("request", plain), DigestVersion: s.version, Stage: string(bg.StageQueued), Stream: in.Stream, Store: in.Store,
 		Revision: 1, CreatedAt: now.UnixMilli(), Deadline: in.Deadline.UnixMilli(), ContentExpiresAt: now.Add(s.retention).UnixMilli(), ExpiresAt: now.Add(s.metadataRetention).UnixMilli(), ReservedBytes: bs.MaxInput + bs.MaxContent + 512, LastSequence: -1}
 	r.Ciphertext, err = s.keys.Seal(plain, backgroundAAD(r, "input"))
 	if err != nil {
@@ -241,11 +259,11 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 func (s *BackgroundService) receipt(r bs.Record) (bg.Receipt, error) {
 	out := bg.Receipt{ID: r.PublicID, Revision: r.Revision, Stage: bg.Stage(r.Stage), Model: r.Model, CancelRequested: r.CancelRequested, CreatedAt: time.UnixMilli(r.CreatedAt), ContentExpiresAt: time.UnixMilli(r.ContentExpiresAt)}
 	if len(r.Snapshot) > 0 && r.ContentExpiresAt > time.Now().UnixMilli() {
-		plain, e := s.keys.Open(r.Snapshot, backgroundAAD(r, "snapshot"))
+		snapshot, e := s.openSnapshot(r)
 		if e != nil {
 			return bg.Receipt{}, bg.ErrUnavailable
 		}
-		out.Document = bytes.Clone(plain)
+		out.Document = bytes.Clone(snapshot.Document)
 	}
 	return out, nil
 }
@@ -323,3 +341,22 @@ func (s *BackgroundService) Events(ctx context.Context, id string, q bg.EventQue
 }
 
 var _ bg.Service = (*BackgroundService)(nil)
+
+func (s *BackgroundService) Kind(ctx context.Context, id string) (bg.ResourceKind, error) {
+	b, e := backgroundBinding(ctx)
+	if e != nil {
+		return "", e
+	}
+	kind, e := s.repository.BackgroundKind(ctx, b, id)
+	return kind, safeBackgroundError(e)
+}
+
+func (s *BackgroundService) Delete(ctx context.Context, id string, revision *uint64) error {
+	b, e := backgroundBinding(ctx)
+	if e != nil {
+		return e
+	}
+	return safeBackgroundError(s.repository.DeleteBackground(ctx, b, id, revision))
+}
+
+var _ bg.Resources = (*BackgroundService)(nil)

@@ -24,6 +24,11 @@ L1 公开入口为 foundation/contracts 下 admission、configuration、control�
 ledger、lifecycle、observability、responses、state、text 的十二个 v1 包，以及 foundation/httpoutput/v1。
 L2 公开门面为 compat/responses/v1。所有包均声明 Version="1"；httpoutput 门面仅供 L2 使用，
 L3 接收 Output/Delivery，不构造 HTTP writer。其余 Go 导出名是实现接线，不自动成为功能可依赖的 API。
+
+FC-002 另行批准了两个**尚未冻结**的候选入口：L1 `background/v1` 与应用 `responses/v2`。
+A03-01 已验收至 `master/c1b8264`；A03-02 当前消费原生后台与已批准的 Resources.Kind/Delete
+最小补充，仍须本批及 A03-03 最终验收。它们不重开上述十四组冻结入口，也不提前开放其他功能
+依赖候选接口；范围与资源寿命见 [后台约定](responses-background.md) 和 [FC-002-A](../proposals/FC-002A-resource-ownership-v1.md)。
 接口、DTO、错误、资源规则、消费者与权限语义逐组见 [API 清单](foundation-api-v1.md)。
 
 [public-v1.json](../../internal/architecture/public-v1.json) 保存 L0 机制和这十四组公开入口的完整导出声明、

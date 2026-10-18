@@ -31,7 +31,7 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 		"transport":    {"transport": true},
 		"compat":       {"foundation": true, "compat": true, "protocol": true},
 		"foundation":   {"store": true, "foundation": true, "access": true, "core": true, "gateway": true, "model": true},
-		"gateway":      {"access": true, "core": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true, "foundation": true},
+		"gateway":      {"access": true, "core": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true, "foundation": true, "generation": true},
 		"server":       {"foundation": true, "compat": true, "protocol": true, "server": true},
 	}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {

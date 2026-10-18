@@ -10,23 +10,25 @@ const EnvResponsesKeysFile = "GATEWAY_RESPONSES_KEYS_FILE"
 // ResponsesConfig bounds foreground receipts, private replay and local history.
 // Background jobs and native WS are separate consumers.
 type ResponsesConfig struct {
-	HistorySeconds       int    `yaml:"history_seconds"`
-	HistoryInstanceBytes int64  `yaml:"history_instance_bytes"`
-	HistoryOwnerBytes    int64  `yaml:"history_owner_bytes"`
-	Enabled              bool   `yaml:"enabled"`
-	KeysFile             string `yaml:"keys_file"`
-	RetentionSeconds     int    `yaml:"retention_seconds"`
-	ReplaySeconds        int    `yaml:"replay_seconds"`
-	MaxOutputBytes       int64  `yaml:"max_output_bytes"`
-	InstanceRecords      int64  `yaml:"instance_records"`
-	OwnerRecords         int64  `yaml:"owner_records"`
-	InstanceBytes        int64  `yaml:"instance_bytes"`
-	OwnerBytes           int64  `yaml:"owner_bytes"`
-	ActiveRequests       int    `yaml:"active_requests"`
-	OwnerRequests        int    `yaml:"owner_requests"`
+	Background           BackgroundConfig `yaml:"background"`
+	HistorySeconds       int              `yaml:"history_seconds"`
+	HistoryInstanceBytes int64            `yaml:"history_instance_bytes"`
+	HistoryOwnerBytes    int64            `yaml:"history_owner_bytes"`
+	Enabled              bool             `yaml:"enabled"`
+	KeysFile             string           `yaml:"keys_file"`
+	RetentionSeconds     int              `yaml:"retention_seconds"`
+	ReplaySeconds        int              `yaml:"replay_seconds"`
+	MaxOutputBytes       int64            `yaml:"max_output_bytes"`
+	InstanceRecords      int64            `yaml:"instance_records"`
+	OwnerRecords         int64            `yaml:"owner_records"`
+	InstanceBytes        int64            `yaml:"instance_bytes"`
+	OwnerBytes           int64            `yaml:"owner_bytes"`
+	ActiveRequests       int              `yaml:"active_requests"`
+	OwnerRequests        int              `yaml:"owner_requests"`
 }
 
 func (c *ResponsesConfig) defaults() {
+	c.Background.defaults()
 	if c.HistorySeconds == 0 {
 		c.HistorySeconds = 86400
 	}
@@ -66,6 +68,12 @@ func (c *ResponsesConfig) defaults() {
 }
 
 func (c ResponsesConfig) validate() error {
+	if c.Background.Enabled && !c.Enabled {
+		return fmt.Errorf("responses.background.enabled requires responses.enabled")
+	}
+	if err := c.Background.validate(); err != nil {
+		return err
+	}
 	if !c.Enabled {
 		return nil
 	}

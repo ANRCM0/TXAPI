@@ -15,6 +15,7 @@ func backgroundSnapshot(in model.BackgroundJob) bs.Record {
 		Operation:        in.Operation,
 		Model:            in.Model,
 		KeyHash:          in.KeyHash,
+		NamespaceHash:    in.NamespaceHash,
 		RequestHash:      in.RequestHash,
 		DigestVersion:    in.DigestVersion,
 		Stage:            in.Stage,
@@ -36,6 +37,7 @@ func backgroundSnapshot(in model.BackgroundJob) bs.Record {
 		LastSequence:     in.LastSequence,
 		StoredBytes:      in.StoredBytes,
 		EventCount:       in.EventCount,
+		Deleted:          in.Deleted,
 	}
 }
 
@@ -48,6 +50,7 @@ func backgroundRow(in bs.Record) model.BackgroundJob {
 		Operation:        in.Operation,
 		Model:            in.Model,
 		KeyHash:          in.KeyHash,
+		NamespaceHash:    in.NamespaceHash,
 		RequestHash:      in.RequestHash,
 		DigestVersion:    in.DigestVersion,
 		Stage:            in.Stage,
@@ -69,5 +72,6 @@ func backgroundRow(in bs.Record) model.BackgroundJob {
 		LastSequence:     in.LastSequence,
 		StoredBytes:      in.StoredBytes,
 		EventCount:       in.EventCount,
+		Deleted:          in.Deleted,
 	}
 }

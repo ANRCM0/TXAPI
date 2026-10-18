@@ -357,6 +357,9 @@ func (c *Config) applyDefaults() {
 // 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
 // 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	if c.Responses.Background.Enabled && c.Billing.Mode != "disabled" {
+		return fmt.Errorf("responses.background.enabled requires billing.mode disabled")
+	}
 	if err := c.Responses.validate(); err != nil {
 		return err
 	}

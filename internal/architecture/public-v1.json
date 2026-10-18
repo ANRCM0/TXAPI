@@ -58,6 +58,8 @@
     "type minigateway/internal/foundation/contracts/admission/v1.RequestGate interface{Admit(context.Context, func() int) (context.Context, minigateway/internal/foundation/contracts/admission/v1.RateDecision); Finish(context.Context, int)}"
   ],
   "minigateway/internal/foundation/contracts/background/v1": [
+    "const minigateway/internal/foundation/contracts/background/v1.BackgroundResource minigateway/internal/foundation/contracts/background/v1.ResourceKind = \"background\"",
+    "const minigateway/internal/foundation/contracts/background/v1.ForegroundResource minigateway/internal/foundation/contracts/background/v1.ResourceKind = \"foreground\"",
     "const minigateway/internal/foundation/contracts/background/v1.RemoteAccepted minigateway/internal/foundation/contracts/background/v1.RemoteState = \"accepted\"",
     "const minigateway/internal/foundation/contracts/background/v1.RemoteCancel minigateway/internal/foundation/contracts/background/v1.RemoteAction = \"cancel\"",
     "const minigateway/internal/foundation/contracts/background/v1.RemoteCancelled minigateway/internal/foundation/contracts/background/v1.RemoteState = \"cancelled\"",
@@ -86,6 +88,8 @@
     "type minigateway/internal/foundation/contracts/background/v1.RemoteAction string",
     "type minigateway/internal/foundation/contracts/background/v1.RemoteCommand struct{Action minigateway/internal/foundation/contracts/background/v1.RemoteAction; Body []byte; RemoteID string; After *uint64}",
     "type minigateway/internal/foundation/contracts/background/v1.RemoteState string",
+    "type minigateway/internal/foundation/contracts/background/v1.ResourceKind string",
+    "type minigateway/internal/foundation/contracts/background/v1.Resources interface{Delete(context.Context, string, *uint64) error; Kind(context.Context, string) (minigateway/internal/foundation/contracts/background/v1.ResourceKind, error)}",
     "type minigateway/internal/foundation/contracts/background/v1.Service interface{Cancel(context.Context, string) (minigateway/internal/foundation/contracts/background/v1.Receipt, error); Events(context.Context, string, minigateway/internal/foundation/contracts/background/v1.EventQuery) (minigateway/internal/foundation/contracts/background/v1.EventPage, error); Read(context.Context, string) (minigateway/internal/foundation/contracts/background/v1.Receipt, error); Submit(context.Context, minigateway/internal/foundation/contracts/background/v1.Submit) (minigateway/internal/foundation/contracts/background/v1.Receipt, error)}",
     "type minigateway/internal/foundation/contracts/background/v1.Stage string",
     "type minigateway/internal/foundation/contracts/background/v1.Submit struct{ID string; Operation minigateway/internal/foundation/contracts/execution/v1.Operation; Body []byte; IdempotencyKey string; Stream bool; Store bool; Deadline time.Time}",

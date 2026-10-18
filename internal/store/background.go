@@ -44,6 +44,13 @@ func (s *Store) InitializeBackground(ctx context.Context, digest, mode string) (
 		if !responseHash(digest) {
 			return bg.ErrUnavailable
 		}
+		var foreground model.Setting
+		if e := tx.Where("key = ?", responseDigestSetting).Limit(1).Find(&foreground).Error; e != nil {
+			return e
+		}
+		if foreground.Value != "" && foreground.Value != digest {
+			return bg.ErrUnavailable
+		}
 		var setting model.Setting
 		found := tx.Where("key = ?", backgroundDigestSetting).Limit(1).Find(&setting)
 		if found.Error != nil {
@@ -141,11 +148,11 @@ func backgroundResourceFree(tx *gorm.DB, id string) error {
 func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Limits) (out bs.Record, err error) {
 	now := time.Now().UnixMilli()
 	if !responseHash(in.ID) || !validBackgroundID(in.PublicID) || in.UserID == 0 || in.TokenID == 0 || in.Operation == "" || len(in.Operation) > 64 ||
-		!responseHash(in.KeyHash) || !responseHash(in.RequestHash) || !responseHash(in.DigestVersion) || len(in.Model) == 0 || len(in.Model) > 256 ||
+		!responseHash(in.KeyHash) || !responseHash(in.NamespaceHash) || !responseHash(in.RequestHash) || !responseHash(in.DigestVersion) || len(in.Model) == 0 || len(in.Model) > 256 ||
 		in.Stage != string(bg.StageQueued) || in.Revision != 1 || in.CreatedAt <= 0 || in.CreatedAt > now || in.Deadline <= now || in.Deadline-in.CreatedAt > int64(5*time.Minute/time.Millisecond) ||
 		in.ContentExpiresAt < in.Deadline || in.ContentExpiresAt-in.CreatedAt > int64(time.Hour/time.Millisecond) || in.ExpiresAt < in.ContentExpiresAt || in.ExpiresAt-in.CreatedAt > int64(7*24*time.Hour/time.Millisecond) ||
 		len(in.Ciphertext) < 30 || len(in.Ciphertext) > bs.MaxInput+256 || len(in.Snapshot) != 0 || in.ReservedBytes < int64(len(in.Ciphertext)) || in.ReservedBytes > bs.MaxInput+bs.MaxContent+512 ||
-		in.ClaimEpoch != 0 || in.ClaimHash != "" || in.ClaimUntil != 0 || in.CancelRequested || in.DueAt != 0 || in.LastSequence != -1 || in.StoredBytes != 0 || in.EventCount != 0 || !validBackgroundLimits(limits) {
+		in.ClaimEpoch != 0 || in.ClaimHash != "" || in.ClaimUntil != 0 || in.CancelRequested || in.Deleted || in.DueAt != 0 || in.LastSequence != -1 || in.StoredBytes != 0 || in.EventCount != 0 || !validBackgroundLimits(limits) {
 		return out, bg.ErrConflict
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -169,11 +176,27 @@ func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Lim
 			if existing.RequestHash != in.RequestHash || existing.Operation != in.Operation || existing.Model != in.Model {
 				return bg.ErrConflict
 			}
+			if existing.Deleted || existing.ContentExpiresAt <= now && existing.Stage == string(bg.StageTerminal) {
+				return bg.ErrCursorUnavailable
+			}
+			if existing.NamespaceHash == "" {
+				existing.NamespaceHash = in.NamespaceHash
+				if e := saveBackground(tx, &existing); e != nil {
+					return e
+				}
+			}
 			out = backgroundSnapshot(existing)
 			return nil
 		}
 		if err := backgroundResourceFree(tx, in.PublicID); err != nil {
 			return err
+		}
+		var foreground int64
+		if e := tx.Model(&model.ResponseRequest{}).Where("user_id = ? AND token_id = ? AND operation = ? AND key_hash = ? AND (expires_at > ? OR state NOT IN ?)", in.UserID, in.TokenID, in.Operation, in.NamespaceHash, now, []string{model.ResponseCompleted, model.ResponseFailed, model.ResponseRejected}).Count(&foreground).Error; e != nil {
+			return e
+		}
+		if foreground != 0 {
+			return bg.ErrConflict
 		}
 		for _, owner := range []bool{false, true} {
 			q := tx.Model(&model.BackgroundJob{})
@@ -210,12 +233,16 @@ func readBackground(tx *gorm.DB, binding identity.Binding, id string) (row model
 	if !validBackgroundID(id) || binding.UserID == 0 || binding.TokenID == 0 {
 		return row, bg.ErrNotFound
 	}
-	err = tx.Where("public_id = ? AND user_id = ? AND token_id = ? AND length(ciphertext) <= ? AND length(snapshot) <= ?", id, binding.UserID, binding.TokenID, bs.MaxInput+256, bs.MaxContent+256).First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	query := tx.Where("public_id = ? AND user_id = ? AND token_id = ? AND length(ciphertext) <= ? AND length(snapshot) <= ?", id, binding.UserID, binding.TokenID, bs.MaxInput+256, bs.MaxContent+256).Limit(1).Find(&row)
+	err = query.Error
+	if err == nil && query.RowsAffected == 0 {
 		return row, bg.ErrNotFound
 	}
 	if err != nil {
 		return row, err
+	}
+	if row.Deleted || row.ContentExpiresAt <= time.Now().UnixMilli() {
+		return row, bg.ErrNotFound
 	}
 	err = backgroundAuthority(tx, binding, row.Model)
 	return
@@ -319,8 +346,9 @@ func (s *Store) ClaimBackground(ctx context.Context, lease time.Duration) (out b
 			return e
 		}
 		var row model.BackgroundJob
-		e := tx.Where("stage IN ? AND claim_until <= ? AND due_at <= ? AND content_expires_at > ?", []string{string(bg.StageQueued), string(bg.StageRemoteActive)}, now, now, now).Order("created_at,id").First(&row).Error
-		if errors.Is(e, gorm.ErrRecordNotFound) {
+		query := tx.Where("stage IN ? AND claim_until <= ? AND due_at <= ? AND content_expires_at > ?", []string{string(bg.StageQueued), string(bg.StageRemoteActive)}, now, now, now).Order("created_at,id").Limit(1).Find(&row)
+		e := query.Error
+		if e == nil && query.RowsAffected == 0 {
 			return nil
 		}
 		if e != nil {
@@ -351,8 +379,9 @@ func ownedBackground(tx *gorm.DB, c bs.Claim) (row model.BackgroundJob, err erro
 	if !responseHash(c.ID) || !responseHash(c.Token) || c.Epoch <= 0 {
 		return row, bs.ErrClaimLost
 	}
-	err = tx.Where("id = ? AND claim_epoch = ? AND claim_hash = ? AND claim_until > ?", c.ID, c.Epoch, backgroundHash(c.Token), time.Now().UnixMilli()).First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	query := tx.Where("id = ? AND claim_epoch = ? AND claim_hash = ? AND claim_until > ?", c.ID, c.Epoch, backgroundHash(c.Token), time.Now().UnixMilli()).Limit(1).Find(&row)
+	err = query.Error
+	if err == nil && query.RowsAffected == 0 {
 		err = bs.ErrClaimLost
 	}
 	return
@@ -517,6 +546,25 @@ func (s *Store) CleanupBackground(ctx context.Context, limit int) error {
 		}
 		return tx.Where("id IN ?", ids).Delete(&model.BackgroundJob{}).Error
 	})
+}
+
+// CleanupExpiredBackground enforces fixed retention before loading new runtime
+// keys or serving requests, including when the product feature is disabled.
+func (s *Store) CleanupExpiredBackground(ctx context.Context) error {
+	for range 21 {
+		var count int64
+		now := time.Now().UnixMilli()
+		if e := s.db.WithContext(ctx).Model(&model.BackgroundJob{}).Where("(content_expires_at <= ? AND (length(ciphertext) > 0 OR length(snapshot) > 0 OR reserved_bytes > 0)) OR (stage = ? AND expires_at <= ? AND reserved_bytes = 0)", now, bg.StageTerminal, now).Count(&count).Error; e != nil {
+			return e
+		}
+		if count == 0 {
+			return nil
+		}
+		if e := s.CleanupBackground(ctx, 200); e != nil {
+			return e
+		}
+	}
+	return bg.ErrCapacity
 }
 
 var _ bs.Repository = (*Store)(nil)

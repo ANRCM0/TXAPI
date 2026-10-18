@@ -368,6 +368,11 @@ S6-00 已在现有基础层契约矩阵旁补充 API/业务/前端/扩展对照�
 
 A03-01 六项边界：负责 `foundation/contracts/background/v1`、`responses/v2`、generation 的受理 owner、私有 backgroundstate、store/model 统一 v13 和 architecture；依赖现有可信身份及密钥环，原十四组公开入口/L0 签名不变；新增两组候选端口，未在所有消费者验收前冻结；验证当前权限、幂等、租约/fencing、容量、未知保护及 v12 密文/账本兼容；不接入 main/HTTP/上游派发，不开放 A04 或收费例外。实现与实际验证见 [FC-002 记录](history/implementation-fc002.md)，原生协议/应用接线和事件恢复按 A03-02/03 继续顺序验收，完整 A03/M3 保持未完成。
 
+A03-01 已经 PR #20 从最终头 `5119d34` 合并为 `master/c1b8264`，push/PR/合并后 master 完整 CI 均通过。A03-02 现从该已验收基线接线；用户又明确批准 [FC-002-A](proposals/FC-002A-resource-ownership-v1.md) 在同一候选 background/v1 包补充 Resources.Kind/Delete，解决唯一资源分类与终态删除端口缺口，不改冻结 v1。A03-02/03 与新候选冻结仍须实际验收。
+
+A03-02 六项边界：L1 generation/gateway/store/model 与候选 background 资源端口、L2 纯原生 codec/HTTP v2、L3 responses、main/config/OpenAPI 单点接线；依赖原 core、当前身份/准入、可信任务与目标绑定，不改十四组冻结入口/L0；统一追加 v14 私有删除及共享幂等命名空间元数据，候选 API 0.5.0 / 92 操作；集中验证真实临时库/loopback 上游、断开/重启/撤销/未知不重发、终态 CAS 删除、模式/密钥/关闭及原全量回归；不含事件流恢复、收费双 hold/成本、背景父链或 WS。两个新增入口仍待 A03-03 最终验收后冻结。
+
+
 - [ ] 支持 HTTP `background=true` 创建、获取、取消；先接上游原生后台能力。持久队列、任务事实和用户/Key 预留成功后才确认接收，不能只返回 202 或启动 goroutine 就称支持。
 - [ ] 任务内部状态含 queued、dispatching、in_progress、cancel_requested、终态及执行不确定标记；公开 Response 状态按协议映射，不把内部状态原样塞入协议。生成终态与 billing pending/settled 分开。
 - [ ] worker 采用原子领取、租约续期、fencing token、有界运行/轮询和恢复；后台由任务 context 管理，客户端断开只停止观察。进程重启后凭已保存上游 ID 继续查询，不重新发起生成。
