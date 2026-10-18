@@ -10,16 +10,22 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 
 2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 
-### FC-002 原生后台（A03-03 实施中）
+### FC-002 原生后台（disabled 子批已验收/冻结）
 
-A03-01/02 已独立验收，PR #21 的 A03-02 最终头及合并后 `master/8a1da1f` 完整 CI 均通过。
-当前 A03-03 补齐 disabled 原生 `background=true,stream=true` 事件持久、独占序号游标、
-JSON 任务终态与事件尾部完成分离、重启/强杀/背压矩阵，最终本地集中验证已通过（1207 项/30 包与真实 main），仍待精确头及合并后完整 CI 验收。
-OpenAPI 仍为 0.5.0 / 92 操作；默认关闭，两个新增入口候选状态保持，
-完整 A03/M3、收费双 hold/成本、背景父链与 WS 不因此完成。
-启用、临时存储（包括 `store=false`）、幂等、资源隔离和保留/关闭边界见
-[后台运行约定](reference/responses-background.md)，实际命令、失败/修复及精确验收见
-[FC-002 记录](history/implementation-fc002.md)。下文 A01/A02 段落保留其原验收范围。
+A03-01/02/03 已依次独立验收。A03-03 功能头 `501507d` 经 PR #22 合并为
+`master/a44d4d1`，push `39130613526`、PR `39130658258`、合并后 master `39131280478`
+的 check/delivery 均成功，未失败步骤；含 Linux 全量 race、主程序冒烟和 v15 容器交付。
+本地最终 1207 项/30 包、6 个预期 helper SKIP、真实主程序强杀/重启/SSE/取消/TTL 通过。
+
+当前 OpenAPI 0.5.0 / 92 操作；两个追加入口 background/v1 与 responses/v2 已按
+[七项 DoD](reference/foundation-integration-v1.md#fc-002-追加公开入口冻结) 和真实 L3/L2 消费者证明冻结，
+原十四组 v1 与 L0 未改。默认关闭、仅 disabled、自包含文本/函数工具；
+store=false 仍临时加密保留，原生 JSON 终态与持久终态事件是不同事实，未知请求绝不盲重发。
+完整 A03/M3、收费双 hold/成本、背景父链与原生 WS 不因此完成。
+
+启用、最小运行命令、扩展/错误/配置/生命周期和限制见
+[后台运行约定](reference/responses-background.md) 与上述接入清单；实际命令、失败/修复及精确来源见
+[FC-002 记录](history/implementation-fc002.md#fc-002-最终验收与冻结)。下文 A01/A02 保留原验收范围。
 
 ### S7-A02 历史与会话（已验收合并）
 
