@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"minigateway/internal/core"
 	"net/http"
 	"strings"
@@ -72,11 +71,13 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 	// 1. 筛选出能服务这个模型的渠道
 	candidates := g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget)
 	if c.responseTarget != nil && len(candidates) == 0 {
+		g.recordRouteDecision(ctx, routeDecision{outcome: "continuation_unavailable", picker: "none"}, 0)
 		writeError(c, http.StatusConflict, "the original Responses target is no longer available", "continuation_target_unavailable")
 		return
 	}
 	if len(candidates) == 0 {
 		if len(g.pickChannels(req.Model(), allowedModels)) > 0 {
+			g.recordRouteDecision(ctx, routeDecision{outcome: "capability_unavailable", picker: "none"}, 0)
 			if g.billingMode == billing.ModeStrict {
 				rejected := g.rejectUnpricedAttempt(c, result.reservation)
 				result.Result = rejected
@@ -88,6 +89,7 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 		}
 		// 记账先行：这个提前返回的分支最容易漏掉状态码记录，
 		// 漏了就会把一次彻底失败的请求记成 status=200，账本失去意义
+		g.recordRouteDecision(ctx, routeDecision{outcome: "model_unavailable", picker: "none"}, 0)
 		c.result.StatusCode = http.StatusServiceUnavailable
 		c.result.ErrorMessage = fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model())
 		writeError(c, http.StatusServiceUnavailable,
@@ -130,7 +132,7 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 			result.Termination = term
 			break
 		}
-		ch, cred := g.selectTarget(g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget), triedCred, sessionID, time.Now())
+		ch, cred := g.selectTargetContext(ctx, g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget), triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}
@@ -425,36 +427,7 @@ func buildMeta(ch *channel, cred *dbmodel.Credential, req execution.Request, res
 //
 // 返回 (nil, nil) 表示没有可试的目标了（所有凭据都试过或都不可用）。
 func (g *Gateway) selectTarget(candidates []*channel, triedCred map[uint]bool, sessionID string, now time.Time) (*channel, *dbmodel.Credential) {
-	pool := make([]*channel, 0, len(candidates))
-	// 未试过的候选里的最高优先级。只在这一层里选，低优先级渠道留作兜底。
-	maxPriority := 0
-	first := true
-	for _, ch := range candidates {
-		if !hasUntriedCredential(ch, triedCred, now) {
-			continue
-		}
-		if first || ch.priority > maxPriority {
-			maxPriority = ch.priority
-			first = false
-		}
-	}
-	for _, ch := range candidates {
-		if !hasUntriedCredential(ch, triedCred, now) || ch.priority != maxPriority {
-			continue
-		}
-		pool = append(pool, ch)
-	}
-	if len(pool) == 0 {
-		return nil, nil
-	}
-	ch := chooseWeightedChannel(pool, rand.Intn)
-	cred := g.pickCredentialWithSession(ch, triedCred, sessionID, now)
-	if cred == nil {
-		// hasUntriedCredential 已经保证有，防御性返回：真出现说明两个
-		// 判断条件不一致，宁可放弃这次尝试也不要发出一个没有 Key 的请求
-		return nil, nil
-	}
-	return ch, cred
+	return g.selectTargetContext(context.Background(), candidates, triedCred, sessionID, now)
 }
 
 func effectiveChannelWeight(weight int) int {
@@ -517,27 +490,8 @@ func countAvailableCredentials(candidates []*channel, now time.Time) int {
 }
 
 func (g *Gateway) pickCredentialWithSession(ch *channel, triedCred map[uint]bool, sessionID string, now time.Time) *dbmodel.Credential {
-	if g.picker != nil {
-		// The extension receives copies and only selects an ID; it cannot mutate
-		// our snapshot, exclusions or substitute arbitrary key material.
-		excluded := make(map[uint]bool, len(triedCred))
-		for id, tried := range triedCred {
-			excluded[id] = tried
-		}
-		chosen, ok := g.picker(append([]dbmodel.Credential(nil), ch.credentials...), excluded, sessionID, now)
-		if ok && chosen != nil {
-			for _, candidate := range ch.credentials {
-				if candidate.ID == chosen.ID && !triedCred[candidate.ID] && candidate.IsUsable(now) && candidate.APIKey != "" {
-					return &candidate
-				}
-			}
-		}
-	}
-	selected, ok := scheduler.Pick(ch.credentials, triedCred, now)
-	if !ok {
-		return nil
-	}
-	return selected
+	credential, _ := g.pickCredentialDecision(ch, triedCred, sessionID, now)
+	return credential
 }
 
 // pickChannels 从渠道池里筛出能服务该模型、且令牌有权限的渠道。

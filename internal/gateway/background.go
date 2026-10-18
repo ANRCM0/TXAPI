@@ -126,7 +126,7 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 	var target execution.Target
 	var credential model.Credential
 	if call.Action == bg.RemoteSubmit {
-		selected, cred := g.selectTarget(candidates, map[uint]bool{}, call.PublicID, time.Now())
+		selected, cred := g.selectTargetContext(ctx, candidates, map[uint]bool{}, call.PublicID, time.Now())
 		if selected == nil {
 			return bg.ErrUnavailable
 		}
