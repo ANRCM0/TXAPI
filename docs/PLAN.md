@@ -364,6 +364,10 @@ S6-00 已在现有基础层契约矩阵旁补充 API/业务/前端/扩展对照�
 
 #### S7-A03：持久后台任务与事件恢复
 
+2026-10-18 已从最终冻结记录 `master/5f90a20` 核对下一批。现有 durable 仅支持 strict Chat/embeddings，前台 receipt/字节 cursor 不能直接承接原生后台；新增地基契约须先获具名确认。已提交 [FC-002 原生后台提案](proposals/FC-002-native-background-v1.md) 供评审，当前未获针对该提案的实施批准，未改运行代码或勾选 A03。建议先按 A03-01 至 A03-03 交付 disabled 的自包含输入原生后台/查询/取消/事件恢复，legacy/strict 与背景父链仍明确拒绝；这只是 A03 子批，不取消本节原定双 hold、成本和完整 M3 门槛。
+
+提案准备六项边界：只写 docs/proposals 与本计划；依赖冻结 v1 的实际缺口作为提案来源；不改变地基实现；新 background/v1、responses/v2 为待确认候选；本批只验证文档差异/链接/规则与非 Markdown 来源；不开放新契约给并行消费者，不实施 A04 或收费例外。源码证据、精确接口草图、所有消费者、迁移/回退、协议来源与分批验收只在 FC-002 维护。
+
 - [ ] 支持 HTTP `background=true` 创建、获取、取消；先接上游原生后台能力。持久队列、任务事实和用户/Key 预留成功后才确认接收，不能只返回 202 或启动 goroutine 就称支持。
 - [ ] 任务内部状态含 queued、dispatching、in_progress、cancel_requested、终态及执行不确定标记；公开 Response 状态按协议映射，不把内部状态原样塞入协议。生成终态与 billing pending/settled 分开。
 - [ ] worker 采用原子领取、租约续期、fencing token、有界运行/轮询和恢复；后台由任务 context 管理，客户端断开只停止观察。进程重启后凭已保存上游 ID 继续查询，不重新发起生成。
