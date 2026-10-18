@@ -1,6 +1,7 @@
 package server
 
 import (
+	"minigateway/internal/access"
 	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
@@ -48,7 +49,7 @@ func newEngine(t *testing.T, adminAuth gin.HandlerFunc) *gin.Engine {
 		t.Fatal(err)
 	}
 	t.Cleanup(gw.Close)
-	return NewEngine(Deps{
+	return fixtureEngine(fixtureDeps{
 		Gateway:   gw,
 		Cfg:       &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
 		Store:     st,
@@ -147,14 +148,14 @@ func TestHealthzNotRateLimited(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(gw.Close)
-	e := NewEngine(Deps{
+	e := fixtureEngine(fixtureDeps{
 		Gateway:   gw,
 		Cfg:       &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
 		Store:     st,
 		AdminAuth: middleware.AdminAuth(testSecret),
 		// IP 级限流故意设成极小（1 次/分钟）：/v1 请求会立刻打满它。
 		// 此时如果 /healthz 也被限流，就会 429——这正是要防的。
-		RateLimiter: middleware.NewMemoryLimiter(),
+		RateLimiter: access.NewMemoryLimiter(),
 		IPRPMLimit:  1,
 	})
 

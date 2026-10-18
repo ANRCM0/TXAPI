@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	authentication "minigateway/internal/foundation/identity"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,8 +47,8 @@ func TestS5BillingModesAtModelBoundary(t *testing.T) {
 				}
 				defer gw.Close()
 				router := gin.New()
-				router.POST("/v1/chat/completions", middleware.NewAuth(fixture.store).Handle(), gw.HandleChatCompletions)
-				router.POST("/v1/embeddings", middleware.NewAuth(fixture.store).Handle(), gw.HandleEmbeddings)
+				router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(fixture.store)).Handle(), gw.HandleChatCompletions)
+				router.POST("/v1/embeddings", middleware.NewAuth(authentication.NewTokenAuthenticator(fixture.store)).Handle(), gw.HandleEmbeddings)
 				for _, path := range []string{"/v1/chat/completions", "/v1/embeddings"} {
 					w := httptest.NewRecorder()
 					req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"model":"gpt-4o-mini","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"input":"hi"}`))
@@ -138,7 +139,7 @@ func TestS5GatewayPinsPersistedPriceVersion(t *testing.T) {
 	}
 	defer gw.Close()
 	router := gin.New()
-	router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+	router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
@@ -177,7 +178,7 @@ func TestS5StrictGatewaySettlesWithoutOrdinaryLogs(t *testing.T) {
 			}
 			defer gw.Close()
 			router := gin.New()
-			router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+			router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
 			body, _ := json.Marshal(map[string]any{"model": "gpt-4o-mini", "messages": []map[string]string{{"role": "user", "content": "hi"}}, "max_completion_tokens": 32, "service_tier": "default", "stream": stream})
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 			req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
@@ -231,7 +232,7 @@ func TestS5StrictGatewayMissingUsageHoldsBudget(t *testing.T) {
 	}
 	defer gw.Close()
 	router := gin.New()
-	router.POST("/v1/chat/completions", middleware.NewAuth(fixture.store).Handle(), gw.HandleChatCompletions)
+	router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(fixture.store)).Handle(), gw.HandleChatCompletions)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":32,"service_tier":"default"}`))
 	req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)

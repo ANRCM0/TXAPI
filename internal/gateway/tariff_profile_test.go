@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	authentication "minigateway/internal/foundation/identity"
 	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
@@ -101,7 +102,7 @@ func TestTariffAdmissionRefusesDriftBeforeNetworkAndPreservesEarlierUnknown(t *t
 				}
 				defer gw.Close()
 				router := gin.New()
-				router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+				router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
 				req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"service_tier":"default","max_completion_tokens":32}`))
 				req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
 				w := httptest.NewRecorder()

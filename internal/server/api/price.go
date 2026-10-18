@@ -99,7 +99,7 @@ func (h *Handler) SetTokenQuota(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	tk, err := h.store.SetTokenQuota(id, in.Quota)
+	tk, err := h.control.SetTokenQuota(id, in.Quota)
 	if err != nil {
 		fail(c, err)
 		return

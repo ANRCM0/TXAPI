@@ -5,14 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
+
 	"strings"
 	"time"
 
+	native "minigateway/internal/compat/responses/v1"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 	state "minigateway/internal/foundation/contracts/state/v1"
-	native "minigateway/internal/protocol/responses"
 )
 
 const maxHistoryItems = 1024
@@ -267,90 +267,20 @@ func (o *captureOutput) Write(ctx context.Context, p []byte) (int, error) {
 	return n, err
 }
 func (o *captureOutput) rewrite(p []byte) []byte {
-	patch := func(raw []byte) []byte {
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(raw, &obj) != nil || obj == nil {
-			return raw
-		}
-		var kind string
-		_ = json.Unmarshal(obj["object"], &kind)
-		if kind == "response" {
-			if o.parent != "" {
-				obj["previous_response_id"], _ = json.Marshal(o.parent)
-			}
-			if o.conversation != "" {
-				obj["conversation"], _ = json.Marshal(map[string]string{"id": o.conversation})
-			}
-		} else if response := obj["response"]; len(response) > 0 {
-			var inner map[string]json.RawMessage
-			if json.Unmarshal(response, &inner) == nil {
-				if o.parent != "" {
-					inner["previous_response_id"], _ = json.Marshal(o.parent)
-				}
-				if o.conversation != "" {
-					inner["conversation"], _ = json.Marshal(map[string]string{"id": o.conversation})
-				}
-				obj["response"], _ = json.Marshal(inner)
-			}
-		} else {
-			return raw
-		}
-		out, err := json.Marshal(obj)
-		if err != nil {
-			return raw
-		}
-		return out
-	}
-	if strings.Contains(o.metadata.ContentType, "event-stream") {
-		lines := bytes.Split(p, []byte("\n"))
-		for i, line := range lines {
-			if bytes.HasPrefix(line, []byte("data:")) {
-				lines[i] = append([]byte("data: "), patch(bytes.TrimSpace(line[5:]))...)
-			}
-		}
-		return bytes.Join(lines, []byte("\n"))
-	}
-	return patch(p)
+	return native.RewriteProvenance(p, o.metadata.ContentType, o.parent, o.conversation)
 }
 func (o *captureOutput) SetWriteDeadline(t time.Time) error {
 	if d, ok := o.Output.(interface{ SetWriteDeadline(time.Time) error }); ok {
 		return d.SetWriteDeadline(t)
 	}
-	return http.ErrNotSupported
+	return execv1.ErrDeadlineUnsupported
 }
 
 func terminalObject(o *captureOutput, stream bool) (json.RawMessage, error) {
 	if o.overflow {
 		return nil, state.ErrHistoryCapacity
 	}
-	if !stream {
-		r, _, err := native.ParseResponse(o.body.Bytes())
-		if err != nil || r.Output == nil {
-			return nil, errors.New("complete native response unavailable")
-		}
-		return bytes.Clone(o.body.Bytes()), nil
-	}
-	var terminal json.RawMessage
-	for _, block := range bytes.Split(o.body.Bytes(), []byte("\n\n")) {
-		var data []string
-		for _, line := range bytes.Split(block, []byte("\n")) {
-			if bytes.HasPrefix(line, []byte("data:")) {
-				data = append(data, strings.TrimSpace(string(line[5:])))
-			}
-		}
-		var event struct {
-			Type     string          `json:"type"`
-			Response json.RawMessage `json:"response"`
-		}
-		if json.Unmarshal([]byte(strings.Join(data, "\n")), &event) == nil && (event.Type == "response.completed" || event.Type == "response.incomplete" || event.Type == "response.failed" || event.Type == "response.cancelled") {
-			terminal = event.Response
-		}
-	}
-	r, _, err := native.ParseResponse(terminal)
-	if err != nil || r.Output == nil {
-		return nil, errors.New("complete native response unavailable")
-	}
-	return terminal, nil
+	return native.TerminalObject(o.body.Bytes(), stream)
 }
 
 func (h *History) finish(b identity.Binding, t *historyTurn, result execv1.Outcome, capture *captureOutput, stream bool, known bool) error {
@@ -372,8 +302,9 @@ func (h *History) finish(b identity.Binding, t *historyTurn, result execv1.Outco
 				content.Ready = true
 				t.record.Busy = ""
 				content.Target = result.Target
-				content.PriceVersion = capture.metadata.Values["X-TXAPI-Price-Version"]
-				content.BillingID = capture.metadata.Values["X-TXAPI-Billing-ID"]
+				association := native.Associations(capture.metadata)
+				content.PriceVersion = association.PriceVersion
+				content.BillingID = association.BillingID
 				response["previous_response_id"], _ = json.Marshal(content.Parent)
 				if content.Parent == "" {
 					response["previous_response_id"] = json.RawMessage("null")

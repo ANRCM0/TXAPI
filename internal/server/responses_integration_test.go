@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"minigateway/internal/compat/httpoutput"
+	"minigateway/internal/compat/responseshttp"
 	authority "minigateway/internal/foundation/identity"
 	"minigateway/internal/foundation/persistence"
 	bridge "minigateway/internal/foundation/runtime"
@@ -106,7 +107,7 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 				}
 				prices := billing.NewPriceTableWithHistory(st.PriceData, billing.DefaultPriceTTL, st.RecordPriceSnapshot)
 				counter := &responsesBillingCounter{Engine: billing.New(st.DB(), prices)}
-				limiter := middleware.NewMemoryLimiter()
+				limiter := access.NewMemoryLimiter()
 				t.Cleanup(limiter.(interface{ Close() }).Close)
 				gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), BillingMode: mode, Billing: counter, Channels: st.Channels(), Limiter: limiter, LogRecorder: st.WriteLog})
 				if err != nil {
@@ -125,12 +126,12 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				service, err := responsesapp.New(context.Background(), responsesapp.Options{History: history, Store: persistence.Receipts(st), Executor: bridge.NewExecutor(gw), Archive: generation.PublicArchive(archive), Identity: authority.New(st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: bytes.Repeat([]byte{17}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 16, OwnerRecords: 8}, ActiveRequests: 4, OwnerRequests: 2})
+				service, err := responsesapp.New(context.Background(), responsesapp.Options{History: history, Store: persistence.Receipts(st), Executor: bridge.NewExecutor(gw), Archive: generation.PublicArchive(archive), Identity: authority.New(st.ResolvePrincipal), DigestKey: bytes.Repeat([]byte{17}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 16, OwnerRecords: 8}, ActiveRequests: 4, OwnerRequests: 2})
 				if err != nil {
 					t.Fatal(err)
 				}
-				deps := Deps{Gateway: gw, Cfg: &config.Config{}, Store: st, Responses: service, RateLimiter: limiter, Billing: counter.Engine, AdminAuth: middleware.AdminAuth(testSecret)}
-				server := httptest.NewServer(NewEngine(deps))
+				deps := fixtureDeps{Gateway: gw, Cfg: &config.Config{}, Store: st, Responses: responseshttp.New(service, httpoutput.New), RateLimiter: limiter, Billing: counter.Engine, AdminAuth: middleware.AdminAuth(testSecret)}
+				server := httptest.NewServer(fixtureEngine(deps))
 				t.Cleanup(server.Close)
 				client := server.Client()
 				client.Timeout = 5 * time.Second
@@ -239,7 +240,7 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 					t.Fatal("real native continuation lost identity or per-turn billing")
 				}
 				deps.Responses = nil
-				disabled := httptest.NewServer(NewEngine(deps))
+				disabled := httptest.NewServer(fixtureEngine(deps))
 				t.Cleanup(disabled.Close)
 				call(disabled.URL, key.Key, "disabled", body, 503)
 				call(disabled.URL, "", "anonymous", body, 401)

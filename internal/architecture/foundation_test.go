@@ -31,10 +31,13 @@ func foundationImportError(path, imported string) error {
 	if owner == "compat" && strings.HasPrefix(imported, base+"foundation/") && !strings.HasPrefix(imported, contracts) && imported != base+"foundation/httpoutput/v1" {
 		return fmt.Errorf("compatibility adapter %s must use a versioned public facade: %s", path, imported)
 	}
-	if owner == "responses" || owner == "management" || owner == "generation" || owner == "access" || owner == "gateway" || owner == "protocol" || owner == "billing" {
+	if owner == "responses" || owner == "management" || owner == "controlplane" || owner == "server" || owner == "generation" || owner == "access" || owner == "gateway" || owner == "protocol" || owner == "billing" {
 		if strings.HasPrefix(imported, base+"foundation/") && !strings.HasPrefix(imported, contracts) {
 			return fmt.Errorf("%s must use public foundation contracts, not %s", path, imported)
 		}
+	}
+	if owner == "responses" && strings.HasPrefix(imported, base+"compat/") && imported != base+"compat/responses/v1" {
+		return fmt.Errorf("feature %s must consume the public Responses codec facade", path)
 	}
 	return nil
 }
@@ -58,6 +61,10 @@ func TestFoundationImportGuardRejectsImplementationLeaks(t *testing.T) {
 		{"responses/service.go", "minigateway/internal/foundation/runtime", true},
 		{"management/configuration.go", "minigateway/internal/foundation/persistence", true},
 		{"management/configuration.go", "minigateway/internal/foundation/contracts/configuration/v1", false},
+		{"server/api/api.go", "minigateway/internal/foundation/persistence", true},
+		{"controlplane/service.go", "minigateway/internal/foundation/identity", true},
+		{"responses/service.go", "minigateway/internal/compat/responseshttp", true},
+		{"responses/service.go", "minigateway/internal/compat/responses/v1", false},
 		{"responses/service.go", "minigateway/internal/foundation/contracts/execution/v1", false},
 		{"compat/httpoutput/output.go", "minigateway/internal/foundation/runtime", true},
 		{"compat/httpoutput/output.go", "minigateway/internal/foundation/httpoutput/v1", false},

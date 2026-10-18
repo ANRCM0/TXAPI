@@ -74,3 +74,27 @@ type Authority interface {
 	Current(context.Context) (Principal, bool)
 	Refresh(context.Context, Binding) (context.Context, Principal, error)
 }
+
+func Intersect(policies ...Policy) Policy {
+	out := Policy{Mode: All}
+	for _, p := range policies {
+		if p.Mode == All {
+			continue
+		}
+		if p.Mode != Allowlist {
+			return Policy{Mode: Allowlist, Models: []string{}}
+		}
+		if out.Mode == All {
+			out = Policy{Mode: Allowlist, Models: append([]string{}, p.Models...)}
+			continue
+		}
+		kept := []string{}
+		for _, m := range out.Models {
+			if p.Allows(m) {
+				kept = append(kept, m)
+			}
+		}
+		out.Models = kept
+	}
+	return out
+}

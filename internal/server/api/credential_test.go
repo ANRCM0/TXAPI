@@ -54,7 +54,7 @@ func newAPITestEngine(t *testing.T) (*gin.Engine, *store.Store) {
 		}
 	}
 
-	h := New(st, nil, nil)
+	h := fixtureHandler(st, nil, nil)
 	e := gin.New()
 	h.Register(e.Group(""), middleware.AdminAuth(testSecret))
 	return e, st

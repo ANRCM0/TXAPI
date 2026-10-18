@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	ledger "minigateway/internal/foundation/contracts/ledger/v1"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,7 +19,7 @@ import (
 
 // Units are billionths of the configured currency. Prices retain the existing
 // per-1K-token API; calculation and versioned storage use integers only.
-const UnitScale int64 = 1_000_000_000
+const UnitScale int64 = ledger.UnitScale
 
 type fixedPrice struct {
 	Model            string `json:"model"`

@@ -26,20 +26,22 @@ It has its own encrypted snapshot/CAS/target consumers; no historical S6/A01 CI
 is substituted for A02 verification. Exact head `2084bcd` and merged master
 passed their own complete push/PR/master CI; M2 is accepted.
 
+FC-001 FND-01/02/03 have separately passed their exact-head and merged-master gates. FND-04 has migrated the remaining application/HTTP consumers; its local evidence and pending final CI are recorded in [FC-001 history](../history/implementation-fc001.md). Public candidates remain unfrozen until FND-05.
+
 ## Responsibilities and actual consumers
 
 | Responsibility | Implementation / consumer | Ownership rule |
 |---|---|---|
 | One upstream HTTP attempt and encoded output | `core.Executor`, `core.Output`, `core.HTTPOutput`; gateway consumes them | Standard library only; execution/commit facts, cancellation and bounded I/O |
 | Generation business lifecycle | gateway shared `execute` / `ExecuteTo` / `ExecuteClaimedTo` | Trusted current principal, one admission, routing/attempts, original ledger and one finalization |
-| HTTP model calls | server authentication/rate middleware, gateway HTTP adapter | Preserve the middleware admission handoff; non-HTTP generation resets inherited mutable marks |
+| HTTP model calls | server authentication/rate ports, compat/generationhttp | Preserve the middleware admission handoff; non-HTTP generation resets inherited mutable marks |
 | Non-HTTP generation | generation Runner / durable dispatcher; existing socket application regression | Refresh identity per dispatch; default-off runtime and existing capacity, ownership and encryption constraints |
 | Upstream representation | protocol operation envelope and registered adaptors | Separate Chat/embeddings payloads; capability filter and send preparation consume the same requirements |
 | Configuration use cases | `management.Configuration`; both legacy and administrator HTTP resource handlers | Serialize channel/credential/price persistence and publication; Store owns transactions, callbacks own snapshot application |
-| Other management/owner use cases | existing access/store/billing operations called by server API | Keep current ownership and authorization; change only concrete gaps identified for their consumers |
+| Other management/owner use cases | controlplane via control/v1, original Store bridge; ledger/v1 for existing Engine | Current session/admin/owner boundaries remain; L2 consumes public capabilities, never implementation handles |
 | Frontend application | `web/assets/api.mjs` and `app.mjs` | Session and call Key separated; stable DTO/error/pagination, current roles, exact ledger money, saved/applied visibility |
 | Construction extensions | `gateway.Options.Protocols/Operations` plus optional billing/admission ports | Constructor registration is copied; instances must support concurrent reads, own per-attempt mutable state and honor cancellation |
-| Assembly/persistence | cmd/config/model/store/secrets | One main lifecycle, schema runner, identity authority and ledger; no new S6 schema or public S7 route |
+| Assembly/persistence | cmd root; existing L1 config/model/store/secrets implementations | One main lifecycle, schema runner, identity authority and ledger; no new S6 schema or public S7 route |
 
 ## Contract rules
 

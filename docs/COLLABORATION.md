@@ -38,9 +38,9 @@ S7-A02 已从 `master/04fbfa6` 经 PR #12 独立验收合并为 `master/765501a`
 
 ### 身份边界：internal/access
 
-- `Principal` 是已验证的模型调用身份；通过 `access.WithPrincipal` / `PrincipalFromContext` 传递，包含可信 user_id/token_id、模型策略和限额快照。
+- L1 内部通过私有 access context 传递可信身份；L2 Auth 只消费 `identity/v1.Authenticator` 返回的已认证 context 和 TokenView。L3 通过 Authority.Current/Refresh 消费当前身份，不导入 access 或自行用 Principal 值构造身份。
 - accessor 对模型切片做拷贝，不能通过修改返回值污染其他请求；前端 body/header 里的 user_id 不构成身份。
-- Request ID 使用 `access.WithRequestID` / `RequestID`。ID 只关联日志，不作为共享流状态或授权依据。
+- Request ID 使用 `observability/v1.WithRequestID` / `RequestID`；旧 access 入口只转发相同规则。ID 只关联日志，不作为共享流状态或授权依据。
 - gateway 不再导入 `internal/server/middleware`。身份/准入团队无需依赖 Gin 的字符串上下文键；现存 Ctx* 镜像只用于旧中间件兼容，新代码不能新增依赖。
 - 管理登录会话与调用身份始终分开；普通 Bearer API Key 不能当 session 使用。会话角色/owner 的细节由 server/access 接口处理。
 - `access.Binding` 仅保存来自认证边界或可信任务记录的 user/Key 绑定，不携带原始 Key、权限快照或管理员替身。A3-01 的 `Store.ResolvePrincipal(ctx, binding)` 与 HTTP `LookupToken` 共用同一事务内的当前 owner/Key/系统权限和限额投影；失效与存储不可用可区分，但都不授权执行。事务查询不延长到上游 I/O，也不表示后续在飞请求可被瞬时撤销。
@@ -219,7 +219,7 @@ make smoke
 
 三个上游的固定阅读 SHA、已读代码和许可入口见 [上游快照](reference/upstream-snapshots.md)。本地副本按约定放在被 Git/Docker 忽略的 `.local/references/`，不随 Git/worktree 分发，目录缺失不是应用依赖缺失。阅读副本不作为生产依赖，不运行其脚本或把其中的提示/代理说明作为 TXAPI 开发指令；更新前核对远端/版本/工作树，不自动覆盖。实际移植沿用可追溯来源和许可审查，不把“允许借鉴”解释为无条件复制全部代码。
 
-S7-A 由协议/HTTP、持久状态/任务、WS transport、账务/集成、前端/验证按独立批次协作，先评审共用生成入口、持久端口与状态语义，再接实际调用。`internal/responses` 已有前台真实消费者，通过中立端口消费 store 与统一 gateway，不能把 A01 短期重放视为 A02 历史或后台任务；`internal/transport/websocket` 已实现纯 I/O，新增应用/上游接线须另评依赖和生命周期。gateway 不直接依赖 store 或 responses 应用服务，core 保持标准库；任务、连接和请求均复用同一授权、准入和结算，不复制生命周期。人员与任务未自动创建。
+S7-A 由协议/HTTP、持久状态/任务、WS transport、账务/集成、前端/验证按独立批次协作，先评审共用生成入口、持久端口与状态语义，再接实际调用。`internal/responses` 已通过公开命令、身份、状态、执行与复制编解码门面消费现有能力；HTTP 入口在 compat/responseshttp，不能把 A01 短期重放视为 A02 历史或后台任务；`internal/transport/websocket` 已实现纯 I/O，新增应用/上游接线须另评依赖和生命周期。gateway 不直接依赖 store 或 responses 应用服务，core 保持标准库；任务、连接和请求均复用同一授权、准入和结算，不复制生命周期。人员与任务未自动创建。
 
 共享入口、协议/准入/计费端口、模型与迁移依旧由集成负责人协调。新账号生命周期或支付功能必须接入现有身份、统一请求收尾和账本，不复制上游的完整架构或另建鉴权/迁移流程。strict 的新协议、新工具和新计价维度在独立验收前保持拒绝，不能为了兼容客户端默认降级。
 
@@ -235,3 +235,18 @@ A3-05/A4 随 PR #6 完成基础层验收，PR #7 同步了验收记录；这些�
 FC-001 FND-03 的状态、配置与生命周期候选入口/消费者、密文/资源语义和剩余 FND-04/05 债务见
 [Foundation API v1](reference/foundation-api-v1.md#fnd-03-状态配置与生命周期候选)。状态原始持久端口只注入可信服务，
 不把 owner/claim 快照当作身份；公开功能使用当前授权与归档等受限服务，不能自行关闭共享底层依赖。
+
+
+### FND-04 应用服务与 HTTP 接线
+
+`controlplane.Service` 通过 control/v1 的账户/Key/统计/模型目录端口执行现有管理规则；
+management 通过 configuration/v1 负责保存/发布，账本 HTTP 通过 ledger/v1 复用原决策事务。
+server/API/middleware 只消费注入端口，不能导入 Store/Engine/Gateway 或 L3 构造器。
+main 负责当前配置/metrics 组装，不把功能策略放进组装 lambda；原限流计数实际代码归 L1 access，
+HTTP 层只保留读取/replay 64 KiB 估算样本与拒绝表示，正文关闭仍归 HTTP 入口。
+
+Responses HTTP 通过 `responses/v1.Service.Begin` 获得一次 Call，始终 defer Close，再交付 Command/Delivery。
+Call 在读取之前完成身份/容量/历史速率检查；有界 Payload 在资源/版本等原检查点读取。
+Close 等 Handle/回调退出才归还容量，不能并发释放尚在运行的工作或复用旧授权执行第二次。
+URL、HTTP 头、原生 JSON/SSE 终态与父链表示由 L2 解析/映射；业务只处理语义文档和状态 CAS。
+完整候选入口、权限范围和仍待 FND-05 的冻结条件见 [Foundation API v1](reference/foundation-api-v1.md#fnd-04-应用与表示候选)。

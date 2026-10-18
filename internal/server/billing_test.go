@@ -34,7 +34,7 @@ func TestS5AdminBillingWorkflowAndPermissionBoundary(t *testing.T) {
 	}
 	t.Cleanup(gw.Close)
 	setEngine := func(ledger *billing.Engine) {
-		f.engine = NewEngine(Deps{Gateway: gw, Cfg: &config.Config{}, Store: f.store, Billing: ledger, AdminAuth: middleware.AdminAuth(testSecret)})
+		f.engine = fixtureEngine(fixtureDeps{Gateway: gw, Cfg: &config.Config{}, Store: f.store, Billing: ledger, AdminAuth: middleware.AdminAuth(testSecret)})
 	}
 	setEngine(e)
 	ctx := context.Background()

@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	authentication "minigateway/internal/foundation/identity"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -155,7 +156,7 @@ func newEmbeddingsGateway(t *testing.T) *embeddingsGateway {
 
 	e := gin.New()
 	e.Use(middleware.RequestID())
-	auth := middleware.NewAuth(st)
+	auth := middleware.NewAuth(authentication.NewTokenAuthenticator(st))
 	// 两个入口都挂上，验证它们走同一条转发链路但打不同上游路径
 	e.POST("/v1/chat/completions", auth.Handle(), gw.HandleChatCompletions)
 	e.POST("/v1/embeddings", auth.Handle(), gw.HandleEmbeddings)
@@ -430,7 +431,7 @@ func TestEmbeddingsWithoutUsageFallsBackToEstimate(t *testing.T) {
 
 	e := gin.New()
 	e.Use(middleware.RequestID())
-	e.POST("/v1/embeddings", middleware.NewAuth(st).Handle(), gw.HandleEmbeddings)
+	e.POST("/v1/embeddings", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleEmbeddings)
 
 	// 一段足够长的中文输入，估算值应该明显大于 0
 	const inputText = "这是一段用于测试 embeddings 估算降级路径的输入文本，需要足够长才能让估算值明显大于零"

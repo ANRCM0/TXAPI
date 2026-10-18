@@ -181,3 +181,60 @@ check/delivery 也全部 SUCCESS，含 Linux 全量 race、契约/依赖、构�
 持久 ORM 行/标签、schema v12、OpenAPI 0.4.0/91 操作、财务/密文格式和依赖/workflow 没有变化；
 无真实提供商/生产数据操作。归档、历史、领取/fencing 与预算仍调用原权威一次，转换只承担数据所有权。
 本地通过不代替最终头的 Linux race/容器交付和合并后 master，当前不勾选 FND-03，不冻结候选契约。
+
+### FND-03 最终 CI 与合并验收
+
+最终功能头 `3840337e2db1f6b12d4e5b9647d6053f72fd329e` 的自动 push
+[39101056074](https://github.com/ANRCM0/TXAPI/actions/runs/39101056074) 和 PR
+[39101081820](https://github.com/ANRCM0/TXAPI/actions/runs/39101081820) check/delivery 全部 SUCCESS。
+核对精确 head、未漂移 master/e97e458、clean worktree 与四个 green jobs 后，
+`gh pr merge 16 --merge --match-head-commit 3840337e2db1f6b12d4e5b9647d6053f72fd329e`
+将 [PR #16](https://github.com/ANRCM0/TXAPI/pull/16) 合并为
+`3bf25400bac13c6ca563de3373cde9992af417a8`，与功能头树一致。
+合并后 master 自动 [39101392941](https://github.com/ANRCM0/TXAPI/actions/runs/39101392941)
+的 check/delivery 均 SUCCESS，含 Linux race、契约/依赖、构建/vet/格式、主程序冒烟和容器交付。
+FND-03 已验收；以上本地段落的 pending 描述保留其时点，不覆盖后续验收事实。
+
+## FND-04：应用用例与 HTTP 表示隔离
+
+从已验收 master/3bf2540 新建 feat/fnd-04-application-http-boundaries，六项开工边界见 PLAN。
+本批将剩余控制面业务与 Responses HTTP 解析/表示分离，L1 仍拥有原授权、限流状态、事务与账本。
+实现和集中验证结果在实际完成后登记；目前不记 PASS，不勾选 FND-04。
+
+
+### FND-04 实施与集中修复
+
+control/v1、ledger/v1、Authenticator/TokenView、admission/observability/text 与 Responses 命令/交付契约
+均使用独立公开值；现有 Store/Engine 的事务和财务权威不变。controlplane 接手登录窗口、owner Key 与模型投影，
+server/API/middleware 不再导入其实现或 Store/Engine/Gateway；实际组装移入 main，测试组装仍调用同一生产 handler。
+原 memoryLimiter 及其全部用例移入 access，保留所有断言；原 history_http 用例改为类型化 history_commands，
+路由/头/JSON/SSE/父链与输出构造在 L2。原字段/密文与 91 个 HTTP 操作保持，不新增后台/WS 或 strict 许可。
+
+编译阶段发现并修复无用 import、ResolutionInput 的旧私有方法不能挂到跨包 alias、转换生成的多余括号，
+以及最后组装点仍给应用传 NewOutput/直接当 http.Handler 的引用。账本规范化保留为私有函数，未迁走结算逻辑。
+控制面和最终全仓只编译检查均通过，但不作为行为验收。新增端口/资源定向回归与依赖拒绝先通过。
+首轮完整候选来源为 348 路径 / `536585bdcb2982c83319ace056f4170b4c554b62c3d015976a4b1e88b231020c`：
+1071 项/29 包、5 helper SKIP，全量、build/vet/tidy、前端 10 项、main 恢复与真实控制台联调通过。
+随后审阅发现 Begin 在自定义身份 Refresh panic 后可能遗留已取得的容量；用交接标记和 defer 保护，
+新增下一次 Begin 可重新取得容量的真实回归，先与 Close/join 用例定向复验 PASS，再重新执行相关完整检查。
+
+### FND-04 最终本地验证
+
+最终来源 348 个非 Markdown 路径 / SHA-256
+`990a65a7350ea053d97a130652e89bd8627ff638fc503df3a548ebd4ae85d952`，集中复验前后一致。
+Windows/PowerShell，所有 Go 命令显式 GOARCH=amd64。
+
+| 实际命令 | 结果 / 适用来源 |
+|---|---|
+| go test -json -count=1 ./... | 最终 1072 项测试/子用例、29 包 PASS，5 预期 helper SKIP，无失败 |
+| go build ./...；go vet ./... | 最终来源 PASS |
+| go mod tidy；go.mod/go.sum diff | 首轮来源 PASS；之后仅 Begin 的异常释放和回归，无依赖变化，最终 diff 复核无漂移 |
+| normalized-LF gofmt 比较，仅变更 Go | 66 个现存变更 Go 文件通过；移动的限流实现/测试保留，不格式化无关文件 |
+| node --check app.mjs/api.mjs；node --test web/assets/api.test.mjs | 首轮来源语法和 10 项 PASS；最终没有 web 或正常 HTTP 表示变化，复用此范围 |
+| python tests/smoke/local.py --go go | 首轮来源真实 main/auth/Chat/SSE/控制台、strict 拒绝、强杀/原 hold/审计、加密/密钥拒绝恢复及 durable 重启/退出 PASS；最终仅自定义身份端口 panic 的释放保护，生产认证桥已将 panic 转错误，正常路径不变，复用此范围 |
+| python tests/smoke/compatibility.py --go go | 首轮来源真实临时二进制/SQLite/API/UI、配置保存/发布、角色/模型/Key 隔离、桌面/移动及清理 PASS；同上限定复用 |
+
+新增直接应用回归验证关闭 join、单次执行/授权、Begin panic 退回容量和 owner/空 allowlist；
+原 HTTP/JSON/SSE、错误/幂等/回放/ETag/CAS、会话/角色/Key/额度、账本决策和旧加密/恢复用例继续运行。
+无真实上游或生产数据操作；没有修改 OpenAPI/schema/migration/workflow/依赖或部署格式。
+最终头的自动 Linux race/冒烟/容器交付和合并后 master 仍须通过，当前不勾选 FND-04、不冻结 v1。

@@ -12,14 +12,12 @@ package api
 import (
 	"errors"
 	cfg "minigateway/internal/foundation/contracts/configuration/v1"
-	"minigateway/internal/foundation/persistence"
+	control "minigateway/internal/foundation/contracts/control/v1"
+	ledger "minigateway/internal/foundation/contracts/ledger/v1"
+
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-
-	"minigateway/internal/billing"
-	"minigateway/internal/management"
-	"minigateway/internal/store"
 )
 
 // Handler 持有管理 API 需要的一切依赖。
@@ -30,20 +28,21 @@ import (
 // 通过回调和 billing.Engine 注入依赖，api 包不反向 import gateway/server，
 // 避免形成 HTTP 装配层的依赖环。
 type Handler struct {
-	loginGate     loginGate
-	store         *store.Store
-	billing       *billing.Engine
+	control       control.Service
+	ledger        ledger.Service
 	configuration cfg.Service
 }
-
-// New 创建管理 API handler。
-func New(st *store.Store, onChannelsChanged, onPricesChanged func() error) *Handler {
-	return NewWithBilling(st, onChannelsChanged, onPricesChanged, nil)
+type Dependencies struct {
+	Control       control.Service
+	Ledger        ledger.Service
+	Configuration cfg.Service
 }
 
-func NewWithBilling(st *store.Store, onChannelsChanged, onPricesChanged func() error, ledger *billing.Engine) *Handler {
-	return &Handler{store: st, billing: ledger,
-		configuration: management.NewConfiguration(persistence.Configuration(st), onChannelsChanged, onPricesChanged)}
+func New(deps Dependencies) *Handler {
+	if deps.Control == nil || deps.Configuration == nil {
+		panic("management application services must be explicitly supplied")
+	}
+	return &Handler{control: deps.Control, ledger: deps.Ledger, configuration: deps.Configuration}
 }
 
 // Register 把管理路由挂到引擎上。
@@ -74,13 +73,13 @@ func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
 
 // fail 统一错误出口。
 //
-// store.ErrNotFound 映射成 404 而不是 500：调用方要知道的是「你要改的东西不存在」，
+// control.ErrNotFound 映射成 404 而不是 500：调用方要知道的是「你要改的东西不存在」，
 // 这是客户端问题，不是服务端故障。
 func fail(c *gin.Context, err error) {
 	if err == nil {
 		return
 	}
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, control.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": gin.H{"message": err.Error(), "type": "not_found"},
 		})

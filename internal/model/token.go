@@ -2,6 +2,7 @@ package model
 
 import (
 	"minigateway/internal/access"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
 	"time"
 
 	"gorm.io/gorm"
@@ -99,30 +100,7 @@ const (
 //
 // UserID 必须带上：P5 的额度是「先扣令牌、再扣用户」的双层结构，
 // 没有它结算时找不到要扣哪个用户。
-type TokenView struct {
-	Policy access.Policy
-	ID     uint
-	UserID uint
-	Name   string
-	Models []string
-	// RPMLimit/TPMLimit 是限流阈值，0 表示不限。
-	// 限流中间件挂在 Auth 之后、只看上下文，所以阈值必须随投影一起
-	// 带过来——让它自己回库查会把一次请求变成两次查库。
-	RPMLimit             int
-	TPMLimit             int
-	UserRPMLimit         int
-	UserConcurrencyLimit int
-	KeyConcurrencyLimit  int
-}
-
-func (v TokenView) Principal() access.Principal {
-	return access.Principal{
-		UserID: v.UserID, TokenID: v.ID, TokenName: v.Name,
-		Policy:   access.Policy{Mode: v.Policy.Mode, Models: append([]string(nil), v.Policy.Models...)},
-		RPMLimit: v.RPMLimit, TPMLimit: v.TPMLimit, UserRPMLimit: v.UserRPMLimit,
-		UserConcurrencyLimit: v.UserConcurrencyLimit, KeyConcurrencyLimit: v.KeyConcurrencyLimit,
-	}
-}
+type TokenView = identity.TokenView
 
 // IsActive 判断令牌当前是否可用（启用且未过期）。
 func (t *Token) IsActive(now time.Time) bool {

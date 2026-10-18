@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	admission "minigateway/internal/foundation/contracts/admission/v1"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -10,11 +11,7 @@ import (
 
 // Limiter is consumed by admission and completion. Implementations own their
 // lifecycle and concurrency safety; callers pass only verified principal IDs.
-type Limiter interface {
-	AllowRequest(context.Context, string, int, time.Time) (bool, int)
-	AllowTokens(context.Context, string, int, int, time.Time) (bool, int)
-	AddTokens(context.Context, string, int, time.Time)
-}
+type Limiter = admission.Limiter
 
 func TokenBucketKey(tokenID uint) string      { return "tok:" + strconv.FormatUint(uint64(tokenID), 10) }
 func TokenUsageBucketKey(tokenID uint) string { return TokenBucketKey(tokenID) + ":tpm" }

@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"minigateway/internal/access"
-	"minigateway/internal/model"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
+	"minigateway/internal/foundation/contracts/observability/v1"
 )
 
 // 上下文 key。用常量而不是裸字符串，避免拼错导致取值拿到 nil。
@@ -92,7 +92,7 @@ func RequestID() gin.HandlerFunc {
 				id = hex.EncodeToString(buf)
 			}
 		}
-		c.Request = c.Request.WithContext(access.WithRequestID(c.Request.Context(), id))
+		c.Request = c.Request.WithContext(observability.WithRequestID(c.Request.Context(), id))
 		c.Set(CtxRequestID, id)
 		c.Writer.Header().Set("X-Request-Id", id)
 		c.Next()
@@ -124,9 +124,6 @@ func CORS() gin.HandlerFunc {
 //
 // 实现方（store.Store）负责过滤掉「已吊销/已过期」的令牌，
 // 中间件只关心「查得到就是合法的」。
-type TokenLookup interface {
-	LookupToken(key string) (model.TokenView, bool)
-}
 
 // Auth 校验客户端令牌。
 //
@@ -134,12 +131,15 @@ type TokenLookup interface {
 // 当前令牌、owner 和系统策略从同一数据库读事务投影；不缓存授权快照，
 // 管理 API 的撤销与权限修改在下一次鉴权时重新读取。
 type Auth struct {
-	lookup TokenLookup
+	authenticator identity.Authenticator
 }
 
 // NewAuth 用令牌查询源构建鉴权器。
-func NewAuth(lookup TokenLookup) *Auth {
-	return &Auth{lookup: lookup}
+func NewAuth(authenticator identity.Authenticator) *Auth {
+	if authenticator == nil {
+		panic("HTTP authentication must be explicitly supplied")
+	}
+	return &Auth{authenticator: authenticator}
 }
 
 // Handle 返回鉴权中间件。
@@ -150,7 +150,7 @@ func (a *Auth) Handle() gin.HandlerFunc {
 			abortUnauthorized(c, "缺少 API Key。请在 Authorization 头里带上 Bearer <key>")
 			return
 		}
-		view, ok := a.lookup.LookupToken(key)
+		ctx, view, ok := a.authenticator.Authenticate(c.Request.Context(), key)
 		if !ok {
 			// 不区分「key 不存在」和「key 已过期」：把区别说出去等于
 			// 告诉攻击者哪些 key 是真实存在的
@@ -166,7 +166,7 @@ func (a *Auth) Handle() gin.HandlerFunc {
 		// 整个投影也存一份：限流中间件要按令牌 ID 分桶并读 RPM/TPM
 		// 阈值，只给它散落的字段会让「加一个令牌字段」变成三处改动。
 		c.Set(CtxTokenView, view)
-		c.Request = c.Request.WithContext(access.WithPrincipal(c.Request.Context(), view.Principal()))
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
 }

@@ -1,13 +1,12 @@
 package api
 
 import (
+	control "minigateway/internal/foundation/contracts/control/v1"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-
-	"minigateway/internal/store"
 )
 
 // 本文件是日志查询与用量统计的 API（SPEC 三交付物）。
@@ -39,7 +38,7 @@ func parseUintQuery(c *gin.Context, name string) (uint, bool) {
 // 会直接丢掉。limit 超过上限由 store 截断而不是报错——前端写错
 // limit 不该让整个查询失败，返回 1000 条比返回一个错误有用得多。
 func (h *Handler) ListLogs(c *gin.Context) {
-	q := store.LogQuery{Model: c.Query("model")}
+	q := control.LogQuery{Model: c.Query("model")}
 	if raw := c.Query("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n <= 0 {
@@ -71,7 +70,7 @@ func (h *Handler) ListLogs(c *gin.Context) {
 	}
 	q.TokenID = tokenID
 
-	logs, err := h.store.ListLogs(q)
+	logs, err := h.control.ListLogs(q)
 	if err != nil {
 		fail(c, err)
 		return
@@ -83,7 +82,7 @@ func (h *Handler) ListLogs(c *gin.Context) {
 //
 // 默认 7d：大多数「最近用得怎么样」的问题关心的就是一周。
 func parseRange(c *gin.Context) (time.Time, bool) {
-	since, err := store.ParseSince(c.Query("range"), time.Now())
+	since, err := control.ParseSince(c.Query("range"), time.Now())
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": gin.H{"message": err.Error(), "type": "invalid_request"},
@@ -99,7 +98,7 @@ func (h *Handler) StatsSummary(c *gin.Context) {
 	if !ok {
 		return
 	}
-	summary, err := h.store.LogSummary(since)
+	summary, err := h.control.LogSummary(since)
 	if err != nil {
 		fail(c, err)
 		return
@@ -115,7 +114,7 @@ func (h *Handler) StatsByModel(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.store.StatsByModel(since)
+	rows, err := h.control.StatsByModel(since)
 	if err != nil {
 		fail(c, err)
 		return
@@ -131,7 +130,7 @@ func (h *Handler) StatsByChannel(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.store.StatsByChannel(since)
+	rows, err := h.control.StatsByChannel(since)
 	if err != nil {
 		fail(c, err)
 		return

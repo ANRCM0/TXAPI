@@ -186,3 +186,12 @@ A04 WS, A05/A06 cross-mode/client/real-provider acceptance and S5 cost proof
 remain separate. A02/M2 acceptance is limited to the supported subset and its
 matching complete CI/latest-base merge evidence above; it does not certify
 real-provider, SDK/Codex or full S7 production readiness.
+
+
+FC-001 FND-04 preserves this accepted HTTP/persistence contract through the new
+`compat/responseshttp` entry and the neutral `responses/v1` Begin/Call/Command/Delivery
+port. The application does not parse URL/HTTP headers or construct writers; L2
+maps native documents, SSE/provenance and conditional metadata. Current scope,
+resource ownership and pending final acceptance are in
+[Foundation API v1](foundation-api-v1.md#fnd-04-应用与表示候选) and
+[FC-001 implementation evidence](../history/implementation-fc001.md).

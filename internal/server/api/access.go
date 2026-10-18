@@ -2,60 +2,19 @@ package api
 
 import (
 	"context"
+	"errors"
+	control "minigateway/internal/foundation/contracts/control/v1"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"minigateway/internal/access"
-	"minigateway/internal/model"
-	"minigateway/internal/store"
 )
 
 type sessionUserContextKey struct{}
 
-type loginBucket struct {
-	count int
-	until time.Time
-}
-type loginGate struct {
-	mu      sync.Mutex
-	buckets map[string]loginBucket
-	sweep   time.Time
-}
-
-func (g *loginGate) allow(ip string) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	now := time.Now()
-	if g.buckets == nil {
-		g.buckets = map[string]loginBucket{}
-	}
-	if now.After(g.sweep) {
-		for k, b := range g.buckets {
-			if now.After(b.until) {
-				delete(g.buckets, k)
-			}
-		}
-		g.sweep = now.Add(time.Minute)
-	}
-	b, exists := g.buckets[ip]
-	if !exists && len(g.buckets) >= 4096 {
-		return false
-	}
-	if now.After(b.until) {
-		b = loginBucket{until: now.Add(time.Minute)}
-	}
-	if b.count >= 5 {
-		return false
-	}
-	b.count++
-	g.buckets[ip] = b
-	return true
-}
 func bearer(c *gin.Context) string {
 	header := c.GetHeader("Authorization")
 	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
@@ -63,18 +22,18 @@ func bearer(c *gin.Context) string {
 	}
 	return strings.TrimSpace(header[7:])
 }
-func sessionUser(c *gin.Context) *model.User {
-	u, _ := c.Request.Context().Value(sessionUserContextKey{}).(*model.User)
+func sessionUser(c *gin.Context) *control.User {
+	u, _ := c.Request.Context().Value(sessionUserContextKey{}).(*control.User)
 	return u
 }
 func (h *Handler) session(admin bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user, err := h.store.SessionUser(bearer(c))
+		user, err := h.control.SessionUser(bearer(c))
 		if err != nil {
 			c.AbortWithStatusJSON(401, gin.H{"error": gin.H{"message": "valid login session required", "type": "unauthorized"}})
 			return
 		}
-		if admin && user.Role != model.RoleAdmin {
+		if admin && user.Role != control.RoleAdmin {
 			c.AbortWithStatusJSON(403, gin.H{"error": gin.H{"message": "administrator required", "type": "forbidden"}})
 			return
 		}
@@ -122,7 +81,7 @@ func (h *Handler) Login(c *gin.Context) {
 	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
 	}
-	if !h.loginGate.allow(ip) {
+	if !h.control.AllowLogin(ip) {
 		c.Header("Retry-After", "60")
 		c.JSON(429, gin.H{"error": gin.H{"message": "too many login attempts"}})
 		return
@@ -134,11 +93,7 @@ func (h *Handler) Login(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	if len(in.Username) > 64 || len(in.Password) > 72 {
-		c.JSON(401, gin.H{"error": gin.H{"message": "invalid username or password"}})
-		return
-	}
-	secret, user, err := h.store.Login(in.Username, in.Password)
+	secret, user, err := h.control.Login(in.Username, in.Password)
 	if err != nil {
 		c.JSON(401, gin.H{"error": gin.H{"message": "invalid username or password"}})
 		return
@@ -147,14 +102,14 @@ func (h *Handler) Login(c *gin.Context) {
 	c.JSON(200, gin.H{"session_token": secret, "token_type": "Bearer", "expires_in": 86400, "user": user})
 }
 func (h *Handler) Logout(c *gin.Context) {
-	if err := h.store.Logout(bearer(c)); err != nil {
+	if err := h.control.Logout(bearer(c)); err != nil {
 		fail(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
 }
 func (h *Handler) Users(c *gin.Context) {
-	users, err := h.store.ListUsers()
+	users, err := h.control.ListUsers()
 	if err != nil {
 		fail(c, err)
 		return
@@ -166,7 +121,7 @@ func (h *Handler) User(c *gin.Context) {
 	if !ok {
 		return
 	}
-	user, err := h.store.GetUser(id)
+	user, err := h.control.GetUser(id)
 	if err != nil {
 		fail(c, err)
 		return
@@ -174,11 +129,11 @@ func (h *Handler) User(c *gin.Context) {
 	c.JSON(200, gin.H{"data": user})
 }
 func (h *Handler) CreateUser(c *gin.Context) {
-	var in store.UserInput
+	var in control.UserInput
 	if !bindJSON(c, &in) {
 		return
 	}
-	user, err := h.store.CreateUser(&in)
+	user, err := h.control.CreateUser(&in)
 	if err != nil {
 		fail(c, err)
 		return
@@ -190,11 +145,11 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var in store.UserInput
+	var in control.UserInput
 	if !bindJSON(c, &in) {
 		return
 	}
-	user, err := h.store.UpdateUser(id, &in)
+	user, err := h.control.UpdateUser(id, &in)
 	if err != nil {
 		fail(c, err)
 		return
@@ -212,7 +167,7 @@ func (h *Handler) ClaimKey(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	token, err := h.store.ClaimToken(id, in.UserID)
+	token, err := h.control.ClaimToken(id, in.UserID)
 	if err != nil {
 		fail(c, err)
 		return
@@ -220,7 +175,7 @@ func (h *Handler) ClaimKey(c *gin.Context) {
 	c.JSON(200, gin.H{"data": token})
 }
 func (h *Handler) MyKeys(c *gin.Context) {
-	tokens, err := h.store.OwnerTokens(sessionUser(c).ID)
+	tokens, err := h.control.OwnerTokens(sessionUser(c).ID)
 	if err != nil {
 		fail(c, err)
 		return
@@ -232,7 +187,7 @@ func (h *Handler) MyKey(c *gin.Context) {
 	if !ok {
 		return
 	}
-	token, err := h.store.OwnedToken(sessionUser(c).ID, id)
+	token, err := h.control.OwnedToken(sessionUser(c).ID, id)
 	if err != nil {
 		fail(c, err)
 		return
@@ -240,16 +195,16 @@ func (h *Handler) MyKey(c *gin.Context) {
 	c.JSON(200, gin.H{"data": token})
 }
 func (h *Handler) CreateMyKey(c *gin.Context) {
-	var in store.TokenInput
+	var in control.TokenInput
 	if !bindJSON(c, &in) {
 		return
 	}
 	owner := sessionUser(c).ID
-	if in.UserID != 0 && in.UserID != owner {
-		c.JSON(403, gin.H{"error": gin.H{"message": "cannot create a key for another user"}})
+	token, err := h.control.CreateOwnedKey(owner, &in)
+	if errors.Is(err, control.ErrForbidden) {
+		c.JSON(403, gin.H{"error": gin.H{"message": err.Error()}})
 		return
 	}
-	token, err := h.store.IssueToken(owner, &in)
 	if err != nil {
 		fail(c, err)
 		return
@@ -262,11 +217,11 @@ func (h *Handler) UpdateMyKey(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var in store.TokenInput
+	var in control.TokenInput
 	if !bindJSON(c, &in) {
 		return
 	}
-	token, err := h.store.UpdateOwnedToken(sessionUser(c).ID, id, &in)
+	token, err := h.control.UpdateOwnedToken(sessionUser(c).ID, id, &in)
 	if err != nil {
 		fail(c, err)
 		return
@@ -278,43 +233,22 @@ func (h *Handler) DeleteMyKey(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.store.DeleteOwnedToken(sessionUser(c).ID, id); err != nil {
+	if err := h.control.DeleteOwnedToken(sessionUser(c).ID, id); err != nil {
 		fail(c, err)
 		return
 	}
 	c.Status(204)
 }
 func (h *Handler) MyModels(c *gin.Context) {
-	system, err := h.store.SystemPolicy()
+	result, err := h.control.ModelsForPolicy(sessionUser(c).Policy())
 	if err != nil {
 		fail(c, err)
 		return
 	}
-	policy := access.Intersect(system, sessionUser(c).Policy())
-	seen := map[string]bool{}
-	models := []string{}
-	for _, ch := range h.store.Channels() {
-		if !ch.IsEnabled() {
-			continue
-		}
-		candidates := append([]string(nil), ch.Models...)
-		for _, name := range ch.Models {
-			if name == "*" {
-				candidates = append(candidates, policy.Models...)
-				break
-			}
-		}
-		for _, m := range candidates {
-			if m != "*" && !seen[m] && policy.Allows(m) {
-				models = append(models, m)
-				seen[m] = true
-			}
-		}
-	}
-	c.JSON(200, gin.H{"data": models, "policy": policy})
+	c.JSON(200, gin.H{"data": result.Models, "policy": result.Policy})
 }
 func (h *Handler) MyLogs(c *gin.Context) {
-	logs, err := h.store.ListLogs(store.LogQuery{UserID: sessionUser(c).ID, OwnerOnly: true, Limit: queryInt(c, "limit", 100), Offset: queryInt(c, "offset", 0)})
+	logs, err := h.control.ListLogs(control.LogQuery{UserID: sessionUser(c).ID, OwnerOnly: true, Limit: queryInt(c, "limit", 100), Offset: queryInt(c, "offset", 0)})
 	if err != nil {
 		fail(c, err)
 		return
@@ -323,7 +257,7 @@ func (h *Handler) MyLogs(c *gin.Context) {
 }
 func (h *Handler) MyUsage(c *gin.Context) {
 	user := sessionUser(c)
-	usage, err := h.store.UsageForUser(user.ID)
+	usage, err := h.control.UsageForUser(user.ID)
 	if err != nil {
 		fail(c, err)
 		return
@@ -331,7 +265,7 @@ func (h *Handler) MyUsage(c *gin.Context) {
 	c.JSON(200, gin.H{"data": gin.H{"user_id": user.ID, "quota": user.Quota, "used_quota": user.UsedQuota, "usage": usage}})
 }
 func (h *Handler) SystemPolicy(c *gin.Context) {
-	p, err := h.store.SystemPolicy()
+	p, err := h.control.SystemPolicy()
 	if err != nil {
 		fail(c, err)
 		return
@@ -339,11 +273,11 @@ func (h *Handler) SystemPolicy(c *gin.Context) {
 	c.JSON(200, gin.H{"data": p})
 }
 func (h *Handler) SetSystemPolicy(c *gin.Context) {
-	var p access.Policy
+	var p identity.Policy
 	if !bindJSON(c, &p) {
 		return
 	}
-	if err := h.store.SetSystemPolicy(p); err != nil {
+	if err := h.control.SetSystemPolicy(p); err != nil {
 		fail(c, err)
 		return
 	}

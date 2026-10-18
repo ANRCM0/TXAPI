@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	authentication "minigateway/internal/foundation/identity"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -62,7 +63,7 @@ func TestStrictConvertedLimitsBeforeUpstreamAndDurableAttempt(t *testing.T) {
 					}
 					defer gw.Close()
 					router := gin.New()
-					router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
+					router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
 					body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"` + field + `":32}`
 					req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
 					req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
@@ -168,8 +169,8 @@ func TestStrictMalformedRequestsDoNotReserveOrForward(t *testing.T) {
 	}
 	defer gw.Close()
 	router := gin.New()
-	router.POST("/v1/chat/completions", middleware.NewAuth(st).Handle(), gw.HandleChatCompletions)
-	router.POST("/v1/embeddings", middleware.NewAuth(st).Handle(), gw.HandleEmbeddings)
+	router.POST("/v1/chat/completions", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleChatCompletions)
+	router.POST("/v1/embeddings", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleEmbeddings)
 	for _, tc := range []struct{ path, body string }{
 		{"/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":32,"max_tokens":4096}`},
 		{"/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":null}],"max_tokens":32}`},
@@ -208,7 +209,7 @@ func TestStrictEmbeddingsCannotBecomeCrossProtocolChat(t *testing.T) {
 			}
 			defer gw.Close()
 			router := gin.New()
-			router.POST("/v1/embeddings", middleware.NewAuth(st).Handle(), gw.HandleEmbeddings)
+			router.POST("/v1/embeddings", middleware.NewAuth(authentication.NewTokenAuthenticator(st)).Handle(), gw.HandleEmbeddings)
 			req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewBufferString(`{"model":"gpt-4o-mini","input":["hi","there"]}`))
 			req.Header.Set("Authorization", "Bearer "+fixture.tokenKey)
 			w := httptest.NewRecorder()
