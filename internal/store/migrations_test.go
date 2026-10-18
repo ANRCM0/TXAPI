@@ -53,7 +53,7 @@ func TestResponseV11UpgradePreservesV10FinancialAuthority(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+1 || got[len(got)-1].Version != 11 {
+		if len(got) != len(released)+2 || got[len(got)-2].Version != 11 || got[len(got)-1].Version != 12 {
 			t.Fatalf("v11 ledger is not idempotent: %+v", got)
 		}
 		for i := range released {
@@ -210,7 +210,7 @@ func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+4 || got[len(got)-4].Version != 8 || got[len(got)-3].Version != 9 || got[len(got)-2].Version != 10 || got[len(got)-1].Version != 11 {
+		if len(got) != len(released)+5 || got[len(got)-5].Version != 8 || got[len(got)-4].Version != 9 || got[len(got)-3].Version != 10 || got[len(got)-2].Version != 11 || got[len(got)-1].Version != 12 {
 			t.Fatalf("non-idempotent v8/v9/v10/v11: %+v", got)
 		}
 		for i := range released {
@@ -274,7 +274,7 @@ func TestIntentV9UpgradePreservesV8OutputAndFinancialAuthority(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+3 || got[len(got)-3].Version != 9 || got[len(got)-2].Version != 10 || got[len(got)-1].Version != 11 {
+		if len(got) != len(released)+4 || got[len(got)-4].Version != 9 || got[len(got)-3].Version != 10 || got[len(got)-2].Version != 11 || got[len(got)-1].Version != 12 {
 			t.Fatalf("non-idempotent v9/v10/v11 migration: %+v", got)
 		}
 		for i := range released {

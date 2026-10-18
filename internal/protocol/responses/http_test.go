@@ -105,6 +105,15 @@ func TestHTTPAdmissionPreservesNativeFieldsAndDefaultStorage(t *testing.T) {
 }
 
 func TestHTTPAdmissionRejectsUnsupportedAndMalformedSemantics(t *testing.T) {
+	for _, item := range []string{`{"type":"reasoning","id":"rs_other_owner"}`, `{"type":"reasoning","id":"rs_other_owner","encrypted_content":""}`, `{"type":"reasoning","id":"rs_other_owner","encrypted_content":123}`} {
+		r, err := ParseRequest([]byte(`{"model":"m","input":[` + item + `]}`))
+		if err == nil {
+			err = r.ValidateHTTP()
+		}
+		if err == nil {
+			t.Fatal("bare or malformed native reasoning lookup was accepted")
+		}
+	}
 	for _, fields := range []string{
 		`"background":true`, `"previous_response_id":"resp-other"`, `"conversation":"conv-other"`,
 		`"max_output_tokens":15`, `"max_output_tokens":16.5`, `"instructions":{}`,

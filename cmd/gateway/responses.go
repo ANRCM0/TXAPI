@@ -54,7 +54,15 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	if err != nil {
 		return nil, err
 	}
-	service, err := responses.New(ctx, responses.Options{Store: st, Executor: gw, Archive: archive, Resolve: st.ResolvePrincipal, DigestKey: keys.Digest,
+	history, err := responses.NewHistory(responses.HistoryOptions{Store: st, ActiveKey: keys.Active, Keys: keys.Keys, Retention: time.Duration(cfg.HistorySeconds) * time.Second,
+		Limits: model.HistoryLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords, InstanceBytes: cfg.HistoryInstanceBytes, OwnerBytes: cfg.HistoryOwnerBytes}})
+	if err != nil {
+		return nil, err
+	}
+	if err = st.RecoverResponseHistory(ctx); err != nil {
+		return nil, errors.New("Responses history recovery failed")
+	}
+	service, err := responses.New(ctx, responses.Options{History: history, Store: st, Executor: gw, Archive: archive, Resolve: st.ResolvePrincipal, DigestKey: keys.Digest,
 		Retention: time.Duration(cfg.RetentionSeconds) * time.Second, Limits: model.ResponseRequestLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords},
 		ActiveRequests: cfg.ActiveRequests, OwnerRequests: cfg.OwnerRequests})
 	if err != nil {
@@ -92,6 +100,9 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 			case <-ticker.C:
 				batch, end := context.WithTimeout(background, 2*time.Second)
 				_, err := st.CleanupResponseRequests(batch, time.Now(), 200)
+				if err == nil {
+					_, err = st.CleanupResponseHistory(batch, 200)
+				}
 				if err == nil {
 					_, err = st.CleanupGenerationRecords(batch, 200)
 				}

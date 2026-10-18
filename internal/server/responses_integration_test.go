@@ -51,14 +51,21 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 						return
 					}
 					var input struct {
-						Model  string `json:"model"`
-						Stream bool   `json:"stream"`
+						Model        string          `json:"model"`
+						Stream       bool            `json:"stream"`
+						Input        json.RawMessage `json:"input"`
+						Parent       string          `json:"previous_response_id"`
+						Conversation json.RawMessage `json:"conversation"`
 					}
 					if json.NewDecoder(r.Body).Decode(&input) != nil || input.Model != "native-model" || input.Stream != stream {
 						http.Error(w, "wrong native payload", 400)
 						return
 					}
-					response := `{"id":"resp_upstream_original","object":"response","model":"native-model","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"native output"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`
+					if hits.Load() == 2 && (input.Parent != "" || len(input.Conversation) != 0 || !bytes.Contains(input.Input, []byte("hello")) || !bytes.Contains(input.Input, []byte("native output")) || !bytes.Contains(input.Input, []byte("follow-up"))) {
+						http.Error(w, "context must have one local source", 400)
+						return
+					}
+					response := fmt.Sprintf(`{"id":"resp_upstream_original","object":"response","model":"native-model","status":"completed","output":[{"type":"message","id":"msg_%d","role":"assistant","content":[{"type":"output_text","text":"native output"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`, hits.Load())
 					if stream {
 						w.Header().Set("Content-Type", "text/event-stream")
 						for sequence := range 320 {
@@ -104,7 +111,11 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				service, err := responsesapp.New(context.Background(), responsesapp.Options{Store: st, Executor: gw, Archive: archive, Resolve: st.ResolvePrincipal, DigestKey: bytes.Repeat([]byte{17}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 16, OwnerRecords: 8}, ActiveRequests: 4, OwnerRequests: 2})
+				history, err := responsesapp.NewHistory(responsesapp.HistoryOptions{Store: st, ActiveKey: "fixture", Keys: map[string][]byte{"fixture": bytes.Repeat([]byte{23}, 32)}, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 32, OwnerRecords: 16, InstanceBytes: 16 << 20, OwnerBytes: 8 << 20}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				service, err := responsesapp.New(context.Background(), responsesapp.Options{History: history, Store: st, Executor: gw, Archive: archive, Resolve: st.ResolvePrincipal, DigestKey: bytes.Repeat([]byte{17}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 16, OwnerRecords: 8}, ActiveRequests: 4, OwnerRequests: 2})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -189,6 +200,33 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 				call(server.URL, key.Key, "new-key", body, 429)
 				if hits.Load() != 1 {
 					t.Fatal("conflict or RPM rejection reached upstream")
+				}
+				for _, path := range []string{"/v1/responses/" + publicID, "/v1/responses/" + publicID + "/input_items?limit=1"} {
+					request, err := http.NewRequest("GET", server.URL+path, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					request.Header.Set("Authorization", "Bearer "+key.Key)
+					response, err := client.Do(request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					raw, _ := io.ReadAll(response.Body)
+					response.Body.Close()
+					if response.StatusCode != 200 || !bytes.Contains(raw, []byte("hello")) && strings.Contains(path, "input_items") {
+						t.Fatalf("history via real API %d %s", response.StatusCode, raw)
+					}
+				}
+				if hits.Load() != 1 || counter.pre.Load() != wantCalls || counter.settled.Load() != wantCalls {
+					t.Fatal("history reads consumed generation budget")
+				}
+				if err := st.DB().Model(&model.Token{}).Where("id = ?", key.ID).Update("rpm_limit", 0).Error; err != nil {
+					t.Fatal(err)
+				}
+				childBody := fmt.Sprintf(`{"model":"public-model","input":"follow-up","previous_response_id":%q,"stream":%v,"max_output_tokens":16}`, publicID, stream)
+				childHeaders, child := call(server.URL, key.Key, "child-key", childBody, 200)
+				if childHeaders.Get("X-TXAPI-Response-ID") == publicID || !bytes.Contains(child, []byte(publicID)) || hits.Load() != 2 || counter.pre.Load() != 2*wantCalls || counter.settled.Load() != 2*wantCalls {
+					t.Fatal("real native continuation lost identity or per-turn billing")
 				}
 				deps.Responses = nil
 				disabled := httptest.NewServer(NewEngine(deps))

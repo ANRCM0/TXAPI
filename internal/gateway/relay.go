@@ -73,7 +73,11 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 	}
 
 	// 1. 筛选出能服务这个模型的渠道
-	candidates := g.capableChannels(req, allowedModels)
+	candidates := g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget)
+	if c.responseTarget != nil && len(candidates) == 0 {
+		writeError(c, http.StatusConflict, "the original Responses target is no longer available", "continuation_target_unavailable")
+		return
+	}
 	if len(candidates) == 0 {
 		if len(g.pickChannels(req.Model(), allowedModels)) > 0 {
 			if g.billingMode == billing.ModeStrict {
@@ -129,7 +133,7 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 			result.Termination = term
 			break
 		}
-		ch, cred := g.selectTarget(g.capableChannels(req, allowedModels), triedCred, sessionID, time.Now())
+		ch, cred := g.selectTarget(g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget), triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}
@@ -151,6 +155,9 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 			c.result.CredentialID = credID
 		}
 		c.result.ActualModel = m.ActualModel
+		if req.Operation() == protocol.Responses {
+			c.result.ResponseTarget = responseTarget(ch, cred, req.Model())
+		}
 		// 记账用：命中的渠道分组。重试会不断覆盖它，最终值是
 		// 「最后一次尝试的渠道」——和 status/channel_id 一样，
 		// 账本只该记录实际服务了这次请求的那个渠道。

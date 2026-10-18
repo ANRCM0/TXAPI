@@ -124,6 +124,7 @@ type AttemptResult struct {
 }
 
 type RequestResult struct {
+	ResponseTarget     ResponseTarget
 	ResponseStatus     string
 	UpstreamResponseID string
 	Operation          protocol.Operation

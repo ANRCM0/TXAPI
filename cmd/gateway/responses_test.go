@@ -19,7 +19,7 @@ import (
 )
 
 func responsesRuntimeConfig(path string) config.ResponsesConfig {
-	return config.ResponsesConfig{Enabled: true, KeysFile: path, RetentionSeconds: 120, ReplaySeconds: 60, MaxOutputBytes: 65536,
+	return config.ResponsesConfig{Enabled: true, KeysFile: path, HistorySeconds: 120, HistoryInstanceBytes: 16 << 20, HistoryOwnerBytes: 8 << 20, RetentionSeconds: 120, ReplaySeconds: 60, MaxOutputBytes: 65536,
 		InstanceRecords: 16, OwnerRecords: 8, InstanceBytes: 2 << 20, OwnerBytes: 1 << 20, ActiveRequests: 8, OwnerRequests: 2}
 }
 

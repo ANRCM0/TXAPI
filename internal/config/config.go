@@ -363,6 +363,9 @@ func (c *Config) validate() error {
 	if c.Responses.Enabled && c.Responses.ReplaySeconds < c.Server.TotalTimeoutSeconds+5 {
 		return fmt.Errorf("responses.replay_seconds must cover server.total_timeout_seconds plus finalization time")
 	}
+	if c.Responses.Enabled && c.Responses.HistorySeconds < c.Server.TotalTimeoutSeconds+5 {
+		return fmt.Errorf("responses.history_seconds must cover total request timeout and finalization")
+	}
 	if c.Responses.Enabled && strings.TrimSpace(c.Database.CredentialKeysFile) == "" {
 		return fmt.Errorf("responses.enabled requires database.credential_keys_file or %s", EnvCredentialKeysFile)
 	}

@@ -64,6 +64,12 @@ func responseNamespace(tx *gorm.DB, version string, initialize bool) error {
 	if count != 0 {
 		return model.ErrResponseUnavailable
 	}
+	if err := tx.Model(&model.ResponseHistory{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 0 {
+		return model.ErrResponseUnavailable
+	}
 	return tx.Create(&model.Setting{Key: responseDigestSetting, Value: version}).Error
 }
 

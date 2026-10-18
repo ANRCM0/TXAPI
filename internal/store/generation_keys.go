@@ -17,6 +17,9 @@ func (s *Store) GenerationKeyRequirements(ctx context.Context) ([]model.Generati
 		FROM generation_intents WHERE length(ciphertext) > 0
 		UNION
 		SELECT DISTINCT substr(ciphertext,1,MIN(34,2+COALESCE(unicode(substr(ciphertext,2,1)),0))) AS header, '' AS digest_version
-		FROM generation_segments WHERE length(ciphertext) > 0 LIMIT 17`).Scan(&out).Error
+		FROM generation_segments WHERE length(ciphertext) > 0
+		UNION
+		SELECT DISTINCT substr(ciphertext,1,MIN(34,2+COALESCE(unicode(substr(ciphertext,2,1)),0))) AS header, '' AS digest_version
+		FROM response_histories WHERE length(ciphertext) > 0 LIMIT 17`).Scan(&out).Error
 	return out, err
 }

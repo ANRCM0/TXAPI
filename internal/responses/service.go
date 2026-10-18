@@ -41,6 +41,7 @@ type Executor interface {
 }
 
 type Options struct {
+	History                       *History
 	Store                         ReceiptStore
 	Executor                      Executor
 	Archive                       *generation.Archive
@@ -52,6 +53,8 @@ type Options struct {
 }
 
 type Service struct {
+	readWindows                 map[uint]historyReadWindow
+	history                     *History
 	store                       ReceiptStore
 	executor                    Executor
 	archive                     *generation.Archive
@@ -76,7 +79,7 @@ func New(ctx context.Context, opts Options) (*Service, error) {
 		return nil, errors.New("invalid Responses application configuration")
 	}
 	digest := sha256.Sum256(opts.DigestKey)
-	s := &Service{store: opts.Store, executor: opts.Executor, archive: opts.Archive, resolve: opts.Resolve,
+	s := &Service{history: opts.History, store: opts.Store, executor: opts.Executor, archive: opts.Archive, resolve: opts.Resolve,
 		digest: bytes.Clone(opts.DigestKey), version: hex.EncodeToString(digest[:]), retention: opts.Retention, limits: opts.Limits,
 		maxActive: opts.ActiveRequests, maxOwner: opts.OwnerRequests, owners: make(map[uint]int)}
 	if err := s.store.InitializeResponseRequests(ctx, s.version); err != nil {
@@ -180,6 +183,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 503, "authorization_unavailable", "current identity cannot be verified")
 		return
 	}
+	if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
+		if s.history == nil {
+			respond(w, 503, "history_unavailable", "Responses history is not enabled")
+			return
+		}
+		s.historyHTTP(w, r, binding)
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBytes+1))
 	if err != nil {
 		respond(w, 400, "invalid_request_error", "could not read Responses body")
@@ -189,7 +200,16 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 413, "request_too_large", "Responses request exceeds 1 MiB")
 		return
 	}
-	request, err := protocol.ParseRequest(protocol.Responses, body)
+	validationBody := body
+	if s.history != nil {
+		fields, _, _, parseErr := stateFields(body)
+		if parseErr != nil {
+			respond(w, 400, "invalid_request_error", parseErr.Error())
+			return
+		}
+		validationBody, _ = json.Marshal(fields)
+	}
+	request, err := protocol.ParseRequest(protocol.Responses, validationBody)
 	if err != nil {
 		respond(w, 400, "invalid_request_error", err.Error())
 		return
@@ -244,11 +264,27 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headers(w, receipt)
 	ctx := access.WithPrincipal(r.Context(), current)
 	if !fresh {
+		if s.history != nil && receipt.Store && receipt.State != model.ResponseDispatching && receipt.State != model.ResponseUncertain && receipt.State != model.ResponseRejected {
+			_, content, err := s.history.read(ctx, binding, receipt.ResponseID)
+			if err != nil || !content.Ready {
+				respond(w, 409, "idempotency_result_unavailable", "retained response history is unavailable")
+				return
+			}
+		}
 		s.replay(ctx, w, binding, receipt)
 		return
 	}
 	w.Header().Set("X-TXAPI-Idempotency", "created")
-	s.execute(ctx, w, binding, receipt, body)
+	var turn *historyTurn
+	if s.history != nil {
+		body, turn, err = s.history.prepare(ctx, binding, receipt, body)
+		if err != nil {
+			_ = s.finish(receipt, model.ResponseRequestCompletion{State: model.ResponseRejected, StatusCode: 409, ErrorType: "history_unavailable"})
+			historyError(w, err)
+			return
+		}
+	}
+	s.execute(ctx, w, binding, receipt, body, turn)
 }
 
 func (s *Service) replay(ctx context.Context, w http.ResponseWriter, binding access.Binding, receipt model.ResponseRequest) {
@@ -299,12 +335,16 @@ func (s *Service) finish(receipt model.ResponseRequest, completion model.Respons
 	return s.store.FinishResponseRequest(ctx, receipt, completion)
 }
 
-func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding access.Binding, receipt model.ResponseRequest, body []byte) {
+func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding access.Binding, receipt model.ResponseRequest, body []byte, turn *historyTurn) {
 	output := core.NewHTTPOutput(w)
 	var recording *generation.Foreground
 	finished := false
+	historyFinished := turn == nil
 	defer func() {
 		panicked := recover() != nil
+		if !historyFinished {
+			_ = s.history.finish(binding, turn, gateway.RequestResult{Result: core.Result{Phase: core.ResponseReceived}}, &captureOutput{}, receipt.Stream, false)
+		}
 		if !finished {
 			_ = s.finish(receipt, model.ResponseRequestCompletion{State: model.ResponseUncertain, ErrorType: "execution_unknown"})
 		}
@@ -321,13 +361,26 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding ac
 		var err error
 		recording, err = s.archive.BeginForeground(ctx, binding, receipt.Model, output)
 		if err != nil {
+			if turn != nil {
+				_ = s.history.finish(binding, turn, gateway.RequestResult{Result: core.Result{Phase: core.NotDispatched}}, &captureOutput{}, receipt.Stream, false)
+				historyFinished = true
+			}
 			finished = s.finish(receipt, model.ResponseRequestCompletion{State: model.ResponseRejected, StatusCode: 503, ErrorType: "archive_unavailable"}) == nil
 			respond(w, 503, "archive_unavailable", "encrypted replay capacity is unavailable")
 			return
 		}
 		target = recording
 	}
-	result := s.executor.ExecuteTo(ctx, target, gateway.Execution{Operation: protocol.Responses, Body: body, ResponseID: receipt.ResponseID})
+	var captured *captureOutput
+	if turn != nil {
+		captured = &captureOutput{Output: target, parent: turn.content.Parent, conversation: turn.content.Conversation}
+		target = captured
+	}
+	input := gateway.Execution{Operation: protocol.Responses, Body: body, ResponseID: receipt.ResponseID}
+	if turn != nil {
+		input.ResponseTarget = turn.target
+	}
+	result := s.executor.ExecuteTo(ctx, target, input)
 	completion := model.ResponseRequestCompletion{State: model.ResponseUncertain, NativeStatus: result.ResponseStatus, UpstreamResponseID: result.UpstreamResponseID,
 		StatusCode: result.StatusCode, HTTPStatus: output.State().HTTPStatus}
 	if result.Error != nil {
@@ -356,6 +409,14 @@ func (s *Service) execute(ctx context.Context, w http.ResponseWriter, binding ac
 		} else if err != nil && completion.State != model.ResponseRejected {
 			completion.State = model.ResponseUncertain
 		}
+	}
+	if turn != nil {
+		known := completion.State == model.ResponseCompleted || completion.State == model.ResponseFailed
+		if err := s.history.finish(binding, turn, result, captured, receipt.Stream, known); err != nil {
+			completion.State = model.ResponseUncertain
+			completion.OutputRecordID = ""
+		}
+		historyFinished = true
 	}
 	if err := s.finish(receipt, completion); err != nil {
 		slog.Error("Responses receipt finalization failed", "generation_id", receipt.ID)

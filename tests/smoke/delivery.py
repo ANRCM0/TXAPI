@@ -81,9 +81,9 @@ def snapshot(path):
             "SELECT * FROM schema_migrations ORDER BY version").fetchall()
         # Optional only for the released S3 backup: current installations must
         # have the receipt table, while an exact rollback must remove it again.
-        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='response_requests'").fetchone():
-            result["response_requests"] = db.execute(
-                "SELECT * FROM response_requests ORDER BY id").fetchall()
+        for table in ("response_requests", "response_histories"):
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                result[table] = db.execute(f'SELECT * FROM "{table}" ORDER BY id').fetchall()
         return result
 
 
@@ -326,6 +326,7 @@ def main():
             backup = fresh.backup("installed")
             installed = snapshot(backup / "gateway.db")
             assert len(installed["logs"]) == 1
+            assert installed["response_histories"] == [], "Fresh disabled Responses created public history"
             assert installed["response_requests"] == [], "Fresh disabled Responses created receipts or its schema is missing"
             fresh.start()
             session = login(fresh.base, "console-user", "console-user-test-password")
@@ -360,9 +361,9 @@ def main():
             assert len(upgraded["logs"]) == 4, "Graceful stop did not flush accepted access logs"
             previous_steps = len(original["schema_migrations"])
             assert upgraded["schema_migrations"][:previous_steps] == original["schema_migrations"], "Released migrations changed"
-            assert [row[0] for row in upgraded["schema_migrations"][previous_steps:]] == [5, 6, 7, 8, 9, 10, 11], "Missing billing/archive/intent/claim/Responses migrations"
+            assert [row[0] for row in upgraded["schema_migrations"][previous_steps:]] == [5, 6, 7, 8, 9, 10, 11, 12], "Missing billing/archive/intent/claim/Responses migrations"
             with contextlib.closing(sqlite3.connect((after / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
-                for table in ("generation_records", "generation_segments", "generation_intents", "response_requests"):
+                for table in ("generation_records", "generation_segments", "generation_intents", "response_requests", "response_histories"):
                     assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,), "Archive schema missing or main started an undeclared consumer"
                 history = dict(db.execute("SELECT version,payload FROM billing_price_versions").fetchall())
                 assert history, "Published price history was not persisted"
@@ -371,7 +372,7 @@ def main():
                 versions = db.execute("SELECT price_version FROM logs ORDER BY id").fetchall()
                 assert versions[:2] == [("",), ("",)], "Historical logs were assigned invented prices"
                 assert all(version in history for version, in versions[2:]), "New requests lack persisted price versions"
-            print("PASS: S3/v4 -> current/v11, original identities/keys/usage, price history, in-flight SSE and log drain", flush=True)
+            print("PASS: S3/v4 -> current/v12, original identities/keys/usage, price history, in-flight SSE and log drain", flush=True)
             upgrade.restore(before)
             restored = upgrade.backup("restored")
             assert snapshot(restored / "gateway.db") == original, "Restore did not recover the exact baseline data"

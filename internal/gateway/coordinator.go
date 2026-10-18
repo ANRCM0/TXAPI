@@ -14,10 +14,11 @@ import (
 // Execution keeps operation payloads intact; it does not translate them to Chat.
 // Context must contain the principal verified by the caller's authentication boundary.
 type Execution struct {
-	Operation  protocol.Operation
-	Body       []byte
-	SessionID  string
-	ResponseID string
+	Operation      protocol.Operation
+	Body           []byte
+	SessionID      string
+	ResponseID     string
+	ResponseTarget *ResponseTarget
 }
 
 // ExecuteTo owns one generation, including admission, attempts and finalization.
@@ -50,6 +51,10 @@ func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Executio
 	}
 	c := newOutputScope(ctx, output, result, in.SessionID)
 	c.responseID = in.ResponseID
+	if in.ResponseTarget != nil {
+		copy := *in.ResponseTarget
+		c.responseTarget = &copy
+	}
 	c.claim = claim
 	if claim != nil && in.Operation == protocol.Responses {
 		writeError(c, http.StatusBadRequest, "Responses cannot consume a strict generation intent", "unsupported_billing_dimension")
@@ -103,6 +108,7 @@ type executionScope struct {
 	result          *RequestResult
 	sessionID       string
 	responseID      string
+	responseTarget  *ResponseTarget
 	requestAdmitted bool
 	claim           *model.GenerationClaim
 }

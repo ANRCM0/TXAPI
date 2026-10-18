@@ -6,6 +6,12 @@ provides the common baseline. This accepts the configuration below, not
 plaintext compatibility deployments or unimplemented S7 product capabilities. See [PLAN](../PLAN.md) and the
 [foundation contract audit](foundation-contracts.md).
 
+The unaccepted A02 worktree also uses the same mounted content-key ring for
+domain-separated encrypted history snapshots. Retained history headers are
+included in startup key requirements; fixed TTL/deletion and snapshot quotas
+are specified in [history contract](responses-history.md). This is independent
+of the accepted foundation/A01 evidence below.
+
 ## Supported deployment boundary
 
 The production security configuration uses `database.credential_keys_file`
