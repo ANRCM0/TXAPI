@@ -6,11 +6,12 @@ provides the common baseline. This accepts the configuration below, not
 plaintext compatibility deployments or unimplemented S7 product capabilities. See [PLAN](../PLAN.md) and the
 [foundation contract audit](foundation-contracts.md).
 
-The unaccepted A02 worktree also uses the same mounted content-key ring for
+A02, independently accepted by PR #12 / `master/765501a`, also uses the same mounted content-key ring for
 domain-separated encrypted history snapshots. Retained history headers are
 included in startup key requirements; fixed TTL/deletion and snapshot quotas
 are specified in [history contract](responses-history.md). This is independent
-of the accepted foundation/A01 evidence below.
+of the accepted foundation/A01 evidence below; its exact head and merged master
+passed their own complete CI, recorded in [A02 acceptance](../history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance).
 
 ## Supported deployment boundary
 

@@ -1,9 +1,10 @@
 # Responses Local History And Conversations
 
-Status: S7-A02 working implementation on `feat/s7-a02-persistent-conversations`,
-based on accepted `master/04fbfa62aad2ad6c3bbc2b4a153b634095c0b6a0`.
-This is not matching remote CI/merge acceptance. A02 and M2 remain unchecked
-in [PLAN](../PLAN.md). See [batch evidence](../history/implementation-s7-a02.md).
+Status (2026-10-18): S7-A02 accepted through PR #12 / `master/765501a`,
+from base `04fbfa62aad2ad6c3bbc2b4a153b634095c0b6a0`. Exact feature head
+`2084bcddf3d39d7f62f65ff138072431427fea43` and merged master passed their own
+complete automatic push/PR/master CI. A02 and M2 are accepted in [PLAN](../PLAN.md).
+See [exact evidence](../history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance).
 The accepted [A01 foreground contract](responses-http.md) remains the basis;
 this batch explicitly expands its former retrieval/continuation exclusions.
 
@@ -182,5 +183,6 @@ The HTTP shape is a declared supported subset with local state/limits, not a
 claim of every vendor feature or official SDK/Codex certification. Tests use
 isolated temporary SQLite and loopback providers only. A03 native background,
 A04 WS, A05/A06 cross-mode/client/real-provider acceptance and S5 cost proof
-remain separate; working implementation and local tests do not close A02/M2
-before matching complete remote CI and latest-base merge acceptance.
+remain separate. A02/M2 acceptance is limited to the supported subset and its
+matching complete CI/latest-base merge evidence above; it does not certify
+real-provider, SDK/Codex or full S7 production readiness.

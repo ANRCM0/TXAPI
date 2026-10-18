@@ -6,9 +6,9 @@
 
 ## 当前能做什么
 
-当前开发批次为 S7-A02：从已合并 `master/04fbfa6` 增量实现本地加密 Responses 历史、Conversations/items、检索/删除与完整上下文续链；工作树 OpenAPI 0.4.0 / 91 个操作，尚待本批完整 CI/合并验收。已验收基线仍为下述 A01，M2 未完成。运行/容量/权限规则见 [历史契约](docs/reference/responses-history.md)，验证状态见 [A02 记录](docs/history/implementation-s7-a02.md)。
+2026-10-18，S7-A02 已完成独立验收：PR #12 将功能头 `2084bcd`（基线 `04fbfa6`）合并为 `master/765501a`，功能头 push/PR 与合并后 master 完整 CI 均通过。M2 的 HTTP/SSE 与持久会话已交付，OpenAPI 0.4.0 / 91 个操作；下一批为 A03 原生后台任务。运行、容量与权限规则见 [历史契约](docs/reference/responses-history.md)，精确提交和验证见 [A02 验收](docs/history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。
 
-2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](docs/history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该 A01 验收当时 A02+ 尚未交付；当前 A02 工作实现仍待独立验收，M2 未完成，S5 成本门槛继续独立验收。
+2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](docs/history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 
 核对日期：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过。精确提交与验证记录见 [PLAN](docs/PLAN.md) 和 [S6 批次记录](docs/history/implementation-s6.md)。A1–A4 的原验收基线 `master/ccbfe29` 和证据保留在 [基础层记录](docs/history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线)。
 
@@ -23,10 +23,10 @@
 | 范围 | 状态与边界 |
 |---|---|
 | S0–S4 与 F0 | 已有阶段验收并合并 master；F0 是初始团队接线基线，不是最终统一兼容框架 |
-| 已合并功能基线 | 当前为 PR #10 / `master/a925140`，A01 功能头 push/PR 和合并后 master 完整 CI 均通过；复用 PR #8 / `master/ca009c2` 的 S6/M1 及 PR #6 / `master/ccbfe29` 的 A1–A4 底座，不代表完整 S5/S7 产品完成 |
+| 已合并功能基线 | 当前为 PR #12 / `master/765501a`，A02 功能头 `2084bcd` 的 push/PR 和合并后 master 完整 CI 均通过；复用 PR #10 的 A01、PR #8 的 S6/M1 及 PR #6 的 A1–A4 底座，不代表完整 S5/S7 产品完成 |
 | S5 | 6 个验收项中 5 个通过，S5-03 未完成；实现已合并，完整阶段尚未验收，不承诺已具备可靠商业收费全部条件 |
 | 统一兼容框架 | S6 已合并现有推理/管理 API、构造扩展与前端的契约闭环，以及真实 API/浏览器验收链；复用 A1–A4 共享业务链和默认关闭的加密持久 runtime。支持矩阵见兼容契约清单，M1 已完成验收，精确证据见 PLAN/批次记录 |
-| Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；S7-A01 原生 Responses HTTP/SSE、持久幂等元数据和私有加密短期重放已验收并由 PR #10 合并为 `master/a925140`，默认关闭；GET/续链/会话已在 A02 工作树独立实现、尚未验收；后台/原生 WS 未实现，A01 短期重放仍不是历史权威 |
+| Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；S7-A01 原生 Responses HTTP/SSE、持久幂等元数据和私有加密短期重放已验收并由 PR #10 合并为 `master/a925140`，默认关闭；GET/续链/会话已通过 A02 独立 CI 并由 PR #12 合并验收；后台/原生 WS 未实现，A01 短期重放仍不是历史权威 |
 | 原生 Messages/Gemini 入站、订阅账号池、支付、分布式部署 | 不属于当前已交付能力；本轮不新增支付 |
 
 现有假上游、SDK 模拟及 CI 记录不等于任意客户端/真实上游全兼容，也不等于已完成生产部署。每种能力分别记录“协议可转发、客户端实测兼容、strict 可计价”，不以品牌名称或路由存在代替验收。
@@ -49,7 +49,7 @@
 上游服务
 
 上游协议编解码亦属于兼容层，由业务协调按操作调用
-业务扩展：Responses 前台已验收合并 / 会话历史 A02 待验收 / 后台待开发
+业务扩展：Responses 前台已验收合并 / 会话历史 A02 已验收合并 / 后台待开发
 支撑与组装：store / secrets / config / cmd/gateway
 ```
 
@@ -88,11 +88,11 @@ strict 会复核转换后的最终正文，而非只检查入口：保留三协�
 
 strict 执行现已强制使用[已登记的输入边界档案](docs/reference/input-bound-profiles.md)：没有档案的旧契约仍可加载以支持历史读取与恢复，但新尝试返回 503 `provider_input_unproven`，不发上游、不反馈健康、不继续换凭据。当前可执行范围仅为档案登记的官方 OpenAI Chat/embeddings 目标；Anthropic/Gemini、兼容代理及未登记模型在 strict 下不再仅凭运营声明放行，legacy/disabled 的兼容路径不变。档案核对真实 URL、正文模型和整请求包络；最终正文输出限制必须与占用成本时的限制完全一致。发送还须通过[费率档案与凭据绑定](docs/reference/provider-tariff-profiles.md)：显式标准 USD 档案、费率不得低于已登记下限，凭据 ID 与实际发送的上游 Key 摘要必须匹配。缺费率档案返回 `provider_tariff_unproven`，换 Key/新凭据或实际鉴权头不匹配返回 `provider_credential_unproven`；已核对的标准价下限不替代逐凭据最高适用价、失败收费和未来变更依据，完整 S5 仍未验收。
 
-普通访问日志可丢弃且会过期，页面用量只是日志聚合，不是权威余额或恢复账本。客户端调用 Key 已摘要存储；上游 API Key 支持挂载密钥的静态加密，生产安全基线必须启用，durable runtime 强制核对 store 已加密。HTTP 明文兼容模式不计入该安全验收；管理掩码不是存储保护。意图/输出内容加密与私有 sealed 字节游标已交付，S7 产品历史/事件仍未交付。密钥轮换、旧备份/WAL/内存等限制见 [密钥约定](docs/reference/secret-storage.md)，公网仍须 TLS 与边界防护。
+普通访问日志可丢弃且会过期，页面用量只是日志聚合，不是权威余额或恢复账本。客户端调用 Key 已摘要存储；上游 API Key 支持挂载密钥的静态加密，生产安全基线必须启用，durable runtime 强制核对 store 已加密。HTTP 明文兼容模式不计入该安全验收；管理掩码不是存储保护。意图/输出内容加密与私有 sealed 字节游标已交付，S7-A02 加密历史已验收，后台/原生事件仍未交付。密钥轮换、旧备份/WAL/内存等限制见 [密钥约定](docs/reference/secret-storage.md)，公网仍须 TLS 与边界防护。
 
 ## HTTP 契约与目录
 
-当前工作树 [OpenAPI 0.4.0](docs/openapi.json) 登记 91 个操作，A02 新增 11 个历史/会话操作且尚待独立 CI；A01 已验收版本 0.3.0 登记 80 个操作，包含 `POST /v1/responses`；S6 已验收基线仍为 0.2.3 / 79 个操作。路由/鉴权/DTO 一致性进入 CI；版本不代表覆盖完整官方协议，S7-A01 已完成独立验收。
+已验收 [OpenAPI 0.4.0](docs/openapi.json) 登记 91 个操作，包含 A02 新增的 11 个历史/会话操作；A01 历史版本 0.3.0 / 80 个操作与 S6 基线 0.2.3 / 79 个操作保留。路由、鉴权与 DTO 一致性进入 CI；版本不表示覆盖完整官方协议或已通过真实 SDK/Codex 验收。
 
 | 入口 | 当前用途 |
 |---|---|
@@ -112,7 +112,7 @@ internal/gateway/     请求协调、attempt、重试、统一收尾
 internal/protocol/    操作/厂商转换与每请求流状态
 internal/access/      身份、权限与准入基础
 internal/generation/  worker、加密意图/输出、持久领取和 sealed 字节游标
-internal/responses/   A01 前台/幂等/私有重放；A02 加密历史/会话/续链待验收
+internal/responses/   A01 前台/幂等/私有重放；A02 已验收加密历史/会话/续链
 internal/transport/   独立 WS 传输 I/O（无生产 WS 应用/上游接线）
 internal/model/       持久化实体与中立端口数据
 internal/scheduler/   渠道/凭据选择与健康
@@ -145,6 +145,6 @@ WS transport 已位于 `internal/transport/websocket`；`internal/responses` 已
 | [上游固定快照](docs/reference/upstream-snapshots.md) | 历史阅读的参考库 SHA、文件与复用边界；本地副本不随 Git/worktree 分发 |
 | [早期 P6 方案](docs/history/plan-p6.md) | 已停止用于排期的历史设计，不作为现行缺陷或功能清单 |
 
-A1–A4 底座和 S6 内核/兼容框架功能均已合并。S6/M1 已完成集成验收；S7-A01 已通过现有业务与兼容契约接入 Responses HTTP/SSE，并完成本批独立 CI/合并验收；M2 的 A02 会话历史仍未完成，不以 S6 历史 CI 代替本批证据；同类项目能力按明确目标有选择地吸收。S5 成本证明单独收口，strict 开放仍遵守原有门槛。本轮不新增支付。
+A1–A4 底座和 S6 内核/兼容框架功能均已合并。S6/M1 已完成集成验收；S7-A01 已通过现有业务与兼容契约接入 Responses HTTP/SSE，并完成本批独立 CI/合并验收；A02 已独立验收合并，M2 已完成，后续为 A03 后台；不以历史 CI 代替新批次证据；同类项目能力按明确目标有选择地吸收。S5 成本证明单独收口，strict 开放仍遵守原有门槛。本轮不新增支付。
 
 开发遵循“批量开发 → 集中验证 → 集中修复 → 合并”；不因每次编辑/汇报重复跑全量测试，最终合并仍需通过完整现有 CI。纯说明文档整理只验证差异、链接与一致性。历史 CI 范围和日期保留在验收记录中，不写成当前未提交文档已通过 CI。
