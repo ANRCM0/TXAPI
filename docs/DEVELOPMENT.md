@@ -1,5 +1,6 @@
 # 开发指南
 
+
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
 [FC-001 地基收口](proposals/FC-001-foundation-contracts-v1.md) 已按用户批准顺序完成，代码基线 master/889ecbd 的最终头及合并后完整 CI 均通过，L0/L1/L2 v1 现为 frozen。后续按 [Agent 工作协议](../AGENTS.md#地基分层与-agent-工作协议) 声明六项边界，沿用 [公开入口/接入样例与快照流程](reference/foundation-integration-v1.md)；新增地基接口或签名/行为/权限/寿命变化仍先具名提案确认。纯说明文档只检查差异、链接与一致性，代码/契约按实际影响集中验证，保留现有完整 CI 和自动触发规则。
@@ -7,6 +8,16 @@
 S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确源码/命令/结果统一见 [PLAN](PLAN.md) 和 [S6 批次记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29`（PR #6）及其 [完整验证](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。A3/S6 原验收未新增公开任务/会话/原生 WS 产品 API；当前 A02 另行交付了会话/历史 API，完整 S5 和 S7 继续独立验收。
 
 ## 工具与工作目录
+
+### R03b-2 原生 WS 产品接线（待最终 CI 验收）
+
+2026-10-19，新增默认关闭的 `responses_ws`，独立于 HTTP Responses 开关。
+`GET /v1/responses` 使用原生客户端和上游 WS，限 billing disabled、显式实际模型与
+已启用凭据加密；逐轮刷新权限和准入，同连接续链只接受最后完成的 response ID。
+配置、协议、容量和回退见 [WS 运行约定](reference/responses-websocket.md)，
+设计取舍见 [R03b-2](../REFERENCE-R03B2-IMPLEMENTATION.md)。
+OpenAPI 候选为 0.6.0 / 93 操作；旧操作和 schema 逐项保持。
+下文保留历史验收时点，不能据此把收费 WS、持久续接、多流、真实 Provider/SDK 或完整 A04 标成完成。
 
 2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 

@@ -15,6 +15,13 @@ func (e configurationError) PublicReason() string { return string(e) }
 // Publish validates the complete candidate before replacing the running pool.
 // Unlike legacy startup loading it never silently drops an enabled channel.
 func (g *Gateway) Publish(channels []model.Channel) error {
+	if err := g.validateChannels(channels); err != nil {
+		return err
+	}
+	return g.Reload(channels)
+}
+
+func (g *Gateway) validateChannels(channels []model.Channel) error {
 	for _, ch := range channels {
 		if !ch.IsEnabled() {
 			continue
@@ -27,7 +34,7 @@ func (g *Gateway) Publish(channels []model.Channel) error {
 			return configurationError(fmt.Sprintf("Channel %d needs an http(s) URL without userinfo or fragment", ch.ID))
 		}
 	}
-	return g.Reload(channels)
+	return nil
 }
 
 // RefreshHealth cannot publish pending channel/key edits as a side effect of

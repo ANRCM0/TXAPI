@@ -225,14 +225,15 @@ func (m *Manager) Close(ctx context.Context) error {
 }
 
 type Conn struct {
-	raw     *ws.Conn
-	owner   *Manager
-	ctx     context.Context
-	cancel  context.CancelFunc
-	done    chan struct{}
-	once    sync.Once
-	reading atomic.Bool
-	writer  chan struct{}
+	raw           *ws.Conn
+	owner         *Manager
+	ctx           context.Context
+	cancel        context.CancelFunc
+	done          chan struct{}
+	once          sync.Once
+	reading       atomic.Bool
+	statusClosing atomic.Bool
+	writer        chan struct{}
 }
 
 func (c *Conn) Context() context.Context { return c.ctx }

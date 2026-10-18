@@ -33,6 +33,10 @@
     "layer": "L2",
     "owner": "compat-responsesws"
   },
+  "minigateway/internal/compat/responseswshttp": {
+    "layer": "L2",
+    "owner": "compat-responseswshttp"
+  },
   "minigateway/internal/compat/summarycodec": {
     "layer": "L2",
     "owner": "example-summary-codec"
@@ -145,6 +149,12 @@
     "public": true,
     "version": "2"
   },
+  "minigateway/internal/foundation/contracts/responsesws/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
   "minigateway/internal/foundation/contracts/state/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -194,6 +204,10 @@
   "minigateway/internal/management": {
     "layer": "L3",
     "owner": "management"
+  },
+  "minigateway/internal/responsesws": {
+    "layer": "L3",
+    "owner": "responsesws"
   },
   "minigateway/internal/metrics": {
     "layer": "L1",

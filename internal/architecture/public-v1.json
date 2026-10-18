@@ -360,6 +360,18 @@
     "type minigateway/internal/foundation/contracts/responses/v2.Command struct{Base minigateway/internal/foundation/contracts/responses/v1.Command; Stream bool; StartingAfter *uint64}",
     "type minigateway/internal/foundation/contracts/responses/v2.Service interface{Begin(context.Context, minigateway/internal/foundation/contracts/responses/v1.Action) (minigateway/internal/foundation/contracts/responses/v2.Call, *minigateway/internal/foundation/contracts/responses/v1.Problem)}"
   ],
+  "minigateway/internal/foundation/contracts/responsesws/v1": [
+    "const minigateway/internal/foundation/contracts/responsesws/v1.Version untyped string = \"1\"",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.Client interface{Run(context.Context, minigateway/internal/foundation/contracts/responsesws/v1.Session, minigateway/internal/foundation/contracts/execution/v2.Connection, minigateway/internal/foundation/contracts/responsesws/v1.ProblemDelivery) *minigateway/internal/foundation/contracts/responsesws/v1.Problem}",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.Create struct{JSON []byte}",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.Limits struct{MaxMessageBytes int64; IdleTimeout time.Duration; RoundTimeout time.Duration; MaxLifetime time.Duration}",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.Open struct{Binding minigateway/internal/foundation/contracts/identity/v1.Binding; ConnectionID minigateway/internal/foundation/contracts/execution/v2.ConnectionID}",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.Problem struct{Code string; Message string; CloseCode uint16; RetryAfterSeconds int}",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.ProblemDelivery func(context.Context, minigateway/internal/foundation/contracts/responsesws/v1.Problem) error",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.Result struct{Facts minigateway/internal/foundation/contracts/execution/v2.ExchangeResult; Problem *minigateway/internal/foundation/contracts/responsesws/v1.Problem}",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.Service interface{Limits() minigateway/internal/foundation/contracts/responsesws/v1.Limits; Open(context.Context, minigateway/internal/foundation/contracts/responsesws/v1.Open) (minigateway/internal/foundation/contracts/responsesws/v1.Session, *minigateway/internal/foundation/contracts/responsesws/v1.Problem)}",
+    "type minigateway/internal/foundation/contracts/responsesws/v1.Session interface{Close(context.Context) error; Done() \u003c-chan struct{}; Execute(context.Context, minigateway/internal/foundation/contracts/responsesws/v1.Create, minigateway/internal/foundation/contracts/execution/v2.FrameDelivery) minigateway/internal/foundation/contracts/responsesws/v1.Result; Problem() *minigateway/internal/foundation/contracts/responsesws/v1.Problem}"
+  ],
   "minigateway/internal/foundation/contracts/state/v1": [
     "const minigateway/internal/foundation/contracts/state/v1.GenerationArchiveMaxSegments untyped int = 8192",
     "const minigateway/internal/foundation/contracts/state/v1.IntentCancelled untyped string = \"cancelled\"",

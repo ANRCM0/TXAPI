@@ -15,6 +15,7 @@ import (
 type Request struct {
 	Model      string
 	PreviousID string
+	PromptText string
 	Initial    v2.Frame
 }
 
@@ -155,6 +156,7 @@ func Parse(frame v2.Frame) (Request, error) {
 	if err = parsed.ValidateHTTP(); err != nil {
 		return out, err
 	}
+	out.PromptText = parsed.PromptText()
 	body, err = json.Marshal(fields)
 	out.Initial = v2.Frame{Type: 1, Data: body}
 	return out, err
@@ -372,4 +374,32 @@ func validateOutputPart(raw json.RawMessage) error {
 		return errors.New("unsupported native WS content part")
 	}
 	return nil
+}
+
+// MapModel preserves the bounded native request while applying the host's
+// already-authorized target mapping. It performs no routing or network I/O.
+func MapModel(frame v2.Frame, model string) (v2.Frame, error) {
+	if model == "" || len(model) > 200 || strings.TrimSpace(model) != model || strings.ContainsAny(model, "*\r\n") {
+		return v2.Frame{}, errors.New("invalid native target model")
+	}
+	request, err := Parse(frame)
+	if err != nil {
+		return v2.Frame{}, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(request.Initial.Data, &fields); err != nil {
+		return v2.Frame{}, err
+	}
+	fields["model"], err = json.Marshal(model)
+	if err != nil {
+		return v2.Frame{}, err
+	}
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return v2.Frame{}, err
+	}
+	if len(body) > 256<<10 {
+		return v2.Frame{}, errors.New("mapped native request exceeds message limit")
+	}
+	return v2.Frame{Type: 1, Data: body}, nil
 }

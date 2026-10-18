@@ -303,6 +303,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer responsesRuntime.Close()
+	nativeResponsesRuntime, err := startResponsesWSRuntime(cfg.ResponsesWS, st, gw, limiter)
+	if err != nil {
+		slog.Error("native WebSocket initialization failed", "err", err)
+		os.Exit(1)
+	}
+	defer joinResponsesWSRuntime(nativeResponsesRuntime)
 	generationRuntime, err := startGenerationRuntime(cfg.Generation, st, engine, gw)
 	if err != nil {
 		slog.Error("durable generation initialization failed", "err", err)
@@ -323,6 +329,9 @@ func main() {
 		channels, err := st.ChannelSnapshot()
 		if err != nil {
 			return err
+		}
+		if nativeResponsesRuntime != nil {
+			return nativeResponsesRuntime.Publish(channels)
 		}
 		return gw.Publish(channels)
 	}, func() error {
@@ -345,6 +354,7 @@ func main() {
 		Metrics:       gw.Metrics(),
 		RateGate:      access.NewRateGate(limiter),
 		Responses:     responsesRuntime.Handler(),
+		ResponsesWS:   nativeResponsesRuntime.Handler(),
 		RateLimiter:   limiter,
 		// IP 级兜底限流：防「拿随机 key 试」的探测请求（那种请求
 		// 过不了鉴权，令牌级限流根本轮不到它）。阈值取自配置，
@@ -385,6 +395,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	slog.Info("正在关闭网关...")
+	nativeResponsesRuntime.Stop()
 	generationRuntime.Stop()
 	responsesRuntime.Stop()
 
@@ -394,5 +405,6 @@ func main() {
 		slog.Error("关闭超时，强制退出", "err", err)
 		os.Exit(1)
 	}
+	joinResponsesWSRuntime(nativeResponsesRuntime)
 	fmt.Println("网关已关闭")
 }

@@ -131,7 +131,63 @@ R03a 最终功能头 `2111467540ef31ee8ad9515be2298d1a5e7d5673` 的 push `391466
 
 首轮集中通过 1303 项后，复核移除 codec 重复校验、为 prepare 增加 10 秒上界，并补充 prepare/drain 竞争及测试 close-worker join；随后重新执行最终 build/vet/tidy/全量 1304 项检查。主程序冒烟已通过，之后的私有 owner/codec 修复尚未接入 main，HTTP/SSE/background 组装与对应实现未变，因此其证据继续适用；新 owner 的最终行为由全量测试中的真实 WS/管理发布和排空用例覆盖。
 
-R03b-1 功能头 `08c4c28f9cb1cfa4da0b817f9f4ba608667c6501` 的 push `39152357936` 与 PR #28 `39152398277` 均 check/delivery SUCCESS；覆盖 Linux 全量 race、主程序恢复冒烟和容器交付。PR #28 已合并为 `master/0ec80e0139125bf60901f7a9779459bc8a476598`，合并树 `2abc9c873a80ff60b17dfa48a0afcbebe4c954f1` 与功能头完全一致。合并后自动运行 `39152906538` 当前仍在执行，故 post-merge 状态单独待更新。真实 Provider 未运行，新增契约尚未冻结，未发布标签或 release。
+R03b-1 功能头 `08c4c28f9cb1cfa4da0b817f9f4ba608667c6501` 的 push `39152357936` 与 PR #28 `39152398277` 均 check/delivery SUCCESS；覆盖 Linux 全量 race、主程序恢复冒烟和容器交付。PR #28 已合并为 `master/0ec80e0139125bf60901f7a9779459bc8a476598`，合并树 `2abc9c873a80ff60b17dfa48a0afcbebe4c954f1` 与功能头完全一致。合并后自动运行 `39152906538` 已 check/delivery SUCCESS。文档 PR #29 合并为 master/b74ef4a，其合并后 39153559035 也已完整 SUCCESS。真实 Provider 未运行，新增契约尚未冻结，未发布标签或 release。
+
+## R03b-2: Native WS Product Integration
+
+Base: master/b74ef4acea70716ebe6c5b9b73c70c5dfcc224c8. Worktree:
+C:/Users/mn139/.codex/worktrees/reference-adoption/TXAPI. Original 5506 edits remain untouched.
+The user authorized autonomous follow-on design decisions. See
+[the six-part implementation decision](REFERENCE-R03B2-IMPLEMENTATION.md) and
+[operating guide](docs/reference/responses-websocket.md).
+
+- L1 adds candidate responsesws/v1 and a native session/resource owner; L2 owns
+  HTTP upgrade, codec and close status; L3 owns a bounded downstream reader.
+  Main/config/OpenAPI/architecture are integrated by this batch only.
+- GET /v1/responses is default-off, billing-disabled, credential-encryption-only,
+  explicit actual-model allowlist and official OpenAI endpoint only. One
+  upstream socket is reused within a session; every round reauthorizes and
+  reacquires request/rate/attempt admission. No HTTP inference fallback.
+- Continuation uses only the same session's latest completed response ID,
+  binding model, channel, credential material/generation and resource revision.
+  Foreign/old/reconnected/rotated handles reject before upstream send.
+- TPM continuation estimation includes verified prior total usage; uncertain
+  dispatch retains its estimate, known non-dispatch refunds. Parent admission
+  and mutable token reservations are not inherited by a new round.
+- Management prepare failure preserves saved desired state, old applied route
+  and pinned resources; retry Apply publishes the saved snapshot. Main stops
+  and joins sessions/transports before closing shared dependencies.
+- OpenAPI 0.6.0 adds one GET operation and six native WS schemas. All 92 old
+  operations and old schemas are unchanged. Public snapshot adds ten declarations
+  in responsesws/v1; all old declarations remain exact. Schema stays v15.
+
+### Final Local Evidence
+
+Windows/PowerShell, Go 1.26.3, GOOS=windows, GOARCH=amd64, CGO_ENABLED=0.
+Final source manifest: 29 non-Markdown files, LF-normalized SHA-256
+`79e7f0f425b788f851188689b40d1c52374fe115d2728ad8f48b77888ec7460d`.
+Manifest and raw logs: D:/my-project/TXAPI-references/validation-r03b2.
+
+| Executed check | Result |
+|---|---|
+| go build ./...; go vet ./... | PASS |
+| go test -json -count=1 ./... | 1333 tests/subtests, 35 packages PASS, six expected helper SKIP; 33 packages without tests |
+| go mod tidy; unchanged go.mod/go.sum | PASS; no added dependency |
+| core/protocol dependency filter; architecture/signature/OpenAPI checks | PASS |
+| touched-Go gofmt; git diff --check | PASS; unrelated Go files untouched |
+| five Node syntax checks; node --test web/assets/api.test.mjs | PASS, 10/10 API tests |
+| python -B tests/smoke/local.py --go go | PASS, including feature-off WS 404 and existing forced-kill/recovery cases |
+
+The final native session tests additionally prove fresh rate admission, bound
+continuation estimation and no refund of uncertain dispatch. A temporary test
+edit duplicated helper declarations; it was consolidated before the final
+build/vet/full run. The ordinary smoke and controlled WS assembly are separate
+evidence; neither proves the real OpenAI endpoint or official SDK.
+Linux race, container delivery, exact functional-head CI and merge remain
+pending at this source commit.
+
+No real Provider or official SDK test, release, tag, OAuth, billing, persistent
+reconnection or multiplexing is claimed. Full A03/A04 and R00-R07 stay open.
 
 ## 后续批次
 

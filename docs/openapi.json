@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.5.0",
-    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Background streaming/event recovery and native WebSocket are not enabled in this batch."
+    "version": "0.6.0",
+    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported."
   },
   "servers": [
     {
@@ -6672,6 +6672,138 @@
             }
           }
         }
+      },
+      "get": {
+        "operationId": "connectNativeResponsesWebSocket",
+        "summary": "Connect a bounded native Responses WebSocket session",
+        "description": "Default disabled. Requires Authorization, billing disabled, explicit actual-model allowlist and activated credential encryption. No query/cookie credentials. One active main lane, pending=0; latest connection-local continuation only. No HTTP fallback, reconnect replay, background, hosted tools or generate:false. TPM is estimated, not a strict financial guarantee. A transport failure may prevent an error JSON or close handshake from reaching the peer.",
+        "tags": [
+          "Responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket upgrade; native text response.create messages follow."
+          },
+          "400": {
+            "description": "Invalid upgrade or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origin or model policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Native WS feature disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Message too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate or identity connection capacity exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Draining or global capacity unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-websocket": {
+          "client_message": {
+            "$ref": "#/components/schemas/NativeWSCreate"
+          },
+          "server_messages": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NativeWSUpstreamEvent"
+              },
+              {
+                "$ref": "#/components/schemas/NativeWSError"
+              }
+            ]
+          },
+          "max_message_bytes": 262144,
+          "max_sessions": 64,
+          "max_user_sessions": 4,
+          "max_key_sessions": 2,
+          "idle_seconds": 60,
+          "round_seconds": 120,
+          "max_lifetime_seconds": 3300,
+          "pending_rounds": 0,
+          "close_codes": {
+            "1000": "session_expired",
+            "1001": "draining",
+            "1003": "unsupported_frame",
+            "1008": "unauthorized, policy_violation, invalid_request, continuation_invalid",
+            "1009": "message_too_large",
+            "1011": "upstream_error",
+            "1013": "unavailable, rate_limited"
+          },
+          "busy_keeps_connection": true,
+          "protocol_limitations": "Serial main-only is a TXAPI subset, not an official OpenAI server limit."
+        }
       }
     },
     "/v1/responses/{response_id}": {
@@ -10024,6 +10156,369 @@
             ]
           }
         }
+      },
+      "NativeWSTextMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "message"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "system",
+              "developer"
+            ]
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "text"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "input_text",
+                        "output_text"
+                      ]
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "NativeWSFunctionOutput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "call_id",
+          "output"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "function_call_output"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "output": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "text"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "input_text",
+                        "output_text"
+                      ]
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "NativeWSFunctionTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "name"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "function"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object"
+          },
+          "strict": {
+            "type": "boolean"
+          }
+        }
+      },
+      "NativeWSCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "model",
+          "input"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "response.create"
+            ]
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "input": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NativeWSTextMessage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeWSFunctionOutput"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "previous_response_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NativeWSFunctionTool"
+            }
+          },
+          "tool_choice": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "none",
+                  "required"
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "name"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "function"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          },
+          "parallel_tool_calls": {
+            "type": "boolean"
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "minimum": 16
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "top_p": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metadata": {
+            "type": "object",
+            "maxProperties": 16,
+            "x-key-max-utf8-bytes": 64,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 512,
+              "x-max-utf8-bytes": 512
+            }
+          },
+          "generate": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "stream_id": {
+            "type": "string",
+            "enum": [
+              "main"
+            ],
+            "default": "main"
+          },
+          "store": {
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "default": false
+          }
+        }
+      },
+      "NativeWSError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "error"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "error"
+            ]
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "txapi_error"
+                ]
+              },
+              "code": {
+                "type": "string",
+                "enum": [
+                  "unavailable",
+                  "unauthorized",
+                  "policy_violation",
+                  "invalid_request",
+                  "unsupported_frame",
+                  "message_too_large",
+                  "busy",
+                  "rate_limited",
+                  "continuation_invalid",
+                  "upstream_error",
+                  "session_expired",
+                  "draining"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "retry_after_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3600
+              }
+            }
+          }
+        }
+      },
+      "NativeWSUpstreamEvent": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "response.created",
+              "response.in_progress",
+              "response.completed",
+              "response.incomplete",
+              "response.failed",
+              "response.cancelled",
+              "response.output_text.delta",
+              "response.output_text.done",
+              "response.output_item.added",
+              "response.output_item.done",
+              "response.content_part.added",
+              "response.content_part.done",
+              "response.function_call_arguments.delta",
+              "response.function_call_arguments.done"
+            ]
+          },
+          "stream_id": {
+            "type": "string",
+            "enum": [
+              "main"
+            ]
+          }
+        },
+        "additionalProperties": true,
+        "description": "One encoded native text/function event. Unknown event types and media/hosted items are rejected; provider error details are sanitized."
       }
     }
   }
