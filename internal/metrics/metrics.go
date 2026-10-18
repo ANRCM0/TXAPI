@@ -49,6 +49,8 @@ const (
 	MetricCredFailures    = "gateway_credential_failures_total"
 	MetricAttemptsTotal   = "gateway_attempts_total"
 	MetricAttemptDuration = "gateway_attempt_duration_seconds"
+	MetricRouteSelections = "gateway_route_selections_total"
+	MetricRouteDuration   = "gateway_route_selection_duration_seconds"
 )
 
 // TokenTypePrompt / TokenTypeCompletion 是 gateway_tokens_total 的
@@ -66,6 +68,8 @@ const (
 // 固定桶而不是指数自动分桶：分桶形状固定才能跨时间比较 p99 的变化，
 // 而且抓取端不用算对数。
 var DurationBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60}
+
+var routeDurationBuckets = []float64{0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.05, 0.1, 1}
 
 // CredentialStat 是「某渠道下某状态的凭据数」的一条 gauge 样本。
 //
@@ -97,6 +101,8 @@ type Registry struct {
 	logStats         func() LogQueueStats
 	attempts         map[string]*counter
 	attemptDurations map[string]*histogram
+	routeSelections  map[string]*counter
+	routeDurations   map[string]*histogram
 }
 
 type LogQueueStats struct {
@@ -121,6 +127,26 @@ func (r *Registry) RecordAttempt(channel, termination string, status int, durati
 	r.histogramFor(&r.attemptDurations, label(MetricAttemptDuration, "channel", channel)).Observe(duration.Seconds())
 }
 
+// RecordRouteSelection observes target selection, before attempt admission or network I/O.
+func (r *Registry) RecordRouteSelection(outcome, picker string, duration time.Duration) {
+	switch outcome {
+	case "selected", "no_candidates", "no_usable_credentials", "credential_selection_failed",
+		"model_unavailable", "capability_unavailable", "continuation_unavailable":
+	default:
+		outcome = "unknown"
+	}
+	switch picker {
+	case "none", "weighted", "extension", "weighted_fallback":
+	default:
+		picker = "unknown"
+	}
+	if duration < 0 {
+		duration = 0
+	}
+	r.counterFor(&r.routeSelections, label(MetricRouteSelections, "outcome", outcome, "picker", picker)).Inc()
+	r.histogramFor(&r.routeDurations, label(MetricRouteDuration, "picker", picker)).Observe(duration.Seconds())
+}
+
 // Default 是进程内唯一的指标注册表。
 var Default = New()
 
@@ -135,6 +161,8 @@ func New() *Registry {
 		credential:       map[string]*gauge{},
 		attempts:         map[string]*counter{},
 		attemptDurations: map[string]*histogram{},
+		routeSelections:  map[string]*counter{},
+		routeDurations:   map[string]*histogram{},
 	}
 }
 
@@ -251,18 +279,23 @@ type gauge struct{ v int64 }
 // 桶都 +1」——这正是 cumulative 的含义，也是直方图能被 rate() 和
 // histogram_quantile() 正确使用的前提。
 type histogram struct {
-	buckets  []atomic.Int64 // 与 DurationBuckets 一一对应（不含 +Inf）
+	upper    []float64
+	buckets  []atomic.Int64
 	sumNanos atomic.Int64
 	count    atomic.Int64
 }
 
 func newHistogram() *histogram {
-	return &histogram{buckets: make([]atomic.Int64, len(DurationBuckets))}
+	return histogramWithBuckets(DurationBuckets)
+}
+
+func histogramWithBuckets(upper []float64) *histogram {
+	return &histogram{upper: append([]float64(nil), upper...), buckets: make([]atomic.Int64, len(upper))}
 }
 
 func (h *histogram) Observe(seconds float64) {
-	idx := len(DurationBuckets) // 落在所有桶之外 → 只进 +Inf
-	for i, b := range DurationBuckets {
+	idx := len(h.upper) // 落在所有桶之外 → 只进 +Inf
+	for i, b := range h.upper {
 		if seconds <= b {
 			idx = i
 			break
@@ -309,7 +342,11 @@ func (r *Registry) histogramFor(m *map[string]*histogram, key string) *histogram
 	if h, ok := (*m)[key]; ok {
 		return h
 	}
-	h = newHistogram()
+	if strings.HasPrefix(key, MetricRouteDuration+"\x00") {
+		h = histogramWithBuckets(routeDurationBuckets)
+	} else {
+		h = newHistogram()
+	}
 	(*m)[key] = h
 	return h
 }
@@ -357,6 +394,10 @@ func (r *Registry) Render(w io.Writer) error {
 	writeCounters(&b, MetricAttemptsTotal, r.attempts, 1)
 	writeFamilyHeader(&b, MetricAttemptDuration, "histogram", "Upstream attempt duration in seconds")
 	writeHistograms(&b, MetricAttemptDuration, r.attemptDurations)
+	writeFamilyHeader(&b, MetricRouteSelections, "counter", "Target selections before attempt admission; labels have fixed values")
+	writeCounters(&b, MetricRouteSelections, r.routeSelections, 1)
+	writeFamilyHeader(&b, MetricRouteDuration, "histogram", "Target selection duration in seconds")
+	writeHistograms(&b, MetricRouteDuration, r.routeDurations)
 	if r.logStats != nil {
 		queue := r.logStats()
 		for _, metric := range []struct {
@@ -449,7 +490,7 @@ func writeHistograms(b *strings.Builder, name string, m map[string]*histogram) {
 		// 会整行报 parse error——整个 target 抓不上来，比少一个指标
 		// 严重得多。（这正是手写 exposition 最容易踩的坑，由
 		// TestHistogramFormat 盯着。）
-		for i, upper := range DurationBuckets {
+		for i, upper := range h.upper {
 			fmt.Fprintf(b, "%s_bucket%s %d\n", name,
 				bracesSorted(append(pairs, labelPair("le", strconv.FormatFloat(upper, 'g', -1, 64)))),
 				h.buckets[i].Load())
