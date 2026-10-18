@@ -292,3 +292,30 @@ Go/HTTP/存储和浏览器回归使用原测试及临时资源，无真实上游
 历史提案的 gateway/handler.go 已迁走，其原差距链接改指经过 git cat-file 验证存在的 4312f77 精确历史源码；未改批准范围。
 
 上述是本地验证，最终自动 Linux race/冒烟/容器与合并后 master CI 仍待通过；此时不冻结、不勾选 FND-05。
+
+
+### FND-05 最终 CI、合并与冻结验收
+
+精确功能头 `38a8cce85fa0a278d5727b3a15cb904c9307d49e` 的自动 push
+[39105728389](https://github.com/ANRCM0/TXAPI/actions/runs/39105728389) 和 PR
+[39105731770](https://github.com/ANRCM0/TXAPI/actions/runs/39105731770) 的 check/delivery 全部 SUCCESS。
+核对 clean worktree、未漂移 master/14bb9c9、精确 head 与四个 green jobs 后，
+`gh pr merge 18 --merge --match-head-commit 38a8cce85fa0a278d5727b3a15cb904c9307d49e`
+将 [PR #18](https://github.com/ANRCM0/TXAPI/pull/18) 合并为 `889ecbd782df087d167a6c2ddd32d6ab51e94b96`，
+`git diff --exit-code 38a8cce origin/master` 通过，合并树与功能头相同。
+合并后自动 [39106078332](https://github.com/ANRCM0/TXAPI/actions/runs/39106078332)
+check/delivery 也全部 SUCCESS，包含契约/依赖/API 快照、构建/vet/格式、Linux 全量 race、
+主程序冒烟、性能报告与容器安装/升级/停止备份恢复/退出。
+
+基于该匹配来源，2026-10-18 冻结 L0 mechanism v1、十二组 L1 契约及输出门面、L2 responses/v1。
+56 个生产包有精确归属，14 个公开入口及 L0 共 15 包签名快照通过；没有未清边界例外。
+L0/L1/L2 的全部 DoD、错误/日志/配置/资源与限制约定、独立真实接入和负面矩阵见
+[v1 接入清单](../reference/foundation-integration-v1.md#分层-dod-证据位置)，实际命令见本节上方本地记录。
+本次后续冻结记录只改 Markdown，复用上述精确代码与完整 CI；非 Markdown 来源仍为
+356 路径 / `2b714cf86fb8f420bed280eff6c57902cfddaeb1faaef9d5051cb11d5fec64b4`。
+只检查文档差异、全仓本地链接与状态一致性，不重复本地 Go 或手动触发 workflow。
+
+冻结记录合并后，L3 可按独立目录和公开 v1 接口并行，人员/任务不自动创建。
+新地基变更仍先具名提案确认；A03/A04、后台/原生 WS、S5-03、真实提供商/SDK 验收与生产部署均未由本轮完成。
+
+冻结记录本地检查：`git diff --check`、全仓 Markdown 链接/锚点与状态一致性核对通过；28 份 Markdown / 310 个本地链接。非 Markdown 指纹复核相同。未重复 Go 测试或手动触发 CI；保留 push/PR 自动完整 workflow。

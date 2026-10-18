@@ -60,6 +60,6 @@ FC-001 FND-04 preserves this accepted HTTP/persistence contract through the new
 `compat/responseshttp` entry and the neutral `responses/v1` Begin/Call/Command/Delivery
 port. The application does not parse URL/HTTP headers or construct writers; L2
 maps native documents, SSE/provenance and conditional metadata. Current scope,
-resource ownership and pending final acceptance are in
-[Foundation API v1](foundation-api-v1.md#fnd-04-应用与表示候选) and
+resource ownership, frozen entry points and completed acceptance are in
+[Foundation API v1](foundation-api-v1.md#fnd-04-应用与表示) and
 [FC-001 implementation evidence](../history/implementation-fc001.md).

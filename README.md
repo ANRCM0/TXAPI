@@ -6,9 +6,9 @@
 
 ## 当前能做什么
 
-当前实施用户已批准的 [FC-001 四层地基符合性提案](docs/proposals/FC-001-foundation-contracts-v1.md)。已有 A1–A4/S6/M2 功能验收保留；新的公开接口冻结与四层 DoD 尚未完成，按 FND-01 至 FND-05 顺序实施、验收并收口地基，再开放新功能并行。活动排期见 [PLAN](docs/PLAN.md#地基符合性收口fc-001)。
+用户已批准的 [FC-001 四层地基提案](docs/proposals/FC-001-foundation-contracts-v1.md) 已按 FND-01 至 FND-05 完成；代码基线 `master/889ecbd` 的完整 CI 通过，L0/L1/L2 v1 已冻结。上层按 [公开入口和独立接入样例](docs/reference/foundation-integration-v1.md) 开发；A1–A4/S6/M2 功能验收保留，后台/原生 WS 与 S5 成本门槛仍单独交付。活动排期见 [PLAN](docs/PLAN.md#地基符合性收口fc-001)。
 
-2026-10-18，S7-A02 已完成独立验收：PR #12 将功能头 `2084bcd`（基线 `04fbfa6`）合并为 `master/765501a`，功能头 push/PR 与合并后 master 完整 CI 均通过。M2 的 HTTP/SSE 与持久会话已交付，OpenAPI 0.4.0 / 91 个操作；下一产品批次为 A03 原生后台任务，开工前先完成上述地基收口。运行、容量与权限规则见 [历史契约](docs/reference/responses-history.md)，精确提交和验证见 [A02 验收](docs/history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。
+2026-10-18，S7-A02 已完成独立验收：PR #12 将功能头 `2084bcd`（基线 `04fbfa6`）合并为 `master/765501a`，功能头 push/PR 与合并后 master 完整 CI 均通过。M2 的 HTTP/SSE 与持久会话已交付，OpenAPI 0.4.0 / 91 个操作；下一产品批次为 A03 原生后台任务，上述地基收口现已完成。运行、容量与权限规则见 [历史契约](docs/reference/responses-history.md)，精确提交和验证见 [A02 验收](docs/history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。
 
 2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](docs/history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 
@@ -25,7 +25,7 @@
 | 范围 | 状态与边界 |
 |---|---|
 | S0–S4 与 F0 | 已有阶段验收并合并 master；F0 是初始团队接线基线，不是最终统一兼容框架 |
-| 已合并功能基线 | 当前为 PR #12 / `master/765501a`，A02 功能头 `2084bcd` 的 push/PR 和合并后 master 完整 CI 均通过；复用 PR #10 的 A01、PR #8 的 S6/M1 及 PR #6 的 A1–A4 底座，不代表完整 S5/S7 产品完成 |
+| 已合并功能基线 | 四层地基为 PR #18 / `master/889ecbd`，FND-01 至 FND-05 均经完整 CI/合并验收，v1 已冻结；保留 PR #12 的 A02/M2、PR #10 的 A01、PR #8 的 S6/M1 与 PR #6 的 A1–A4 原产品范围，不代表完整 S5/S7 产品完成 |
 | S5 | 6 个验收项中 5 个通过，S5-03 未完成；实现已合并，完整阶段尚未验收，不承诺已具备可靠商业收费全部条件 |
 | 统一兼容框架 | S6 已合并现有推理/管理 API、构造扩展与前端的契约闭环，以及真实 API/浏览器验收链；复用 A1–A4 共享业务链和默认关闭的加密持久 runtime。支持矩阵见兼容契约清单，M1 已完成验收，精确证据见 PLAN/批次记录 |
 | Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；S7-A01 原生 Responses HTTP/SSE、持久幂等元数据和私有加密短期重放已验收并由 PR #10 合并为 `master/a925140`，默认关闭；GET/续链/会话已通过 A02 独立 CI 并由 PR #12 合并验收；后台/原生 WS 未实现，A01 短期重放仍不是历史权威 |
