@@ -10,7 +10,6 @@ and [exact acceptance record](../../REFERENCE-ADOPTION-PROGRESS.md). Historical
 package and entry counts below describe their original freeze checkpoints;
 the architecture inventory and signature tests verify the current source.
 
-
 状态：2026-10-18 **v1 / frozen**；代码基线 master/889ecbd（PR #18，功能头 38a8cce）。
 L0/L1/L2 DoD、独立样例、最终头与合并后完整 CI 均通过；冻结记录合并后按本页公开契约开放 L3 并行。
 批准范围见 [FC-001](../proposals/FC-001-foundation-contracts-v1.md)，唯一排期见

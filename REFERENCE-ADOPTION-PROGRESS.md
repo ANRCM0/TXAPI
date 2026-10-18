@@ -195,9 +195,9 @@ Remote merged tree and functional-head tree are identical:
 |---|---|---|
 | Functional push / 81d2afe | 39164752515 | check/delivery SUCCESS |
 | PR #30 / 81d2afe | 39164788204 | check/delivery SUCCESS |
-| Merged master / a5c7a5f | 39165344718 | IN PROGRESS; not yet accepted |
+| Merged master / a5c7a5f | 39165344718 | check/delivery SUCCESS |
 
-Both accepted functional-head runs include Linux full race, coverage report,
+All three accepted runs include Linux full race, coverage report,
 main recovery smoke and container install/upgrade/backup/restore. The container
 workflow also exercises the disabled WS 404 through the shared console fixture.
 The controlled native WS assembly is covered by Go race tests; real Provider
