@@ -188,7 +188,11 @@ func TestEveryProductionPackageHasFourLayerOwnership(t *testing.T) {
 		if r.Layer == "assembly" && path != module+"cmd/gateway" {
 			t.Errorf("only cmd/gateway may assemble production layers: %s", path)
 		}
-		if r.Public && (r.Version != "1" || !strings.HasSuffix(path, "/v1")) {
+		version := "1"
+		if path == module+"internal/foundation/contracts/responses/v2" {
+			version = "2"
+		}
+		if r.Public && (r.Version != version || !strings.HasSuffix(path, "/v"+version)) {
 			t.Errorf("public package requires versioned registration: %s", path)
 		}
 		if r.Layer == "L0" && r.Version != "1" {
@@ -214,6 +218,8 @@ func TestFourLayerGuardRejectsForbiddenConsumers(t *testing.T) {
 		{"internal/responses", "internal/controlplane"},
 		{"internal/responses", "internal/compat/responseshttp"},
 		{"internal/responses", "internal/foundation/httpoutput/v1"},
+		{"internal/responses", "internal/generation/backgroundstate"},
+		{"internal/compat/responseshttp", "internal/generation/backgroundstate"},
 		{"internal/foundation/contracts/state/v1", "internal/model"},
 	} {
 		t.Run(tc.from+"->"+tc.to, func(t *testing.T) {

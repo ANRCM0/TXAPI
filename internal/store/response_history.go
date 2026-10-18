@@ -116,6 +116,12 @@ func (s *Store) ApplyResponseHistory(ctx context.Context, binding access.Binding
 					return model.ErrHistoryConflict
 				}
 			} else {
+				if err := noBackgroundResource(tx, r.ID); err != nil {
+					if errors.Is(err, model.ErrResponseConflict) {
+						return model.ErrHistoryConflict
+					}
+					return err
+				}
 				inserted := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&r)
 				if inserted.Error != nil {
 					return inserted.Error

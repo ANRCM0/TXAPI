@@ -364,9 +364,9 @@ S6-00 已在现有基础层契约矩阵旁补充 API/业务/前端/扩展对照�
 
 #### S7-A03：持久后台任务与事件恢复
 
-2026-10-18 已从最终冻结记录 `master/5f90a20` 核对下一批。现有 durable 仅支持 strict Chat/embeddings，前台 receipt/字节 cursor 不能直接承接原生后台；新增地基契约须先获具名确认。已提交 [FC-002 原生后台提案](proposals/FC-002-native-background-v1.md) 供评审，当前未获针对该提案的实施批准，未改运行代码或勾选 A03。建议先按 A03-01 至 A03-03 交付 disabled 的自包含输入原生后台/查询/取消/事件恢复，legacy/strict 与背景父链仍明确拒绝；这只是 A03 子批，不取消本节原定双 hold、成本和完整 M3 门槛。
+2026-10-18 已从最终冻结记录 `master/5f90a20` 核对下一批。现有 durable 仅支持 strict Chat/embeddings，前台 receipt/字节 cursor 不能直接承接原生后台；新增地基契约须先获具名确认。已提交 [FC-002 原生后台提案](proposals/FC-002-native-background-v1.md) 供评审，用户已于 2026-10-18 明确批准“按 FC-002 实施”，现按 A03-01 → A03-02 → A03-03 顺序推进，未提前勾选 A03。建议先按 A03-01 至 A03-03 交付 disabled 的自包含输入原生后台/查询/取消/事件恢复，legacy/strict 与背景父链仍明确拒绝；这只是 A03 子批，不取消本节原定双 hold、成本和完整 M3 门槛。
 
-提案准备六项边界：只写 docs/proposals 与本计划；依赖冻结 v1 的实际缺口作为提案来源；不改变地基实现；新 background/v1、responses/v2 为待确认候选；本批只验证文档差异/链接/规则与非 Markdown 来源；不开放新契约给并行消费者，不实施 A04 或收费例外。源码证据、精确接口草图、所有消费者、迁移/回退、协议来源与分批验收只在 FC-002 维护。
+A03-01 六项边界：负责 `foundation/contracts/background/v1`、`responses/v2`、generation 的受理 owner、私有 backgroundstate、store/model 统一 v13 和 architecture；依赖现有可信身份及密钥环，原十四组公开入口/L0 签名不变；新增两组候选端口，未在所有消费者验收前冻结；验证当前权限、幂等、租约/fencing、容量、未知保护及 v12 密文/账本兼容；不接入 main/HTTP/上游派发，不开放 A04 或收费例外。实现与实际验证见 [FC-002 记录](history/implementation-fc002.md)，原生协议/应用接线和事件恢复按 A03-02/03 继续顺序验收，完整 A03/M3 保持未完成。
 
 - [ ] 支持 HTTP `background=true` 创建、获取、取消；先接上游原生后台能力。持久队列、任务事实和用户/Key 预留成功后才确认接收，不能只返回 202 或启动 goroutine 就称支持。
 - [ ] 任务内部状态含 queued、dispatching、in_progress、cancel_requested、终态及执行不确定标记；公开 Response 状态按协议映射，不把内部状态原样塞入协议。生成终态与 billing pending/settled 分开。

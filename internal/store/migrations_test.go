@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,88 @@ import (
 	"minigateway/internal/config"
 	"minigateway/internal/model"
 )
+
+func TestBackgroundV13UpgradePreservesV12AuthoritiesAndCiphertext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v12-background-upgrade.db")
+	st, err := Open(config.DatabaseConfig{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	rows := []interface{}{
+		&model.BillingReservation{ID: "original-hold", UserID: 7, TokenID: 8, State: "pending", ReservedUnits: 71, ProviderHeldUnits: 23, PriceVersion: "old-price", LeaseUntil: now.Add(time.Minute).UnixMilli()},
+		&model.BillingBalance{OwnerType: "user", OwnerID: 7, ReservedUnits: 71, UsedUnits: 9},
+		&model.GenerationIntent{ID: strings.Repeat("a", 64), UserID: 7, TokenID: 8, AdmissionKey: strings.Repeat("b", 64), RequestDigest: strings.Repeat("c", 64), DigestVersion: strings.Repeat("d", 64), Operation: "chat", Model: "m", BillingID: "original-hold", State: model.IntentUncertain, Ciphertext: []byte("opaque-v9-intent-ciphertext"), CreatedAt: now.UnixMilli(), Deadline: now.Add(time.Minute).UnixMilli(), ExpiresAt: now.Add(time.Hour).UnixMilli()},
+		&model.GenerationRecord{ID: "original-output", UserID: 7, TokenID: 8, State: "sealed", MaxBytes: 16384, StoredBytes: 40, NextSequence: 1, CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(time.Hour).UnixMilli()},
+		&model.GenerationSegment{RecordID: "original-output", Sequence: 0, Kind: "result", Ciphertext: []byte("opaque-v8-output-ciphertext")},
+		&model.ResponseRequest{ID: "original-receipt", UserID: 7, TokenID: 8, KeyHash: strings.Repeat("e", 64), ResponseID: "resp_old", Operation: "responses", State: model.ResponseUncertain},
+		&model.ResponseHistory{ID: "resp_old", UserID: 7, TokenID: 8, Kind: "response", Model: "m", Version: 1, CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(time.Hour).UnixMilli(), ReservedBytes: 64, Ciphertext: []byte("opaque-v12-history-ciphertext")},
+	}
+	for _, row := range rows {
+		if e := st.DB().Create(row).Error; e != nil {
+			t.Fatal(e)
+		}
+	}
+	tables := []string{"billing_reservations", "billing_balances", "generation_intents", "generation_records", "generation_segments", "response_requests", "response_histories"}
+	snapshot := func(db *gorm.DB, table string) []byte {
+		var values []map[string]interface{}
+		if e := db.Table(table).Find(&values).Error; e != nil {
+			t.Fatal(e)
+		}
+		encoded, e := json.Marshal(values)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return encoded
+	}
+	before := map[string][]byte{}
+	for _, table := range tables {
+		before[table] = snapshot(st.DB(), table)
+	}
+	if e := st.DB().Where("version = 13").Delete(&model.SchemaMigration{}).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := st.DB().Migrator().DropTable(&model.BackgroundJob{}, &model.BackgroundEvent{}); e != nil {
+		t.Fatal(e)
+	}
+	var released []model.SchemaMigration
+	if e := st.DB().Order("version").Find(&released).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := st.Close(); e != nil {
+		t.Fatal(e)
+	}
+	for range 2 {
+		st, err = Open(config.DatabaseConfig{Path: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, table := range tables {
+			if !bytes.Equal(before[table], snapshot(st.DB(), table)) {
+				t.Fatalf("v13 changed existing authority or encrypted bytes in %s", table)
+			}
+		}
+		var got []model.SchemaMigration
+		if e := st.DB().Order("version").Find(&got).Error; e != nil || len(got) != len(released)+1 || got[len(got)-1].Version != 13 {
+			t.Fatalf("v13 not appended once: %+v %v", got, e)
+		}
+		for i, old := range released {
+			if old.Version != got[i].Version || !old.AppliedAt.Equal(got[i].AppliedAt) {
+				t.Fatal("v13 rewrote released migration evidence")
+			}
+		}
+		var count int64
+		if e := st.DB().Model(&model.BackgroundJob{}).Count(&count).Error; e != nil || count != 0 {
+			t.Fatalf("v13 invented historical background tasks: %d %v", count, e)
+		}
+		if e := checkMigrationVersion(st.DB(), 12); e == nil {
+			t.Fatal("v12 accepted schema v13")
+		}
+		if e := st.Close(); e != nil {
+			t.Fatal(e)
+		}
+	}
+}
 
 func TestResponseV11UpgradePreservesV10FinancialAuthority(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v10-responses-upgrade.db")
@@ -53,7 +136,7 @@ func TestResponseV11UpgradePreservesV10FinancialAuthority(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+2 || got[len(got)-2].Version != 11 || got[len(got)-1].Version != 12 {
+		if len(got) != len(released)+3 || got[len(got)-3].Version != 11 || got[len(got)-2].Version != 12 || got[len(got)-1].Version != 13 {
 			t.Fatalf("v11 ledger is not idempotent: %+v", got)
 		}
 		for i := range released {
@@ -210,7 +293,7 @@ func TestArchiveV8UpgradePreservesReleasedLedgerAndRejectsV7(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+5 || got[len(got)-5].Version != 8 || got[len(got)-4].Version != 9 || got[len(got)-3].Version != 10 || got[len(got)-2].Version != 11 || got[len(got)-1].Version != 12 {
+		if len(got) != len(released)+6 || got[len(got)-6].Version != 8 || got[len(got)-5].Version != 9 || got[len(got)-4].Version != 10 || got[len(got)-3].Version != 11 || got[len(got)-2].Version != 12 || got[len(got)-1].Version != 13 {
 			t.Fatalf("non-idempotent v8/v9/v10/v11: %+v", got)
 		}
 		for i := range released {
@@ -274,7 +357,7 @@ func TestIntentV9UpgradePreservesV8OutputAndFinancialAuthority(t *testing.T) {
 		if err := st.DB().Order("version").Find(&got).Error; err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != len(released)+4 || got[len(got)-4].Version != 9 || got[len(got)-3].Version != 10 || got[len(got)-2].Version != 11 || got[len(got)-1].Version != 12 {
+		if len(got) != len(released)+5 || got[len(got)-5].Version != 9 || got[len(got)-4].Version != 10 || got[len(got)-3].Version != 11 || got[len(got)-2].Version != 12 || got[len(got)-1].Version != 13 {
 			t.Fatalf("non-idempotent v9/v10/v11 migration: %+v", got)
 		}
 		for i := range released {

@@ -56,6 +56,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/background/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
   "minigateway/internal/foundation/contracts/configuration/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -110,6 +116,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/responses/v2": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "2"
+  },
   "minigateway/internal/foundation/contracts/state/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -145,6 +157,10 @@
     "owner": "gateway"
   },
   "minigateway/internal/generation": {
+    "layer": "L1",
+    "owner": "generation"
+  },
+  "minigateway/internal/generation/backgroundstate": {
     "layer": "L1",
     "owner": "generation"
   },
