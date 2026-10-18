@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	execv2 "minigateway/internal/foundation/contracts/execution/v2"
 	"minigateway/internal/protocol/jsonutil"
 )
 
@@ -90,20 +91,33 @@ func terminalStatus(status string) bool {
 	return status == "completed" || status == "incomplete" || status == "failed" || status == "cancelled"
 }
 func (d *Decoder) Decode(body []byte) ([]byte, *execv1.Usage, error) {
+	envelope, usage, err := d.decode(body, false)
+	return envelope.Data, usage, err
+}
+
+func (d *Decoder) decode(body []byte, facts bool) (execv2.Envelope, *execv1.Usage, error) {
 	d.observe(Observation{})
 	r, usage, err := ParseResponse(body)
 	if err != nil {
-		return nil, nil, err
+		return execv2.Envelope{}, nil, err
 	}
 	if !terminalStatus(r.Status) {
-		return nil, nil, errors.New("Responses synchronous response is not terminal")
+		return execv2.Envelope{}, nil, errors.New("Responses synchronous response is not terminal")
+	}
+	envelope := execv2.Envelope{ProtocolTerminal: true, Native: &execv1.NativeCompletion{ID: r.ID, Status: r.Status}, Failed: r.Status == "failed" || r.Status == "cancelled"}
+	if facts {
+		envelope.Usage, err = usageObservation(r.Usage)
+		if err != nil {
+			return execv2.Envelope{}, nil, err
+		}
 	}
 	out, err := rewrite(body, d.publicID, true, false)
 	if err != nil {
-		return nil, nil, err
+		return execv2.Envelope{}, nil, err
 	}
 	d.observe(Observation{ID: r.ID, Status: r.Status, Usage: usage})
-	return out, usage, nil
+	envelope.Data = out
+	return envelope, usage, nil
 }
 func (d *Decoder) NewStream() execv1.StreamDecoder {
 	d.observe(Observation{})
@@ -119,6 +133,9 @@ type streamDecoder struct {
 	event        string
 	lastSequence int64
 	terminal     bool
+	captureFacts bool
+	factUsage    *execv2.UsageObservation
+	factNative   *execv1.NativeCompletion
 }
 
 const maxEventBytes = 1 << 20
@@ -192,6 +209,13 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 		}
 		s.upstreamID = response.ID
 		s.owner.observe(Observation{ID: s.upstreamID})
+		if s.captureFacts {
+			s.factUsage, err = usageObservation(response.Usage)
+			if err != nil {
+				return nil, err
+			}
+			s.factNative = &execv1.NativeCompletion{ID: s.upstreamID, Status: response.Status}
+		}
 	}
 	var identity struct {
 		ResponseID string `json:"response_id"`
@@ -205,6 +229,9 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 		}
 		s.upstreamID = identity.ResponseID
 		s.owner.observe(Observation{ID: s.upstreamID})
+		if s.captureFacts && s.factNative == nil {
+			s.factNative = &execv1.NativeCompletion{ID: s.upstreamID}
+		}
 	}
 	status := strings.TrimPrefix(event.Type, "response.")
 	if strings.HasPrefix(event.Type, "response.") && terminalStatus(status) {
@@ -219,6 +246,9 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 		s.terminal = true
 		frame.Complete = true
 		s.owner.observe(Observation{ID: s.upstreamID, Status: "failed"})
+		if s.captureFacts {
+			s.factNative = &execv1.NativeCompletion{ID: s.upstreamID, Status: "failed"}
+		}
 	}
 	rewritten, err := rewrite(data, s.owner.publicID, false, event.Type == "error")
 	if err != nil {
