@@ -38,6 +38,7 @@ func backgroundSnapshot(in model.BackgroundJob) bs.Record {
 		StoredBytes:      in.StoredBytes,
 		EventCount:       in.EventCount,
 		Deleted:          in.Deleted,
+		ReplayPending:    in.ReplayPending,
 	}
 }
 
@@ -73,5 +74,6 @@ func backgroundRow(in bs.Record) model.BackgroundJob {
 		StoredBytes:      in.StoredBytes,
 		EventCount:       in.EventCount,
 		Deleted:          in.Deleted,
+		ReplayPending:    in.ReplayPending,
 	}
 }

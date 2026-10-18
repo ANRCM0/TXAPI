@@ -6587,7 +6587,7 @@
             "CallBearer": []
           }
         ],
-        "description": "Requires responses.enabled and mounted content/credential keys. Limit 1 MiB. Supports text, instructions, native function tools/history and reasoning items; no Chat conversion. Defaults store=true without injecting that field upstream. Local response IDs are stable across replay; upstream IDs are metadata only. Idempotency-Key (1-256 visible ASCII bytes) is scoped to current owner and API key. Object key order/JSON whitespace do not affect the digest; numeric lexical representations and omitted/defaulted fields remain distinct. A known terminal receipt expires after configured retention (default 24h), allowing reuse; dispatching/unknown receipts do not expire automatically. Stored replay expires earlier (default 1h) or may be unavailable after an output failure; store=false never retains response bodies. A retry in those states returns 409 and never re-executes. Replays reauthorize identity/model and do not create attempts, consume generation RPM or charge again. Stored responses support GET/delete/input_items and local previous_response_id or conversation continuation, mutually exclusive. Expanded stored context is capped at 256 KiB and 1024 items, pinned to the original target and reauthorized per turn; no native parent ID is sent. store=false cannot reference history. background=true additionally requires responses.background.enabled, explicit channel_ids and billing.mode=disabled; legacy/strict reject before acceptance or network I/O. The background input limit is 256 KiB including the private envelope; self-contained text/function tools only, no previous_response_id/conversation. Only non-stream background creation is enabled in this batch. A queued local receipt does not prove remote acceptance or completion. Workers persist their target before POST, bind an accepted remote ID, then inspect/cancel only that exact target. Disconnect does not cancel work; unknown dispatch is never blindly resubmitted. Background content (also store=false) has fixed temporary retention (default 10 minutes); idempotency tombstones default to 24h and uncertainty stays protected. Background is not promoted to A02 long-term history. Native WS remains unsupported. Strict returns 400 unsupported_billing_dimension before any monetary reservation.",
+        "description": "Requires responses.enabled and mounted content/credential keys. Limit 1 MiB. Supports text, instructions, native function tools/history and reasoning items; no Chat conversion. Defaults store=true without injecting that field upstream. Local response IDs are stable across replay; upstream IDs are metadata only. Idempotency-Key (1-256 visible ASCII bytes) is scoped to current owner and API key. Object key order/JSON whitespace do not affect the digest; numeric lexical representations and omitted/defaulted fields remain distinct. A known terminal receipt expires after configured retention (default 24h), allowing reuse; dispatching/unknown receipts do not expire automatically. Stored replay expires earlier (default 1h) or may be unavailable after an output failure; store=false never retains response bodies. A retry in those states returns 409 and never re-executes. Replays reauthorize identity/model and do not create attempts, consume generation RPM or charge again. Stored responses support GET/delete/input_items and local previous_response_id or conversation continuation, mutually exclusive. Expanded stored context is capped at 256 KiB and 1024 items, pinned to the original target and reauthorized per turn; no native parent ID is sent. store=false cannot reference history. background=true additionally requires responses.background.enabled, explicit channel_ids and billing.mode=disabled; legacy/strict reject before acceptance or network I/O. The background input limit is 256 KiB including the private envelope; self-contained text/function tools only, no previous_response_id/conversation. Original stream=true background requests are observed as durable native sequence-numbered SSE and can resume on GET with stream=true and optional starting_after; nil and zero cursors differ. Only original stream=true jobs support event replay. Native task terminal and terminal event persistence are separate facts. Incomplete, unavailable or expired logs never fabricate DONE/completion. A queued local receipt does not prove remote acceptance or completion. Workers persist their target before POST, bind an accepted remote ID, then inspect/cancel/resume only that exact target. Disconnect does not cancel work; unknown dispatch is never blindly resubmitted. Background content (also store=false) has fixed temporary retention (default 10 minutes); idempotency tombstones default to 24h and uncertainty stays protected. Background is not promoted to A02 long-term history. Native WS remains unsupported. Strict returns 400 unsupported_billing_dimension before any monetary reservation.",
         "parameters": [
           {
             "in": "header",
@@ -6686,7 +6686,7 @@
             "CallBearer": []
           }
         ],
-        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership. Resources are positively classified under current owner/key/model authority; not-found never falls back to another content owner. Background GET returns its persisted local/native projection, never starts another generation, and can report 409 background_unknown when dispatch is uncertain. Background content is temporary even for store=false.",
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership. Resources are positively classified under current owner/key/model authority; not-found never falls back to another content owner. Background GET returns its persisted local/native projection, never starts another generation, and can report 409 background_unknown when dispatch is uncertain. Background content is temporary even for store=false. Background stream=true returns only persisted native SSE for jobs originally created with stream=true. Event pages reauthorize current ownership/model; replay is at most five minutes and shares the existing 120 reads/minute/owner quota. Observer disconnect never cancels the durable task. Errors before commit use JSON; errors after SSE commit only close the connection without fabricating terminal events. Native JSON task completion does not prove the event tail is complete. Temporary background SSE uses Cache-Control: no-store.",
         "parameters": [
           {
             "name": "response_id",
@@ -6704,7 +6704,7 @@
               "type": "boolean",
               "default": false
             },
-            "description": "Only false is currently served. Background event streaming is reserved for the next accepted batch; true returns 409."
+            "description": "For background jobs originally created with stream=true, observe/replay persisted native SSE. Foreground GET query behavior remains unchanged. Non-stream background jobs return 409 for event replay."
           },
           {
             "name": "starting_after",
@@ -6715,7 +6715,7 @@
               "minimum": 0,
               "maximum": 9223372036854775807
             },
-            "description": "Requires stream=true. Parsed without loss; event recovery is not enabled in this batch. Duplicates, negative or malformed values return 400."
+            "description": "Requires stream=true. Exclusive native sequence cursor, not a byte cursor. Omission includes sequence zero; explicit zero skips zero. Duplicate, negative, overflow or noncanonical values return 400. Missing, future, conflicting or unrecoverable event sequences return 409 before SSE commit."
           }
         ],
         "responses": {
@@ -6748,6 +6748,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NativeResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Durably committed native response.* event bytes only; no invented queued event, sequence or Chat DONE. A JSON-terminal task can still have an incomplete event tail."
                 }
               }
             }

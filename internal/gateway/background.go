@@ -101,7 +101,7 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 				continue
 			}
 			parsed, e := registration.Parse.ParseRequest(call.Operation, call.Body)
-			if e != nil || nilInterface(parsed) || parsed.Model() != call.Model || parsed.Operation() != call.Operation || !bytes.Equal(parsed.Body(), call.Body) || parsed.Requirements().Transport != execution.Background || parsed.Requirements().Operation != call.Operation || parsed.Requirements().Stream != parsed.Stream() {
+			if e != nil || nilInterface(parsed) || parsed.Model() != call.Model || parsed.Operation() != call.Operation || parsed.Stream() != call.Stream || !bytes.Equal(parsed.Body(), call.Body) || parsed.Requirements().Transport != execution.Background || parsed.Requirements().Operation != call.Operation || parsed.Requirements().Stream != parsed.Stream() {
 				continue
 			}
 			requests[ch.id] = ownedRequest{operation: parsed.Operation(), body: bytes.Clone(call.Body), model: parsed.Model(), stream: parsed.Stream(), requirements: parsed.Requirements(), maxTokens: parsed.LegacyMaxTokens(), prompt: parsed.PromptText(), affinity: parsed.AffinityText(), completion: func([]byte) string { return "" }}
@@ -116,7 +116,7 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 		}
 		defer release()
 	} else {
-		if call.Target == nil || call.RemoteID == "" || call.Action != bg.RemoteInspect && call.Action != bg.RemoteCancel {
+		if call.Target == nil || call.RemoteID == "" || call.Action != bg.RemoteInspect && call.Action != bg.RemoteCancel && call.Action != bg.RemoteResume {
 			return bg.ErrConflict
 		}
 		candidates = g.responseChannels(g.reg.allChannels(), call.Model, call.Target)
@@ -158,8 +158,9 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 	if registration.Operation != call.Operation {
 		return bg.ErrUnsupportedCapability
 	}
-	prepared, problem := registration.Codec.Prepare(bg.RemoteCommand{Action: call.Action, Body: call.Body, RemoteID: call.RemoteID}, target)
-	if problem != nil || nilInterface(prepared.Progress) || nilInterface(prepared.Input.Decoder) || prepared.Input.Replayable || !backgroundWireBound(prepared.Input, target) {
+	prepared, problem := registration.Codec.Prepare(bg.RemoteCommand{Action: call.Action, Body: call.Body, RemoteID: call.RemoteID, After: call.After}, target)
+	stream := call.Action == bg.RemoteResume || call.Action == bg.RemoteSubmit && call.Stream
+	if problem != nil || nilInterface(prepared.Progress) || nilInterface(prepared.Input.Decoder) || prepared.Input.Replayable || prepared.Input.Stream != stream || !backgroundWireBound(prepared.Input, target, call.Action == bg.RemoteResume) {
 		return bg.ErrUnsupportedCapability
 	}
 	var release func()
@@ -207,6 +208,8 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 		}
 	}
 	prepared.Input.Timeout = 10 * time.Second
+	tracking := &backgroundDecoderTracking{decoder: prepared.Input.Decoder}
+	prepared.Input.Decoder = tracking
 	out := &backgroundOutput{progress: progress, observer: prepared.Progress}
 	result := g.executor.ExecuteTo(ctx, out, ToCoreInput(prepared.Input))
 	if result.Error == nil && out.observed {
@@ -215,24 +218,49 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 	if result.Error != nil && result.Termination == core.UpstreamError && ctx.Err() == nil {
 		g.reportCredentialHealth(ch.name, &credential, result.StatusCode, "background upstream RPC failed")
 	}
-	if result.Error != nil || !out.observed {
+	if out.persistError != nil {
+		for _, known := range []error{bg.ErrCursorUnavailable, bg.ErrCapacity, bg.ErrConflict, bs.ErrClaimLost} {
+			if errors.Is(out.persistError, known) {
+				return known
+			}
+		}
+		return bg.ErrUnavailable
+	}
+	if tracking.err != nil && stream {
+		return bg.ErrCursorUnavailable
+	}
+	if call.Action == bg.RemoteResume && (result.UpstreamStatus == 400 || result.UpstreamStatus == 404 || result.UpstreamStatus == 410 || result.UpstreamStatus == 422) {
+		return bg.ErrCursorUnavailable
+	}
+	if result.Error != nil || !out.observed && call.Action != bg.RemoteResume {
 		return bg.ErrUnavailable
 	}
 	return nil
 }
 
-func backgroundWireBound(in execution.Input, target execution.Target) bool {
+func backgroundWireBound(in execution.Input, target execution.Target, allowQuery ...bool) bool {
 	base, e := url.Parse(target.BaseURL)
 	if e != nil {
 		return false
 	}
 	u, e := url.Parse(in.URL)
-	if e != nil || !u.IsAbs() || u.Scheme != base.Scheme || u.Host != base.Host || u.User != nil || u.Fragment != "" || u.RawQuery != "" {
+	if e != nil || !u.IsAbs() || u.Scheme != base.Scheme || u.Host != base.Host || u.User != nil || u.Fragment != "" || u.RawQuery != "" && (len(allowQuery) == 0 || !allowQuery[0] || in.Method != "GET") {
 		return false
 	}
 	root := strings.TrimRight(path.Clean("/"+strings.TrimPrefix(base.Path, "/")), "/") + "/"
 	if !strings.HasPrefix(path.Clean(u.Path), root) || target.APIKey == "" {
 		return false
+	}
+	if u.RawQuery != "" {
+		query, e := url.ParseQuery(u.RawQuery)
+		if e != nil || len(query) > 4 {
+			return false
+		}
+		for name, values := range query {
+			if len(name) > 64 || strings.Contains(name, target.APIKey) || len(values) != 1 || len(values[0]) > 256 || strings.Contains(values[0], target.APIKey) {
+				return false
+			}
+		}
 	}
 	// This first batch explicitly supports standard API-key Bearer transport.
 	// A codec cannot silently dispatch under another origin or credential.
@@ -276,6 +304,7 @@ type backgroundOutput struct {
 	progress            bs.Progress
 	observer            bg.Observer
 	committed, observed bool
+	persistError        error
 }
 
 func (o *backgroundOutput) Commit(ctx context.Context, _ core.ResponseMetadata) error {
@@ -290,9 +319,11 @@ func (o *backgroundOutput) Flush(ctx context.Context) error { return ctx.Err() }
 func (o *backgroundOutput) Write(ctx context.Context, b []byte) (int, error) {
 	observation := o.observer.Drain()
 	if observation.RemoteID == "" {
-		return 0, errors.New("missing native background observation")
+		o.persistError = errors.New("missing native background observation")
+		return 0, o.persistError
 	}
 	if e := o.progress.Observe(ctx, observation); e != nil {
+		o.persistError = e
 		return 0, e
 	}
 	o.observed = true

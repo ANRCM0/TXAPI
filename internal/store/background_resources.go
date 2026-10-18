@@ -62,6 +62,7 @@ func (s *Store) DeleteBackground(ctx context.Context, b identity.Binding, id str
 			return e
 		}
 		row.Deleted = true
+		row.ReplayPending = false
 		row.Ciphertext, row.Snapshot = []byte{}, []byte{}
 		row.ReservedBytes, row.StoredBytes, row.EventCount = 0, 0, 0
 		row.ClaimHash, row.ClaimUntil = "", 0
@@ -77,6 +78,34 @@ func (s *Store) ReadClaimedBackground(ctx context.Context, c bs.Claim) (out bs.R
 			out = backgroundSnapshot(row)
 		}
 		return e
+	})
+	return
+}
+
+// ReadClaimedBackgroundEvent exposes only one bounded ciphertext to its fenced
+// owner. AEAD and semantic replay comparison remain the generation owner's job.
+func (s *Store) ReadClaimedBackgroundEvent(ctx context.Context, c bs.Claim, sequence int64) (out bs.Event, found bool, err error) {
+	if sequence < 0 {
+		return out, false, bg.ErrCursorUnavailable
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		row, e := ownedBackground(tx, c)
+		if e != nil {
+			return e
+		}
+		if row.Deleted || row.ContentExpiresAt <= time.Now().UnixMilli() {
+			return bs.ErrClaimLost
+		}
+		var event model.BackgroundEvent
+		q := tx.Where("task_id = ? AND sequence = ? AND length(ciphertext) <= ?", row.ID, sequence, (64<<10)+256).Limit(1).Find(&event)
+		if q.Error != nil {
+			return q.Error
+		}
+		found = q.RowsAffected != 0
+		if found {
+			out = bs.Event{TaskID: event.TaskID, Sequence: event.Sequence, Ciphertext: event.Ciphertext}
+		}
+		return nil
 	})
 	return
 }

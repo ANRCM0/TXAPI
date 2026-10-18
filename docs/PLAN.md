@@ -368,9 +368,11 @@ S6-00 已在现有基础层契约矩阵旁补充 API/业务/前端/扩展对照�
 
 A03-01 六项边界：负责 `foundation/contracts/background/v1`、`responses/v2`、generation 的受理 owner、私有 backgroundstate、store/model 统一 v13 和 architecture；依赖现有可信身份及密钥环，原十四组公开入口/L0 签名不变；新增两组候选端口，未在所有消费者验收前冻结；验证当前权限、幂等、租约/fencing、容量、未知保护及 v12 密文/账本兼容；不接入 main/HTTP/上游派发，不开放 A04 或收费例外。实现与实际验证见 [FC-002 记录](history/implementation-fc002.md)，原生协议/应用接线和事件恢复按 A03-02/03 继续顺序验收，完整 A03/M3 保持未完成。
 
-A03-01 已经 PR #20 从最终头 `5119d34` 合并为 `master/c1b8264`，push/PR/合并后 master 完整 CI 均通过。A03-02 现从该已验收基线接线；用户又明确批准 [FC-002-A](proposals/FC-002A-resource-ownership-v1.md) 在同一候选 background/v1 包补充 Resources.Kind/Delete，解决唯一资源分类与终态删除端口缺口，不改冻结 v1。A03-02/03 与新候选冻结仍须实际验收。
+A03-01 已经 PR #20 从最终头 `5119d34` 合并为 `master/c1b8264`，push/PR/合并后 master 完整 CI 均通过。A03-02 现从该已验收基线接线；用户又明确批准 [FC-002-A](proposals/FC-002A-resource-ownership-v1.md) 在同一候选 background/v1 包补充 Resources.Kind/Delete，解决唯一资源分类与终态删除端口缺口，不改冻结 v1。A03-02 已经 PR #21 将功能头 `8d28ebc` 合并为 `master/8a1da1f`；push `39126429335`、PR `39126434971`、合并后 master `39126878929` 均为 check + delivery SUCCESS。A03-03 与新候选冻结仍须实际验收。
 
 A03-02 六项边界：L1 generation/gateway/store/model 与候选 background 资源端口、L2 纯原生 codec/HTTP v2、L3 responses、main/config/OpenAPI 单点接线；依赖原 core、当前身份/准入、可信任务与目标绑定，不改十四组冻结入口/L0；统一追加 v14 私有删除及共享幂等命名空间元数据，候选 API 0.5.0 / 92 操作；集中验证真实临时库/loopback 上游、断开/重启/撤销/未知不重发、终态 CAS 删除、模式/密钥/关闭及原全量回归；不含事件流恢复、收费双 hold/成本、背景父链或 WS。两个新增入口仍待 A03-03 最终验收后冻结。
+
+A03-03 六项边界：L1 generation/gateway/store/model、L2 原生 SSE codec/HTTP v2、L3 Responses 观察、既有主程序 smoke；依赖同一候选 background/v1、responses/v2 和原十四组冻结入口/L0，不新增公开签名；统一追加 v15 私有 ReplayPending，把原生任务终态和事件日志完成分开；原生事件先 fenced 原子提交后公开，重放同明文复用原密文，保留固定 TTL/容量/当前权限；验证实际子进程强杀、序号/缺失/冲突、取消终态尾部、无第二次 POST 和真实 main 重启及完整回归/CI；不扩大计费、父链、WS 或真实厂商认证。当前最终本地集中验证已通过：1207 项/30 包、真实 main 与后台强杀重启冒烟；精确头及合并后完整 CI 尚待通过，不提前勾选或冻结。
 
 
 - [ ] 支持 HTTP `background=true` 创建、获取、取消；先接上游原生后台能力。持久队列、任务事实和用户/Key 预留成功后才确认接收，不能只返回 202 或启动 goroutine 就称支持。

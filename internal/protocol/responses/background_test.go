@@ -61,9 +61,9 @@ func TestBackgroundCodecBindsControlIDAndRejectsUnsupportedInputs(t *testing.T) 
 	for _, command := range []bg.RemoteCommand{
 		{Action: bg.RemoteInspect, RemoteID: "../other"},
 		{Action: bg.RemoteCancel, RemoteID: "x?api_key=secret"},
-		{Action: bg.RemoteResume, RemoteID: "resp_x"},
+		{Action: bg.RemoteResume, RemoteID: "../resp_x"},
 		{Action: bg.RemoteSubmit, Body: []byte(`{"model":"m","background":false,"input":"x"}`)},
-		{Action: bg.RemoteSubmit, Body: []byte(`{"model":"m","background":true,"stream":true,"input":"x"}`)},
+		{Action: bg.RemoteSubmit, Body: []byte(`{"model":"m","background":true,"stream":null,"input":"x"}`)},
 		{Action: bg.RemoteSubmit, Body: []byte(`{"model":"m","background":true,"previous_response_id":"resp_x","input":"x"}`)},
 		{Action: bg.RemoteSubmit, Body: []byte(`{"model":"m","background":true,"input":"x","tools":[{"type":"web_search"}]}`)},
 	} {

@@ -107,7 +107,11 @@ func (c *callV2) Handle(command appv2.Command, delivery app.Delivery) {
 				backgroundProblem(delivery, e)
 				return
 			}
-			deliverBackground(call.ctx, delivery, receipt)
+			if flags.Stream {
+				s.observeBackground(call.ctx, delivery, call.binding.UserID, receipt, nil)
+			} else {
+				deliverBackground(call.ctx, delivery, receipt)
+			}
 			return
 		}
 		base.Payload = ownedPayload(body)
@@ -125,8 +129,8 @@ func (c *callV2) Handle(command appv2.Command, delivery app.Delivery) {
 				problem(delivery, "invalid_request_error", "unsupported background resource options")
 				return
 			}
-			if command.Stream || command.StartingAfter != nil {
-				backgroundProblem(delivery, bg.ErrCursorUnavailable)
+			if command.StartingAfter != nil && !command.Stream {
+				problem(delivery, "invalid_request_error", "starting_after requires stream")
 				return
 			}
 			var receipt bg.Receipt
@@ -149,7 +153,11 @@ func (c *callV2) Handle(command appv2.Command, delivery app.Delivery) {
 				backgroundProblem(delivery, e)
 				return
 			}
-			deliverBackground(call.ctx, delivery, receipt)
+			if base.Action == app.GetResponse && command.Stream {
+				s.observeBackground(call.ctx, delivery, call.binding.UserID, receipt, command.StartingAfter)
+			} else {
+				deliverBackground(call.ctx, delivery, receipt)
+			}
 			return
 		}
 		if kind != bg.ForegroundResource || base.Action == appv2.CancelResponse {
@@ -233,3 +241,85 @@ func deliverBackground(ctx context.Context, delivery app.Delivery, r bg.Receipt)
 }
 
 var _ appv2.Service = serviceV2{}
+
+func (s *Service) observeBackground(parent context.Context, delivery app.Delivery, owner uint, r bg.Receipt, after *uint64) {
+	ctx, cancel := context.WithDeadline(parent, minTime(r.ContentExpiresAt, time.Now().Add(5*time.Minute)))
+	defer cancel()
+	defer delivery.SetWriteDeadline(time.Time{})
+	committed := false
+	for ctx.Err() == nil {
+		if !s.allowHistoryRead(owner) {
+			if !committed {
+				problem(delivery, "rate_limit_error", "background observation rate exceeded")
+			}
+			return
+		}
+		page, e := s.background.Events(ctx, r.ID, bg.EventQuery{After: after, Limit: 64})
+		if e != nil {
+			if !committed {
+				backgroundProblem(delivery, e)
+			}
+			return
+		}
+		if len(page.Events) > 0 || page.Terminal {
+			if e := delivery.SetWriteDeadline(time.Now().Add(10 * time.Second)); e != nil && !errors.Is(e, execution.ErrDeadlineUnsupported) {
+				if !committed {
+					backgroundProblem(delivery, bg.ErrUnavailable)
+				}
+				return
+			}
+			if !committed {
+				delivery.Annotate(app.Metadata{ResponseID: r.ID, NoStore: true})
+				e = delivery.Commit(ctx, execution.ResponseMetadata{StatusCode: 200, ContentType: "text/event-stream", Values: map[string]string{"Cache-Control": "no-store", "X-TXAPI-Background-Retention": "temporary", "X-TXAPI-Background-Expires-At": r.ContentExpiresAt.UTC().Format(time.RFC3339)}})
+				if e != nil {
+					return
+				}
+				committed = true
+			}
+			for _, event := range page.Events {
+				if e := delivery.SetWriteDeadline(time.Now().Add(10 * time.Second)); e != nil && !errors.Is(e, execution.ErrDeadlineUnsupported) {
+					return
+				}
+				n, e := delivery.Write(ctx, event.Data)
+				if e != nil || n != len(event.Data) {
+					return
+				}
+				if delivery.Flush(ctx) != nil {
+					return
+				}
+			}
+			after = page.Next
+			if page.Terminal {
+				return
+			}
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			if !committed {
+				backgroundObservationExpired(delivery, r.ContentExpiresAt)
+			}
+			return
+		case <-timer.C:
+		}
+	}
+	if !committed {
+		backgroundObservationExpired(delivery, r.ContentExpiresAt)
+	}
+}
+
+func backgroundObservationExpired(delivery app.Delivery, expiry time.Time) {
+	if !expiry.After(time.Now()) {
+		backgroundProblem(delivery, bg.ErrCursorUnavailable)
+	} else {
+		backgroundProblem(delivery, bg.ErrUnavailable)
+	}
+}
+
+func minTime(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
+}

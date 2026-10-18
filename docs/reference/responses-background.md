@@ -1,8 +1,8 @@
 # Native Background Responses
 
-Status: 2026-10-18, A03-02 implementation candidate, **not accepted yet**.
-A03-01's exact feature head and merged `master/c1b8264` passed complete CI through
-PR #20. The current native HTTP/worker extension requires its own final-head and
+Status: 2026-10-18, A03-01/02 accepted; A03-03 event recovery is **not accepted yet**.
+A03-02 feature `8d28ebc` and merged `master/8a1da1f` passed complete CI through
+PR #21. The current event extension requires its own final-head and
 merged-master acceptance; see [FC-002 evidence](../history/implementation-fc002.md).
 The two new foundation entries remain candidates until A03-03 completes.
 This is only the disabled-billing, self-contained slice, not full A03/M3, charged
@@ -46,8 +46,8 @@ that the provider is free or its spend has been proved bounded.
 
 - `POST /v1/responses` with `background:true` durably accepts a self-contained
   text/function-tool input. It sends real native `background:true`, never a
-  synchronous replacement or a Chat translation. A03-02 only supports
-  `stream:false`; previous_response_id, conversation, hosted tools and media fail
+  synchronous replacement or a Chat translation. A03-03 adds original
+  `stream:true` observation/replay; previous_response_id, conversation, hosted tools and media fail
   before dispatch. The input plus private envelope must fit 256 KiB.
 - The initial JSON response is a local queued receipt. HTTP 200/queued proves
   local durable acceptance, not remote acceptance, task completion or cost
@@ -72,9 +72,57 @@ their behavior; only the separately registered v2 facade accepts cancellation.
 
 For background GET, stream and starting_after are parsed separately. Duplicate
 or unknown query names, malformed booleans, negative/overflow cursors, noncanonical
-integer text and starting_after without stream=true return 400. Streaming/event
-recovery is deferred to A03-03: a valid streaming query currently returns 409
-background_result_unavailable, not an invented or partial event stream.
+integer text and starting_after without stream=true return 400. Event recovery
+requires an original stream=true job. A missing cursor includes sequence zero;
+explicit starting_after=0 skips zero. Future/missing/conflicting/unavailable
+sequences fail explicitly with 409 before SSE commit. Ordinary foreground GET
+retains its prior query rejection, and non-stream jobs cannot invent events.
+
+## Native Event Recovery (A03-03 Implementation)
+
+POST background=true,stream=true observes durable native events, not a fabricated
+local queued/created SSE event. GET stream=true observes/replays the same event
+log. The pure L2 codec validates typed nonnegative signed-64-bit sequence_number,
+native identity and event type/status before the owner can publish bytes. It
+rewrites only documented response identity/error envelope positions and retains
+native text/function-tool deltas and extension fields. SSE transport comments,
+id and retry fields are not replayed; validated JSON is canonically encoded.
+There is no fabricated Chat [DONE]. Standalone error events without a complete
+native terminal response are outside this subset and make replay unavailable;
+response.failed with its full native response is supported.
+
+Each event and its remote binding/snapshot commit in the same fenced transaction
+before output acknowledgement. Identical canonical plaintext at an overlapping
+sequence reuses the original ciphertext; changed content never overwrites it.
+Sequences must be consecutive from zero. Limits are 64 KiB per encoded event,
+128 events per transaction, 8192 events and the existing total content reservation
+per task. Public pages are at most 64 KiB/128 events (default 64); the completion
+flag applies only to a page that has reached the durable terminal event.
+
+A native JSON cancellation/poll terminal result can end the task and free its
+active quota while its event tail is still incomplete. Private ReplayPending
+keeps only that event-recovery obligation claimable. Historical queued/running
+events cannot regress the latest terminal document, and matching late usage
+cannot adjust TPM twice. Delete or fixed content expiry fences replay and clears
+this obligation. An explicitly unrecoverable log is not marked complete: if its
+task is still active, JSON inspection/cancellation cleanup continues. Known
+terminal state does not regress to active or uncertain merely because events
+expire. A lost-ID dispatch remains protected uncertain and is never re-POSTed.
+
+A clean RPC EOF is not native task completion. An incomplete final SSE frame is
+not committed; reconnect resumes it after the last durable sequence. Transient
+network interruption resumes GET, never POST. Unsupported resume, invalid native
+events, gaps, corrupt overlap and exhausted event capacity become explicit replay
+unavailability rather than silent truncation or a fabricated successful stream.
+
+An observer has at most five minutes, bounded by content expiry, and uses the
+existing per-owner read quota (120 reads/minute) and delivery capacity. It polls
+at one second and reauthorizes every page. Multiple observers share that quota;
+reaching it closes observation without cancelling the task. Each write has a
+10-second deadline; short writes/errors stop the observer without changing the
+persisted task. Before commit errors use ordinary JSON; after SSE commit failures
+only close the connection, with no appended JSON/error/DONE pretending completion.
+Temporary background SSE explicitly uses Cache-Control: no-store.
 
 ## One Resource And Idempotency Authority
 
@@ -117,7 +165,7 @@ Before the sole submit RPC, current permissions, original request/attempt
 capacity and generation RPM/TPM admission are checked. A transaction persists
 dispatching plus the exact target first. If POST might have happened but the
 remote ID was not persisted, the job becomes uncertain and is never re-POSTed.
-After the ID is durably bound, restart performs only inspect/cancel on that
+After the ID is durably bound, restart performs only inspect/cancel/resume on that
 binding; credential removal/rotation or model/URL changes cannot switch targets.
 
 Client disconnect stops only observation. Bound control uses its fenced private
@@ -162,8 +210,10 @@ retention is not subordinated to successful foreground maintenance. Unconfirmed
 work retains only non-content uncertainty/namespace protection after content TTL;
 it is explicitly unrecoverable and never silently freed for replay.
 
-Unified schema v14 appends private deletion and namespace metadata to v13; it
-does not alter released intent/ledger/history ciphertext or AAD. Retained key
+Unified v14 appended private deletion and namespace metadata to v13. Schema v15
+adds private ReplayPending with a false default for old records; it does not
+invent missing native events or alter released intent/ledger/history ciphertext
+or AAD. Retained key
 requirements include background input, snapshots and event key IDs. Wrong or
 missing keys for live content fail closed. Keep the original external content
 and digest key material and coherent database backups. Older binaries reject

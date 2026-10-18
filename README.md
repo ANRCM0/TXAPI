@@ -1,6 +1,6 @@
 # TXAPI
 
-FC-002 顺序推进中：A03-01 已验收合并至 `master/c1b8264`；当前 A03-02 的 disabled 原生后台/查询/取消/终态删除和 OpenAPI 0.5.0 / 92 操作为候选，尚未验收。默认关闭，`store=false` 仍有临时内容保留，事件恢复另由下一批实现；不标记完整 A03/M3 或成本证明通过。见 [后台运行约定](docs/reference/responses-background.md) 与 [精确批次记录](docs/history/implementation-fc002.md)。
+FC-002 顺序推进中：A03-01/02 已验收合并，A03-02 为 `master/8a1da1f`（PR #21，功能头及合并后完整 CI 通过）；当前 A03-03 正在实现原生事件持久/游标恢复和强杀矩阵，尚未验收。默认关闭，仅 disabled、自包含输入，`store=false` 仍有临时内容保留；两组新增入口待最终消费者验收后冻结，不标记完整 A03/M3 或成本证明通过。见 [后台运行约定](docs/reference/responses-background.md) 与 [精确批次记录](docs/history/implementation-fc002.md)。
 
 一个按**core 中转内核、业务层、统一对外兼容层**分工的轻量 AI API 网关。管理员集中配置上游，用户使用自己的 API Key 调用；业务层负责授权、调度、计费及状态处理，兼容层覆盖客户端/上游协议、扩展和前端接入。
 

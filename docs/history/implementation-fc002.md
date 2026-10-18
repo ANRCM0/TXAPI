@@ -114,3 +114,76 @@ API 导出并逐项对照 c1b8264，仅候选 background/v1 新增 ResourceKind�
 没有本地 Docker 可执行程序；Linux 全量 race 和 v14 容器安装/升级/备份恢复/退出由现有
 自动 CI 验证，不把 Windows 普通测试冒充这些结果。没有调用真实提供商、真实预算/生产库或宣称 SDK 认证。
 完整本地通过不等于已验收：最终提交头及合并后 master 的现有完整 CI 仍须全部通过，随后才进入 A03-03。
+
+## A03-02 精确头与合并后验收
+
+2026-10-18，最终功能头 `8d28ebc122503d0f302292e16a856fc10fd95ce1` 从已验收
+`master/c1b826453d1ecfb9edc3d58322fbbaf42e172a41` 经 PR #21 合并为
+`master/8a1da1fd1b27d47bd74e761ea928caa37ba8b0cb`。
+实际 fetch 后核对合并树 `50e485dd17e45196d5f83a4eaaad0f939a567f55` 与功能头完全相同；
+工作树干净。自动 push `39126429335`、PR `39126434971`、合并后 master
+`39126878929` 在对应精确 SHA 均为 check + delivery SUCCESS，含 Linux 全量 race、
+主程序冒烟与 v14 容器交付。A03-02 与 FC-002-A 的该范围已独立验收。
+未发布 tag/release，未操作真实上游；两组新入口仍候选，完整 A03/M3 与 S5 成本门槛保持。
+
+## A03-03：原生事件与强杀恢复（实施中，未验收）
+
+从已验收 `master/8a1da1f` 创建 `feat/a03-03-background-events`。
+六项责任范围见 PLAN：原包内补齐 L2 原生后台 SSE/GET resume，L1 fenced 事件与
+真实 owner/gateway/core I/O，L3 只观察已持久协议字节；原十四组冻结入口/L0 和
+A03-02 两组候选签名都不修改。统一追加 schema v15 私有 ReplayPending，
+不改已发布 v14、AAD 或旧密文；本地临时保留、disabled 模式及保护未知请求语义保持。
+
+当前作者实现包括：原生 typed sequence_number/事件 ID/终态校验、规范化 SSE 字节，
+同明文重放复用原密文、序号连续与页尾完成，原生 JSON 终态和终态事件持久分离，
+取消/权限撤销内部清理、暂态 RPC 断开只 GET 恢复、明确不可恢复与保守未知，
+观察断开/短写不影响任务，以及 L2 的后台 SSE no-store 修正（不修改 L0）。
+
+新回归已编写但尚未执行：真实子进程 Kill 的领取/发送前/上游受理未绑定/事件提交未确认/
+终态未落库窗口，loopback 实际 POST 次数，旧 claim fencing、重放/缺失/冲突与取消尾部，
+当前 HTTP SSE 断开/重启/显式零游标、短写，以及生产二进制的默认关闭/强杀重启/取消/
+模式拒绝/产品关闭后 TTL。保留既有回归与 CI；集中验证结果、失败修复和最终源码另行追加。
+
+### A03-03 集中验证与修复记录
+
+Windows PowerShell，所有 Go 进程及 Python Go 子进程使用 GOARCH=amd64、GOFLAGS=-buildvcs=false。
+首轮 build/vet、原生事件/强杀/HTTP 相关六包均通过；旧 gateway 回归发现底层存储错误原样返回
+不再匹配 ErrUnavailable。只调整私有错误映射：已知游标/容量/冲突/claim 错误保留类型，
+其他存储故障继续映射为原 ErrUnavailable；无重试、无提供商健康惩罚，原断言完整保留。
+随后 gateway/generation/cmd 的背景受影响范围集中复验全部通过。
+
+来源 387 个非 Markdown 路径 / `11d539c1e94cbb1149bf468d5348dc710e999109e1d92a83d818c531ed9c40b6`
+的首轮完整本地 `go build ./...`、`go vet ./...`、tidy/依赖零差异、
+`go test -json -count=1 ./...` 通过：1201 项测试/子用例、30 个测试包、零失败。
+主程序 local.py 新增真实二进制的后台 SSE/SIGKILL/重启/取消/游标/模式拒绝/feature-off TTL
+并与原 Chat/strict/凭据/持久 runtime 全部一起通过；兼容冒烟真实 API/桌面/移动端通过。
+五个 JS 语法及十个前端 API 行为通过；17 个公开/L0 快照导出与 master/8a1da1f 完全一致。
+
+收尾源码审查另修正观察端首次提交前 TTL/取消/写期限失败返回空 200 的边缘路径：
+现在提交前返回具名问题，提交后仅关闭、不追加 JSON/伪终态；新增明确前后提交回归。
+真实主程序 smoke 的恢复轮询降至每秒一次，避免合法 30 秒遗留租约窗口耗尽用户读配额。
+这两处后的最终源码须重新完成集中检查；不得把上一段来源直接当作最终头已通过。
+纯前端与 feature-off UI 兼容来源不变，适用的结果可在注明范围后复用。
+
+### A03-03 最终本地集中验证（待精确头 CI/合并验收）
+
+最终来源 388 个非 Markdown 路径，SHA-256
+`adc6d18a07911a0d5e324c16bff37a126b9df04ce6ee3883abbd2212d820cd8d`，
+验证前后完全相同；基线仍为 fetch 后未漂移的 `master/8a1da1f`。
+
+| 实际命令/检查 | 最终结果 |
+|---|---|
+| `go build ./...`; `go vet ./...` | PASS |
+| `go mod tidy`; `git diff --exit-code -- go.mod go.sum` | PASS；零依赖变化 |
+| `go test -json -count=1 ./...` | PASS：1207 项测试/子用例、30 个测试包，6 个预期 helper SKIP，零失败 |
+| `go test -count=1 ./internal/responses ./cmd/gateway -run Background -timeout 3m` | 最后观察边界修复的受影响范围 PASS；随后上项全量再次通过 |
+| 28 个本批 Go 文件 normalized-LF gofmt；三份 Python AST | PASS；只格式化本批 Go |
+| 17 项公开/L0 API 快照与 master/8a1da1f 对照 | 完全不变；原十四组冻结入口与 L0 未改，完整 architecture 回归通过 |
+| `python tests/smoke/local.py --go go` | 最终来源重新 PASS；含原全部主程序/strict/凭据/持久 runtime，新增实际后台 SSE/SIGKILL 重启/取消/游标/模式拒绝/feature-off TTL |
+| 五个 JS 语法、10 项前端 API 行为 | 复用本批通过；JS 来源完全未改 |
+| `python tests/smoke/compatibility.py --go go --node node` | 复用本批来源 11d539c 的 PASS；其后仅后台观察首次提交错误、相应回归和后台 smoke 轮询变更，feature-off 的真实 UI/API/角色/桌面移动布局路径无变化；后台改变另由最终主程序 smoke 和全量覆盖 |
+| `git diff --check`；全仓 Markdown 本地链接/锚点 | PASS |
+
+没有本地 Docker 可执行程序；Linux 全量 race 与 v15 容器交付仍待最终头的现有自动 CI。
+未手动触发 workflow、未关闭门槛、未操作真实上游/数据库或发布。
+本地全部通过不提前冻结或勾完整 A03/M3；最终功能头及合并后 master check/delivery 均通过后才验收。

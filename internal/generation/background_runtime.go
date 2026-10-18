@@ -17,13 +17,17 @@ import (
 )
 
 type backgroundSnapshot struct {
-	Version  int `json:"private_version"`
-	Target   execv1.TargetConstraint
-	RemoteID string
-	Document json.RawMessage
-	Usage    *execv1.Usage
-	Rate     bs.RateReservation
-	Failures int
+	Version          int `json:"private_version"`
+	Target           execv1.TargetConstraint
+	RemoteID         string
+	Document         json.RawMessage
+	Usage            *execv1.Usage
+	Rate             bs.RateReservation
+	Failures         int
+	NativeState      bg.RemoteState `json:"native_state,omitempty"`
+	EventComplete    bool           `json:"event_complete,omitempty"`
+	EventUnavailable bool           `json:"event_unavailable,omitempty"`
+	RateFinalized    bool           `json:"rate_finalized,omitempty"`
 }
 
 func (s *BackgroundService) openSnapshot(r bs.Record) (backgroundSnapshot, error) {
@@ -35,7 +39,7 @@ func (s *BackgroundService) openSnapshot(r bs.Record) (backgroundSnapshot, error
 	if e != nil || json.Unmarshal(plain, &out) != nil || out.Version != 1 || len(out.Document) > 1<<20 || out.Target.ChannelID == 0 || out.Target.CredentialID == 0 || out.Target.Fingerprint == "" {
 		return backgroundSnapshot{}, bg.ErrUnavailable
 	}
-	if r.Stage == string(bg.StageRemoteActive) && out.RemoteID == "" {
+	if (r.Stage == string(bg.StageRemoteActive) || r.ReplayPending) && out.RemoteID == "" {
 		return backgroundSnapshot{}, bg.ErrUnavailable
 	}
 	return out, nil
@@ -131,7 +135,7 @@ func (r *BackgroundRunner) runOne(parent context.Context) (err error) {
 	if e != nil {
 		return e
 	}
-	call := bs.RemoteCall{Operation: execv1.Operation(row.Operation), Model: row.Model, PublicID: row.PublicID}
+	call := bs.RemoteCall{Operation: execv1.Operation(row.Operation), Model: row.Model, PublicID: row.PublicID, Stream: row.Stream}
 	if row.Stage == string(bg.StageQueued) {
 		if row.CancelRequested || row.Deadline <= time.Now().UnixMilli() {
 			return p.rejectQueued(ctx)
@@ -154,12 +158,15 @@ func (r *BackgroundRunner) runOne(parent context.Context) (err error) {
 		}
 		call.Action = bg.RemoteSubmit
 		call.Body = bytes.Clone(payload.Body)
-	} else if row.Stage == string(bg.StageRemoteActive) {
+	} else if row.Stage == string(bg.StageRemoteActive) || row.ReplayPending {
 		call.Action = bg.RemoteInspect
+		if row.Stream && !p.snapshot.EventUnavailable {
+			call.Action = bg.RemoteResume
+		}
 		// Revocation blocks content and new work, not cleanup of already-bound
 		// work. Cancellation uses its fenced claim, never a synthetic principal.
 		principal, e := currentPrincipal(ctx, r.opts.Resolve, access.Binding{UserID: row.UserID, TokenID: row.TokenID})
-		if row.CancelRequested || row.Deadline <= time.Now().UnixMilli() || errors.Is(e, access.ErrUnauthorized) || e == nil && !principal.Policy.Allows(row.Model) {
+		if !row.ReplayPending && (row.CancelRequested || row.Deadline <= time.Now().UnixMilli() || errors.Is(e, access.ErrUnauthorized) || e == nil && !principal.Policy.Allows(row.Model)) {
 			call.Action = bg.RemoteCancel
 		}
 		if e != nil && !errors.Is(e, access.ErrUnauthorized) {
@@ -174,10 +181,20 @@ func (r *BackgroundRunner) runOne(parent context.Context) (err error) {
 		target := p.snapshot.Target
 		call.Target = &target
 		call.RemoteID = p.snapshot.RemoteID
+		if call.Action == bg.RemoteResume && row.LastSequence >= 0 {
+			n := uint64(row.LastSequence)
+			call.After = &n
+		}
 	} else {
 		return bg.ErrConflict
 	}
 	e = r.opts.Remote.Execute(ctx, call, p)
+	if row.Stream && p.snapshot.RemoteID != "" && (errors.Is(e, bg.ErrCursorUnavailable) || errors.Is(e, bg.ErrCapacity) || errors.Is(e, bg.ErrUnsupportedCapability)) {
+		if end := p.markEventsUnavailable(ctx); end != nil {
+			return end
+		}
+		return e
+	}
 	if call.Action == bg.RemoteSubmit && (errors.Is(e, bg.ErrCapacity) || errors.Is(e, bg.ErrUnsupportedCapability) || errors.Is(e, bg.ErrUnauthorized)) {
 		if end := p.rejectQueued(ctx); end != nil {
 			return end
@@ -216,7 +233,7 @@ func (p *backgroundProgress) Validate(ctx context.Context, call bs.RemoteCall) e
 		return bg.ErrConflict
 	}
 	if call.Action == bg.RemoteSubmit {
-		if p.row.Stage != string(bg.StageQueued) || call.Target != nil || call.RemoteID != "" {
+		if p.row.Stage != string(bg.StageQueued) || call.Target != nil || call.RemoteID != "" || call.After != nil || call.Stream != p.row.Stream {
 			return bg.ErrConflict
 		}
 		plain, e := p.service.keys.Open(p.row.Ciphertext, backgroundAAD(p.row, "input"))
@@ -226,7 +243,17 @@ func (p *backgroundProgress) Validate(ctx context.Context, call bs.RemoteCall) e
 		}
 		return nil
 	}
-	if p.row.Stage != string(bg.StageRemoteActive) || call.Target == nil || *call.Target != p.snapshot.Target || call.RemoteID != p.snapshot.RemoteID || len(call.Body) != 0 || call.Action != bg.RemoteInspect && call.Action != bg.RemoteCancel {
+	if (p.row.Stage != string(bg.StageRemoteActive) && !p.row.ReplayPending) || call.Target == nil || *call.Target != p.snapshot.Target || call.RemoteID != p.snapshot.RemoteID || len(call.Body) != 0 || call.Stream != p.row.Stream || call.Action != bg.RemoteInspect && call.Action != bg.RemoteCancel && call.Action != bg.RemoteResume {
+		return bg.ErrConflict
+	}
+	if p.row.ReplayPending && call.Action != bg.RemoteResume {
+		return bg.ErrConflict
+	}
+	if call.Action == bg.RemoteResume {
+		if !p.row.Stream || p.snapshot.EventUnavailable || (call.After == nil) != (p.row.LastSequence < 0) || call.After != nil && *call.After != uint64(p.row.LastSequence) {
+			return bg.ErrConflict
+		}
+	} else if call.After != nil {
 		return bg.ErrConflict
 	}
 	return nil
@@ -259,59 +286,11 @@ func (p *backgroundProgress) Dispatch(ctx context.Context, target execv1.TargetC
 	}
 	return e
 }
-func (p *backgroundProgress) Observe(ctx context.Context, o bg.Observation) error {
-	if o.RemoteID == "" || len(o.Document) == 0 || len(o.Document) > 1<<20 || !json.Valid(o.Document) || len(o.Events) > 0 {
-		return bg.ErrUnsupportedCapability
-	}
-	if p.snapshot.RemoteID != "" && p.snapshot.RemoteID != o.RemoteID {
-		return bg.ErrConflict
-	}
-	stage := bg.StageRemoteActive
-	switch o.State {
-	case bg.RemoteAccepted, bg.RemoteRunning:
-	case bg.RemoteSucceeded, bg.RemoteIncomplete, bg.RemoteFailed, bg.RemoteCancelled:
-		stage = bg.StageTerminal
-	default:
-		return bg.ErrConflict
-	}
-	next := p.snapshot
-	next.RemoteID = o.RemoteID
-	next.Document = bytes.Clone(o.Document)
-	next.Failures = 0
-	if o.Usage != nil {
-		u := *o.Usage
-		next.Usage = &u
-	}
-	for range 3 {
-		if e := p.refresh(ctx); e != nil {
-			return e
-		}
-		snapshot, e := p.service.sealSnapshot(p.row, next)
-		if e != nil {
-			return e
-		}
-		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: stage, Snapshot: snapshot, DueAt: time.Now().Add(time.Second).UnixMilli()})
-		if errors.Is(e, bg.ErrConflict) {
-			continue
-		}
-		if e != nil {
-			return e
-		}
-		p.row = row
-		p.snapshot = next
-		if stage == bg.StageTerminal {
-			p.remote.FinishRate(ctx, row.TokenID, next.Rate, next.Usage)
-		}
-		return nil
-	}
-	return bg.ErrConflict
-}
-
 func (p *backgroundProgress) backoff(ctx context.Context) error {
 	if e := p.refresh(ctx); e != nil {
 		return e
 	}
-	if p.row.Stage != string(bg.StageRemoteActive) {
+	if p.row.Stage != string(bg.StageRemoteActive) && !p.row.ReplayPending {
 		return bg.ErrConflict
 	}
 	next := p.snapshot
@@ -321,7 +300,7 @@ func (p *backgroundProgress) backoff(ctx context.Context) error {
 		return e
 	}
 	due := time.Now().Add(time.Duration(1<<next.Failures) * time.Second).UnixMilli()
-	row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.StageRemoteActive, Snapshot: snapshot, DueAt: due})
+	row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.Stage(p.row.Stage), ReplayPending: p.row.ReplayPending, Snapshot: snapshot, DueAt: due})
 	if e == nil {
 		p.row = row
 		p.snapshot = next

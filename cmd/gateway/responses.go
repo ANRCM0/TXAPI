@@ -159,6 +159,16 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 		}
 		r.handler = responseshttp.NewV2(service.V2(), httpoutput.New)
 	}
+	handler := r.handler
+	r.handler = http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		ctx, cancel := context.WithCancel(request.Context())
+		stop := context.AfterFunc(background, cancel)
+		defer func() { stop(); cancel() }()
+		if background.Err() != nil {
+			cancel()
+		}
+		handler.ServeHTTP(w, request.WithContext(ctx))
+	})
 	go r.retention(background, st, true)
 	return r, nil
 }
@@ -213,4 +223,12 @@ func (r *responsesRuntime) Close() {
 	r.cancel()
 	_ = r.worker.Close(context.Background())
 	<-r.done
+}
+
+// Stop ends admission/observation and interrupts owned RPCs before HTTP drain.
+// Close still joins them before the shared gateway/store can be destroyed.
+func (r *responsesRuntime) Stop() {
+	if r != nil {
+		r.cancel()
+	}
 }

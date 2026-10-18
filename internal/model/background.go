@@ -32,6 +32,7 @@ type BackgroundJob struct {
 	StoredBytes      int64  `gorm:"not null"`
 	EventCount       int64  `gorm:"not null"`
 	Deleted          bool   `gorm:"not null;default:false"`
+	ReplayPending    bool   `gorm:"not null;default:false"`
 }
 
 type BackgroundEvent struct {

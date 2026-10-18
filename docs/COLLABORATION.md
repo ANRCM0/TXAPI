@@ -250,3 +250,7 @@ Call 在读取之前完成身份/容量/历史速率检查；有界 Payload 在�
 Close 等 Handle/回调退出才归还容量，不能并发释放尚在运行的工作或复用旧授权执行第二次。
 URL、HTTP 头、原生 JSON/SSE 终态与父链表示由 L2 解析/映射；业务只处理语义文档和状态 CAS。
 已冻结的公开入口、权限范围和 FND-05 验收条件见 [Foundation API v1](reference/foundation-api-v1.md#fnd-04-应用与表示)。
+
+## FC-002 当前集成切片
+
+A03-01/02 已独立验收；A03-02 经 PR #21 合并为 `master/8a1da1f`，精确头及合并后 check/delivery 均成功。当前 A03-03 由集成单点修改原生事件 codec、owner runtime、私有持久事实及 HTTP/应用观察；统一 schema v15，公开 background/v1/responses/v2 签名保持候选且不变，原十四组冻结 v1/L0 不变。其他模块暂不依赖新候选入口，待最终事件消费者/强杀/完整 CI 与冻结记录通过。完整 A03/M3、收费后台和 WS 不因此完成。六项边界与唯一排期见 [PLAN](PLAN.md#s7-a03持久后台任务与事件恢复)，命令/验收见 [FC-002 记录](history/implementation-fc002.md)。

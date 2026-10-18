@@ -24,6 +24,7 @@ func NewV2(service appv2.Service, output func(http.ResponseWriter) execution.Dea
 	return &handlerV2{service, output}
 }
 func (h *handlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w = backgroundWriter{w}
 	command := parseV2(r)
 	out := &delivery{DeadlineOutput: h.output(w), writer: w}
 	call, p := h.service.Begin(r.Context(), command.Base.Action)
@@ -34,6 +35,16 @@ func (h *handlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer call.Close()
 	command.Base.Payload = &bodySource{reader: r.Body}
 	call.Handle(command, out)
+}
+
+type backgroundWriter struct{ http.ResponseWriter }
+
+func (w backgroundWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w backgroundWriter) WriteHeader(status int) {
+	if w.Header().Get("X-TXAPI-Background-Retention") == "temporary" {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	w.ResponseWriter.WriteHeader(status)
 }
 func parseV2(r *http.Request) appv2.Command {
 	c := appv2.Command{Base: parse(r)}
