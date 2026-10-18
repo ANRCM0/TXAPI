@@ -1,6 +1,6 @@
 # 架构设计：中转内核、业务层与统一兼容层
 
-2026-10-18 新目标：用户提出 L0 内核、L1 基础框架、L2 兼容层、L3 功能层的严格依赖与地基 DoD，当前源码尚未全部符合。具体职责、公开契约、差距和分批迁移见 [FC-001 已批准提案](proposals/FC-001-foundation-contracts-v1.md)，排期以 [PLAN](PLAN.md#地基符合性收口fc-001) 为准。下文三层职责继续描述现有架构与历史验收，不作为新四层契约已冻结的证明；用户已明确批准按 FND-01 至 FND-05 顺序实施；实现/验收状态以 PLAN 为准。
+2026-10-18，用户批准的 L0 内核、L1 基础框架、L2 兼容层、L3 功能层约束已按 [FC-001](proposals/FC-001-foundation-contracts-v1.md) 的 FND-01 至 FND-05 完成。代码基线 `master/889ecbd` 经最终功能头与合并后完整 CI 验收，L0/L1/L2 v1 已冻结；全部包归属、公开入口、资源规则、独立接入与 DoD 见 [v1 接入清单](reference/foundation-integration-v1.md)。下文三层表保留产品职责视角，生产编译依赖以四层规则为准；状态与下一批以 [PLAN](PLAN.md#地基符合性收口fc-001) 为准。
 
 状态：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确提交与验证记录见 [PLAN.md](PLAN.md) 和 [S6 记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29` 及其 [验收证据](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；完整 S5 和 S7-A 仍未完成。命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，本页不维护第二份活动计划。
 
@@ -294,5 +294,5 @@ Responses WS 不通过 `background` 参数创建后台任务，HTTP 后台执行
 
 FC-001 FND-04 的当前迁移把 controlplane/Responses/management 应用规则与 server/API/compat HTTP 表示分开；
 后者仅消费公开能力，main 组装原 Store/Engine/Gateway 与发布/metrics。请求 Call、限流状态、
-编解码投影和权限范围见 [公开候选清单](reference/foundation-api-v1.md#fnd-04-应用与表示候选)。
-完整生产包归属、递归公开类型与独立接入证明仍须 FND-05，不由本次源码拆分提前宣称整个地基 frozen。
+编解码投影和权限范围见 [冻结公开清单](reference/foundation-api-v1.md#fnd-04-应用与表示)。
+完整生产包归属、递归公开类型、签名快照与独立接入证明均已通过 FND-05；冻结范围与约束以 v1 接入清单为准。

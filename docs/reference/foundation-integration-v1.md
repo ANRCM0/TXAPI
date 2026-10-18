@@ -1,6 +1,7 @@
 # Foundation v1：接入、归属与 DoD
 
-状态：FND-05 实施候选；最终头与合并后完整 CI 通过前不冻结、不开放新功能并行。
+状态：2026-10-18 **v1 / frozen**；代码基线 master/889ecbd（PR #18，功能头 38a8cce）。
+L0/L1/L2 DoD、独立样例、最终头与合并后完整 CI 均通过；冻结记录合并后按本页公开契约开放 L3 并行。
 批准范围见 [FC-001](../proposals/FC-001-foundation-contracts-v1.md)，唯一排期见
 [PLAN](../PLAN.md#地基符合性收口fc-001)，精确来源及验收记录见
 [实施记录](../history/implementation-fc001.md)。本页说明仓库内接入，不发布外部 Go SDK。
@@ -64,19 +65,19 @@ Linux/macOS 直接运行同一 go test 命令。无需实际凭据、外部提�
 
 ## 分层 DoD 证据位置
 
-以下是最终验收的检查清单及证据入口；本候选实现不由表格自动转为完成。
+以下各项已由 FND-05 的精确功能头与合并后完整 CI 验收；命令、来源、初次失败修复与边界见实施记录。
 
 | DoD | L0 | L1 | L2 |
 |---|---|---|---|
-| 版本/公开类型 | core.Version=1，L1-only 机制声明及 API 快照 | 十二组候选契约与输出门面 Version=1、递归类型检查 | responses/v1 复制门面、操作/协议/HTTP 的中立端口；其余接线为私有实现 |
+| 版本/公开类型 | core.Version=1，L1-only 机制声明及 API 快照 | 十二组冻结契约与输出门面 Version=1、递归类型检查 | responses/v1 复制门面、操作/协议/HTTP 的中立端口；其余接线为私有实现 |
 | 关键行为/最小运行 | [执行/取消](../../internal/core/core_test.go)、[输出/短写](../../internal/core/output_test.go)，样例实际派发原 core | [注册](../../internal/gateway/registered_test.go)、[容量](../../internal/gateway/capacity_test.go)、原 billing/generation/store 全量与独立样例 | [协议输入](../../internal/protocol/request_test.go)、[工具保真](../../internal/protocol/tools_test.go)、HTTP/OpenAPI/前端与真实样例输出 |
 | 扩展与资源寿命 | HTTP attempt 只管本次 I/O；[内部边界](foundation-contracts.md) | 原授权/准入/成本/attempt/收尾、状态 CAS/fencing 和共享关闭；[API 清单](foundation-api-v1.md) | 注册与独立 session；HTTP 输出/Body/Call 的 join、关闭与缓存/头表示；同上清单 |
 | 错误/日志/配置约定 | phase/committed/protocolComplete 保持不同事实，原错误不被成功覆盖 | 未证明即拒绝、unknown 保留原 hold；保存后错误/发布状态、请求关联和脱敏仍按 [开发指南](../DEVELOPMENT.md) | 不可表示语义拒绝；流已提交不能改状态/假造 DONE；91 操作/配置与前端契约保持 |
 | 范围与限制 | HTTP/SSE 机制；WS I/O 不等于产品执行接线 | 单实例 SQLite/有界资源与既有 strict 许可；不新增成本证明 | [支持矩阵](compatibility-contracts.md)；Responses 默认关闭、strict 全拒绝，后台/原生 WS 未交付 |
 | 独立上层证明 | L3 源码无法导入 L0 | summary 只用公开身份/执行端口，实际经过原协调与容量 | codec 不导入功能，真实 loopback/HTTP consumer 验证字节与拒绝路径 |
 
-最终必须在最新集成基线上通过自动完整 CI（契约/依赖、构建/vet/格式、Linux 全量 race、
-主程序冒烟、容器安装/升级/备份/退出），合并后主线再通过，才记录 frozen 和开放 L3 并行。
+本次已在最新集成基线上通过自动完整 CI（契约/依赖、构建/vet/格式、Linux 全量 race、
+主程序冒烟、容器安装/升级/备份/退出），合并后主线也通过，现记录 frozen。后续变更保留同一完整合并门槛。
 S5-03、A03/A04、后台/WS 与每种新厂商能力仍需各自验收，不随地基冻结变为已完成。
 
 ## 已批准变更的快照工具

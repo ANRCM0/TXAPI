@@ -1,7 +1,7 @@
 # Foundation API v1：实施清单与迁移边界
 
-状态：FC-001 已由用户批准，FND-01/02/03/04 已验收，FND-05 正在完成集中验证与冻结门槛；本清单是 v1 候选，不是 frozen 发布。
-最终冻结需 FND-05 全部 DoD、独立上层样例和最新基线完整 CI/合并证明。
+状态：FC-001 的 FND-01 至 FND-05 已全部验收，2026-10-18 冻结为 **v1 / frozen**。
+代码基线 `master/889ecbd`（PR #18，功能头 `38a8cce`）；L0/L1/L2 DoD、独立样例与精确头/合并后完整 CI 已通过，证据见下方实施记录。
 排期与勾选只维护 [PLAN](../PLAN.md#地基符合性收口fc-001)，目标范围见
 [FC-001](../proposals/FC-001-foundation-contracts-v1.md)，实际验证见
 [实施记录](../history/implementation-fc001.md)。
@@ -30,7 +30,7 @@ generation 在派发前仍用原 resolver 校验当前主体，新的投影值�
 Output 的 Commit/Write/Flush/State 与可选写 deadline 保留原寿命规则：
 提交状态只能前进；短写/读错/取消不伪造完整协议成功；attempt 不关闭 writer。
 L2 HTTP 工厂由 main 注入 compat/responseshttp，功能只接收语义化 Delivery，不构造 core.HTTPOutput、
-HTTP writer 或解析 URL/Header。当前拆分已有集中验证，但整个四层 DoD 仍待 FND-05。
+HTTP writer 或解析 URL/Header。当前拆分与四层 DoD 已通过 FND-05 的独立样例和完整 CI，冻结范围见接入清单。
 
 Outcome 显式映射 phase、原始和已公开 HTTP 状态、committed、protocolComplete、
 termination、nil/已知 usage、错误码原始 JSON、耗时/字节数和每次尝试。
@@ -51,24 +51,24 @@ Operation/Phase/Termination 改为公开值类型后仍编码原字符串；旧�
 加密写入再读取验证，不依靠新类型自产自读来声称旧格式兼容。
 没有新增财务权威、迁移 runner、配置或第三方依赖；strict 许可与默认开关不扩大。
 
-## 本批检查与剩余债务
+## 迁移检查与退出记录
 
 FND-01 增加契约实现依赖/无类型逃逸检查、受控拒绝样例、结果复制与未知执行映射、
 真实 gateway 的缺身份/短写/取消、Authority 的绑定伪造/权限撤销/异常和旧归档读取回归。
 存量权限、Chat/embeddings、Responses JSON/SSE、并发/恢复测试保留，并迁移其真实消费者。
 完整结果与精确来源见实施记录；编译成功不等于行为或 Linux race 已验收。
 
-| 剩余依赖 / 来源 | 退出批次 |
+| 原迁移来源 | 已验收退出批次 |
 |---|---|
 | gateway 注册/协议会话与 HTTP 隔离 | FND-02 已验收，PR #15 / master/e97e458 |
 | generation 的记录/claim/意图及状态端口已用中立值；access/secrets 仅留 L1 私有实现 | FND-03 已验收，PR #16 / master/3bf2540 |
 | Responses 通过命令/Call/Delivery 消费公开状态与编解码门面，HTTP/SSE 表示已归 L2 | FND-04 已验收，PR #17 / master/14bb9c9 |
 | controlplane/management 只消费公开基础契约；server/API/middleware 不再导入 L1/L3 实现，构造回调由 main 注入 | FND-04 已验收，PR #17 / master/14bb9c9 |
-| 全生产包四层映射、公开签名递归可见性、独立新增操作样例与零例外冻结 | FND-05 |
+| 全生产包四层映射、公开签名递归可见性、独立新增操作样例与零例外冻结 | FND-05 已验收，PR #18 / master/889ecbd，v1 frozen |
 
 这些是已知迁移来源，不是新增模块可复制的接入方式；本清单不降低旧检查或最终 CI 门槛。
 
-## FND-02 注册与会话候选
+## FND-02 注册与会话
 
 execution v1 同组增加 OperationRegistration/ProtocolRegistration、Parser/Request、Adapter、Target、
 Input/Decoder/StreamDecoder/Frame、Observer/Observation 和 ModelCatalog。它们只引用标准库与契约值；
@@ -83,7 +83,7 @@ NonReplayable/OpaqueErrors/Continuity 只收紧既有执行安全；错误消息
 不解释厂商状态。strict 新操作默认拒绝，Chat/embeddings 也仍需原成本证明，注册不能绕过 StartPreparedAttempt。
 旧 adaptor 的 ProtocolAdaptor/整数 mode 保留在 L2 兼容工厂内；framework 不导入这些实现。
 纯 JSON 约束统一为 foundation/contracts/json/v1，旧 protocol/jsonutil 仅转发，避免财务/worker 反向依赖 L2。
-该组与 HTTP 接入已由 FND-02 最终头及合并后完整 CI 验收；整个 v1 仍待 FND-05，不据此提前冻结。
+该组由 FND-02 独立验收，随后 FND-05 全层与完整 CI 通过；当前属于 frozen v1。
 
 HTTP 适配的准入交接由组装根注入的 gateway.NewHTTPExecutor 处理；普通 NewPublicExecutor 保持每次新准入。
 私有上下文标记只可绑定当前可信 Key 并原子接管一次，Invocation 无跳过限流字段；原 TPM 预留仍由原 once 收尾。
@@ -91,7 +91,7 @@ Request.AffinityText 将旧首条 user/多模态文本投影留在协议侧，sc
 该迁移不改变显式头与旧回退亲和键字节，也不把亲和摘要当作授权或会话持久化。
 
 
-## FND-03 状态、配置与生命周期候选
+## FND-03 状态、配置与生命周期
 
 | 路径 / 版本 | 内容与实际消费者 | 语义与限制 |
 |---|---|---|
@@ -109,12 +109,12 @@ Request.AffinityText 将旧首条 user/多模态文本投影留在协议侧，sc
 
 真实风险回归新增密文字节/嵌套片段所有权、fencing/原 hold/unknown/cancel 事实、提交后错误双层识别与保存时间，
 以及 typed-nil 后端不隐藏在 wrapper；既有归档/旧密文/重启/强杀/当前授权/CAS/发布测试保留。
-公开合同的递归类型检查、全部生产包分类与独立接入证明仍留 FND-05；FND-04 的实际消费者见下节。
+递归类型检查、全部生产包分类与独立接入证明已由 FND-05 完成；FND-04 的实际消费者见下节。
 
 
-## FND-04 应用与表示候选
+## FND-04 应用与表示
 
-| 公开候选 / v1 | 实际消费者与边界 |
+| 公开入口 / v1 | 实际消费者与边界 |
 |---|---|
 | identity.Authenticator / TokenView、Policy.Intersect | L2 Auth 只提取 Key、调用注入的认证器并使用返回 context；L1 私有实现调用原当前 Store.LookupToken 和 access 的可信 context。TokenView/Principal 是复制投影，不提供公开的认证 context 构造器 |
 | admission.Limiter / RequestGate | 既有 memoryLimiter 与 RPM/TPM 计数、reservation/once handoff 已归 L1 access；HTTP 只转发有界估算回调和映射拒绝。RPM 在估算读取前，TPM 仍走原 once 收尾 |
@@ -141,8 +141,8 @@ compat/responseshttp 解析路由、重复查询、If-Match 和幂等头，映�
 新增应用层直接回归验证 owner/空 allowlist、工作 join/单次执行、身份回调 panic 的容量归还及 DTO 空数组/秘密隔离。
 
 
-## FND-05 完整登记与独立接入候选
+## FND-05 完整登记与独立接入
 
 所有生产包的精确层级/owner、十四组公开入口、L0 机制版本、递归类型/签名快照、
 独立新操作的真实接入与三层 DoD 均见 [接入与 DoD](foundation-integration-v1.md)。
-当前仍是实施候选；最终功能头及合并后主线完整 CI 通过后才登记 frozen，不以本地绿灯替代。
+功能头 38a8cce、PR #18 与 master/889ecbd 完整 CI 均已通过，当前登记 frozen；不由旧基线或本地绿灯推定。
