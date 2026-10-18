@@ -1,0 +1,255 @@
+{
+  "minigateway/cmd/gateway": {
+    "layer": "assembly",
+    "owner": "cmd/gateway"
+  },
+  "minigateway/internal/access": {
+    "layer": "L1",
+    "owner": "access"
+  },
+  "minigateway/internal/billing": {
+    "layer": "L1",
+    "owner": "billing"
+  },
+  "minigateway/internal/compat/generationhttp": {
+    "layer": "L2",
+    "owner": "compat"
+  },
+  "minigateway/internal/compat/httpoutput": {
+    "layer": "L2",
+    "owner": "compat"
+  },
+  "minigateway/internal/compat/responses/v1": {
+    "layer": "L2",
+    "owner": "compat",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/compat/responseshttp": {
+    "layer": "L2",
+    "owner": "compat"
+  },
+  "minigateway/internal/compat/summarycodec": {
+    "layer": "L2",
+    "owner": "example-summary-codec"
+  },
+  "minigateway/internal/config": {
+    "layer": "L1",
+    "owner": "config"
+  },
+  "minigateway/internal/controlplane": {
+    "layer": "L3",
+    "owner": "controlplane"
+  },
+  "minigateway/internal/core": {
+    "layer": "L0",
+    "owner": "core",
+    "version": "1"
+  },
+  "minigateway/internal/examples/summary": {
+    "layer": "L3",
+    "owner": "example-summary"
+  },
+  "minigateway/internal/foundation/contracts/admission/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/configuration/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/control/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/execution/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/identity/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/json/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/ledger/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/lifecycle/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/observability/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/responses/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/state/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/text/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/httpoutput/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/foundation/identity": {
+    "layer": "L1",
+    "owner": "foundation"
+  },
+  "minigateway/internal/foundation/persistence": {
+    "layer": "L1",
+    "owner": "foundation"
+  },
+  "minigateway/internal/foundation/runtime": {
+    "layer": "L1",
+    "owner": "foundation"
+  },
+  "minigateway/internal/gateway": {
+    "layer": "L1",
+    "owner": "gateway"
+  },
+  "minigateway/internal/generation": {
+    "layer": "L1",
+    "owner": "generation"
+  },
+  "minigateway/internal/logging": {
+    "layer": "L1",
+    "owner": "logging"
+  },
+  "minigateway/internal/management": {
+    "layer": "L3",
+    "owner": "management"
+  },
+  "minigateway/internal/metrics": {
+    "layer": "L1",
+    "owner": "metrics"
+  },
+  "minigateway/internal/model": {
+    "layer": "L1",
+    "owner": "model"
+  },
+  "minigateway/internal/protocol": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/adaptor": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/adaptor/anthropic": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/adaptor/gemini": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/adaptor/openai": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/canonical": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/jsonutil": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/meta": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/model": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/protocol/responses": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
+  "minigateway/internal/responses": {
+    "layer": "L3",
+    "owner": "responses"
+  },
+  "minigateway/internal/scheduler": {
+    "layer": "L1",
+    "owner": "scheduler"
+  },
+  "minigateway/internal/secrets": {
+    "layer": "L1",
+    "owner": "secrets"
+  },
+  "minigateway/internal/server": {
+    "layer": "L2",
+    "owner": "server"
+  },
+  "minigateway/internal/server/api": {
+    "layer": "L2",
+    "owner": "server"
+  },
+  "minigateway/internal/server/middleware": {
+    "layer": "L2",
+    "owner": "server"
+  },
+  "minigateway/internal/store": {
+    "layer": "L1",
+    "owner": "store"
+  },
+  "minigateway/internal/transport/websocket": {
+    "layer": "L2",
+    "owner": "transport"
+  },
+  "minigateway/tests/upstream/anthropic": {
+    "layer": "L2",
+    "owner": "tests/upstream/anthropic"
+  },
+  "minigateway/tests/upstream/gemini": {
+    "layer": "L2",
+    "owner": "tests/upstream/gemini"
+  },
+  "minigateway/tests/upstream/openai": {
+    "layer": "L2",
+    "owner": "tests/upstream/openai"
+  },
+  "minigateway/web": {
+    "layer": "L2",
+    "owner": "web"
+  }
+}

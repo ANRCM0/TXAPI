@@ -9,6 +9,8 @@ import (
 	"unicode/utf8"
 )
 
+const Version = "1"
+
 func Validate(body []byte) error {
 	if !utf8.Valid(body) {
 		return errors.New("JSON must be valid UTF-8")

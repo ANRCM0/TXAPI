@@ -1,6 +1,6 @@
 # Foundation API v1：实施清单与迁移边界
 
-状态：FC-001 已由用户批准，FND-01/02/03 已验收，FND-04 本地集中验证通过、待完整 CI/合并；本清单是 v1 候选，不是 frozen 发布。
+状态：FC-001 已由用户批准，FND-01/02/03/04 已验收，FND-05 正在完成集中验证与冻结门槛；本清单是 v1 候选，不是 frozen 发布。
 最终冻结需 FND-05 全部 DoD、独立上层样例和最新基线完整 CI/合并证明。
 排期与勾选只维护 [PLAN](../PLAN.md#地基符合性收口fc-001)，目标范围见
 [FC-001](../proposals/FC-001-foundation-contracts-v1.md)，实际验证见
@@ -62,8 +62,8 @@ FND-01 增加契约实现依赖/无类型逃逸检查、受控拒绝样例、结
 |---|---|
 | gateway 注册/协议会话与 HTTP 隔离 | FND-02 已验收，PR #15 / master/e97e458 |
 | generation 的记录/claim/意图及状态端口已用中立值；access/secrets 仅留 L1 私有实现 | FND-03 已验收，PR #16 / master/3bf2540 |
-| Responses 通过命令/Call/Delivery 消费公开状态与编解码门面，HTTP/SSE 表示已归 L2 | FND-04 待 CI/合并 |
-| controlplane/management 只消费公开基础契约；server/API/middleware 不再导入 L1/L3 实现，构造回调由 main 注入 | FND-04 待 CI/合并 |
+| Responses 通过命令/Call/Delivery 消费公开状态与编解码门面，HTTP/SSE 表示已归 L2 | FND-04 已验收，PR #17 / master/14bb9c9 |
+| controlplane/management 只消费公开基础契约；server/API/middleware 不再导入 L1/L3 实现，构造回调由 main 注入 | FND-04 已验收，PR #17 / master/14bb9c9 |
 | 全生产包四层映射、公开签名递归可见性、独立新增操作样例与零例外冻结 | FND-05 |
 
 这些是已知迁移来源，不是新增模块可复制的接入方式；本清单不降低旧检查或最终 CI 门槛。
@@ -139,3 +139,10 @@ compat/responseshttp 解析路由、重复查询、If-Match 和幂等头，映�
 前台幂等/unknown 和账本关联仍在应用/原事务；不通过搬到 HTTP 层来改变它们。
 请求 Scope 的关闭不关闭共享 Gateway/Store，也不把客户端断开解释为无成本或自动重新执行。
 新增应用层直接回归验证 owner/空 allowlist、工作 join/单次执行、身份回调 panic 的容量归还及 DTO 空数组/秘密隔离。
+
+
+## FND-05 完整登记与独立接入候选
+
+所有生产包的精确层级/owner、十四组公开入口、L0 机制版本、递归类型/签名快照、
+独立新操作的真实接入与三层 DoD 均见 [接入与 DoD](foundation-integration-v1.md)。
+当前仍是实施候选；最终功能头及合并后主线完整 CI 通过后才登记 frozen，不以本地绿灯替代。

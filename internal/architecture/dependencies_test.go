@@ -25,6 +25,7 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 		"store":        {"foundation": true, "model": true, "access": true, "config": true, "store": true, "secrets": true},
 		"management":   {"foundation": true},
 		"controlplane": {"foundation": true},
+		"examples":     {"foundation": true},
 		"generation":   {"access": true, "foundation": true, "secrets": true},
 		"responses":    {"foundation": true, "compat": true},
 		"transport":    {"transport": true},
