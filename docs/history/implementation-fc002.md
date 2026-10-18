@@ -1,5 +1,8 @@
 # FC-002 原生后台实施与验证记录
 
+最新状态：A03-01/02/03 已依次独立验收，两个追加入口已按 disabled、自包含范围冻结；
+见[最终验收与冻结](#fc-002-最终验收与冻结)。下文实施中/未验证文字保留各批原时点，不作为当前待验收状态。
+
 ## 批准、范围与基线
 
 2026-10-18 用户明确批准“批准按 FC-002 实施”，覆盖
@@ -187,3 +190,43 @@ Windows PowerShell，所有 Go 进程及 Python Go 子进程使用 GOARCH=amd64�
 没有本地 Docker 可执行程序；Linux 全量 race 与 v15 容器交付仍待最终头的现有自动 CI。
 未手动触发 workflow、未关闭门槛、未操作真实上游/数据库或发布。
 本地全部通过不提前冻结或勾完整 A03/M3；最终功能头及合并后 master check/delivery 均通过后才验收。
+
+## FC-002 最终验收与冻结
+
+2026-10-18，三个已批准子批按序完成，没有并行夹带功能或重开原十四组/L0：
+
+| 子批 | 最终功能头 / PR | 实际合并 master | 完整 push / PR / master CI |
+|---|---|---|---|
+| A03-01 | 5119d349034e42ea4b4070857fb75b064451ffa3 / #20 | c1b826453d1ecfb9edc3d58322fbbaf42e172a41 | 39121239200 / 39121268742 / 39121669860，全 check + delivery SUCCESS |
+| A03-02 + FC-002-A | 8d28ebc122503d0f302292e16a856fc10fd95ce1 / #21 | 8a1da1fd1b27d47bd74e761ea928caa37ba8b0cb | 39126429335 / 39126434971 / 39126878929，全 check + delivery SUCCESS |
+| A03-03 | 501507d4c070208ed8e234cf6ff9cb19c156e25c / #22 | a44d4d147b7309679fa5b7005ed34c12473e4bf0 | 39130613526 / 39130658258 / 39131280478，全 check + delivery SUCCESS |
+
+最终头自动 [push](https://github.com/ANRCM0/TXAPI/actions/runs/39130613526) 与
+[PR](https://github.com/ANRCM0/TXAPI/actions/runs/39130658258) 两个 job 均成功且无失败步骤后，
+实际 fetch 核对 clean worktree、基线仍为 `8a1da1f`、精确 head 和 MERGEABLE，执行
+`gh pr merge 22 --merge --match-head-commit 501507d4c070208ed8e234cf6ff9cb19c156e25c`。
+随后 fetch 验证 [PR #22](https://github.com/ANRCM0/TXAPI/pull/22) 实际合并 SHA 为上述 a44d4d1，
+`git diff --exit-code 501507d origin/master` 通过；合并树
+`f8fe78117f0163605398748fb97418d427aa99b9` 与已测功能头完全相同。
+合并后自动 [master](https://github.com/ANRCM0/TXAPI/actions/runs/39131280478)
+也全部成功、无失败步骤，含 Linux 全量 race、主程序后台 SIGKILL/恢复冒烟及 v15 容器安装/升级/备份恢复/退出。
+没有手动触发 CI、admin 绕过、删除回归或修改 workflow 触发条件。
+
+依据该匹配来源及全部实际消费者，现冻结 L1 background/v1（Version=1）与应用 responses/v2（Version=2）
+的已验收 disabled、自包含原生后台 JSON/SSE 范围；原十四组/L0 签名与许可不变。
+59 个生产包逐个登记；十六组当前公开入口/L0 共十七项签名和递归可见性通过，A03-03 没有新的签名增量。
+逐项文档/版本、契约测试、最小可运行、扩展、基础约定、限制和独立上层接入证据见
+[七项 DoD](../reference/foundation-integration-v1.md#fc-002-追加公开入口冻结) 和
+[追加 API 清单](../reference/foundation-api-v1.md#fc-002-追加冻结接口)。
+
+本次后续冻结登记**只改 Markdown**。非 Markdown 来源仍为 388 路径 /
+`adc6d18a07911a0d5e324c16bff37a126b9df04ce6ee3883abbd2212d820cd8d`，与上方最终本地检查及合并代码相同；
+复用其 1207 项/30 包、真实主程序和精确头/合并后完整 CI，不在文档批次重复本地 Go/main/浏览器。
+实际执行 `git diff --check`、`python .local/validation/check-foundation-all-docs.py` 和来源指纹检查：
+13 个变更路径全部为 Markdown，全仓 32 份 Markdown / 376 个本地链接锚点通过；
+版本/权限/生命周期/状态一致性及原完整 A03 八个未完成总门槛均核对，非 Markdown 来源未变。
+本登记仍正常推送/PR/合并，保留既有自动 CI，记录合并本身与功能验收来源区分。
+
+冻结不是完整 A03/M3：收费后台原子双 hold/最终结算、Responses 成本证明、背景父链/会话组合、
+原生 WS、真实提供商/SDK、ZDR/生产部署均未由本批验收；store=false 仍按固定 TTL 临时加密保留。
+没有创建或移动标签、发布 release/镜像、操作真实提供商、生产库或远端治理。

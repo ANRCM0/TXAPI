@@ -1,10 +1,11 @@
 # Native Background Responses
 
-Status: 2026-10-18, A03-01/02 accepted; A03-03 event recovery is **not accepted yet**.
-A03-02 feature `8d28ebc` and merged `master/8a1da1f` passed complete CI through
-PR #21. The current event extension requires its own final-head and
-merged-master acceptance; see [FC-002 evidence](../history/implementation-fc002.md).
-The two new foundation entries remain candidates until A03-03 completes.
+Status: 2026-10-18, A03-01/02/03 accepted in order. A03-03 feature `501507d`,
+PR #22 and merged `master/a44d4d1` passed complete automatic push/PR/master CI.
+The two additional entries background/v1 (Version=1) and responses/v2 (Version=2)
+are frozen only for the accepted subset; the original fourteen entries and L0
+remain unchanged. See [exact evidence](../history/implementation-fc002.md#fc-002-最终验收与冻结)
+and [seven-part DoD](foundation-integration-v1.md#fc-002-追加公开入口冻结).
 This is only the disabled-billing, self-contained slice, not full A03/M3, charged
 background, a Responses cost proof, native WS, or real-provider/SDK certification.
 
@@ -65,7 +66,7 @@ that the provider is free or its spend has been proved bounded.
   cancel or delete a provider resource. Background input_items and background
   continuation/history composition are not enabled.
 
-The candidate [OpenAPI](../openapi.json) is 0.5.0 / 92 operations. The prior
+The accepted [OpenAPI](../openapi.json) is 0.5.0 / 92 operations. The prior
 accepted A02 version is 0.4.0 / 91 operations. Original foreground JSON/SSE,
 history/Conversations, query rejection and the frozen responses/v1 facade retain
 their behavior; only the separately registered v2 facade accepts cancellation.
@@ -78,7 +79,7 @@ explicit starting_after=0 skips zero. Future/missing/conflicting/unavailable
 sequences fail explicitly with 409 before SSE commit. Ordinary foreground GET
 retains its prior query rejection, and non-stream jobs cannot invent events.
 
-## Native Event Recovery (A03-03 Implementation)
+## Native Event Recovery (A03-03 Accepted)
 
 POST background=true,stream=true observes durable native events, not a fabricated
 local queued/created SSE event. GET stream=true observes/replays the same event

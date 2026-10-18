@@ -247,3 +247,19 @@ requirement-by-requirement scope and acceptance are in
 These runs certify the named source, not later documentation text. M1 is the
 accepted current compatibility framework, not unresolved S5 cost proof, new
 strict permission or S7 product acceptance.
+
+## FC-002 Accepted Extension
+
+FC-002 A03-01/02/03 add the separately accepted OpenAPI 0.5.0 / 92-operation native
+background subset. Final feature `501507d`, PR #22 and actual `master/a44d4d1`
+passed their own complete automatic push/PR/master CI; no historical S6/A01/A02
+run is substituted. Background/v1 and application responses/v2 are frozen with
+[seven-part DoD and actual consumers](foundation-integration-v1.md#fc-002-追加公开入口冻结).
+
+The supported combination is explicit native API-key Bearer channels, self-contained
+text/function tools, disabled gateway billing, JSON or original stream=true native
+SSE recovery. Current authorization, exact-account binding, fenced persistence,
+fixed temporary retention, cancellation and no blind POST replay are mandatory.
+See [background limits](responses-background.md) and [exact evidence](../history/implementation-fc002.md#fc-002-最终验收与冻结).
+It is not a strict-cost/charged-background/parent/WS/real-provider or SDK acceptance;
+full A03/M3 remains open. The historical S6 inventory above retains its original scope.

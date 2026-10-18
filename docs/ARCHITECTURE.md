@@ -1,6 +1,6 @@
 # 架构设计：中转内核、业务层与统一兼容层
 
-FC-002 的 A03-01/02 已独立验收；A03-02 功能头与合并后 `master/8a1da1f` 的完整 CI 均通过（PR #21）。当前 A03-03 从该基线补齐原生事件持久/游标恢复与强杀故障矩阵，尚未验收，两组新增契约仍候选；原十四组冻结入口和 L0 不变。收费后台、背景父链与完整 A03/M3 不因此完成；隔离、幂等和临时保留见 [后台运行约定](reference/responses-background.md)。
+FC-002 的 A03-01/02/03 已依次独立验收；最终头 `501507d`、PR #22 与合并后 `master/a44d4d1` 的完整 CI 均通过。两组新增入口 `background/v1` / `responses/v2` 按已验收的 disabled、自包含文本/函数工具范围冻结，原十四组冻结入口和 L0 不变。原生序号先事务提交再公开，任务终态与事件尾部完成分离；收费双 hold/成本、背景父链、原生 WS 与完整 A03/M3 不因此完成。资源/限制见 [后台运行约定](reference/responses-background.md)，七项 DoD 与独立上层证据见 [追加入口冻结](reference/foundation-integration-v1.md#fc-002-追加公开入口冻结)。
 
 2026-10-18，用户批准的 L0 内核、L1 基础框架、L2 兼容层、L3 功能层约束已按 [FC-001](proposals/FC-001-foundation-contracts-v1.md) 的 FND-01 至 FND-05 完成。代码基线 `master/889ecbd` 经最终功能头与合并后完整 CI 验收，L0/L1/L2 v1 已冻结；全部包归属、公开入口、资源规则、独立接入与 DoD 见 [v1 接入清单](reference/foundation-integration-v1.md)。下文三层表保留产品职责视角，生产编译依赖以四层规则为准；状态与下一批以 [PLAN](PLAN.md#地基符合性收口fc-001) 为准。
 

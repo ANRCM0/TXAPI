@@ -1,6 +1,6 @@
 # TXAPI
 
-FC-002 顺序推进中：A03-01/02 已验收合并，A03-02 为 `master/8a1da1f`（PR #21，功能头及合并后完整 CI 通过）；当前 A03-03 正在实现原生事件持久/游标恢复和强杀矩阵，尚未验收。默认关闭，仅 disabled、自包含输入，`store=false` 仍有临时内容保留；两组新增入口待最终消费者验收后冻结，不标记完整 A03/M3 或成本证明通过。见 [后台运行约定](docs/reference/responses-background.md) 与 [精确批次记录](docs/history/implementation-fc002.md)。
+FC-002 的 A03-01 → A03-02 → A03-03 已依次验收合并；最终功能头 `501507d`、PR #22 与 `master/a44d4d1` 完整 CI 均通过，`background/v1` 与 `responses/v2` 按已验收范围冻结。默认关闭，仅 disabled、自包含文本/函数工具；原生后台 JSON/SSE、查询/取消、持久序号恢复与强杀矩阵已交付，`store=false` 仍临时保留内容。完整 A03/M3、收费双 hold/成本、背景父链与原生 WS 仍未验收。见 [后台运行约定](docs/reference/responses-background.md)、[追加入口 DoD](docs/reference/foundation-integration-v1.md#fc-002-追加公开入口冻结) 与 [精确批次记录](docs/history/implementation-fc002.md#fc-002-最终验收与冻结)。
 
 一个按**core 中转内核、业务层、统一对外兼容层**分工的轻量 AI API 网关。管理员集中配置上游，用户使用自己的 API Key 调用；业务层负责授权、调度、计费及状态处理，兼容层覆盖客户端/上游协议、扩展和前端接入。
 
@@ -8,9 +8,9 @@ FC-002 顺序推进中：A03-01/02 已验收合并，A03-02 为 `master/8a1da1f`
 
 ## 当前能做什么
 
-用户已批准的 [FC-001 四层地基提案](docs/proposals/FC-001-foundation-contracts-v1.md) 已按 FND-01 至 FND-05 完成；代码基线 `master/889ecbd` 的完整 CI 通过，L0/L1/L2 v1 已冻结。上层按 [公开入口和独立接入样例](docs/reference/foundation-integration-v1.md) 开发；A1–A4/S6/M2 功能验收保留，后台/原生 WS 与 S5 成本门槛仍单独交付。活动排期见 [PLAN](docs/PLAN.md#地基符合性收口fc-001)。
+用户已批准的 [FC-001 四层地基提案](docs/proposals/FC-001-foundation-contracts-v1.md) 已按 FND-01 至 FND-05 完成；代码基线 `master/889ecbd` 的完整 CI 通过，L0/L1/L2 v1 已冻结。上层按 [公开入口和独立接入样例](docs/reference/foundation-integration-v1.md) 开发；A1–A4/S6/M2 功能验收保留；FC-002 的 disabled 后台子批已追加验收，完整收费后台/原生 WS 与 S5 成本门槛仍单独交付。活动排期见 [PLAN](docs/PLAN.md#地基符合性收口fc-001)。
 
-2026-10-18，S7-A02 已完成独立验收：PR #12 将功能头 `2084bcd`（基线 `04fbfa6`）合并为 `master/765501a`，功能头 push/PR 与合并后 master 完整 CI 均通过。M2 的 HTTP/SSE 与持久会话已交付，OpenAPI 0.4.0 / 91 个操作；下一产品批次为 A03 原生后台任务，上述地基收口现已完成。运行、容量与权限规则见 [历史契约](docs/reference/responses-history.md)，精确提交和验证见 [A02 验收](docs/history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。
+2026-10-18，S7-A02 已完成独立验收：PR #12 将功能头 `2084bcd`（基线 `04fbfa6`）合并为 `master/765501a`，功能头 push/PR 与合并后 master 完整 CI 均通过。M2 的 HTTP/SSE 与持久会话已交付，OpenAPI 0.4.0 / 91 个操作；后续 FC-002 的 disabled 后台子批已按开头记录独立验收，完整 A03 仍未完成，上述地基收口保持。运行、容量与权限规则见 [历史契约](docs/reference/responses-history.md)，精确提交和验证见 [A02 验收](docs/history/implementation-s7-a02.md#2026-10-18-s7-a02-functional-acceptance)。
 
 2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](docs/history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 
@@ -30,7 +30,7 @@ FC-002 顺序推进中：A03-01/02 已验收合并，A03-02 为 `master/8a1da1f`
 | 已合并功能基线 | 四层地基为 PR #18 / `master/889ecbd`，FND-01 至 FND-05 均经完整 CI/合并验收，v1 已冻结；保留 PR #12 的 A02/M2、PR #10 的 A01、PR #8 的 S6/M1 与 PR #6 的 A1–A4 原产品范围，不代表完整 S5/S7 产品完成 |
 | S5 | 6 个验收项中 5 个通过，S5-03 未完成；实现已合并，完整阶段尚未验收，不承诺已具备可靠商业收费全部条件 |
 | 统一兼容框架 | S6 已合并现有推理/管理 API、构造扩展与前端的契约闭环，以及真实 API/浏览器验收链；复用 A1–A4 共享业务链和默认关闭的加密持久 runtime。支持矩阵见兼容契约清单，M1 已完成验收，精确证据见 PLAN/批次记录 |
-| Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；S7-A01 原生 Responses HTTP/SSE、持久幂等元数据和私有加密短期重放已验收并由 PR #10 合并为 `master/a925140`，默认关闭；GET/续链/会话已通过 A02 独立 CI 并由 PR #12 合并验收；后台/原生 WS 未实现，A01 短期重放仍不是历史权威 |
+| Responses / 持久会话 / 后台任务 / WebSocket | 本轮主线必须交付；S7-A01 原生 Responses HTTP/SSE、持久幂等元数据和私有加密短期重放已验收并由 PR #10 合并为 `master/a925140`，默认关闭；GET/续链/会话已通过 A02 独立 CI 并由 PR #12 合并验收；FC-002 的默认关闭、仅 disabled 原生后台/事件恢复已由 PR #20–#22 独立验收，收费/背景父链及原生 WS 尚未交付，A01 短期重放仍不是历史权威 |
 | 原生 Messages/Gemini 入站、订阅账号池、支付、分布式部署 | 不属于当前已交付能力；本轮不新增支付 |
 
 现有假上游、SDK 模拟及 CI 记录不等于任意客户端/真实上游全兼容，也不等于已完成生产部署。每种能力分别记录“协议可转发、客户端实测兼容、strict 可计价”，不以品牌名称或路由存在代替验收。

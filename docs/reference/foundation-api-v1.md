@@ -146,3 +146,29 @@ compat/responseshttp 解析路由、重复查询、If-Match 和幂等头，映�
 所有生产包的精确层级/owner、十四组公开入口、L0 机制版本、递归类型/签名快照、
 独立新操作的真实接入与三层 DoD 均见 [接入与 DoD](foundation-integration-v1.md)。
 功能头 38a8cce、PR #18 与 master/889ecbd 完整 CI 均已通过，当前登记 frozen；不由旧基线或本地绿灯推定。
+
+## FC-002 追加冻结接口
+
+A03-01/02/03 已依次验收，最终头 `501507d`、PR #22 与 `master/a44d4d1` 完整 CI 均通过。
+新增两包按 [七项 DoD/最小运行/真实消费者](foundation-integration-v1.md#fc-002-追加公开入口冻结) 冻结；
+原十四组与 L0 完全保持，FND 历史范围不被本节替换。以下路径仍相对 internal/。
+
+| 路径 / 版本 | 公共契约与实际消费者 | 权限、错误与生命周期 |
+|---|---|---|
+| foundation/contracts/background/v1 / Version=1 | Service.Submit/Read/Cancel/Events；Resources.Kind/Delete；受理/回执/Stage、具名 EventQuery/Event/EventPage；L3 Responses 消费，L1 generation/原 Store 实现，main 注入 | 当前身份、创建 Key 和模型每次校验，跨 owner/Key/不可访问统一不可枚举；本地 queued 不证明上游受理。原子目标/事件/游标和 opaque claim/fencing，未知永不盲 POST；Cancel 请求事实不等于 native cancelled；仅已知终态可 Delete/CAS，保留幂等墓碑 |
+| 同上 Registration/Codec/Prepared/Observer | L2 独立原生 parser/codec 准备纯 wire 值，每次 RPC 新 decoder/observer；main 显式 opt-in，L1 复制注册后只读持有并执行同一 core | 具名 RemoteCommand/Observation 不是客户端网络/凭据/claim 授权，L3 不获得私有目标绑定。JSON RPC 结束不等于 native task 结束；原生全 terminal 事件才完成事件日志，原 v1 execution 不被扩展为任意 skip/事务回调 |
+| foundation/contracts/responses/v2 / Version=2 | Command.Base 组合原 appv1.Command；CancelResponse、Stream/StartingAfter；独立 Begin/Call.Handle/Close facade；L3 实现，L2 responseshttp.NewV2 消费 | 复用原身份/容量/有界正文/关闭 join；URL/query/HTTP/缓存头在 L2，L3 只发送已验证不透明事件字节；原 appv1 行为不扩张。StartingAfter 缺失/零区分、非法/重复/负数/溢出拒绝 |
+
+background 错误身份为具名 ErrUnavailable/Unauthorized/NotFound/Conflict/Capacity/Uncertain/
+CursorUnavailable/UnsupportedBilling/UnsupportedCapability，通过 errors.Is 保留；实现错误不泄漏路径、Key 或原生秘密。
+提交前由 L2 映射 JSON 状态，SSE 已提交后只能结束连接，不追加 JSON 或伪造成功终态。
+临时后台 SSE 保持 no-store，读取还受原 owner 120 次/分钟和交付容量保护，单写期限十秒。
+
+原生事件是有界 canonical SSE 字节，不是通用 JSON/SQL 载体；序号为可表示的非负 int64 范围，
+每条/每页 64 KiB、默认页 64/上限 128 条、每任务最多 8192 条并受总内容预留约束。
+同序号同 canonical 明文重用原密文，不同明文明确失败。EventPage.Terminal 只在终态事件已持久且本页追平尾部时为真，
+native JSON 终态可以继续持有私有 ReplayPending。观察有界、断开只停止观察；owner 关闭先停/取消 owned RPC 并 join 再关依赖。
+密钥/TTL/备份/回退细则及明确不可恢复边界统一见 [后台指南](responses-background.md)。
+
+冻结限默认关闭、disabled、自包含文本/函数工具的 HTTP JSON/SSE；不获得收费双 hold、成本许可、
+背景父链/会话、原生 WS、真实提供商/SDK 或生产部署验收。扩展注册不构成这些许可，未来变化仍先具名审批。

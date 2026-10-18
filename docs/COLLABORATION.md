@@ -251,6 +251,16 @@ Close 等 Handle/回调退出才归还容量，不能并发释放尚在运行的
 URL、HTTP 头、原生 JSON/SSE 终态与父链表示由 L2 解析/映射；业务只处理语义文档和状态 CAS。
 已冻结的公开入口、权限范围和 FND-05 验收条件见 [Foundation API v1](reference/foundation-api-v1.md#fnd-04-应用与表示)。
 
-## FC-002 当前集成切片
+## FC-002 当前已验收接口
 
-A03-01/02 已独立验收；A03-02 经 PR #21 合并为 `master/8a1da1f`，精确头及合并后 check/delivery 均成功。当前 A03-03 由集成单点修改原生事件 codec、owner runtime、私有持久事实及 HTTP/应用观察；统一 schema v15，公开 background/v1/responses/v2 签名保持候选且不变，原十四组冻结 v1/L0 不变。其他模块暂不依赖新候选入口，待最终事件消费者/强杀/完整 CI 与冻结记录通过。完整 A03/M3、收费后台和 WS 不因此完成。六项边界与唯一排期见 [PLAN](PLAN.md#s7-a03持久后台任务与事件恢复)，命令/验收见 [FC-002 记录](history/implementation-fc002.md)。
+A03-01 → A03-02 → A03-03 已依次验收。A03-03 经 PR #22 合并为 `master/a44d4d1`，
+功能头与合并后完整 check/delivery 均成功；两组追加入口 background/v1 / responses/v2
+现按 [七项 DoD 与真实消费者](reference/foundation-integration-v1.md#fc-002-追加公开入口冻结) 冻结。
+L3 仅依赖登记公开入口，不导入私有 backgroundstate、Store、Gateway 或协议实现；
+L2 parser/codec 保持纯字节/值准备，main 单点注册，L1 原 owner 才持有网络、当前授权与事务。
+共享注册、schema v15、main/OpenAPI 与 CI 继续由集成人员协调；新签名、权限或寿命变化仍先具名批准。
+
+此冻结只支持默认关闭、disabled、自包含文本/函数工具的原生后台 JSON/SSE 与事件恢复；
+不开放收费、背景父链、原生 WS 或真实厂商/SDK 许可，也不勾完整 A03/M3。
+原十四组冻结接口/L0 及 S5 门槛保持。排期见 [PLAN](PLAN.md#s7-a03持久后台任务与事件恢复)，
+精确来源与逐批验收见 [FC-002 记录](history/implementation-fc002.md#fc-002-最终验收与冻结)。

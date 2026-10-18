@@ -25,12 +25,15 @@ ledger、lifecycle、observability、responses、state、text 的十二个 v1 �
 L2 公开门面为 compat/responses/v1。所有包均声明 Version="1"；httpoutput 门面仅供 L2 使用，
 L3 接收 Output/Delivery，不构造 HTTP writer。其余 Go 导出名是实现接线，不自动成为功能可依赖的 API。
 
-FC-002 另行批准了两个**尚未冻结**的候选入口：L1 `background/v1` 与应用 `responses/v2`。
-A03-01/02 已独立验收；A03-02 经 PR #21 合并为 `master/8a1da1f`，包含已批准的 Resources.Kind/Delete 最小补充；A03-03 事件/恢复当前实施中，仍待本批最终验收与冻结记录。它们不重开上述十四组冻结入口，也不提前开放其他功能
-依赖候选接口；范围与资源寿命见 [后台约定](responses-background.md) 和 [FC-002-A](../proposals/FC-002A-resource-ownership-v1.md)。
+FC-002 又按用户批准顺序完成 A03-01/02/03。追加的 L1 `background/v1`（Version=1）
+与应用 `responses/v2`（Version=2）现按已验收的 disabled、自包含原生后台范围冻结；
+功能头 `501507d`、PR #22 与 `master/a44d4d1` 的完整 CI 均通过。
+上述十四组与 L0 没有签名/语义扩张；原 FND-05 证据仍只证明其原范围。
+追加入口的七项 DoD、真实独立 L3/L2 消费者和最小运行命令见
+[本页追加冻结](#fc-002-追加公开入口冻结)，资源寿命与限制见 [后台约定](responses-background.md)。
 接口、DTO、错误、资源规则、消费者与权限语义逐组见 [API 清单](foundation-api-v1.md)。
 
-[public-v1.json](../../internal/architecture/public-v1.json) 保存 L0 机制和这十四组公开入口的完整导出声明、
+[public-v1.json](../../internal/architecture/public-v1.json) 保存 L0 机制及十六组当前公开入口（原十四组加 FC-002 两组）的完整导出声明、
 常量值、结构字段/标签、接口及方法签名。正常测试比较编译器类型信息与该快照；不允许只改签名后保留绿灯。
 新接口、签名、权限或寿命变更仍先提出具名提案并获用户确认，再迁移所有消费者和更新快照；
 快照生成工具不构成批准。Go interface 新增方法也可能破坏实现者，不当作天然兼容。
@@ -97,3 +100,51 @@ go test -count=1 ./internal/architecture -run TestVersionedPublicSignaturesHideI
 审阅签名、行为回归与兼容/回退后，同批更新登记、快照、所有消费者和文档；
 不兼容接口优先另建 v2，旧冻结版本保留受控迁移期。没有 schema/密文格式变更的批次可整体退回前一匹配版本；
 不得借回退重发 unknown、释放原 hold 或删除迁移。
+
+## FC-002 追加公开入口冻结
+
+2026-10-18，A03-03 精确功能头 `501507d4c070208ed8e234cf6ff9cb19c156e25c` 经 PR #22
+合并为 `master/a44d4d147b7309679fa5b7005ed34c12473e4bf0`，合并树与功能头完全相同。
+push `39130613526`、PR `39130658258`、master `39131280478` 的 check/delivery 全部成功且无失败步骤，
+包含 Linux 全量 race、真实主程序冒烟、v15 容器安装/升级/备份恢复/退出。
+精确命令、首次失败修复、来源与限制见 [FC-002 最终记录](../history/implementation-fc002.md#fc-002-最终验收与冻结)。
+
+冻结增加两个入口，不重开原十四组/L0，也不发布仓库外 SDK：
+
+| 入口 | 版本与实际消费者 | 冻结范围 |
+|---|---|---|
+| [background/v1](../../internal/foundation/contracts/background/v1/background.go) | Version=1；L3 Responses 的 Service/Resources、L2 原生 parser/codec，main 注入 L1 owner/Store | disabled、自包含文本/函数工具的受理/读/取消/终态删除及原生事件；Submit/Receipt/Stage、EventQuery/EventPage、具名 RemoteCommand/Observation 和复制后只读 Registration |
+| [responses/v2](../../internal/foundation/contracts/responses/v2/responses.go) | Version=2；L3 的独立 V2 facade，由 L2 HTTP v2 调用 Begin/Call.Handle/Close | 组合原 v1 Command，新增 CancelResponse、Stream 和 StartingAfter；原 v1 的签名、查询拒绝、容量/身份/关闭语义保持 |
+
+全部 59 个生产包有精确 owner/layer；当前十六组公开入口与 L0 共十七项类型/签名快照持续校验。
+A03-03 与已验收 A03-02 的全部十七项完全相同；A03-02 唯一符号增量为用户另行批准的 Resources 补充。
+不存在由候选 Go 导出名推断冻结、任意 v2 通配豁免、L3 私有实现依赖或无类型事务回调。
+
+| 冻结要求 | 真实证据与边界 |
+|---|---|
+| 文档/版本 | 两包 Version 常量、[完整 API 清单](foundation-api-v1.md#fc-002-追加冻结接口)、layers/public-v1 登记；[批准提案](../proposals/FC-002-native-background-v1.md) 与 [Resources 补充](../proposals/FC-002A-resource-ownership-v1.md)；背景指南规定资源/错误/限制 |
+| 契约测试 | [受理/当前权限/fencing](../../internal/generation/background_test.go)、[资源分类/CAS/墓碑](../../internal/generation/background_resources_test.go)、[纯原生 SSE](../../internal/protocol/responses/background_stream_test.go)、[实际 HTTP v2](../../cmd/gateway/background_stream_test.go)、原 v1/A02/全量架构和 OpenAPI 回归；最终本地 1207 项/30 包，六个预期子进程 helper 跳过 |
+| 最小可运行样例 | 下方命令使用临时加密 SQLite、挂载测试密钥、真实 owner/gateway/core 与 loopback 原生上游；[生产二进制 smoke](../../tests/smoke/background.py) 由既有 local.py 自动调用，真实 SIGKILL/重启查询/游标/取消/关闭/模式拒绝/feature-off TTL；不依赖真实提供商 |
+| 扩展说明 | 新 L2 通过具名 Registration 的纯 Parser/Codec.Prepare 返回每次独立的 Input/Decoder/Observer，main 显式注册/选择渠道，L1 拥有受限派发。v2 是独立 facade，不给 v1 接口强加新方法；进一步签名/语义/权限/寿命变更仍先具名批准 |
+| 基础约定 | 当前 owner/创建 Key/模型与事务权威不变；有界 worker/租约/网络/读/写期限，错误脱敏、不记录密钥/正文，固定 TTL 与关闭 join；native sequence 的 nil/0 不同，JSON 任务终态不等于事件尾部完成，持久后再公开，观察断开不取消任务，unknown 不盲重发；细则见后台指南 |
+| 限制清单 | 默认关闭，仅 disabled、自包含文本/函数工具、明确 opt-in 的原生 API-key Bearer 渠道；store=false 仍临时加密保留；单实例 SQLite。收费双 hold/成本、父链/会话组合、原生 WS、真实提供商/SDK 与 ZDR 认证均未完成，完整 A03/M3 保持未验收 |
+| 独立上层接入 | [L3 Responses](../../internal/responses/background.go) 只消费登记的 background/v1 与应用 v2/其他公开端口，不导入 Store/Gateway/协议/网络；[L2 原生 codec](../../internal/protocol/responses/background.go) 与 [HTTP v2](../../internal/compat/responseshttp/background.go) 不持有业务/SQL。实际 HTTP 集成、[五个强杀窗口](../../internal/generation/background_runtime_test.go) 与 [故障/尾部矩阵](../../internal/generation/background_event_failures_test.go) 穿过真实链路，不用 mock 证明持久性 |
+
+最小运行（仅隔离测试数据，无真实密钥/账号/外部调用）：
+
+```powershell
+$env:GOARCH = 'amd64'
+$env:GOFLAGS = '-buildvcs=false'
+go test -count=1 ./cmd/gateway -run TestNativeBackgroundSSE -timeout 3m
+go test -count=1 ./internal/generation -run TestBackgroundNative -timeout 3m
+python tests/smoke/local.py --go go
+```
+
+L0 未改：一次 RPC 的 ProtocolComplete/Committed 不能证明任务终态。L1 private ReplayPending
+只保留已知终态任务的事件恢复义务；L2 只有完整原生 terminal 事件才确认事件日志完成；
+L3 发出已持久的不透明协议字节，页尾未追平不能报完整。未知/未持久 ID、缺序号、冲突、过期或不可重建
+都不补造 DONE；内容 TTL 不因恢复或财务未知无限延长。读写/关闭及错误边界详见后台指南。
+
+本次冻结记录只改 Markdown，复用同一 388 路径的已验收代码来源
+`adc6d18a07911a0d5e324c16bff37a126b9df04ce6ee3883abbd2212d820cd8d`；
+只做本地差异/链接/状态一致性，不重复 Go/main 行为测试。正常自动 push/PR/master CI 不修改、不绕过。

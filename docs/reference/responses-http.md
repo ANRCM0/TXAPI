@@ -11,14 +11,18 @@ their own complete push/PR/master CI. See [history contract](responses-history.m
 and [A02 evidence](../history/implementation-s7-a02.md). The A01 exclusions below
 describe its original scope; current history support follows the A02 contract.
 
-## FC-002 Background Candidate
+## FC-002 Accepted Background Extension
 
-A03-01's owner-state baseline was accepted through PR #20 / `master/c1b8264`.
-A03-02 now implements an opt-in disabled-billing-only native background chain;
-its OpenAPI 0.5.0 / 92 operations are a worktree candidate, not yet accepted.
-See [background runtime](responses-background.md) for fixed temporary retention,
-positive resource authority, restart/cancel/delete and the unimplemented event
-recovery boundary. The foreground sections retain A01/A02 acceptance semantics.
+A03-01/02/03 were accepted in order through PR #20/#21/#22. A03-03 feature
+`501507d` and merged `master/a44d4d1` passed complete push/PR/master CI, including
+Linux race, actual-main smoke and schema-v15 container delivery. OpenAPI 0.5.0 /
+92 operations adds the opt-in disabled-billing-only self-contained native background
+chain, original stream=true event persistence/replay and cancel/terminal delete.
+The two additional versioned entries are frozen only for that accepted subset.
+See [background runtime](responses-background.md), [DoD](foundation-integration-v1.md#fc-002-追加公开入口冻结)
+and [exact evidence](../history/implementation-fc002.md#fc-002-最终验收与冻结).
+The foreground sections retain their original A01/A02 semantics; this extension
+is not full A03/M3, charged background, parent composition, native WS or SDK/provider certification.
 
 ## Supported Surface
 
