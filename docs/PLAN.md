@@ -2,6 +2,10 @@
 
 核对日期：2026-10-18。本文是唯一活动开发计划；产品边界和最终分层见 [ARCHITECTURE.md](ARCHITECTURE.md)，操作命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，团队接线规则见 [COLLABORATION.md](COLLABORATION.md)。历史 P 系列方案不再用于排期；阶段证据见 [S0–S5 历史验收](history/acceptance-s0-s5.md)，后续实现、命令和合并事实见 [S5–A3 批次记录](history/implementation-s5-a3.md)。
 
+## R03b-2 当前实施批次
+
+2026-10-19：默认关闭的原生 Responses WS 产品接线已在本地实现，尚待最终功能头完整 CI 与合并。范围为 billing disabled、显式实际模型、官方 OpenAI endpoint、单连接串行文本/函数轮次与连接内最新 response ID 续接；不支持持久重连、后台、OAuth 或收费。运行边界见 [WS 指南](reference/responses-websocket.md)，六项工作协议见 [实施决策](../REFERENCE-R03B2-IMPLEMENTATION.md)，精确验证见 [吸收记录](../REFERENCE-ADOPTION-PROGRESS.md)。S5-03、完整 A03/A04 和 R00-R07 总目标仍未完成；下文历史时点不扩大本批验收。
+
 ## 地基符合性收口FC-001
 
 2026-10-18 用户要求按“地基先行、上层并行”的四层约束评估，并确认开始下一批。[FC-001 四层地基契约与迁移提案](proposals/FC-001-foundation-contracts-v1.md) 已按用户批准的 FND-01 至 FND-05 顺序全部实施并验收；最终功能头 `38a8cce`、PR #18 与合并后 `master/889ecbd` 完整 CI 通过，L0/L1/L2 v1 现登记 frozen。该冻结记录合并后开放按公开契约和独立目录开展 L3 并行；下一产品批次为 A03。S5 成本证明和 A03/A04 产品能力仍未完成，不因地基验收自动通过。

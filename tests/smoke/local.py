@@ -89,6 +89,7 @@ def service(command, log_path, env=None):
 
 def control_workflow(base, upstream_url):
     """Exercise the actual console APIs without using the legacy admin key."""
+    assert request(base + "/v1/responses")[0] == 404, "Disabled native WS exposed an upgrade route"
     def api(path, session=None, payload=None, method=None, expected=200):
         status, raw = request(base + path, session, payload, method)
         assert status == expected, (path, status, raw)

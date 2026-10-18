@@ -37,6 +37,7 @@ type Deps struct {
 	Ledger        ledger.Service
 	Metrics       Metrics
 	Responses     http.Handler
+	ResponsesWS   http.Handler
 	AdminAuth     gin.HandlerFunc
 	RateGate      admission.RequestGate
 	RateLimiter   admission.Limiter
@@ -162,6 +163,15 @@ func NewEngine(deps Deps) *gin.Engine {
 		deps.Responses.ServeHTTP(c.Writer, c.Request)
 	}
 	engine.POST("/v1/responses", auth.Handle(), responsesHandler)
+	engine.GET("/v1/responses", func(c *gin.Context) {
+		if deps.ResponsesWS == nil {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found", "message": "Native WebSocket mode is not enabled"}})
+			return
+		}
+		c.Next()
+	}, auth.Handle(), func(c *gin.Context) {
+		deps.ResponsesWS.ServeHTTP(c.Writer, c.Request)
+	})
 	for _, route := range []struct{ method, path string }{
 		{"GET", "/v1/responses/:response_id"}, {"DELETE", "/v1/responses/:response_id"}, {"GET", "/v1/responses/:response_id/input_items"}, {"POST", "/v1/responses/:response_id/cancel"},
 		{"POST", "/v1/conversations"}, {"GET", "/v1/conversations/:conversation_id"}, {"POST", "/v1/conversations/:conversation_id"}, {"DELETE", "/v1/conversations/:conversation_id"},

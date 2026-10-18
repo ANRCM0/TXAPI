@@ -84,6 +84,15 @@ billing:
   # reasoning/cache/错误请求的总可计费范围及每个绑定凭据的最高适用价格；
   # 已登记标准费率下限不替代失败收费/附加费证明或未来价格变更核查。
 
+# Optional native Responses WebSocket. Disabled independently of HTTP Responses.
+# Enabling requires billing.mode=disabled, activated credential encryption, and
+# explicit actual model names. Only the official OpenAI endpoint is used.
+responses_ws:
+  enabled: false
+  models: []
+  # Browser origins must be same-origin or exact http(s) scheme and host.
+  origins: []
+
 # Optional durable generation runtime. This does not expose a background API.
 # Secret bytes belong in a separately mounted JSON file, never in this YAML.
 # The runtime requires configured strict fee/provider ceilings and contracts.

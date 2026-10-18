@@ -118,8 +118,12 @@ func TestOpenAPIContainsEveryRouteAndSecurityBoundary(t *testing.T) {
 		url := documentedParam.ReplaceAllString(path, "1")
 		rec := httptest.NewRecorder()
 		engine.ServeHTTP(rec, httptest.NewRequest(route.Method, url, strings.NewReader(`{}`)))
-		if rec.Code != 401 {
-			t.Errorf("secured route %s allowed anonymous request: %d", key, rec.Code)
+		expectedStatus := 401
+		if route.Method == "GET" && path == "/v1/responses" {
+			expectedStatus = 404 // The optional native WS feature is disabled in this fixture.
+		}
+		if rec.Code != expectedStatus {
+			t.Errorf("secured route %s anonymous status = %d, want %d", key, rec.Code, expectedStatus)
 		}
 	}
 	for path := range remaining {
