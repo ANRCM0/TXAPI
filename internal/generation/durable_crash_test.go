@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	state "minigateway/internal/foundation/contracts/state/v1"
+	"minigateway/internal/foundation/persistence"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -50,7 +52,7 @@ type crashSealedOutput struct {
 	pause func()
 }
 
-func (s crashSealedOutput) AppendGenerationSegment(ctx context.Context, record model.GenerationRecord, segment model.GenerationSegment) error {
+func (s crashSealedOutput) AppendGenerationSegment(ctx context.Context, record state.GenerationRecord, segment state.GenerationSegment) error {
 	err := s.ArchiveStore.AppendGenerationSegment(ctx, record, segment)
 	if err == nil && segment.Kind == "result" {
 		s.pause()
@@ -80,7 +82,7 @@ func TestDurableExecutionCrashWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine, ch := strictRecordingFixture(t, st)
-	acceptorOpts := intentOptions(st, engine)
+	acceptorOpts := intentOptions(st, persistence.Admission(engine))
 	acceptorOpts.QueueTTL = 30 * time.Second
 	acceptor := intentAcceptor(t, acceptorOpts)
 	in := strictSocketExecution()
@@ -113,7 +115,7 @@ func TestDurableExecutionCrashWorker(t *testing.T) {
 	opts.Acceptor = acceptor
 	if mode == "after-seal" {
 		archiveOpts := archiveOptions(st)
-		archiveOpts.Store = crashSealedOutput{ArchiveStore: st, pause: pause}
+		archiveOpts.Store = crashSealedOutput{ArchiveStore: persistence.Archive(st), pause: pause}
 		opts.Archive = testArchive(t, archiveOpts)
 	}
 	if err := (&DurableRunner{opts: opts}).runOne(context.Background()); err != nil {

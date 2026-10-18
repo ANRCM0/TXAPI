@@ -11,19 +11,12 @@ import (
 
 	"minigateway/internal/access"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
-	"minigateway/internal/model"
+	state "minigateway/internal/foundation/contracts/state/v1"
 )
 
 // IntentLeases owns atomic claim/renewal and financial-safe rejection. It is
 // neither a database callback nor permission to create an uncosted attempt.
-type IntentLeases interface {
-	ClaimGenerationIntent(context.Context, time.Duration) (model.GenerationIntent, model.GenerationClaim, error)
-	RenewGenerationClaim(context.Context, model.GenerationClaim, time.Duration) (bool, error)
-	AttachGenerationOutput(context.Context, model.GenerationClaim, string) error
-	CompleteGenerationOutput(context.Context, model.GenerationClaim) error
-	RejectGenerationClaim(context.Context, model.GenerationClaim) error
-	QuarantineGenerationClaim(context.Context, model.GenerationClaim) error
-}
+type IntentLeases = state.IntentLeases
 
 type DurableOptions struct {
 	Acceptor      *IntentAcceptor
@@ -32,7 +25,7 @@ type DurableOptions struct {
 	Workers       int
 	PollInterval  time.Duration
 	LeaseDuration time.Duration
-	Execute       func(context.Context, execv1.Output, execv1.Invocation, model.GenerationClaim) execv1.Outcome
+	Execute       func(context.Context, execv1.Output, execv1.Invocation, state.GenerationClaim) execv1.Outcome
 }
 
 func nilPort(port any) bool {
@@ -79,7 +72,7 @@ func NewDurableRunner(parent context.Context, opts DurableOptions) (*DurableRunn
 				case <-ctx.Done():
 					return
 				case <-timer.C:
-					if err := r.runOne(ctx); err != nil && !errors.Is(err, model.ErrIntentNotFound) && ctx.Err() == nil {
+					if err := r.runOne(ctx); err != nil && !errors.Is(err, state.ErrIntentNotFound) && ctx.Err() == nil {
 						// Never log opaque storage/callback errors containing content.
 						slog.Warn("durable generation did not complete; inspect intent and ledger state")
 					}
@@ -110,7 +103,7 @@ func (r *DurableRunner) runOne(ctx context.Context) (err error) {
 	return r.consume(ctx, in, claim)
 }
 
-func (r *DurableRunner) consume(parent context.Context, in model.GenerationIntent, claim model.GenerationClaim) (err error) {
+func (r *DurableRunner) consume(parent context.Context, in state.GenerationIntent, claim state.GenerationClaim) (err error) {
 	ctx, cancel := context.WithDeadline(parent, time.UnixMilli(in.Deadline))
 	defer cancel()
 	stop, joined := make(chan struct{}), make(chan struct{})
@@ -172,7 +165,7 @@ func (r *DurableRunner) consume(parent context.Context, in model.GenerationInten
 		// execution became uncertain, this cannot refund an attempted intent.
 		err = errors.Join(err, r.opts.Leases.RejectGenerationClaim(finalCtx, claim))
 	}()
-	if in.ID != claim.ID || in.ClaimEpoch != claim.Epoch || in.State != model.IntentClaimed {
+	if in.ID != claim.ID || in.ClaimEpoch != claim.Epoch || in.State != state.IntentClaimed {
 		return ErrIntentIntegrity
 	}
 	execution, err := r.opts.Acceptor.openIntent(in)

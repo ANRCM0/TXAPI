@@ -18,19 +18,19 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), ".."))
 	allowed := map[string]map[string]bool{
 		"access": {"foundation": true}, "core": {}, "config": {}, "logging": {}, "metrics": {}, "secrets": {},
-		"model":      {"access": true},
+		"model":      {"access": true, "foundation": true},
 		"protocol":   {"protocol": true, "foundation": true},
 		"scheduler":  {"model": true, "scheduler": true},
 		"billing":    {"model": true, "foundation": true, "billing": true},
-		"store":      {"model": true, "access": true, "config": true, "store": true, "secrets": true},
-		"management": {"model": true, "store": true},
-		"generation": {"access": true, "foundation": true, "model": true, "secrets": true},
-		"responses":  {"foundation": true, "generation": true, "protocol": true, "model": true, "secrets": true},
+		"store":      {"foundation": true, "model": true, "access": true, "config": true, "store": true, "secrets": true},
+		"management": {"foundation": true},
+		"generation": {"access": true, "foundation": true, "secrets": true},
+		"responses":  {"foundation": true, "protocol": true},
 		"transport":  {"transport": true},
 		"compat":     {"foundation": true, "compat": true},
-		"foundation": {"foundation": true, "access": true, "core": true, "gateway": true, "model": true},
+		"foundation": {"store": true, "foundation": true, "access": true, "core": true, "gateway": true, "model": true},
 		"gateway":    {"access": true, "core": true, "model": true, "billing": true, "scheduler": true, "metrics": true, "gateway": true, "foundation": true},
-		"server":     {"protocol": true, "compat": true, "access": true, "model": true, "config": true, "store": true, "billing": true, "gateway": true, "management": true, "metrics": true, "server": true},
+		"server":     {"foundation": true, "protocol": true, "compat": true, "access": true, "model": true, "config": true, "store": true, "billing": true, "gateway": true, "management": true, "metrics": true, "server": true},
 	}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {

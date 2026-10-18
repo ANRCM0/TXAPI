@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"minigateway/internal/compat/httpoutput"
 	authority "minigateway/internal/foundation/identity"
+	"minigateway/internal/foundation/persistence"
+	"minigateway/internal/secrets"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -78,15 +80,19 @@ func (e *historyExecutor) Execute(ctx context.Context, out execv1.Output, in exe
 
 func historyService(t *testing.T, f *responseFixture, e app.Executor, active string, keys map[string][]byte) *app.Service {
 	t.Helper()
-	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: f.st, Resolve: f.st.ResolvePrincipal, ActiveKey: active, Keys: keys, Retention: time.Hour, MaxRecordBytes: 65536, Limits: model.GenerationArchiveLimits{InstanceBytes: 4 << 20, OwnerBytes: 2 << 20, InstanceRecords: 64, OwnerRecords: 32}})
+	archive, err := generation.NewArchive(generation.ArchiveOptions{Store: persistence.Archive(f.st), Resolve: f.st.ResolvePrincipal, ActiveKey: active, Keys: keys, Retention: time.Hour, MaxRecordBytes: 65536, Limits: model.GenerationArchiveLimits{InstanceBytes: 4 << 20, OwnerBytes: 2 << 20, InstanceRecords: 64, OwnerRecords: 32}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	history, err := app.NewHistory(app.HistoryOptions{Store: f.st, ActiveKey: active, Keys: keys, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 64, OwnerRecords: 32, InstanceBytes: 32 << 20, OwnerBytes: 16 << 20}})
+	protector, err := secrets.NewRing(active, keys)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := app.New(context.Background(), app.Options{History: history, Store: f.st, Executor: e, Archive: archive, Identity: authority.New(f.st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 64, OwnerRecords: 32}, ActiveRequests: 8, OwnerRequests: 4})
+	history, err := app.NewHistory(app.HistoryOptions{Store: persistence.History(f.st), Protector: protector, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 64, OwnerRecords: 32, InstanceBytes: 32 << 20, OwnerBytes: 16 << 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := app.New(context.Background(), app.Options{History: history, Store: persistence.Receipts(f.st), Executor: e, Archive: generation.PublicArchive(archive), Identity: authority.New(f.st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 64, OwnerRecords: 32}, ActiveRequests: 8, OwnerRequests: 4})
 	if err != nil {
 		t.Fatal(err)
 	}

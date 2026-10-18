@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	state "minigateway/internal/foundation/contracts/state/v1"
+	"minigateway/internal/foundation/persistence"
 	bridge "minigateway/internal/foundation/runtime"
 	"minigateway/internal/protocol"
 	"net/http"
@@ -24,7 +26,7 @@ import (
 )
 
 func archiveOptions(st *store.Store) ArchiveOptions {
-	return ArchiveOptions{Store: st, Resolve: st.ResolvePrincipal, ActiveKey: "key-1", Keys: map[string][]byte{"key-1": bytes.Repeat([]byte{21}, 32)},
+	return ArchiveOptions{Store: persistence.Archive(st), Resolve: st.ResolvePrincipal, ActiveKey: "key-1", Keys: map[string][]byte{"key-1": bytes.Repeat([]byte{21}, 32)},
 		Retention: time.Hour, MaxRecordBytes: 65536,
 		Limits: model.GenerationArchiveLimits{InstanceBytes: 1 << 20, OwnerBytes: 1 << 19, InstanceRecords: 16, OwnerRecords: 8}}
 }
@@ -115,7 +117,7 @@ func TestRecordedWorkerJSONAndSSESurviveDatabaseReopenWithoutPlaintext(t *testin
 				t.Fatal(err)
 			}
 			defer reopened.Close()
-			opts.Store, opts.Resolve = reopened, reopened.ResolvePrincipal
+			opts.Store, opts.Resolve = persistence.Archive(reopened), reopened.ResolvePrincipal
 			after, err := testArchive(t, opts).Read(context.Background(), binding, id)
 			if err != nil || !bytes.Equal(got.Body, after.Body) {
 				t.Fatalf("reopen lost output: %v", err)
@@ -261,7 +263,7 @@ type failingArchiveStore struct {
 	panicFinal bool
 }
 
-func (s failingArchiveStore) AppendGenerationSegment(ctx context.Context, r model.GenerationRecord, segment model.GenerationSegment) error {
+func (s failingArchiveStore) AppendGenerationSegment(ctx context.Context, r state.GenerationRecord, segment state.GenerationSegment) error {
 	if segment.Kind == "result" && s.panicFinal {
 		panic("private storage failure")
 	}
@@ -282,7 +284,7 @@ func TestArchiveStorageFailureAndFinalizerPanicNeverReplayOrKillWorker(t *testin
 		t.Run(kind, func(t *testing.T) {
 			st, binding, _ := fixture(t)
 			opts := archiveOptions(st)
-			opts.Store = failingArchiveStore{ArchiveStore: st, kind: kind, panicFinal: kind == "panic"}
+			opts.Store = failingArchiveStore{ArchiveStore: persistence.Archive(st), kind: kind, panicFinal: kind == "panic"}
 			a := testArchive(t, opts)
 			var calls atomic.Int64
 			g, capacity := newGateway(t, gateway.Options{BillingMode: billing.ModeDisabled, RetryTimes: 2, Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { calls.Add(1); return response(), nil })}})
@@ -318,7 +320,7 @@ type blockedArchiveCreate struct {
 	started, release chan struct{}
 }
 
-func (s blockedArchiveCreate) CreateGenerationRecord(ctx context.Context, r model.GenerationRecord, limits model.GenerationArchiveLimits) error {
+func (s blockedArchiveCreate) CreateGenerationRecord(ctx context.Context, r state.GenerationRecord, limits model.GenerationArchiveLimits) error {
 	close(s.started)
 	<-s.release
 	return s.ArchiveStore.CreateGenerationRecord(ctx, r, limits)
@@ -328,7 +330,7 @@ func TestArchiveHandoffDoesNotHoldShutdownLockAndCloseJoinsStorage(t *testing.T)
 	st, binding, _ := fixture(t)
 	opts := archiveOptions(st)
 	started, release := make(chan struct{}), make(chan struct{})
-	opts.Store = blockedArchiveCreate{ArchiveStore: st, started: started, release: release}
+	opts.Store = blockedArchiveCreate{ArchiveStore: persistence.Archive(st), started: started, release: release}
 	r := recordingRunner(t, st, testArchive(t, opts), func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
 		panic("closed handoff executed")
 	})
@@ -419,7 +421,8 @@ func TestArchiveRejectsMissingKeysAndCanceledObserversWithoutRecords(t *testing.
 		func(o *ArchiveOptions) { o.Keys["key-1"] = []byte("not-32-bytes") },
 		func(o *ArchiveOptions) { o.Retention = 0 },
 		func(o *ArchiveOptions) { o.MaxRecordBytes = 16 },
-		func(o *ArchiveOptions) { o.Store = (*store.Store)(nil) },
+		func(o *ArchiveOptions) { o.Store = (*failingArchiveStore)(nil) },
+		func(o *ArchiveOptions) { o.Store = persistence.Archive((*store.Store)(nil)) },
 	} {
 		opts := archiveOptions(st)
 		modify(&opts)

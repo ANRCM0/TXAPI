@@ -3,6 +3,7 @@ package generation
 import (
 	"bytes"
 	"context"
+	"minigateway/internal/foundation/persistence"
 	"testing"
 
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
@@ -12,7 +13,7 @@ import (
 func TestContentKeyRequirementsIncludeInputOutputAndStableDigest(t *testing.T) {
 	st, binding, _ := fixture(t)
 	engine, _ := strictRecordingFixture(t, st)
-	opts := intentOptions(st, engine)
+	opts := intentOptions(st, persistence.Admission(engine))
 	a := intentAcceptor(t, opts)
 	admitIntent(t, a, binding, "required-input-key")
 	archive := testArchive(t, archiveOptions(st))

@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"minigateway/internal/store"
+	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 )
 
 // ListChannels 处理 GET /api/channels。
@@ -59,7 +59,7 @@ func (h *Handler) GetChannel(c *gin.Context) {
 
 // CreateChannel 处理 POST /api/channels。
 func (h *Handler) CreateChannel(c *gin.Context) {
-	var in store.ChannelInput
+	var in cfg.ChannelInput
 	if !bindJSON(c, &in) {
 		return
 	}
@@ -79,7 +79,7 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var in store.ChannelInput
+	var in cfg.ChannelInput
 	if !bindJSON(c, &in) {
 		return
 	}

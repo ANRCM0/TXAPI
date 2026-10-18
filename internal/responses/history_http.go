@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	identity "minigateway/internal/foundation/contracts/identity/v1"
-	"minigateway/internal/model"
+	state "minigateway/internal/foundation/contracts/state/v1"
 )
 
 var errHistoryRequest = errors.New("invalid history request")
@@ -53,15 +53,15 @@ func (s *Service) allowHistoryRead(owner uint) bool {
 
 func historyError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, model.ErrHistoryNotFound):
+	case errors.Is(err, state.ErrHistoryNotFound):
 		respond(w, 404, "not_found", "history is unavailable")
 	case errors.Is(err, identity.ErrUnauthorized):
 		respond(w, 401, "unauthorized", "identity is no longer authorized")
-	case errors.Is(err, model.ErrHistoryConflict):
+	case errors.Is(err, state.ErrHistoryConflict):
 		respond(w, 409, "history_conflict", "history changed or a generation is active or uncertain")
-	case errors.Is(err, model.ErrHistoryCapacity):
+	case errors.Is(err, state.ErrHistoryCapacity):
 		respond(w, 429, "history_capacity", "history capacity or context limit exceeded")
-	case errors.Is(err, model.ErrHistoryContext):
+	case errors.Is(err, state.ErrHistoryContext):
 		respond(w, 409, "history_context_unavailable", "complete self-contained history cannot be reconstructed")
 	case errors.Is(err, errHistoryRequest):
 		respond(w, 400, "invalid_request_error", "invalid or unsupported history request")
@@ -116,7 +116,7 @@ func historyMetadata(raw json.RawMessage) (map[string]string, error) {
 	return m, nil
 }
 
-func conversationObject(row model.ResponseHistory, c historyContent) any {
+func conversationObject(row state.ResponseHistory, c historyContent) any {
 	return map[string]any{"id": row.ID, "object": "conversation", "created_at": row.CreatedAt / 1000, "metadata": c.Metadata}
 }
 
@@ -196,7 +196,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 	// generation's RPM/TPM or budget. Unknown query switches are not ignored.
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 2 || parts[0] != "v1" {
-		historyError(w, model.ErrHistoryNotFound)
+		historyError(w, state.ErrHistoryNotFound)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "conversations" && r.Method == http.MethodPost {
@@ -235,7 +235,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 		content := historyContent{Ready: true, Items: items, Metadata: metadata}
 		row, err = h.seal(row, content)
 		if err == nil {
-			err = h.apply(r.Context(), b, []model.HistoryChange{{Record: row}})
+			err = h.apply(r.Context(), b, []state.HistoryChange{{Record: row}})
 		}
 		if err != nil {
 			historyError(w, err)
@@ -246,7 +246,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 		return
 	}
 	if len(parts) < 3 {
-		historyError(w, model.ErrHistoryNotFound)
+		historyError(w, state.ErrHistoryNotFound)
 		return
 	}
 	id := parts[2]
@@ -256,13 +256,13 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 		return
 	}
 	if parts[1] == "responses" && row.Kind != "response" || parts[1] == "conversations" && row.Kind != "conversation" {
-		historyError(w, model.ErrHistoryNotFound)
+		historyError(w, state.ErrHistoryNotFound)
 		return
 	}
 	w.Header().Set("ETag", `"`+strconv.FormatUint(row.Version, 10)+`"`)
 	if row.Kind == "response" {
 		if !content.Ready || row.Busy != "" {
-			historyError(w, model.ErrHistoryConflict)
+			historyError(w, state.ErrHistoryConflict)
 			return
 		}
 		switch {
@@ -287,7 +287,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 		return
 	}
 	if row.Kind != "conversation" || parts[1] != "conversations" {
-		historyError(w, model.ErrHistoryNotFound)
+		historyError(w, state.ErrHistoryNotFound)
 		return
 	}
 	if len(parts) == 3 && r.Method == http.MethodGet && r.URL.RawQuery == "" {
@@ -314,7 +314,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 				return
 			}
 		}
-		historyError(w, model.ErrHistoryNotFound)
+		historyError(w, state.ErrHistoryNotFound)
 		return
 	}
 	if r.URL.RawQuery != "" {
@@ -323,7 +323,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 	}
 	if row.Busy != "" || content.Active != "" {
 		if !(len(parts) == 3 && r.Method == http.MethodDelete && row.Busy == "uncertain") {
-			historyError(w, model.ErrHistoryConflict)
+			historyError(w, state.ErrHistoryConflict)
 			return
 		}
 	}
@@ -337,7 +337,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 	}
 	old := row.Version
 	if !historyMatch(r, row) {
-		historyError(w, model.ErrHistoryConflict)
+		historyError(w, state.ErrHistoryConflict)
 		return
 	}
 	var result any
@@ -402,7 +402,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 			}
 		}
 		if !found {
-			err = model.ErrHistoryNotFound
+			err = state.ErrHistoryNotFound
 		}
 		result = conversationObject(row, content)
 	default:
@@ -415,7 +415,7 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 	row.Version++
 	row, err = h.seal(row, content)
 	if err == nil {
-		err = h.apply(r.Context(), b, []model.HistoryChange{{Expected: old, Record: row}})
+		err = h.apply(r.Context(), b, []state.HistoryChange{{Expected: old, Record: row}})
 	}
 	if err != nil {
 		historyError(w, err)
@@ -425,13 +425,13 @@ func (s *Service) historyHTTP(w http.ResponseWriter, r *http.Request, b identity
 	historyJSON(w, result)
 }
 
-func historyMatch(r *http.Request, row model.ResponseHistory) bool {
+func historyMatch(r *http.Request, row state.ResponseHistory) bool {
 	match := r.Header.Get("If-Match")
 	return match == "" || match == `"`+strconv.FormatUint(row.Version, 10)+`"`
 }
-func (h *History) delete(ctx context.Context, b identity.Binding, row model.ResponseHistory, c historyContent, r *http.Request) error {
+func (h *History) delete(ctx context.Context, b identity.Binding, row state.ResponseHistory, c historyContent, r *http.Request) error {
 	if !historyMatch(r, row) {
-		return model.ErrHistoryConflict
+		return state.ErrHistoryConflict
 	}
 	old := row.Version
 	row.Version++
@@ -447,5 +447,5 @@ func (h *History) delete(ctx context.Context, b identity.Binding, row model.Resp
 			return err
 		}
 	}
-	return h.apply(ctx, b, []model.HistoryChange{{Expected: old, Record: row}})
+	return h.apply(ctx, b, []state.HistoryChange{{Expected: old, Record: row}})
 }

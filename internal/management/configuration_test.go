@@ -2,6 +2,8 @@ package management
 
 import (
 	"errors"
+	cfg "minigateway/internal/foundation/contracts/configuration/v1"
+	"minigateway/internal/foundation/persistence"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,8 +26,8 @@ func configurationTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-func configurationChannel(name string) *store.ChannelInput {
-	return &store.ChannelInput{Name: name, Type: "openai", BaseURL: "http://127.0.0.1:9911", Models: []string{"m1"}, APIKey: "temporary-fixture-key"}
+func configurationChannel(name string) *cfg.ChannelInput {
+	return &cfg.ChannelInput{Name: name, Type: "openai", BaseURL: "http://127.0.0.1:9911", Models: []string{"m1"}, APIKey: "temporary-fixture-key"}
 }
 
 // Moved from server/api: the publication state machine now belongs here.
@@ -47,7 +49,7 @@ func TestConfigurationSavedFailureRetainsDataAndApplyDoesNotSaveAgain(t *testing
 	st := configurationTestStore(t)
 	fail := false
 	var publications int
-	service := NewConfiguration(st, func() error {
+	service := NewConfiguration(persistence.Configuration(st), func() error {
 		publications++
 		if fail {
 			return errors.New("private-publication-detail")
@@ -82,7 +84,7 @@ func TestConfigurationSavedFailureRetainsDataAndApplyDoesNotSaveAgain(t *testing
 func TestConfigurationRejectedSaveDoesNotPublish(t *testing.T) {
 	st := configurationTestStore(t)
 	var channelPublications, pricePublications int
-	service := NewConfiguration(st, func() error { channelPublications++; return nil }, func() error { pricePublications++; return nil })
+	service := NewConfiguration(persistence.Configuration(st), func() error { channelPublications++; return nil }, func() error { pricePublications++; return nil })
 	before := service.Status()
 	invalid := configurationChannel("invalid")
 	invalid.APIKey = ""
@@ -90,7 +92,7 @@ func TestConfigurationRejectedSaveDoesNotPublish(t *testing.T) {
 	if err == nil || change.Saved {
 		t.Fatal("invalid channel was reported saved")
 	}
-	_, change, err = service.UpsertPrice("m1", &store.PriceInput{InputPricePer1K: -1})
+	_, change, err = service.UpsertPrice("m1", &cfg.PriceInput{InputPricePer1K: -1})
 	if err == nil || change.Saved {
 		t.Fatal("invalid price was reported saved")
 	}
@@ -103,7 +105,7 @@ func TestConfigurationRejectedSaveDoesNotPublish(t *testing.T) {
 func TestConfigurationNilMutationInputsDoNotSaveOrPublish(t *testing.T) {
 	st := configurationTestStore(t)
 	var publications int
-	service := NewConfiguration(st, func() error { publications++; return nil }, nil)
+	service := NewConfiguration(persistence.Configuration(st), func() error { publications++; return nil }, nil)
 	channel, _, err := service.CreateChannel(configurationChannel("unchanged"))
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +145,7 @@ func TestConfigurationNilMutationInputsDoNotSaveOrPublish(t *testing.T) {
 
 func TestConfigurationCommittedCacheFailureAdvancesOnce(t *testing.T) {
 	st := configurationTestStore(t)
-	service := NewConfiguration(st, func() error { _, err := st.ChannelSnapshot(); return err }, nil)
+	service := NewConfiguration(persistence.Configuration(st), func() error { _, err := st.ChannelSnapshot(); return err }, nil)
 	key, err := st.CreateToken(&store.TokenInput{Name: "corrupt-cache-fixture", Key: "temporary-token-key"})
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +184,7 @@ func TestConfigurationCrossResourceWriteAndApplyWaitForPublication(t *testing.T)
 	var unblock sync.Once
 	defer unblock.Do(func() { close(release) })
 	var blockNext atomic.Bool
-	service := NewConfiguration(st, func() error {
+	service := NewConfiguration(persistence.Configuration(st), func() error {
 		if blockNext.Swap(false) {
 			close(entered)
 			<-release
@@ -204,7 +206,7 @@ func TestConfigurationCrossResourceWriteAndApplyWaitForPublication(t *testing.T)
 	priceStarted, applyStarted := make(chan struct{}), make(chan struct{})
 	go func() {
 		close(priceStarted)
-		_, _, err := service.UpsertPrice("m1", &store.PriceInput{InputPricePer1K: 1, OutputPricePer1K: 2})
+		_, _, err := service.UpsertPrice("m1", &cfg.PriceInput{InputPricePer1K: 1, OutputPricePer1K: 2})
 		priceDone <- err
 	}()
 	go func() { close(applyStarted); applyDone <- service.Apply() }()

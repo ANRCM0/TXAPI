@@ -7,31 +7,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
 	"minigateway/internal/access"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
-	"minigateway/internal/model"
+	state "minigateway/internal/foundation/contracts/state/v1"
 	"minigateway/internal/secrets"
 )
 
 var (
-	ErrArchiveUnavailable = errors.New("generation output archive is unavailable")
-	ErrArchiveIntegrity   = errors.New("generation output archive cannot be authenticated")
-	ErrArchiveIncomplete  = errors.New("generation output archive is incomplete; execution may be unknown")
-	ErrArchiveLimit       = errors.New("generation output archive limit exceeded")
+	ErrArchiveUnavailable = state.ErrArchiveUnavailable
+	ErrArchiveIntegrity   = state.ErrArchiveIntegrity
+	ErrArchiveIncomplete  = state.ErrArchiveIncomplete
+	ErrArchiveLimit       = state.ErrArchiveLimit
 )
 
 // ArchiveStore stores only ciphertext and bounded scheduling/ownership metadata.
 // It must atomically reserve quotas, append with sequence CAS and close a record.
-type ArchiveStore interface {
-	CreateGenerationRecord(context.Context, model.GenerationRecord, model.GenerationArchiveLimits) error
-	AppendGenerationSegment(context.Context, model.GenerationRecord, model.GenerationSegment) error
-	ReadGenerationRecord(context.Context, access.Binding, string) (model.GenerationRecord, error)
-	DeleteGenerationRecord(context.Context, access.Binding, string) error
-}
+type ArchiveStore = state.ArchiveStore
 
 type ArchiveOptions struct {
 	Store          ArchiveStore
@@ -40,7 +34,7 @@ type ArchiveOptions struct {
 	Keys           map[string][]byte
 	Retention      time.Duration
 	MaxRecordBytes int64
-	Limits         model.GenerationArchiveLimits
+	Limits         state.GenerationArchiveLimits
 }
 
 type Archive struct {
@@ -49,7 +43,7 @@ type Archive struct {
 	keys      *secrets.Ring
 	retention time.Duration
 	maxBytes  int64
-	limits    model.GenerationArchiveLimits
+	limits    state.GenerationArchiveLimits
 	cursorMu  sync.Mutex
 	cursors   int
 	owners    map[uint]int
@@ -57,27 +51,17 @@ type Archive struct {
 
 // RecordedResult deliberately excludes raw errors, caller keys and policies.
 // Sealed means an authenticated observation exists, not protocol/billing success.
-type RecordedResult struct {
-	Operation        execv1.Operation
-	Model            string
-	StatusCode       int
-	Phase            execv1.Phase
-	Termination      execv1.Termination
-	Committed        bool
-	ProtocolComplete bool
-	BillingState     string
-	Reason           string
-}
+type RecordedResult = state.RecordedResult
 
 type Recording struct {
 	Metadata execv1.ResponseMetadata
 	Body     []byte
 	Result   RecordedResult
-	record   model.GenerationRecord
+	record   state.GenerationRecord
 }
 
 func NewArchive(opts ArchiveOptions) (*Archive, error) {
-	if opts.Store == nil || (reflect.ValueOf(opts.Store).Kind() == reflect.Pointer && reflect.ValueOf(opts.Store).IsNil()) || opts.Resolve == nil || opts.Retention < time.Minute || opts.Retention > 7*24*time.Hour ||
+	if nilPort(opts.Store) || opts.Resolve == nil || opts.Retention < time.Minute || opts.Retention > 7*24*time.Hour ||
 		opts.MaxRecordBytes < 16384 || opts.MaxRecordBytes > 8<<20 || len(opts.Keys) == 0 || len(opts.Keys) > 8 ||
 		opts.Limits.OwnerBytes < opts.MaxRecordBytes || opts.Limits.InstanceBytes < opts.Limits.OwnerBytes ||
 		opts.Limits.OwnerRecords < 1 || opts.Limits.InstanceRecords < opts.Limits.OwnerRecords {
@@ -137,7 +121,7 @@ func (a *Archive) start(ctx context.Context, binding access.Binding) (output *re
 		return nil, ErrArchiveUnavailable
 	}
 	now := time.Now()
-	r := model.GenerationRecord{ID: hex.EncodeToString(id[:]), UserID: binding.UserID, TokenID: binding.TokenID,
+	r := state.GenerationRecord{ID: hex.EncodeToString(id[:]), UserID: binding.UserID, TokenID: binding.TokenID,
 		State: "open", MaxBytes: a.maxBytes, CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(a.retention).UnixMilli()}
 	if err := a.store.CreateGenerationRecord(ctx, r, a.limits); err != nil {
 		return nil, ErrArchiveUnavailable
@@ -145,11 +129,11 @@ func (a *Archive) start(ctx context.Context, binding access.Binding) (output *re
 	return &recordOutput{archive: a, record: r}, nil
 }
 
-func archiveAAD(r model.GenerationRecord, seq uint64, kind string, header []byte) []byte {
+func archiveAAD(r state.GenerationRecord, seq uint64, kind string, header []byte) []byte {
 	return append([]byte(fmt.Sprintf("TXAPI/generation/v1/%s/%d/%d/%d/%d/%d/%d/%s/", r.ID, r.UserID, r.TokenID, r.CreatedAt, r.ExpiresAt, r.MaxBytes, seq, kind)), header...)
 }
 
-func (a *Archive) seal(r model.GenerationRecord, kind string, data []byte) ([]byte, error) {
+func (a *Archive) seal(r state.GenerationRecord, kind string, data []byte) ([]byte, error) {
 	sealed, err := a.keys.Seal(data, archiveAAD(r, r.NextSequence, kind, nil))
 	if err != nil {
 		return nil, ErrArchiveUnavailable
@@ -157,7 +141,7 @@ func (a *Archive) seal(r model.GenerationRecord, kind string, data []byte) ([]by
 	return sealed, nil
 }
 
-func (a *Archive) open(r model.GenerationRecord, s model.GenerationSegment) ([]byte, error) {
+func (a *Archive) open(r state.GenerationRecord, s state.GenerationSegment) ([]byte, error) {
 	plain, err := a.keys.Open(s.Ciphertext, archiveAAD(r, s.Sequence, s.Kind, nil))
 	if err != nil {
 		return nil, ErrArchiveIntegrity
@@ -178,7 +162,7 @@ func (a *Archive) Read(ctx context.Context, binding access.Binding, id string) (
 		return Recording{}, ErrArchiveUnavailable
 	}
 	if r.ID != id || r.UserID != binding.UserID || r.TokenID != binding.TokenID || r.ExpiresAt <= time.Now().UnixMilli() ||
-		r.MaxBytes > a.maxBytes || r.StoredBytes < 0 || r.StoredBytes > r.MaxBytes || len(r.Segments) > model.GenerationArchiveMaxSegments || uint64(len(r.Segments)) != r.NextSequence {
+		r.MaxBytes > a.maxBytes || r.StoredBytes < 0 || r.StoredBytes > r.MaxBytes || len(r.Segments) > state.GenerationArchiveMaxSegments || uint64(len(r.Segments)) != r.NextSequence {
 		return Recording{}, ErrArchiveIntegrity
 	}
 	if r.State != "sealed" {
@@ -249,7 +233,7 @@ func (a *Archive) Delete(ctx context.Context, binding access.Binding, id string)
 type recordOutput struct {
 	mu      sync.Mutex
 	archive *Archive
-	record  model.GenerationRecord
+	record  state.GenerationRecord
 	state   execv1.OutputState
 	failed  bool
 	closed  bool
@@ -272,7 +256,7 @@ func (o *recordOutput) append(ctx context.Context, kind string, data []byte) err
 		return err
 	}
 	// Always leave one segment and 4 KiB for the bounded final observation.
-	maxBytes, maxSequence := o.record.MaxBytes, uint64(model.GenerationArchiveMaxSegments)
+	maxBytes, maxSequence := o.record.MaxBytes, uint64(state.GenerationArchiveMaxSegments)
 	if kind != "result" {
 		maxBytes -= 4096
 		maxSequence--
@@ -280,7 +264,7 @@ func (o *recordOutput) append(ctx context.Context, kind string, data []byte) err
 	if int64(len(ciphertext)) > maxBytes-o.record.StoredBytes || o.record.NextSequence >= maxSequence {
 		return ErrArchiveLimit
 	}
-	segment := model.GenerationSegment{RecordID: o.record.ID, Sequence: o.record.NextSequence, Kind: kind, Ciphertext: ciphertext}
+	segment := state.GenerationSegment{RecordID: o.record.ID, Sequence: o.record.NextSequence, Kind: kind, Ciphertext: ciphertext}
 	if err := o.archive.store.AppendGenerationSegment(ctx, o.record, segment); err != nil {
 		// An ambiguous commit cannot be retried with a new nonce/sequence.
 		o.failed = true

@@ -16,7 +16,7 @@ import (
 
 	"minigateway/internal/access"
 	jsonutil "minigateway/internal/foundation/contracts/json/v1"
-	"minigateway/internal/model"
+	state "minigateway/internal/foundation/contracts/state/v1"
 	"minigateway/internal/secrets"
 )
 
@@ -24,11 +24,7 @@ var ErrIntentIntegrity = errors.New("generation intent cannot be authenticated")
 
 // IntentAdmission is a narrow transaction port, not a raw DB callback or another
 // financial ledger. The implementation owns both the intent and dual hold.
-type IntentAdmission interface {
-	AdmitGenerationIntent(context.Context, model.GenerationIntent, model.GenerationIntentLimits) (model.GenerationIntent, error)
-	ReadGenerationIntent(context.Context, uint, uint, string) (model.GenerationIntent, error)
-	CancelGenerationIntent(context.Context, uint, uint, string) (model.GenerationIntent, error)
-}
+type IntentAdmission = state.IntentAdmission
 
 type IntentOptions struct {
 	Parser    execv1.Parser
@@ -41,7 +37,7 @@ type IntentOptions struct {
 	DigestKey []byte
 	QueueTTL  time.Duration
 	Retention time.Duration
-	Limits    model.GenerationIntentLimits
+	Limits    state.GenerationIntentLimits
 }
 
 type IntentAcceptor struct {
@@ -52,7 +48,7 @@ type IntentAcceptor struct {
 	digestKey []byte
 	queueTTL  time.Duration
 	retention time.Duration
-	limits    model.GenerationIntentLimits
+	limits    state.GenerationIntentLimits
 }
 
 type IntentReceipt struct {
@@ -96,27 +92,27 @@ func (a *IntentAcceptor) digest(domain string, data []byte) string {
 
 func canonicalIntent(in execv1.Invocation) (intentPayload, []byte, error) {
 	if len(in.Body) == 0 || len(in.Body) > 64<<10 || len(in.SessionID) > 256 || !utf8.Valid(in.Body) || !utf8.ValidString(in.SessionID) {
-		return intentPayload{}, nil, model.ErrIntentCapacity
+		return intentPayload{}, nil, state.ErrIntentCapacity
 	}
 	if err := jsonutil.Validate(in.Body); err != nil {
-		return intentPayload{}, nil, model.ErrIntentConflict
+		return intentPayload{}, nil, state.ErrIntentConflict
 	}
 	decoder := json.NewDecoder(bytes.NewReader(in.Body))
 	decoder.UseNumber()
 	var fields map[string]any
 	if err := decoder.Decode(&fields); err != nil || fields == nil {
-		return intentPayload{}, nil, model.ErrIntentConflict
+		return intentPayload{}, nil, state.ErrIntentConflict
 	}
 	body, err := json.Marshal(fields)
 	if err != nil {
-		return intentPayload{}, nil, model.ErrIntentConflict
+		return intentPayload{}, nil, state.ErrIntentConflict
 	}
 	payload := intentPayload{Operation: in.Operation, Body: body, SessionID: in.SessionID}
 	plain, err := json.Marshal(payload)
 	return payload, plain, err
 }
 
-func intentAAD(in model.GenerationIntent, header []byte) []byte {
+func intentAAD(in state.GenerationIntent, header []byte) []byte {
 	meta, _ := json.Marshal(struct {
 		Domain, ID, AdmissionKey, Digest, DigestVersion, Operation, Model, BillingID string
 		UserID, TokenID                                                              uint
@@ -126,7 +122,7 @@ func intentAAD(in model.GenerationIntent, header []byte) []byte {
 	return append(meta, header...)
 }
 
-func (a *IntentAcceptor) sealIntent(in model.GenerationIntent, plain []byte) ([]byte, error) {
+func (a *IntentAcceptor) sealIntent(in state.GenerationIntent, plain []byte) ([]byte, error) {
 	sealed, err := a.keys.Seal(plain, intentAAD(in, nil))
 	if err != nil {
 		return nil, ErrIntentIntegrity
@@ -134,7 +130,7 @@ func (a *IntentAcceptor) sealIntent(in model.GenerationIntent, plain []byte) ([]
 	return sealed, nil
 }
 
-func (a *IntentAcceptor) openIntent(in model.GenerationIntent) (execv1.Invocation, error) {
+func (a *IntentAcceptor) openIntent(in state.GenerationIntent) (execv1.Invocation, error) {
 	version := sha256.Sum256(a.digestKey)
 	if in.DigestVersion != hex.EncodeToString(version[:]) || !validIntentState(in.State) {
 		return execv1.Invocation{}, ErrIntentIntegrity
@@ -158,9 +154,9 @@ func (a *IntentAcceptor) openIntent(in model.GenerationIntent) (execv1.Invocatio
 	return execv1.Invocation{Operation: payload.Operation, Body: payload.Body, SessionID: payload.SessionID}, nil
 }
 
-func validIntentState(state string) bool {
-	switch state {
-	case model.IntentQueued, model.IntentClaimed, model.IntentRunning, model.IntentFinalizing, model.IntentSucceeded, model.IntentFailed, model.IntentCancelled, model.IntentExpired, model.IntentUncertain:
+func validIntentState(value string) bool {
+	switch value {
+	case state.IntentQueued, state.IntentClaimed, state.IntentRunning, state.IntentFinalizing, state.IntentSucceeded, state.IntentFailed, state.IntentCancelled, state.IntentExpired, state.IntentUncertain:
 		return true
 	default:
 		return false
@@ -178,11 +174,11 @@ func (a *IntentAcceptor) Admit(ctx context.Context, binding access.Binding, idem
 		return IntentReceipt{}, err
 	}
 	if len(idempotencyKey) < 1 || len(idempotencyKey) > 128 {
-		return IntentReceipt{}, model.ErrIntentConflict
+		return IntentReceipt{}, state.ErrIntentConflict
 	}
 	for _, c := range idempotencyKey {
 		if c < 33 || c > 126 {
-			return IntentReceipt{}, model.ErrIntentConflict
+			return IntentReceipt{}, state.ErrIntentConflict
 		}
 	}
 	// Snapshot before invoking trusted authority or persistence callbacks.
@@ -192,7 +188,7 @@ func (a *IntentAcceptor) Admit(ctx context.Context, binding access.Binding, idem
 	}
 	req, err := a.parser.ParseRequest(payload.Operation, payload.Body)
 	if err != nil || nilPort(req) || len(req.Model()) > 256 {
-		return IntentReceipt{}, model.ErrIntentConflict
+		return IntentReceipt{}, state.ErrIntentConflict
 	}
 	principal, err := currentPrincipal(ctx, a.resolve, binding)
 	if err != nil {
@@ -206,9 +202,9 @@ func (a *IntentAcceptor) Admit(ctx context.Context, binding access.Binding, idem
 		return IntentReceipt{}, ErrIntentIntegrity
 	}
 	now := time.Now()
-	intent := model.GenerationIntent{ID: hex.EncodeToString(id[:]), UserID: binding.UserID, TokenID: binding.TokenID,
+	intent := state.GenerationIntent{ID: hex.EncodeToString(id[:]), UserID: binding.UserID, TokenID: binding.TokenID,
 		AdmissionKey: a.digest("admission", []byte(idempotencyKey)), RequestDigest: a.requestDigest(plain), Operation: string(payload.Operation), Model: req.Model(),
-		State: model.IntentQueued, CreatedAt: now.UnixMilli(), Deadline: now.Add(a.queueTTL).UnixMilli(), ExpiresAt: now.Add(a.retention).UnixMilli()}
+		State: state.IntentQueued, CreatedAt: now.UnixMilli(), Deadline: now.Add(a.queueTTL).UnixMilli(), ExpiresAt: now.Add(a.retention).UnixMilli()}
 	version := sha256.Sum256(a.digestKey)
 	intent.DigestVersion = hex.EncodeToString(version[:])
 	intent.BillingID = intent.ID[:32]
@@ -229,7 +225,7 @@ func (a *IntentAcceptor) Admit(ctx context.Context, binding access.Binding, idem
 	return intentReceipt(stored), nil
 }
 
-func intentReceipt(in model.GenerationIntent) IntentReceipt {
+func intentReceipt(in state.GenerationIntent) IntentReceipt {
 	return IntentReceipt{ID: in.ID, BillingID: in.BillingID, State: in.State, OutputRecordID: in.OutputRecordID, CreatedAt: in.CreatedAt, Deadline: in.Deadline, ExpiresAt: in.ExpiresAt}
 }
 

@@ -1,15 +1,15 @@
 package model
 
-import "errors"
+import state "minigateway/internal/foundation/contracts/state/v1"
 
 var (
-	ErrHistoryNotFound = errors.New("history not found")
-	ErrHistoryConflict = errors.New("history version or execution conflict")
-	ErrHistoryCapacity = errors.New("history capacity exceeded")
-	ErrHistoryContext  = errors.New("history context is not self-contained")
+	ErrHistoryNotFound = state.ErrHistoryNotFound
+	ErrHistoryConflict = state.ErrHistoryConflict
+	ErrHistoryCapacity = state.ErrHistoryCapacity
+	ErrHistoryContext  = state.ErrHistoryContext
 )
 
-const ResponseHistoryMaxBytes = 2 << 20
+const ResponseHistoryMaxBytes = state.ResponseHistoryMaxBytes
 
 // ResponseHistory contains encrypted application snapshots, never a runnable
 // intent. Receipt identity and the original financial ledger remain separate.
@@ -28,12 +28,9 @@ type ResponseHistory struct {
 	Ciphertext    []byte `gorm:"not null"`
 }
 
-type HistoryGuard struct {
-	ID      string
-	Version uint64
-}
+type HistoryGuard = state.HistoryGuard
 type HistoryChange struct {
 	Expected uint64
 	Record   ResponseHistory
 }
-type HistoryLimits struct{ InstanceRecords, OwnerRecords, InstanceBytes, OwnerBytes int64 }
+type HistoryLimits = state.HistoryLimits

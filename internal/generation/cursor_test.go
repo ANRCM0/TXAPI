@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	state "minigateway/internal/foundation/contracts/state/v1"
+	"minigateway/internal/foundation/persistence"
 	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"strings"
@@ -204,18 +206,18 @@ type cursorStorageFault struct {
 	panic bool
 }
 
-func (f cursorStorageFault) ReadGenerationRecord(context.Context, access.Binding, string) (model.GenerationRecord, error) {
+func (f cursorStorageFault) ReadGenerationRecord(context.Context, access.Binding, string) (state.GenerationRecord, error) {
 	if f.panic {
 		panic("private cursor storage fixture")
 	}
-	return model.GenerationRecord{}, errors.New("private cursor storage fixture")
+	return state.GenerationRecord{}, errors.New("private cursor storage fixture")
 }
 
 func TestArchiveCursorStorageFailureAndPanicReleaseCapacityWithoutRawErrors(t *testing.T) {
 	st, binding, _ := fixture(t)
 	for _, panicFault := range []bool{false, true} {
 		opts := archiveOptions(st)
-		opts.Store = cursorStorageFault{ArchiveStore: st, panic: panicFault}
+		opts.Store = cursorStorageFault{ArchiveStore: persistence.Archive(st), panic: panicFault}
 		a := testArchive(t, opts)
 		if reader, err := a.OpenCursor(context.Background(), binding, strings.Repeat("a", 64), ""); !errors.Is(err, ErrArchiveUnavailable) || reader != nil || strings.Contains(err.Error(), "private") {
 			t.Fatal("storage failure exposed data or a live reader", err)

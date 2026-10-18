@@ -5,12 +5,12 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"minigateway/internal/management"
+	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 )
 
 // Preserve the HTTP DTO names while the application service owns their state.
-type PublicationStatus = management.PublicationStatus
-type ConfigStatus = management.ConfigStatus
+type PublicationStatus = cfg.PublicationStatus
+type ConfigStatus = cfg.ConfigStatus
 
 func publicationHeaders(c *gin.Context, status PublicationStatus) {
 	c.Header("X-TXAPI-Desired-Revision", strconv.FormatUint(status.DesiredRevision, 10))
@@ -22,7 +22,7 @@ func publicationHeaders(c *gin.Context, status PublicationStatus) {
 	c.Header("X-TXAPI-Publication-State", state)
 }
 
-func configurationResult(c *gin.Context, change management.Change, err error) bool {
+func configurationResult(c *gin.Context, change cfg.Change, err error) bool {
 	if change.Saved {
 		publicationHeaders(c, change.Publication)
 	}

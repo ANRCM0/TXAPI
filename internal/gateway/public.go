@@ -12,7 +12,7 @@ import (
 
 	"minigateway/internal/core"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
-	"minigateway/internal/model"
+	statev1 "minigateway/internal/foundation/contracts/state/v1"
 )
 
 type PublicExecutor struct {
@@ -31,8 +31,8 @@ func (e *PublicExecutor) Execute(ctx context.Context, output execution.Output, i
 	return FromGateway(e.gateway.executeTo(ctx, ToCoreOutput(output), invocation(in), nil, e.httpAdmission))
 }
 
-// ExecuteClaimed is an assembly-only bridge pending the state contract migration.
-func (e *PublicExecutor) ExecuteClaimed(ctx context.Context, output execution.Output, in execution.Invocation, claim model.GenerationClaim) execution.Outcome {
+// ExecuteClaimed resumes only the original fenced reservation.
+func (e *PublicExecutor) ExecuteClaimed(ctx context.Context, output execution.Output, in execution.Invocation, claim statev1.GenerationClaim) execution.Outcome {
 	return FromGateway(e.gateway.ExecuteClaimedTo(ctx, ToCoreOutput(output), invocation(in), claim))
 }
 

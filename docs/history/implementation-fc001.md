@@ -136,3 +136,48 @@ Playwright 与 Chromium 使用已安装工具及前批相同 NODE_PATH/PLAYWRIGH
 
 明确值桥与缓冲所有权复制增加分配；该对照保留成本，不宣传零开销。样本仅 40 次、包含固定睡眠且集中检查并行，
 时延不是生产吞吐/SLO 结论，CI 原有多场景性能报告继续保留。旧第一次当前基准不代替最终源码数值。
+
+### FND-02 最终 CI 与合并验收
+
+功能头 `196be0eeec1c2282847df7579d9cb8bbdd8c636d` 的自动 push
+[39099593057](https://github.com/ANRCM0/TXAPI/actions/runs/39099593057) 与 PR
+[39099596254](https://github.com/ANRCM0/TXAPI/actions/runs/39099596254) 的 check/delivery 均 SUCCESS。
+核对 clean worktree、未漂移的 master/dcdc56b、精确 head 和四个 green jobs 后，
+`gh pr merge 15 --merge --match-head-commit 196be0eeec1c2282847df7579d9cb8bbdd8c636d`
+将 [PR #15](https://github.com/ANRCM0/TXAPI/pull/15) 合并为
+`e97e458bb52761bb3d8330d8b1383c5e2fa04b4b`；`git diff --exit-code 196be0e origin/master` 通过。
+合并后自动 [39099900287](https://github.com/ANRCM0/TXAPI/actions/runs/39099900287) 的
+check/delivery 也全部 SUCCESS，含 Linux 全量 race、契约/依赖、构建/vet/格式、主程序冒烟和容器交付。
+该结果关闭 FND-02；上文 pending 描述是本地验证时点，不代表后续状态，也不冻结整个 v1。
+
+## FND-03：状态、配置和生命周期端口
+
+从已验收 master/e97e458 新建 feat/fnd-03-state-configuration-lifecycle；六项开工边界见 PLAN。
+本批保持原 schema v12、加密关联数据、JSON 字段、CAS/fencing 与预算权威，通过显式值转换连接原事务。
+实施和验证结果将在实际完成后登记；目前不记 PASS、不勾选 FND-03。
+
+
+### FND-03 本地集中验证
+
+最终非 Markdown 来源为 329 路径，SHA-256
+`17e3b734b6913489cc295fa3364178943b0d92d7b1bd2bfb52b982814d7aa4d8`，
+集中检查前后相同；之后仅修改说明文档。Windows/PowerShell，每条 Go 命令显式 GOARCH=amd64。
+
+| 实际命令 / 环境 | 结果 |
+|---|---|
+| go test -json -count=1 ./... | 1064 项测试/子用例、28 包 PASS，5 预期 helper SKIP，无失败 |
+| go build ./...；go vet ./...；go mod tidy 与 go.mod/go.sum diff | PASS，无依赖漂移 |
+| normalized-LF gofmt 比较，仅变更 Go | 46 文件通过，不格式化无关源码 |
+| node --check web/assets/app.mjs、api.mjs；node --test web/assets/api.test.mjs | 语法与 10 项 API PASS |
+| python tests/smoke/local.py --go go | 真实 main/auth/Chat/SSE/控制台、strict 拒绝、强杀/原双 hold/审计豁免、加密轮换拒绝/恢复、durable 重启/密钥拒绝和关闭 PASS |
+| python tests/smoke/compatibility.py --go go | 已安装 Chromium/Playwright，真实临时二进制/SQLite/API/UI、保存/发布、角色/模型/Key 隔离与桌面/移动 PASS |
+
+首次编译因 state 参数遮蔽 import、迁移后的无用 import 与 price.go 其他路径仍需 math 失败，统一修复后 build 通过。
+首次测试编译发现旧测试 helper 与 import 重名、reopen 原 store 未包桥和 typed-nil 用例仍传旧实现，迁移为中立端口后测试编译通过。
+只编译命令不作为行为测试。新增桥的定向 ownership/fencing/错误回归及 architecture 先通过，最终全量包含它们。
+首次 gofmt 写入遇到 Windows 短暂 mapped-section 占用，未全量格式化成功；随后逐个仅变更 Go 以格式结果比较并替换剩余 12 文件，全部 46 文件通过。
+静态命令的 Go build/vet/tidy 已通过，后续 node 最初误用不存在的 app.js 路径失败；改为仓库实际 .mjs 后两语法检查和 10 项 API 通过，未因此重跑无变化的 Go 检查。
+
+持久 ORM 行/标签、schema v12、OpenAPI 0.4.0/91 操作、财务/密文格式和依赖/workflow 没有变化；
+无真实提供商/生产数据操作。归档、历史、领取/fencing 与预算仍调用原权威一次，转换只承担数据所有权。
+本地通过不代替最终头的 Linux race/容器交付和合并后 master，当前不勾选 FND-03，不冻结候选契约。

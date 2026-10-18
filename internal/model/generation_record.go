@@ -1,8 +1,10 @@
 package model
 
+import state "minigateway/internal/foundation/contracts/state/v1"
+
 // GenerationArchiveMaxSegments bounds both persistent rows and replay loading.
 // The final slot is reserved for the authenticated result observation.
-const GenerationArchiveMaxSegments = 8192
+const GenerationArchiveMaxSegments = state.GenerationArchiveMaxSegments
 
 // GenerationRecord is an output journal, not a task intent or financial ledger.
 // MaxBytes reserves ciphertext capacity until explicit deletion or expiry cleanup.
@@ -27,9 +29,4 @@ type GenerationSegment struct {
 	Ciphertext []byte `gorm:"not null"`
 }
 
-type GenerationArchiveLimits struct {
-	InstanceBytes   int64
-	OwnerBytes      int64
-	InstanceRecords int64
-	OwnerRecords    int64
-}
+type GenerationArchiveLimits = state.GenerationArchiveLimits

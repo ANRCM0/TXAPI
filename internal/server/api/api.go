@@ -11,6 +11,8 @@ package api
 
 import (
 	"errors"
+	cfg "minigateway/internal/foundation/contracts/configuration/v1"
+	"minigateway/internal/foundation/persistence"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -31,7 +33,7 @@ type Handler struct {
 	loginGate     loginGate
 	store         *store.Store
 	billing       *billing.Engine
-	configuration *management.Configuration
+	configuration cfg.Service
 }
 
 // New 创建管理 API handler。
@@ -41,7 +43,7 @@ func New(st *store.Store, onChannelsChanged, onPricesChanged func() error) *Hand
 
 func NewWithBilling(st *store.Store, onChannelsChanged, onPricesChanged func() error, ledger *billing.Engine) *Handler {
 	return &Handler{store: st, billing: ledger,
-		configuration: management.NewConfiguration(st, onChannelsChanged, onPricesChanged)}
+		configuration: management.NewConfiguration(persistence.Configuration(st), onChannelsChanged, onPricesChanged)}
 }
 
 // Register 把管理路由挂到引擎上。

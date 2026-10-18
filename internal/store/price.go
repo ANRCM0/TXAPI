@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 	"strings"
 
 	"minigateway/internal/model"
@@ -31,12 +32,8 @@ type PriceInput struct {
 // 「数据落库前的最后防线」，api 的校验是「把 400 拦在门外」，
 // 两层都要有。
 func (in *PriceInput) Validate() error {
-	for _, price := range []float64{in.InputPricePer1K, in.OutputPricePer1K} {
-		if math.IsNaN(price) || math.IsInf(price, 0) || price < 0 || price > model.MaxPricePer1K {
-			return fmt.Errorf("price must be finite and between 0 and 1000000000 per 1K tokens")
-		}
-	}
-	return nil
+	value := cfg.PriceInput(*in)
+	return value.Validate()
 }
 
 // ModelPrices 列出全部模型价格，按模型名排序（列表接口要求顺序稳定）。
