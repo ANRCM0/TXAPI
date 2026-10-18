@@ -26,11 +26,11 @@ func relayStream(c *gin.Context, a adaptor.Adaptor, resp *http.Response, m *meta
 	if c.Request != nil {
 		ctx = c.Request.Context()
 	}
-	result := e.Execute(ctx, c.Writer, core.Input{URL: "http://legacy-response.test", Stream: true, Decoder: protocol.NewDecoder(a, m)})
+	result := e.Execute(ctx, c.Writer, core.Input{URL: "http://legacy-response.test", Stream: true, Decoder: decoderBridge{protocol.NewDecoder(a, m)}})
 	if result.Error != nil {
-		return result.Usage, errors.New(result.Error.Error.Message)
+		return fromCoreUsage(result.Usage), errors.New(result.Error.Error.Message)
 	}
-	return result.Usage, nil
+	return fromCoreUsage(result.Usage), nil
 }
 
 func (g *Gateway) SetTimeout(d time.Duration) { g.attemptTimeout = d }

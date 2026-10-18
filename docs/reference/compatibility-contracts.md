@@ -38,7 +38,7 @@ passed their own complete push/PR/master CI; M2 is accepted.
 | Configuration use cases | `management.Configuration`; both legacy and administrator HTTP resource handlers | Serialize channel/credential/price persistence and publication; Store owns transactions, callbacks own snapshot application |
 | Other management/owner use cases | existing access/store/billing operations called by server API | Keep current ownership and authorization; change only concrete gaps identified for their consumers |
 | Frontend application | `web/assets/api.mjs` and `app.mjs` | Session and call Key separated; stable DTO/error/pagination, current roles, exact ledger money, saved/applied visibility |
-| Construction extensions | `gateway.Options.Adaptors` plus optional billing/admission ports | Constructor registration is copied; instances must support concurrent reads, own per-attempt mutable state and honor cancellation |
+| Construction extensions | `gateway.Options.Protocols/Operations` plus optional billing/admission ports | Constructor registration is copied; instances must support concurrent reads, own per-attempt mutable state and honor cancellation |
 | Assembly/persistence | cmd/config/model/store/secrets | One main lifecycle, schema runner, identity authority and ledger; no new S6 schema or public S7 route |
 
 ## Contract rules
@@ -117,8 +117,8 @@ this table is a reviewed mapping, not an independently executable API registry.
 | GET | `/healthz` | Public | `server.NewEngine health handler` | Health probe |
 | GET | `/metrics` | Public | `metrics.Render via server handler` | Prometheus / operator |
 | GET | `/v1/models` | CallBearer | `gateway.ListModels` | API clients / model discovery |
-| POST | `/v1/chat/completions` | CallBearer | `gateway.HandleChatCompletions -> shared execute` | API clients / console playground |
-| POST | `/v1/embeddings` | CallBearer | `gateway.HandleEmbeddings -> shared execute` | API clients / real API acceptance |
+| POST | `/v1/chat/completions` | CallBearer | `compat/generationhttp.HandleChatCompletions -> public Executor` | API clients / console playground |
+| POST | `/v1/embeddings` | CallBearer | `compat/generationhttp.HandleEmbeddings -> public Executor` | API clients / real API acceptance |
 | POST | `/api/auth/login` | Public | `api.Login` | Console sign-in/sign-out |
 | POST | `/api/auth/logout` | SessionBearer | `api.Logout` | Console sign-in/sign-out |
 | GET | `/api/me` | SessionBearer | `api.current authenticated User` | Owner console: overview / keys / models / logs |
@@ -196,10 +196,11 @@ this table is a reviewed mapping, not an independently executable API registry.
 
 ## Extension and lifetime acceptance
 
-- Protocol registration uses `gateway.Options.Adaptors` with an existing
+- Protocol registration uses `gateway.Options.Protocols/Operations` with neutral
+  operation/parser and protocol Adapter registrations; the L2 protocol factory can adapt an existing
   `adaptor.Adaptor`, optional operation capability and per-attempt stream session.
   Supply a nonempty stable registry name, valid configuration and a non-nil
-  implementation. Constructor copies the registration map, not mutable objects.
+  implementation. Constructor copies versioned registration values; codec instances must be concurrency safe.
 - Stateful multi-event codecs use `SessionStreamer.NewStreamSession` for every
   attempt; production decoding supplies this session. Anthropic-to-OpenAI uses
   the OpenAI output builder. The old stateless Anthropic parse/build helpers do

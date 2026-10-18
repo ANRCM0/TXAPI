@@ -106,6 +106,7 @@ func newGateway(t *testing.T, opts gateway.Options) (*gateway.Gateway, *access.C
 	}
 	opts.Admission = gateway.CapacityAdmission{Capacity: capacity}
 	opts.TotalTimeout = 5 * time.Second
+	opts.Protocols, opts.Operations = protocol.Protocols(nil), protocol.Operations()
 	g, err := gateway.New(opts)
 	if err != nil {
 		t.Fatal(err)

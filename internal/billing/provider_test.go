@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	relaymodel "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
-	relaymodel "minigateway/internal/protocol/model"
 	"minigateway/internal/store"
 )
 

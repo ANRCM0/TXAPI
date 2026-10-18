@@ -1,6 +1,7 @@
 package server
 
 import (
+	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -42,7 +43,7 @@ func newEngine(t *testing.T, adminAuth gin.HandlerFunc) *gin.Engine {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	gw, err := gateway.New(gateway.Options{})
+	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestHealthzNotRateLimited(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	gw, err := gateway.New(gateway.Options{})
+	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations()})
 	if err != nil {
 		t.Fatal(err)
 	}

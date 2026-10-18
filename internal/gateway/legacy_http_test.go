@@ -2,21 +2,24 @@ package gateway
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"minigateway/internal/billing"
+	"minigateway/internal/compat/generationhttp"
 	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/meta"
 	"minigateway/internal/protocol/model"
 )
 
-func (g *Gateway) HandleChatCompletions(c *gin.Context) { g.handleRelay(c, meta.ModeChatCompletions) }
-func (g *Gateway) HandleEmbeddings(c *gin.Context)      { g.handleRelay(c, meta.ModeEmbeddings) }
+func (g *Gateway) HandleChatCompletions(c *gin.Context) {
+	generationhttp.New(testHTTPService{g, state(c)}).HandleChatCompletions(c)
+}
+func (g *Gateway) HandleEmbeddings(c *gin.Context) {
+	generationhttp.New(testHTTPService{g, state(c)}).HandleEmbeddings(c)
+}
 
 // Execute is the HTTP compatibility adapter for the shared execution entry.
 func (g *Gateway) Execute(ctx context.Context, w http.ResponseWriter, in Execution) RequestResult {
@@ -25,26 +28,6 @@ func (g *Gateway) Execute(ctx context.Context, w http.ResponseWriter, in Executi
 
 func newExecutionScope(ctx context.Context, w http.ResponseWriter, result *RequestResult, sessionID string) *executionScope {
 	return newOutputScope(ctx, core.NewHTTPOutput(w), result, sessionID)
-}
-
-func (g *Gateway) handleRelay(c *gin.Context, mode int) {
-	result := state(c)
-	scope := newExecutionScope(c.Request.Context(), c.Writer, result, c.GetHeader(SessionIDHeader))
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		var oversized *http.MaxBytesError
-		if errors.As(err, &oversized) {
-			writeError(scope, 413, "request body exceeds the size limit", "request_too_large")
-		} else {
-			writeError(scope, 400, "could not read request body", "invalid_request_error")
-		}
-		return
-	}
-	operation := protocol.Chat
-	if mode == meta.ModeEmbeddings {
-		operation = protocol.Embeddings
-	}
-	g.execute(scope, Execution{Operation: operation, Body: body})
 }
 
 // Relay is retained for existing in-package integrations. New consumers use Execute.
@@ -59,7 +42,7 @@ func (g *Gateway) Relay(c *gin.Context, req *model.ModelRequest, body []byte, al
 		writeError(scope, 400, "unsupported operation", "unsupported_operation")
 		return
 	}
-	request, err := protocol.ParseRequest(operation, body)
+	request, err := g.ParseRequest(operation, body)
 	if err != nil || req == nil || req.Model != request.Model() || req.Stream != request.Stream() {
 		writeError(scope, 400, "request body and routing metadata must match", "invalid_request_error")
 		return
@@ -82,35 +65,18 @@ func state(c *gin.Context) *RequestResult {
 
 func relayStatus(c *gin.Context) int { return state(c).StatusCode }
 
-// ListModels 处理 GET /v1/models，返回该令牌可访问的模型清单。
-//
-// 客户端（Cherry Studio、NextChat 这类）靠这个接口自动填充模型下拉框。
+// Existing test entry names delegate to the actual L2 production handlers.
+type testHTTPService struct {
+	gateway *Gateway
+	result  *RequestResult
+}
+
+func (s testHTTPService) Execute(ctx context.Context, out execv1.Output, in execv1.Invocation) execv1.Outcome {
+	result := s.gateway.executeTo(ctx, ToCoreOutput(out), invocation(in), nil, true)
+	*s.result = result
+	return FromGateway(result)
+}
+func (s testHTTPService) Models(ctx context.Context) []execv1.Model { return s.gateway.Models(ctx) }
 func (g *Gateway) ListModels(c *gin.Context) {
-	allowedModels := state(c).Identity.AllowedModels
-
-	seen := map[string]bool{}
-	data := make([]gin.H, 0)
-
-	for _, ch := range g.reg.allChannels() {
-		models := append([]string(nil), ch.models...)
-		if ch.supports("*") && state(c).Identity.Policy != nil {
-			models = append(models, state(c).Identity.Policy.Models...)
-		}
-		for _, m := range models {
-			if m == "*" {
-				continue
-			}
-			if seen[m] || !modelAllowed(m, allowedModels) || (state(c).Identity.Policy != nil && !state(c).Identity.Policy.Allows(m)) {
-				continue
-			}
-			seen[m] = true
-			data = append(data, gin.H{
-				"id":       m,
-				"object":   "model",
-				"owned_by": ch.name,
-			})
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"object": "list", "data": data})
+	generationhttp.New(testHTTPService{g, state(c)}).ListModels(c)
 }

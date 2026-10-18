@@ -9,6 +9,7 @@ import (
 	"minigateway/internal/compat/httpoutput"
 	authority "minigateway/internal/foundation/identity"
 	bridge "minigateway/internal/foundation/runtime"
+	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -105,7 +106,7 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 				counter := &responsesBillingCounter{Engine: billing.New(st.DB(), prices)}
 				limiter := middleware.NewMemoryLimiter()
 				t.Cleanup(limiter.(interface{ Close() }).Close)
-				gw, err := gateway.New(gateway.Options{BillingMode: mode, Billing: counter, Channels: st.Channels(), Limiter: limiter, LogRecorder: st.WriteLog})
+				gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), BillingMode: mode, Billing: counter, Channels: st.Channels(), Limiter: limiter, LogRecorder: st.WriteLog})
 				if err != nil {
 					t.Fatal(err)
 				}

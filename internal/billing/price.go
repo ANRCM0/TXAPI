@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	relaymodel "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
-	relaymodel "minigateway/internal/protocol/model"
 )
 
 type PriceLoader func() (prices []model.ModelPrice, rates map[string]float64, err error)

@@ -63,8 +63,8 @@ func TestStrictPreparedDimensionsRejectBeforeNetwork(t *testing.T) {
 			base, _ := protocol.Resolve(tc.protocol)
 			custom := &unpricedWireAdaptor{Adaptor: base, ProtocolAdaptor: base.(adaptor.ProtocolAdaptor), body: []byte(tc.wire)}
 			var health atomic.Int64
-			gw, err := New(Options{Channels: channels, Billing: engine, BillingMode: mode, RetryTimes: 3,
-				Adaptors:       map[string]adaptor.Adaptor{tc.protocol: custom},
+			gw, err := newRegisteredGateway(Options{Channels: channels, Billing: engine, BillingMode: mode, RetryTimes: 3,
+				Protocols:      protocol.Protocols(map[string]adaptor.Adaptor{tc.protocol: custom}),
 				HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) },
 			})
 			if err != nil {

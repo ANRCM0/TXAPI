@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/protocol/adaptor"
 	"minigateway/internal/protocol/adaptor/anthropic"
 	"minigateway/internal/protocol/adaptor/gemini"
@@ -31,64 +31,64 @@ func Resolve(name string) (adaptor.Adaptor, bool) {
 	}
 }
 
-func Prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (core.Input, *core.Error) {
+func Prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (execv1.Input, *execv1.Error) {
 	if m == nil {
-		return core.Input{}, unsupportedOperation()
+		return execv1.Input{}, unsupportedOperation()
 	}
 	operation, known := OperationForMode(m.Mode)
 	requirements := RequirementsFor(operation, body)
 	requirements.Stream = requirements.Stream || m.IsStream
 	if !known || !Supports(a, requirements) {
-		return core.Input{}, unsupportedOperation()
+		return execv1.Input{}, unsupportedOperation()
 	}
 	return prepare(a, body, m)
 }
 
 // PrepareRequest binds a selected target to the same operation facts used by
 // routing. The old Mode/IsStream fields cannot substitute a different operation.
-func PrepareRequest(a adaptor.Adaptor, request Request, m *meta.Meta) (core.Input, *core.Error) {
+func PrepareRequest(a adaptor.Adaptor, request Request, m *meta.Meta) (execv1.Input, *execv1.Error) {
 	mode, known := modeForOperation(request.Operation())
 	if m == nil || !known || !Supports(a, request.Requirements()) {
-		return core.Input{}, unsupportedOperation()
+		return execv1.Input{}, unsupportedOperation()
 	}
 	target := *m
 	target.Mode, target.IsStream, target.OriginModel = mode, request.Stream(), request.Model()
 	return prepare(a, request.Body(), &target)
 }
 
-func unsupportedOperation() *core.Error {
-	return &core.Error{StatusCode: 400, Error: core.ErrorDetail{Message: "upstream does not support the requested operation or capabilities", Type: "unsupported_operation"}}
+func unsupportedOperation() *execv1.Error {
+	return &execv1.Error{StatusCode: 400, Error: execv1.ErrorDetail{Message: "upstream does not support the requested operation or capabilities", Type: "unsupported_operation"}}
 }
 
-func prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (core.Input, *core.Error) {
+func prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (execv1.Input, *execv1.Error) {
 	// Adaptors receive independent value copies; their scratch mutations cannot
 	// change another callback's target or the operation-specific decoder.
 	target := *m
 	callbackMeta := target
 	url, err := a.GetRequestURL(&callbackMeta)
 	if err != nil {
-		return core.Input{}, &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "invalid upstream URL", Type: "internal_error"}}
+		return execv1.Input{}, &execv1.Error{StatusCode: 500, Error: execv1.ErrorDetail{Message: "invalid upstream URL", Type: "internal_error"}}
 	}
 	callbackMeta = target
 	out, err := ConvertRequestBody(a, body, &callbackMeta)
 	if err != nil {
-		return core.Input{}, &core.Error{StatusCode: 400, Error: core.ErrorDetail{Message: "request conversion failed: " + err.Error(), Type: "convert_error"}}
+		return execv1.Input{}, &execv1.Error{StatusCode: 400, Error: execv1.ErrorDetail{Message: "request conversion failed: " + err.Error(), Type: "convert_error"}}
 	}
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
-		return core.Input{}, &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "invalid upstream URL", Type: "internal_error"}}
+		return execv1.Input{}, &execv1.Error{StatusCode: 500, Error: execv1.ErrorDetail{Message: "invalid upstream URL", Type: "internal_error"}}
 	}
 	callbackMeta = target
 	if err = a.SetupRequestHeader(req, &callbackMeta); err != nil {
-		return core.Input{}, &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "upstream authentication header failed", Type: "internal_error"}}
+		return execv1.Input{}, &execv1.Error{StatusCode: 500, Error: execv1.ErrorDetail{Message: "upstream authentication header failed", Type: "internal_error"}}
 	}
-	var decoder core.Decoder = NewDecoder(a, &target)
+	var decoder execv1.Decoder = NewDecoder(a, &target)
 	replayable := true
 	if target.Mode == meta.ModeResponses {
 		decoder = responses.NewDecoderWithID(target.ResponseID)
 		replayable = false
 	}
-	return core.Input{URL: url, Header: req.Header, Body: out, Stream: target.IsStream, Replayable: replayable, Decoder: decoder}, nil
+	return execv1.Input{URL: url, Header: req.Header, Body: out, Stream: target.IsStream, Replayable: replayable, Decoder: decoder}, nil
 }
 
 type decoder struct {
@@ -96,7 +96,7 @@ type decoder struct {
 	target meta.Meta
 }
 
-func NewDecoder(a adaptor.Adaptor, m *meta.Meta) core.Decoder {
+func NewDecoder(a adaptor.Adaptor, m *meta.Meta) execv1.Decoder {
 	if m != nil && m.Mode == meta.ModeResponses {
 		return responses.NewDecoderWithID(m.ResponseID)
 	}
@@ -105,10 +105,10 @@ func NewDecoder(a adaptor.Adaptor, m *meta.Meta) core.Decoder {
 	}
 	return &decoder{a: a, target: *m}
 }
-func (d *decoder) Decode(b []byte) ([]byte, *core.Usage, error) {
+func (d *decoder) Decode(b []byte) ([]byte, *execv1.Usage, error) {
 	return ConvertResponseBody(d.a, b, &d.target)
 }
-func (d *decoder) NewStream() core.StreamDecoder {
+func (d *decoder) NewStream() execv1.StreamDecoder {
 	s := &streamDecoder{decoder: d, raw: true}
 	if pa, ok := d.a.(adaptor.ProtocolAdaptor); ok {
 		s.name = pa.Name()
@@ -129,13 +129,13 @@ type streamDecoder struct {
 	done    bool
 }
 
-func (s *streamDecoder) DecodeLine(line []byte) ([]core.Frame, error) {
+func (s *streamDecoder) DecodeLine(line []byte) ([]execv1.Frame, error) {
 	data := strings.TrimSpace(string(line))
 	if strings.HasPrefix(data, "data:") {
 		data = strings.TrimSpace(strings.TrimPrefix(data, "data:"))
 		if data == "[DONE]" {
 			s.done = true
-			return []core.Frame{{Complete: true}}, nil
+			return []execv1.Frame{{Complete: true}}, nil
 		}
 		var envelope struct {
 			Error *json.RawMessage `json:"error"`
@@ -155,38 +155,38 @@ func (s *streamDecoder) DecodeLine(line []byte) ([]core.Frame, error) {
 		if hasFinishReason(line) {
 			s.finish = true
 		}
-		return []core.Frame{{Data: append(append([]byte(nil), line...), '\n'), Usage: usageFromLine(line)}}, nil
+		return []execv1.Frame{{Data: append(append([]byte(nil), line...), '\n'), Usage: usageFromLine(line)}}, nil
 	}
 	lines, err := ConvertStreamLine(s.decoder.a, line, s.session, &s.decoder.target)
 	if err != nil {
 		return nil, err
 	}
-	frames := make([]core.Frame, 0, len(lines)+1)
+	frames := make([]execv1.Frame, 0, len(lines)+1)
 	for _, ln := range lines {
 		if hasFinishReason(ln) {
 			s.finish = true
 		}
-		frames = append(frames, core.Frame{Data: append(ln, '\n', '\n'), Usage: usageFromLine(ln)})
+		frames = append(frames, execv1.Frame{Data: append(ln, '\n', '\n'), Usage: usageFromLine(ln)})
 	}
 	if s.done {
-		frames = append(frames, core.Frame{Complete: true})
+		frames = append(frames, execv1.Frame{Complete: true})
 	}
 	return frames, nil
 }
-func (s *streamDecoder) End() ([]core.Frame, error) {
+func (s *streamDecoder) End() ([]execv1.Frame, error) {
 	if !s.finish || ((s.raw || s.name == "anthropic") && !s.done) {
 		return nil, fmt.Errorf("missing stream terminal state")
 	}
-	return []core.Frame{{Data: []byte("data: [DONE]\n\n")}}, nil
+	return []execv1.Frame{{Data: []byte("data: [DONE]\n\n")}}, nil
 }
 
-func usageFromLine(line []byte) *core.Usage {
+func usageFromLine(line []byte) *execv1.Usage {
 	data := strings.TrimSpace(string(line))
 	if !strings.HasPrefix(data, "data:") {
 		return nil
 	}
 	var raw struct {
-		Usage *core.Usage `json:"usage"`
+		Usage *execv1.Usage `json:"usage"`
 	}
 	if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(data, "data:"))), &raw) != nil {
 		return nil

@@ -21,10 +21,17 @@ func foundationImportError(path, imported string) error {
 		}
 	}
 	owner := strings.Split(path, "/")[0]
+	if (owner == "gateway" || owner == "billing" || owner == "generation") &&
+		(strings.HasPrefix(imported, base+"protocol") || strings.HasPrefix(imported, "github.com/gin-gonic/")) {
+		return fmt.Errorf("framework %s must use registered protocol ports: %s", path, imported)
+	}
+	if owner == "protocol" && imported == base+"core" {
+		return fmt.Errorf("protocol %s must use public execution values", path)
+	}
 	if owner == "compat" && strings.HasPrefix(imported, base+"foundation/") && !strings.HasPrefix(imported, contracts) && imported != base+"foundation/httpoutput/v1" {
 		return fmt.Errorf("compatibility adapter %s must use a versioned public facade: %s", path, imported)
 	}
-	if owner == "responses" || owner == "generation" || owner == "access" || owner == "gateway" || owner == "protocol" {
+	if owner == "responses" || owner == "generation" || owner == "access" || owner == "gateway" || owner == "protocol" || owner == "billing" {
 		if strings.HasPrefix(imported, base+"foundation/") && !strings.HasPrefix(imported, contracts) {
 			return fmt.Errorf("%s must use public foundation contracts, not %s", path, imported)
 		}
@@ -37,6 +44,12 @@ func TestFoundationImportGuardRejectsImplementationLeaks(t *testing.T) {
 		file, imported string
 		denied         bool
 	}{
+		{"gateway/relay.go", "minigateway/internal/protocol", true},
+		{"gateway/handler.go", "github.com/gin-gonic/gin", true},
+		{"billing/request.go", "minigateway/internal/protocol/jsonutil", true},
+		{"generation/runner.go", "minigateway/internal/protocol", true},
+		{"protocol/decoder.go", "minigateway/internal/core", true},
+		{"compat/generationhttp/handler.go", "github.com/gin-gonic/gin", false},
 		{"foundation/contracts/execution/v1/api.go", "minigateway/internal/core", true},
 		{"foundation/contracts/execution/v1/api.go", "gorm.io/gorm", true},
 		{"foundation/contracts/execution/v1/api.go", "minigateway/internal/foundation/runtime", true},

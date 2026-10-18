@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	bridge "minigateway/internal/foundation/runtime"
+	"minigateway/internal/protocol"
 	"net/http"
 	"os"
 	"strings"
@@ -40,7 +41,7 @@ func testArchive(t *testing.T, opts ArchiveOptions) *Archive {
 func recordingRunner(t *testing.T, st *store.Store, a *Archive, execute func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome) *Runner {
 	t.Helper()
 	r, err := New(context.Background(), Options{Workers: 1, QueueCapacity: 2, MaxRequestBytes: 4096, MaxDuration: 5 * time.Second,
-		Resolve: st.ResolvePrincipal, Execute: execute, Archive: a})
+		Resolve: st.ResolvePrincipal, Execute: execute, Archive: a, Parser: protocol.BuiltinParser{}})
 	if err != nil {
 		t.Fatal(err)
 	}

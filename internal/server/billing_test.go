@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"minigateway/internal/protocol"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func TestS5AdminBillingWorkflowAndPermissionBoundary(t *testing.T) {
 	if err := e.EnableStrict("0.1", time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	gw, err := gateway.New(gateway.Options{Channels: f.store.Channels(), Billing: e, BillingMode: billing.ModeStrict})
+	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: f.store.Channels(), Billing: e, BillingMode: billing.ModeStrict})
 	if err != nil {
 		t.Fatal(err)
 	}

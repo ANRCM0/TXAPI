@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"minigateway/internal/protocol"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,8 +93,8 @@ func TestTariffAdmissionRefusesDriftBeforeNetworkAndPreservesEarlierUnknown(t *t
 					channels[target].Type = "header-fixture"
 					adaptors["header-fixture"] = &tariffHeaderAdaptor{header: tc.header}
 				}
-				gw, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 3,
-					Adaptors: adaptors, HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) },
+				gw, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 3,
+					Protocols: protocol.Protocols(adaptors), HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) },
 				})
 				if err != nil {
 					t.Fatal(err)

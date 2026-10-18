@@ -71,7 +71,7 @@ func TestCoordinatorIndependentOutputSharesOperationLifecycle(t *testing.T) {
 	for _, operation := range []protocol.Operation{protocol.Chat, protocol.Embeddings} {
 		t.Run(string(operation), func(t *testing.T) {
 			var hits, requests, attempts, releases atomic.Int64
-			g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: admissionFunc(func(_ context.Context, scope AdmissionScope) (func(), error) {
+			g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Admission: admissionFunc(func(_ context.Context, scope AdmissionScope) (func(), error) {
 				if scope.Level == RequestAdmission {
 					requests.Add(1)
 				} else {
@@ -111,7 +111,7 @@ func TestCoordinatorOutputFailureNeverRetriesOrPenalizesCredential(t *testing.T)
 			var hits, leases, health atomic.Int64
 			channels := lifecycleChannels("http://upstream.test")
 			channels[0].Credentials = append(channels[0].Credentials, dbmodel.Credential{ID: 9, APIKey: "second-test-key", Weight: 1, Status: dbmodel.CredentialActive})
-			g, err := New(Options{Channels: channels, RetryTimes: 1, Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
+			g, err := newRegisteredGateway(Options{Channels: channels, RetryTimes: 1, Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
 				leases.Add(1)
 				return func() { leases.Add(-1) }, nil
 			}), HealthReporter: func(*dbmodel.Credential, int, string) { health.Add(1) }, Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -136,7 +136,7 @@ func TestCoordinatorOutputFailureNeverRetriesOrPenalizesCredential(t *testing.T)
 
 func TestCoordinatorIndependentOutputRejectsBeforeExecution(t *testing.T) {
 	var hits atomic.Int64
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		hits.Add(1)
 		panic("local refusal reached network")
 	})}})
@@ -177,7 +177,7 @@ func TestCoordinatorIndependentOutputRejectsBeforeExecution(t *testing.T) {
 }
 
 func TestCoordinatorIndependentOutputCarriesRetryMetadata(t *testing.T) {
-	g, err := New(Options{Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
+	g, err := newRegisteredGateway(Options{Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
 		return nil, &AdmissionError{StatusCode: 429, RetryAfterSeconds: 7, Message: "capacity reached"}
 	})})
 	if err != nil {
@@ -195,7 +195,7 @@ func TestCoordinatorIndependentOutputRetriesOnlyBeforeCommit(t *testing.T) {
 	channels := lifecycleChannels("http://upstream.test")
 	channels[0].Credentials = append(channels[0].Credentials, dbmodel.Credential{ID: 9, APIKey: "second-test-key", Weight: 1, Status: dbmodel.CredentialActive})
 	var hits atomic.Int64
-	g, err := New(Options{Channels: channels, RetryTimes: 1, Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	g, err := newRegisteredGateway(Options{Channels: channels, RetryTimes: 1, Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		if hits.Add(1) == 1 {
 			return &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"message":"first attempt failed"}}`))}, nil
 		}
@@ -230,7 +230,7 @@ func TestCoordinatorIndependentOutputPreservesStrictFinancialTruth(t *testing.T)
 			if err := engine.ConfigureProviderCosts("1", []billing.ProviderCostContract{contract}); err != nil {
 				t.Fatal(err)
 			}
-			g, err := New(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict})
+			g, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict})
 			if err != nil {
 				t.Fatal(err)
 			}

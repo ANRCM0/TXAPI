@@ -61,7 +61,7 @@ func startGenerationRuntime(cfg config.GenerationConfig, st *store.Store, engine
 	if err := keys.ValidateRequirements(requirements, version); err != nil {
 		return nil, fmt.Errorf("retained generation content requires missing or incompatible keys")
 	}
-	acceptor, err := generation.NewIntentAcceptor(generation.IntentOptions{Admission: engine, Resolve: st.ResolvePrincipal,
+	acceptor, err := generation.NewIntentAcceptor(generation.IntentOptions{Parser: gw, Admission: engine, Resolve: st.ResolvePrincipal,
 		ActiveKey: keys.Active, Keys: keys.Keys, DigestKey: keys.Digest,
 		QueueTTL: time.Duration(cfg.DeadlineSeconds) * time.Second, Retention: time.Duration(cfg.RetentionSeconds) * time.Second,
 		Limits: model.GenerationIntentLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords, InstanceBytes: cfg.InstanceBytes, OwnerBytes: cfg.OwnerBytes}})

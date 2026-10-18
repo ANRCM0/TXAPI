@@ -14,7 +14,6 @@ import (
 	"minigateway/internal/access"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
-	"minigateway/internal/protocol"
 	"minigateway/internal/secrets"
 )
 
@@ -59,7 +58,7 @@ type Archive struct {
 // RecordedResult deliberately excludes raw errors, caller keys and policies.
 // Sealed means an authenticated observation exists, not protocol/billing success.
 type RecordedResult struct {
-	Operation        protocol.Operation
+	Operation        execv1.Operation
 	Model            string
 	StatusCode       int
 	Phase            execv1.Phase

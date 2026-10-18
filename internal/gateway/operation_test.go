@@ -34,8 +34,8 @@ func TestOperationEnvelopeSurvivesConversionAndRetries(t *testing.T) {
 	a := &mutatingRequestAdaptor{}
 	var hits int
 	var scopes []AdmissionScope
-	g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), RetryTimes: 1, BillingMode: billing.ModeDisabled,
-		Adaptors: map[string]adaptor.Adaptor{"openai": a},
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), RetryTimes: 1, BillingMode: billing.ModeDisabled,
+		Protocols: protocol.Protocols(map[string]adaptor.Adaptor{"openai": a}),
 		Admission: admissionFunc(func(_ context.Context, scope AdmissionScope) (func(), error) {
 			scopes = append(scopes, scope)
 			return func() {}, nil

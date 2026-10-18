@@ -48,7 +48,7 @@ func TestRetryAttemptsKeepTypedResultsAndReplayBody(t *testing.T) {
 		io.WriteString(w, `{"choices":[],"usage":{"prompt_tokens":2,"total_tokens":2}}`)
 	}))
 	defer upstream.Close()
-	g, err := New(Options{Channels: lifecycleChannels(upstream.URL), RetryTimes: 2, TotalTimeout: time.Second})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels(upstream.URL), RetryTimes: 2, TotalTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestTotalDeadlineBoundsAllAttempts(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	g, err := New(Options{Channels: lifecycleChannels(upstream.URL), RetryTimes: 2, TotalTimeout: 70 * time.Millisecond})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels(upstream.URL), RetryTimes: 2, TotalTimeout: 70 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestCanceledRequestDoesNotExecuteOrRetry(t *testing.T) {
 	var hits atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); w.WriteHeader(503) }))
 	defer upstream.Close()
-	g, err := New(Options{Channels: lifecycleChannels(upstream.URL), RetryTimes: 2})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels(upstream.URL), RetryTimes: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,12 +114,12 @@ func TestCanceledRequestDoesNotExecuteOrRetry(t *testing.T) {
 	}
 }
 func TestIndependentGatewaysDoNotShareRuntimeState(t *testing.T) {
-	a, err := New(Options{Channels: lifecycleChannels("http://a.test"), RetryTimes: 0})
+	a, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://a.test"), RetryTimes: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	b, err := New(Options{Channels: lifecycleChannels("http://b.test"), RetryTimes: 2})
+	b, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://b.test"), RetryTimes: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestCanceledStreamingRequestClosesUpstream(t *testing.T) {
 		close(closed)
 	}))
 	defer upstream.Close()
-	g, err := New(Options{Channels: lifecycleChannels(upstream.URL), RetryTimes: 2, TotalTimeout: time.Second})
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels(upstream.URL), RetryTimes: 2, TotalTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

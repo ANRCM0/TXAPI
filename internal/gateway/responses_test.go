@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"net/http"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ func TestResponsesSharesCoordinatorAndPreservesNativeTerminalFacts(t *testing.T)
 	for _, status := range []string{"completed", "incomplete", "failed", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
 			var requests, attempts, releases, hits int
-			g, err := New(Options{BillingMode: billing.ModeDisabled, RetryTimes: 2, Channels: lifecycleChannels("http://upstream.test"),
+			g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, RetryTimes: 2, Channels: lifecycleChannels("http://upstream.test"),
 				Admission: admissionFunc(func(_ context.Context, scope AdmissionScope) (func(), error) {
 					if scope.Operation != protocol.Responses {
 						t.Error("operation lost at admission")
@@ -63,7 +64,7 @@ func TestResponsesSharesCoordinatorAndPreservesNativeTerminalFacts(t *testing.T)
 }
 
 func TestResponsesStrictAndClaimedRefuseBeforeAdmissionOrBilling(t *testing.T) {
-	g, err := New(Options{BillingMode: billing.ModeStrict, StrictBilling: forbiddenStrictBilling{}, Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
+	g, err := newRegisteredGateway(Options{BillingMode: billing.ModeStrict, StrictBilling: forbiddenStrictBilling{}, Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
 		t.Fatal("unproved Responses reached admission")
 		return nil, nil
 	})})
@@ -110,7 +111,7 @@ func TestResponsesSSEPreservesNativeFramesAndDoesNotInventDone(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			wire := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":0,\"delta\":\"hello\"}\n\n" +
 				"event: response." + status + "\ndata: {\"type\":\"response." + status + "\",\"sequence_number\":1,\"response\":{\"id\":\"resp_upstream\",\"object\":\"response\",\"status\":\"" + status + "\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n"
-			g, err := New(Options{BillingMode: billing.ModeDisabled, Channels: lifecycleChannels("http://upstream.test"), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, Channels: lifecycleChannels("http://upstream.test"), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire))}, nil
 			})}})
 			if err != nil {
@@ -132,14 +133,14 @@ func TestResponsesSSEPreservesNativeFramesAndDoesNotInventDone(t *testing.T) {
 type responseLegacyProbe struct {
 	legacyBillingProbe
 	max   int
-	usage core.Usage
+	usage execv1.Usage
 }
 
 func (p *responseLegacyProbe) PreRequest(user, key uint, max int, model string) (*billing.PreDeduct, error) {
 	p.max = max
 	return p.legacyBillingProbe.PreRequest(user, key, max, model)
 }
-func (p *responseLegacyProbe) PriceOfSnapshot(_ *billing.PreDeduct, usage *core.Usage, _, _, _ string) (float64, bool) {
+func (p *responseLegacyProbe) PriceOfSnapshot(_ *billing.PreDeduct, usage *execv1.Usage, _, _, _ string) (float64, bool) {
 	p.usage = *usage
 	return 0, true
 }
@@ -147,7 +148,7 @@ func (p *responseLegacyProbe) PriceOfSnapshot(_ *billing.PreDeduct, usage *core.
 func TestResponsesLegacyAndTPMUseNativeInputAndMissingUsageEstimate(t *testing.T) {
 	probe := &responseLegacyProbe{}
 	limiter := &generationLimiter{adjustments: map[string]int{}}
-	g, err := New(Options{BillingMode: billing.ModeLegacy, Billing: probe, Limiter: limiter, Channels: lifecycleChannels("http://upstream.test"), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	g, err := newRegisteredGateway(Options{BillingMode: billing.ModeLegacy, Billing: probe, Limiter: limiter, Channels: lifecycleChannels("http://upstream.test"), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"resp_upstream","object":"response","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"a nonempty native answer"}]}]}`))}, nil
 	})}})
 	if err != nil {
@@ -168,7 +169,7 @@ func TestResponsesNonNativeErrorsAreSanitizedBeforeOutputLogsAndHealth(t *testin
 			url := "https://private-upstream.invalid/request?api_key=" + secret
 			var hits int
 			var logged, health string
-			g, err := New(Options{BillingMode: billing.ModeDisabled, RetryTimes: 2, Channels: lifecycleChannels("http://upstream.test"),
+			g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, RetryTimes: 2, Channels: lifecycleChannels("http://upstream.test"),
 				Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 					hits++
 					if transportFailure {

@@ -14,6 +14,7 @@ import (
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/protocol"
 )
@@ -24,7 +25,7 @@ func (p *legacyBillingProbe) PreRequest(uint, uint, int, string) (*billing.PreDe
 	p.calls = append(p.calls, "pre")
 	return &billing.PreDeduct{}, nil
 }
-func (p *legacyBillingProbe) PriceOfSnapshot(*billing.PreDeduct, *core.Usage, string, string, string) (float64, bool) {
+func (p *legacyBillingProbe) PriceOfSnapshot(*billing.PreDeduct, *execv1.Usage, string, string, string) (float64, bool) {
 	p.calls = append(p.calls, "price")
 	return 0, true
 }
@@ -55,7 +56,7 @@ func TestOptionalBillingPortsAreModeScopedAndNilSafe(t *testing.T) {
 					hits++
 					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))}, nil
 				})}
-				g, err := New(opts)
+				g, err := newRegisteredGateway(opts)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -104,14 +105,14 @@ func (p *strictBillingProbe) StartPreparedAttempt(ctx context.Context, pre *bill
 	header.Set("Authorization", "Bearer changed-after-admission")
 	return err
 }
-func (p *strictBillingProbe) EndAttempt(ctx context.Context, pre *billing.PreDeduct, number, status int, termination string, usage *core.Usage) error {
+func (p *strictBillingProbe) EndAttempt(ctx context.Context, pre *billing.PreDeduct, number, status int, termination string, usage *execv1.Usage) error {
 	p.calls = append(p.calls, "end")
 	if p.failEnd {
 		return errors.New("injected receipt persistence failure")
 	}
 	return p.StrictBilling.EndAttempt(ctx, pre, number, status, termination, usage)
 }
-func (p *strictBillingProbe) Finish(ctx context.Context, pre *billing.PreDeduct, usage *core.Usage, model, group string, complete bool) (int64, string, error) {
+func (p *strictBillingProbe) Finish(ctx context.Context, pre *billing.PreDeduct, usage *execv1.Usage, model, group string, complete bool) (int64, string, error) {
 	p.calls = append(p.calls, "finish")
 	return p.StrictBilling.Finish(ctx, pre, usage, model, group, complete)
 }
@@ -145,7 +146,7 @@ func TestStrictOnlyPortPreservesDurableFinalization(t *testing.T) {
 				}
 				return transport.RoundTrip(r)
 			})
-			g, err := New(Options{Channels: channels, Client: client, StrictBilling: port, BillingMode: billing.ModeStrict, RetryTimes: 2})
+			g, err := newRegisteredGateway(Options{Channels: channels, Client: client, StrictBilling: port, BillingMode: billing.ModeStrict, RetryTimes: 2})
 			if err != nil {
 				t.Fatal(err)
 			}

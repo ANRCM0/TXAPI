@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	relaymodel "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
-	relaymodel "minigateway/internal/protocol/model"
 )
 
 func TestFeeBoundAdmissionUsesSellingPriceAndExactHold(t *testing.T) {

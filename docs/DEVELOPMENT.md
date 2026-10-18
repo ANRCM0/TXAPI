@@ -445,8 +445,8 @@ PR/交付记录注明批次范围、实际命令和结果、验证提交/基线�
 ## S1 请求边界与性能基线
 
 - `core.Executor` 仅执行一次上游 HTTP 请求；每个 gateway 复用一个 Transport，退出时关闭空闲连接。
-- `protocol` 只做 URL/鉴权和纯数据转换，不导入 Gin、store、GORM 或 billing；同协议保持未知字段透传，每条流独立创建解析器。
-- `gateway.New(Options)` 显式注入路由、执行器、计费、限流、指标和健康反馈。请求汇总 `RequestResult` 与逐次 `AttemptResult` 分开，身份只在 HTTP 边界读取一次；转发结果不再写 Gin 字符串键。
+- `protocol` 只做 URL/鉴权和纯数据转换，使用公开执行值/decoder，不导入 core、Gin、store、GORM 或 billing；同协议保持未知字段透传，每条流独立创建解析器。
+- `gateway.New(Options)` 显式注入 Operations/Protocols（由 main 调 protocol 工厂组装）、路由、执行器、计费、限流、指标和健康反馈。请求汇总 `RequestResult` 与逐次 `AttemptResult` 分开，身份来自可信上下文，每次生成/worker 派发仍按现有边界重新校验；转发结果不再写 Gin 字符串键。
 - `server.timeout_seconds` 是逐次尝试超时；`server.total_timeout_seconds` 是包含所有重试的总预算，未设置时取前者。默认总预算不再随重试次数放大。
 - 重放 body 由 HTTP 层限制为 20 MiB 内存块；只有未提交、可重放、策略允许且未取消/未超总预算的失败才重试。上游执行结果未知的超时仍可能有真实成本，本阶段不承诺 exactly-once；严格账本恢复属于 S5。
 - 对于真实 net/http 下游，core 设置对应写截止时间；包装 writer 必须实现 `Unwrap` 或透传写 deadline。客户端取消会停止尝试、关闭上游 Body，不惩罚凭据。未知/无终止事件的流不会补成功 `[DONE]`。

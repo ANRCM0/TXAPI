@@ -14,11 +14,8 @@ import (
 	"time"
 
 	"minigateway/internal/billing"
+	execution "minigateway/internal/foundation/contracts/execution/v1"
 	dbmodel "minigateway/internal/model"
-	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/meta"
-	"minigateway/internal/protocol/model"
-	"minigateway/internal/protocol/responses"
 	"minigateway/internal/scheduler"
 )
 
@@ -29,7 +26,7 @@ import (
 //
 // The owned operation envelope binds payload, routing and capability facts for
 // every attempt. Integer modes exist only at the legacy adaptor boundary.
-func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels []string, timeout time.Duration) {
+func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels []string, timeout time.Duration) {
 	result := c.result
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(c.ctx, g.totalTimeout)
@@ -107,7 +104,7 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 		retryTimes = maxRetry
 	}
 
-	var lastErr *model.ErrorWithStatusCode
+	var lastErr *core.Error
 	responseCommitted := false
 	// 重试单元是「(渠道, 凭据) 对」，不是渠道本身：单渠道多 Key 时，
 	// 第一把 Key 失败后必须能在同一把渠道内换一把 Key 重试，否则一个
@@ -119,7 +116,7 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 
 	// 会话 ID 只算一次：整个请求（含重试）必须落在同一个会话上，
 	// 否则亲和会把重试打到另一把 Key 上，上游的 prompt 缓存白白作废。
-	sessionID := requestSessionID(c, c.result.Identity.UserID, c.result.Identity.TokenID, req.Body())
+	sessionID := requestSessionID(c, c.result.Identity.UserID, c.result.Identity.TokenID, req)
 
 	for attempt := 0; attempt <= retryTimes; attempt++ {
 		if ctx.Err() != nil {
@@ -129,7 +126,7 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 				code = 499
 				term = core.Canceled
 			}
-			lastErr = &model.ErrorWithStatusCode{StatusCode: code, Error: model.ErrorDetail{Message: "request time budget exhausted or canceled", Type: string(term)}}
+			lastErr = &core.Error{StatusCode: code, Error: core.ErrorDetail{Message: "request time budget exhausted or canceled", Type: string(term)}}
 			result.Termination = term
 			break
 		}
@@ -155,7 +152,7 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 			c.result.CredentialID = credID
 		}
 		c.result.ActualModel = m.ActualModel
-		if req.Operation() == protocol.Responses {
+		if g.operations[req.Operation()].Continuity {
 			c.result.ResponseTarget = responseTarget(ch, cred, req.Model())
 		}
 		// 记账用：命中的渠道分组。重试会不断覆盖它，最终值是
@@ -253,9 +250,9 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 	}
 
 	if lastErr == nil {
-		lastErr = &model.ErrorWithStatusCode{
+		lastErr = &core.Error{
 			StatusCode: http.StatusServiceUnavailable,
-			Error:      model.ErrorDetail{Message: "所有可用渠道均不可用", Type: "all_channels_failed"},
+			Error:      core.ErrorDetail{Message: "所有可用渠道均不可用", Type: "all_channels_failed"},
 		}
 	}
 	result.Error = lastErr
@@ -268,43 +265,52 @@ func (g *Gateway) relay(c *executionScope, req protocol.Request, allowedModels [
 }
 
 // doRelay 向单个渠道发一次请求。
-func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, req protocol.Request, timeout time.Duration) (result core.Result) {
-	if req.Operation() == protocol.Responses {
-		defer func() { result = sanitizeResponsesFailure(result, c.result.ResponseStatus) }()
+func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.Request, timeout time.Duration) (result core.Result) {
+	if g.operations[req.Operation()].OpaqueErrors {
+		defer func() {
+			result = sanitizeOperationFailure(result, g.operations[req.Operation()].Errors, c.result.nativeFailed)
+		}()
 	}
 	a, ok := g.reg.getAdaptor(m.ChannelType)
 	if !ok {
 		return core.Result{Phase: core.NotDispatched, StatusCode: 500, Error: &core.Error{StatusCode: 500, Error: core.ErrorDetail{Message: "no upstream adaptor", Type: "no_adaptor"}}}
 	}
-	if g.billingMode == billing.ModeStrict && m.Mode == meta.ModeEmbeddings {
-		pa, known := a.(interface{ Name() string })
-		if !known || pa.Name() != "openai" {
+	if g.billingMode == billing.ModeStrict && req.Operation() == execution.Embeddings {
+		name := a.Name()
+		known := name != ""
+		if !known || name != "openai" {
 			return g.rejectUnpricedAttempt(c, c.result.reservation)
 		}
 	}
-	input, err := protocol.PrepareRequest(a, req, m)
+	prepared, err := a.Prepare(req, *m)
+	input := ToCoreInput(prepared)
+	if err == nil && (prepared.Stream != req.Stream() || nilInterface(prepared.Decoder)) {
+		err = &execution.Error{StatusCode: 400, Error: execution.ErrorDetail{Message: "prepared request does not match operation transport", Type: "unsupported_operation"}}
+	}
+	input.Replayable = input.Replayable && !g.operations[req.Operation()].NonReplayable
 	if err != nil {
 		if g.billingMode == billing.ModeStrict {
 			return g.rejectUnpricedAttempt(c, c.result.reservation)
 		}
-		return core.Result{Phase: core.NotDispatched, StatusCode: err.StatusCode, Error: err, Termination: core.UpstreamError}
+		return core.Result{Phase: core.NotDispatched, StatusCode: err.StatusCode, Error: toCoreError(err), Termination: core.UpstreamError}
 	}
 	input.Timeout = timeout
 	pre := c.result.reservation
 	number := len(c.result.Attempts) + 1
 	if g.billingMode == billing.ModeStrict {
-		pa, known := a.(interface{ Name() string })
-		if !known || billing.ValidatePreparedRequest(input.Body, pa.Name(), m.Mode == meta.ModeEmbeddings) != nil {
+		name := a.Name()
+		known := name != ""
+		if !known || billing.ValidatePreparedRequest(input.Body, name, req.Operation() == execution.Embeddings) != nil {
 			return g.rejectUnpricedAttempt(c, pre)
 		}
-		if m.Mode == meta.ModeChatCompletions {
+		if req.Operation() == execution.Chat {
 			limits := c.result.strictRequest
 			if limits == nil {
 				return core.Result{Phase: core.NotDispatched, StatusCode: 503, Error: &core.Error{StatusCode: 503, Error: core.ErrorDetail{
 					Message: "strict request limits are unavailable", Type: "billing_unavailable",
 				}}}
 			}
-			if err := protocol.CheckOutputLimit(a, input.Body, limits.OutputLimit, limits.OutputLimitField); err != nil {
+			if err := a.CheckOutputLimit(bytes.Clone(input.Body), limits.OutputLimit, limits.OutputLimitField); err != nil {
 				return g.rejectUnpricedAttempt(c, pre)
 			}
 		}
@@ -314,7 +320,7 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, req protocol.Request,
 		err := g.strictBilling.StartPreparedAttempt(c.ctx, pre, dbmodel.BillingAttempt{
 			Number: number, ChannelID: uint(m.ChannelID), CredentialID: m.CredentialIDValue,
 			ActualModel: m.ActualModel, Group: c.result.ChannelGroup,
-		}, billing.ProviderTarget{ChannelID: uint(m.ChannelID), BaseURL: m.BaseURL, Protocol: pa.Name(), ActualModel: m.ActualModel, Operation: string(req.Operation())}, *c.result.strictRequest, input.URL, bytes.Clone(input.Body), input.Header.Clone())
+		}, billing.ProviderTarget{ChannelID: uint(m.ChannelID), BaseURL: m.BaseURL, Protocol: name, ActualModel: m.ActualModel, Operation: string(req.Operation())}, *c.result.strictRequest, input.URL, bytes.Clone(input.Body), input.Header.Clone())
 		if err != nil {
 			code, kind, message := 503, "billing_unavailable", "billing attempt could not be recorded"
 			switch {
@@ -339,23 +345,24 @@ func (g *Gateway) doRelay(c *executionScope, m *meta.Meta, req protocol.Request,
 	// If an injected executor/transport panics, non-execution is not established.
 	c.result.Phase = core.Dispatching
 	result = g.executor.ExecuteTo(c.ctx, c.output, input)
-	if req.Operation() == protocol.Responses {
-		if decoder, ok := input.Decoder.(interface{ Observation() responses.Observation }); ok {
-			observation := decoder.Observation()
-			c.result.ResponseStatus, c.result.UpstreamResponseID = observation.Status, observation.ID
-			if observation.Usage != nil {
-				result.Usage = observation.Usage
-			}
-			if result.Error == nil && (observation.Status == "failed" || observation.Status == "cancelled") {
-				result.StatusCode, result.Termination = http.StatusBadGateway, core.UpstreamError
-				result.Error = &core.Error{StatusCode: http.StatusBadGateway, Error: core.ErrorDetail{Message: "Responses generation did not complete successfully", Type: "upstream_response_failed"}}
-			}
+	if decoder, ok := prepared.Decoder.(execution.Observer); ok {
+		observation := decoder.Observation()
+		c.result.nativeFailed = observation.Failed
+		c.result.ResponseStatus, c.result.UpstreamResponseID = observation.Native.Status, observation.Native.ID
+		if observation.Usage != nil {
+			result.Usage = toCoreUsage(observation.Usage)
 		}
+		if result.Error == nil && observation.Failed {
+			result.StatusCode, result.Termination = http.StatusBadGateway, core.UpstreamError
+			result.Error = &core.Error{StatusCode: http.StatusBadGateway, Error: core.ErrorDetail{Message: g.operations[req.Operation()].Errors.Generation, Type: "upstream_response_failed"}}
+		}
+	}
+	if g.operations[req.Operation()].NonReplayable {
 		result.Replayable = false
 	}
 	if g.billingMode == billing.ModeStrict {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		err := g.strictBilling.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), result.Usage)
+		err := g.strictBilling.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), fromCoreUsage(result.Usage))
 		cancel()
 		if err != nil {
 			result.StatusCode, result.Termination = 503, core.UpstreamError
@@ -387,19 +394,12 @@ func (g *Gateway) rejectUnpricedAttempt(c *executionScope, pre *billing.PreDeduc
 // selectTarget 的注释）。
 //
 // The operation supplies the legacy adaptor mode; callers cannot override it.
-func buildMeta(ch *channel, cred *dbmodel.Credential, req protocol.Request, responseID string) *meta.Meta {
+func buildMeta(ch *channel, cred *dbmodel.Credential, req execution.Request, responseID string) *execution.Target {
 	actual := req.Model()
 	if mapped, ok := ch.mapping[req.Model()]; ok && mapped != "" {
 		actual = mapped
 	}
-	mode := meta.ModeChatCompletions
-	if req.Operation() == protocol.Embeddings {
-		mode = meta.ModeEmbeddings
-	}
-	if req.Operation() == protocol.Responses {
-		mode = meta.ModeResponses
-	}
-	return &meta.Meta{
+	return &execution.Target{
 		ResponseID:        responseID,
 		ChannelID:         ch.id,
 		ChannelName:       ch.name,
@@ -409,7 +409,7 @@ func buildMeta(ch *channel, cred *dbmodel.Credential, req protocol.Request, resp
 		OriginModel:       req.Model(),
 		ActualModel:       actual,
 		IsStream:          req.Stream(),
-		Mode:              mode,
+		Operation:         req.Operation(),
 		CredentialIDValue: cred.ID,
 	}
 }
@@ -682,35 +682,17 @@ func (g *Gateway) reportCredentialHealth(channel string, cred *dbmodel.Credentia
 // 网关时这个头要能过预检，否则亲和在前端场景下永远不生效。
 const SessionIDHeader = "X-Session-Id"
 
-// requestSessionID 算出本次请求的会话标识，供凭据亲和用。
-//
-// 在 relay 里算而不是在 handler 里算：请求体在这里已经是解析好的
-// []byte，而首条 user 消息的抽取要看 messages 数组。handler 为了保持
-// 「透明代理」只解析了 model/stream/max_tokens 三个字段，再为会话亲和
-// 多解析一个 messages 会让那个刻意的边界变模糊（见 handler.go 的说明）。
-//
-// 取值优先级：X-Session-Id 请求头 > 用户 ID + 令牌 ID + 首条 user 消息哈希；亲和 ID 在服务端按用户隔离。
-// 都取不到时返回空串，选择逻辑据此降级到纯加权随机。
-func requestSessionID(c *executionScope, userID, tokenID uint, body []byte) string {
-	if h := c.sessionID; h != "" {
-		return scheduler.SessionID(h, userID, tokenID, nil)
-	}
-	var envelope struct {
-		Messages []scheduler.Message `json:"messages"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil || len(envelope.Messages) == 0 {
-		return ""
-	}
-	return scheduler.SessionID("", userID, tokenID, envelope.Messages)
+// requestSessionID scopes only the neutral affinity projection; codecs own wire parsing.
+func requestSessionID(c *executionScope, userID, tokenID uint, req execution.Request) string {
+	return scheduler.SessionKey(c.sessionID, userID, tokenID, req.AffinityText())
 }
 
-func (g *Gateway) capableChannels(req protocol.Request, allowed []string) []*channel {
-	requirements := req.Requirements()
+func (g *Gateway) capableChannels(req execution.Request, allowed []string) []*channel {
 	candidates := g.pickChannels(req.Model(), allowed)
 	filtered := make([]*channel, 0, len(candidates))
 	for _, ch := range candidates {
 		a, ok := g.reg.getAdaptor(ch.typ)
-		if ok && protocol.Supports(a, requirements) {
+		if ok && a.Supports(req) {
 			filtered = append(filtered, ch)
 		}
 	}

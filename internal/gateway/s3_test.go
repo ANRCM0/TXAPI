@@ -19,7 +19,7 @@ func TestS3ImmediateCooldownSurvivesStaleReload(t *testing.T) {
 	for i := range channels[0].Credentials {
 		channels[0].Credentials[i].ChannelID = 1
 	}
-	g, err := New(Options{Channels: channels})
+	g, err := newRegisteredGateway(Options{Channels: channels})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestS3RetryUpstreamCredentialAuthWithoutChangingModel(t *testing.T) {
 				}
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(reply)), Header: make(http.Header)}, nil
 			})}
-			g, err := New(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, RetryTimes: 2})
+			g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Client: client, RetryTimes: 2})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -139,7 +139,7 @@ func TestS3AllCoolingChannelsBecomeEligibleWithoutReload(t *testing.T) {
 		channels[0].Credentials[i].Status = dbmodel.CredentialCooldown
 		channels[0].Credentials[i].CooldownUntil = time.Now().Add(time.Hour).Unix()
 	}
-	g, err := New(Options{Channels: channels})
+	g, err := newRegisteredGateway(Options{Channels: channels})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestS3AllCoolingChannelsBecomeEligibleWithoutReload(t *testing.T) {
 
 func TestS3DelayedPersistenceCannotRewindNewerRuntimeFailures(t *testing.T) {
 	channels := lifecycleChannels("http://upstream.test")
-	g, err := New(Options{Channels: channels})
+	g, err := newRegisteredGateway(Options{Channels: channels})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestS3RetryBudgetAndRouteReloadKeepAuthorization(t *testing.T) {
 				return &http.Response{StatusCode: 502, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"retry"}}`)), Header: make(http.Header)}, nil
 			})}
 			var err error
-			g, err = New(Options{Channels: channels, Client: client, RetryTimes: 10})
+			g, err = newRegisteredGateway(Options{Channels: channels, Client: client, RetryTimes: 10})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -218,7 +218,7 @@ func TestS3RetryBudgetAndRouteReloadKeepAuthorization(t *testing.T) {
 
 func TestReviewSuccessfulProbeSurvivesDelayedFailureReload(t *testing.T) {
 	channels := lifecycleChannels("http://upstream.test")
-	g, err := New(Options{Channels: channels})
+	g, err := newRegisteredGateway(Options{Channels: channels})
 	if err != nil {
 		t.Fatal(err)
 	}

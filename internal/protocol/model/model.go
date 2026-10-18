@@ -6,7 +6,7 @@
 // 这样上游新增的任何字段都不会被网关吃掉。
 package model
 
-import "minigateway/internal/core"
+import execv1 "minigateway/internal/foundation/contracts/execution/v1"
 
 // ModelRequest is retained only by the legacy Relay compatibility boundary.
 // New coordination uses protocol.Request and operation-specific payloads.
@@ -18,13 +18,13 @@ type ModelRequest struct {
 }
 
 // Usage 是上游返回的 token 用量，是计费的唯一依据。
-type Usage = core.Usage
+type Usage = execv1.Usage
 
 // ErrorDetail 是 OpenAI 风格的错误体，也是网关对外统一的错误格式。
-type ErrorDetail = core.ErrorDetail
+type ErrorDetail = execv1.ErrorDetail
 
 // ErrorWithStatusCode 把 HTTP 状态码和错误体绑在一起。
 //
 // 为什么要绑在一起：重试逻辑要先看状态码决定「要不要换渠道重试」，
 // 再看错误消息决定「给客户端回什么」。两者分开传会到处漏判。
-type ErrorWithStatusCode = core.Error
+type ErrorWithStatusCode = execv1.Error

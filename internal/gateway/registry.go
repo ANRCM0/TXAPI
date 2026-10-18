@@ -15,12 +15,9 @@ import (
 	"sync"
 	"time"
 
+	execution "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/metrics"
 	"minigateway/internal/model"
-	"minigateway/internal/protocol/adaptor"
-	"minigateway/internal/protocol/adaptor/anthropic"
-	"minigateway/internal/protocol/adaptor/gemini"
-	"minigateway/internal/protocol/adaptor/openai"
 )
 
 // channel 是运行期的渠道对象，由 model.Channel + 凭据池构建。
@@ -81,7 +78,7 @@ func hasUsableCredential(creds []model.Credential, now time.Time) bool {
 type registry struct {
 	mu       sync.RWMutex
 	channels map[int]*channel
-	adaptors map[string]adaptor.Adaptor
+	adaptors map[string]execution.Adapter
 	// modelIndex 是「模型名 → 渠道 ID 列表」的内存索引，
 	// 与渠道池同生命周期（Init/Reload 时一起重建）。
 	//
@@ -114,15 +111,8 @@ func (g *Gateway) initRegistry(channels []model.Channel) error {
 		channels: make(map[int]*channel, len(channels)),
 		// 适配器表：协议名 → 适配器实例。
 		// 新增协议只要在这里加一行 + 建个包，核心代码零改动（PLAN 3.2 的 N+M）。
-		adaptors: map[string]adaptor.Adaptor{
-			"openai":    &openai.Adaptor{},
-			"anthropic": &anthropic.Adaptor{},
-			"gemini":    &gemini.Adaptor{},
-		},
+		adaptors:   maps.Clone(g.adaptors),
 		modelIndex: make(map[string][]int),
-	}
-	for name, a := range g.adaptors {
-		r.adaptors[name] = a
 	}
 	if err := r.apply(channels); err != nil {
 		return err
@@ -248,7 +238,7 @@ func (r *registry) adaptorTypes() []string {
 }
 
 // getAdaptor 按渠道类型取适配器实例。
-func (r *registry) getAdaptor(channelType string) (adaptor.Adaptor, bool) {
+func (r *registry) getAdaptor(channelType string) (execution.Adapter, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	a, ok := r.adaptors[channelType]
@@ -328,12 +318,8 @@ func (g *Gateway) CredentialStats() []metrics.CredentialStat {
 func (g *Gateway) ensureInit() {
 	if g.reg == nil {
 		g.reg = &registry{
-			channels: map[int]*channel{},
-			adaptors: map[string]adaptor.Adaptor{
-				"openai":    &openai.Adaptor{},
-				"anthropic": &anthropic.Adaptor{},
-				"gemini":    &gemini.Adaptor{},
-			},
+			channels:   map[int]*channel{},
+			adaptors:   maps.Clone(g.adaptors),
 			modelIndex: map[string][]int{},
 		}
 	}

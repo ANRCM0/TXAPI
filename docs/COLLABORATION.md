@@ -12,7 +12,7 @@ F0 是已合并的初始接线基线，不是最终统一兼容框架。此后 S
 
 2026-10-18 的职责澄清：core 处理中转；gateway 与身份、调度、计费、状态服务组成业务层；兼容层覆盖 server/protocol/transport 的对外适配、扩展端口及前端应用契约。`web` 经公开应用 API 使用业务能力，页面不能成为授权/账本/恢复的权威。该分工不要求合并成三个大包；现有 server/store 业务调用按真实消费者核对，必要时提取小入口，不能仅凭目录名称宣称已完成分层。
 
-三层实际消费者、已支持组合、构造注册与资源责任见 [兼容契约清单](reference/compatibility-contracts.md)。新增协议沿用 `gateway.Options.Adaptors` 与独立流 session，管理配置复用 `management.Configuration`，页面消费现有应用 API；共享端口变更连同调用方评审。S6/M1 已完成集成验收，S7-A01 Responses HTTP/SSE 已完成独立 CI/合并验收；同类项目能力按具体目标通过这些契约接入。
+三层实际消费者、已支持组合、构造注册与资源责任见 [兼容契约清单](reference/compatibility-contracts.md)。新增协议沿用 `gateway.Options.Protocols/Operations` 与独立流 session，管理配置复用 `management.Configuration`，页面消费现有应用 API；共享端口变更连同调用方评审。S6/M1 已完成集成验收，S7-A01 Responses HTTP/SSE 已完成独立 CI/合并验收；同类项目能力按具体目标通过这些契约接入。
 
 ## 1. 可以并行推进的分工
 
@@ -21,7 +21,7 @@ S7-A02 已从 `master/04fbfa6` 经 PR #12 独立验收合并为 `master/765501a`
 | 责任角色 | 主要写入目录 | 受控工作范围 | 需要与集成负责人协调的文件 |
 |---|---|---|---|
 | 平台/集成 | `cmd/gateway`、`internal/core`、`internal/gateway`、`internal/architecture` | 公共契约收口、持久执行边界、取消/关闭与依赖验收 | main、gateway.Options、CI、迁移版本表、OpenAPI |
-| 协议团队 | `internal/protocol/adaptor/<provider>`、协议样本/测试 | 新厂商转换、协议能力/错误映射、独立 SSE 解析器 | `gateway.Options.Adaptors` 的生产注册，由集成团队接线 |
+| 协议团队 | `internal/protocol/adaptor/<provider>`、协议样本/测试 | 新厂商转换、协议能力/错误映射、独立 SSE 解析器 | `gateway.Options.Protocols/Operations` 的生产注册，由集成团队接线 |
 | 身份与存储团队 | `internal/access`、`internal/store/access*`、相关 API 功能切片 | 用户/Key 生命周期、权限收敛、owner 校验、迁移回归 | `internal/model`、`internal/store/migrations.go`、OpenAPI |
 | 密钥与运行安全（集成协调） | `internal/secrets`、`internal/store/credential_keys*`、generation 内容保护 | 标准库加密/挂载密钥解析，store 负责转换与生命周期；不新建鉴权/迁移 | 共享密文版本、model/store 迁移、main/config、保留与恢复规则 |
 | 调度与准入团队 | `internal/scheduler`、自己的准入实现包、相关测试 | 维护已验收的 S3 准入/租约，按独立批次扩展调度和负载回归 | Admission 接口、gateway.Options 和限额配置/模型字段 |
@@ -53,15 +53,15 @@ S7-A02 已从 `master/04fbfa6` 经 PR #12 独立验收合并为 `master/765501a`
 
 ### 类型化协调入口（A1–A4 基础契约已验收）
 
-`Gateway.ExecuteTo(ctx, output, gateway.Execution)` 接收已验证 Principal 与独立的 operation/body，返回本次 `RequestResult`；不构造 Gin context。调用方必须在**每次生成前**重新验证身份有效性，不能复用长连接初始认证快照承诺持续授权。公开入口拒绝无 user/key 身份，HTTP 适配保留已有认证中间件。
+`execution/v1.Executor.Execute(ctx, Output, Invocation)` 是功能消费者的公开候选入口，返回中立 Outcome；gateway.ExecuteTo/RequestResult 仅是 L1 内部协调和组装迁移接口，不接受新 L3 依赖。调用方必须在**每次生成前**重新验证身份有效性，不能复用长连接初始认证快照承诺持续授权。公开入口拒绝无 user/key 身份，HTTP 适配保留已有认证中间件。
 
-Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模型授权、请求/attempt 准入、预留、路由、重试和收尾。每次 `ExecuteTo`（旧 HTTP `Execute` 委托此入口）屏蔽父 context 的旧 RPM/TPM 准入标记及 mutable reservation；HTTP 中间件已完成的单次准入则由适配层明确传入，避免双扣。结果与流解析状态不按外部 Request ID 共享。协调链内部使用 `protocol.ParseRequest` 生成自持正文的 `protocol.Request`；路由/准入/attempt 与 `PrepareRequest` 使用同一操作事实，结果显式记录 Operation。每次准备只把副本交给适配器，不能修改原信封或下一次重试。`model.ModelRequest` 与整数 Mode 仅在旧 Relay/适配器边界保留；旧投影必须匹配正文，未知模式拒绝。
+Chat/embeddings HTTP 与公开入口调用同一非 Gin 协调函数，共用模型授权、请求/attempt 准入、预留、路由、重试和收尾。普通公开执行与内部 ExecuteTo 每次屏蔽父 context 的旧 RPM/TPM 准入和 mutable reservation。组装根只给 HTTP 兼容入口注入 NewHTTPExecutor：以私有、绑定当前可信 Key 的原子一次性标记接管中间件已经完成的 RPM/TPM；复用父 context 或并发消费只能有一次接管，其余重新准入。Invocation 没有可伪造的跳过准入字段。结果与流解析状态不按外部 Request ID 共享。亲和文本由 operation Request 投影，调度器只计算原有 owner/Key 摘要，不解析协议消息。FND-02 协调链只消费已注册的中立 Parser/Request；内建 ParseRequest 留在 L2 工厂；路由/准入/attempt 与 `PrepareRequest` 使用同一操作事实，结果显式记录 Operation。每次准备只把副本交给适配器，不能修改原信封或下一次重试。`model.ModelRequest` 与整数 Mode 仅在旧 Relay/适配器边界保留；旧投影必须匹配正文，未知模式拒绝。
 
-现有 HTTP 通过 `core.HTTPOutput` 消费输出端口，协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 已提供独立原生请求/item/JSON/SSE 编解码，A01 通过 `internal/responses` 应用注册 `POST /v1/responses` 并消费同一 gateway；它不是持久任务、历史/续链或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
+HTTP 入口通过 compat/httpoutput 返回公开 Output，L1 版本化门面内部桥接原 core.HTTPOutput；协调 scope 不持有 `http.ResponseWriter`。非 HTTP 输出的 HTTPStatus=0，Committed 仍约束重试；提交失败、短写或 flush 失败不惩罚上游、不改目标重试、不补造成功终态。端口仅输出已编码 JSON/SSE，尚不是独立的协议事件模型或 WS executor。元数据含 ContentType/StatusCode 和重试/账单等键值，HTTP 适配为响应头。调用者负责出口关闭与每次生成的独占实例，禁止复用已提交出口。`protocol/responses` 已提供独立原生请求/item/JSON/SSE 编解码，A01 通过 `internal/responses` 应用注册 `POST /v1/responses` 并消费同一 gateway；它不是持久任务、历史/续链或 WS 应用。`core.Phase` 仅说明本地观察，ProtocolComplete 只说明协议解析终态，不替代操作成功或财务终态。
 
 ### 最小 worker、输出记录与意图：internal/generation（A3-01 至 A3-05 基础消费者）
 
-新增模块只允许依赖 access/core/gateway/protocol/model/secrets，不导入 store/GORM、Gin 或 billing 引擎；组装者注入身份解析函数与实际 `Gateway.ExecuteTo`。固定 worker 和有界队列实际消费现有 Chat/embeddings，正文副本总预算最高 64 MiB，排队起算取消期限。交接不会预占 generation/network 槽、预留预算或持久受理。每次派发重新解析可信绑定，旧 context 的身份/准入标记不能带入；排队后撤销禁止新执行，已派发轮次仍用本轮快照，尚无后台任务撤销传播服务。
+L1 generation 当前只通过公开 execution/Parser 消费执行与载荷校验，不导入 core/gateway/protocol。其 access/model/secrets 实现依赖将在 FND-03 按状态和生命周期端口迁移，不是新增 L3 的接入许可。组装者注入当前身份解析、注册 Parser 与公开 Executor；不能导入 store/GORM、Gin 或另建 billing 引擎。固定 worker 和有界队列实际消费现有 Chat/embeddings，正文副本总预算最高 64 MiB，排队起算取消期限。交接不会预占 generation/network 槽、预留预算或持久受理。每次派发重新解析可信绑定，旧 context 的身份/准入标记不能带入；排队后撤销禁止新执行，已派发轮次仍用本轮快照，尚无后台任务撤销传播服务。
 
 观察者取消不取消已交接工作；显式 `Future.Cancel`、服务关闭和期限可取消生成，均继续走 gateway 既有收尾。输出属于本次生成，结果仅一次接收；commit 后 panic 保守标记执行可能未知，不重放、不伪造未派发或清零账本。`Close` 等待所有 worker 与收尾；超时后不得提前关闭 gateway/store，同进程不合作回调无法被隔离或强杀。
 
@@ -105,12 +105,13 @@ strict 的 `StartPreparedAttempt` 是唯一可执行成本准入入口：必须�
 ```go
 gw, err := gateway.New(gateway.Options{
     Channels: channels,
-    Adaptors: map[string]adaptor.Adaptor{"provider-name": providerAdaptor},
+    Operations: protocol.Operations(),
+    Protocols: protocol.Protocols(map[string]adaptor.Adaptor{"provider-name": providerAdaptor}),
     // 其他依赖由应用入口注入
 })
 ```
 
-注册表在构造时复制，不能通过修改原 map 热替换实例。内建协议默认仍可用；替换已有名称是显式的构造行为。不能在协议包发 HTTP 请求、访问用户表、记录费用或创建后台 worker。`protocol.Resolve` 仅描述内建默认协议，不等于实例注册表。
+注册表在构造时复制，不能通过修改原 map 热替换实例。内建协议由组装根通过 protocol.Protocols 显式提供；gateway 不内置厂商，也不对缺失注册回落。替换已有名称是工厂中的显式构造行为。不能在协议包发 HTTP 请求、访问用户表、记录费用或创建后台 worker。`protocol.Resolve` 仅描述内建默认协议，不等于实例注册表。
 
 ### 可选计费消费端口
 

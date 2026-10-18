@@ -6,7 +6,7 @@ import (
 	"errors"
 	"unicode/utf8"
 
-	"minigateway/internal/protocol/jsonutil"
+	jsonutil "minigateway/internal/foundation/contracts/json/v1"
 )
 
 type StrictRequest struct {

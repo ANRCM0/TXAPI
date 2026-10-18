@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/protocol/jsonutil"
 )
 
@@ -28,7 +28,7 @@ type Usage struct {
 	Total  *int `json:"total_tokens"`
 }
 
-func ParseResponse(body []byte) (Response, *core.Usage, error) {
+func ParseResponse(body []byte) (Response, *execv1.Usage, error) {
 	var r Response
 	if err := jsonutil.Validate(body); err != nil {
 		return r, nil, err
@@ -54,13 +54,13 @@ func ParseResponse(body []byte) (Response, *core.Usage, error) {
 	if *u.Input < 0 || *u.Output < 0 || *u.Total < 0 || *u.Input > math.MaxInt-*u.Output || *u.Input+*u.Output != *u.Total {
 		return r, nil, errors.New("invalid Responses usage")
 	}
-	return r, &core.Usage{PromptTokens: *u.Input, CompletionTokens: *u.Output, TotalTokens: *u.Total}, nil
+	return r, &execv1.Usage{PromptTokens: *u.Input, CompletionTokens: *u.Output, TotalTokens: *u.Total}, nil
 }
 
 type Observation struct {
 	ID     string
 	Status string
-	Usage  *core.Usage
+	Usage  *execv1.Usage
 }
 
 type Decoder struct {
@@ -89,7 +89,7 @@ func (d *Decoder) observe(o Observation) {
 func terminalStatus(status string) bool {
 	return status == "completed" || status == "incomplete" || status == "failed" || status == "cancelled"
 }
-func (d *Decoder) Decode(body []byte) ([]byte, *core.Usage, error) {
+func (d *Decoder) Decode(body []byte) ([]byte, *execv1.Usage, error) {
 	d.observe(Observation{})
 	r, usage, err := ParseResponse(body)
 	if err != nil {
@@ -105,7 +105,7 @@ func (d *Decoder) Decode(body []byte) ([]byte, *core.Usage, error) {
 	d.observe(Observation{ID: r.ID, Status: r.Status, Usage: usage})
 	return out, usage, nil
 }
-func (d *Decoder) NewStream() core.StreamDecoder {
+func (d *Decoder) NewStream() execv1.StreamDecoder {
 	d.observe(Observation{})
 	return &streamDecoder{lastSequence: -1, owner: d}
 }
@@ -123,7 +123,7 @@ type streamDecoder struct {
 
 const maxEventBytes = 1 << 20
 
-func (s *streamDecoder) DecodeLine(line []byte) ([]core.Frame, error) {
+func (s *streamDecoder) DecodeLine(line []byte) ([]execv1.Frame, error) {
 	if s.terminal {
 		return nil, errors.New("Responses event after terminal state")
 	}
@@ -148,14 +148,14 @@ func (s *streamDecoder) DecodeLine(line []byte) ([]core.Frame, error) {
 	return nil, nil
 }
 
-func (s *streamDecoder) flush() ([]core.Frame, error) {
+func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	defer func() { s.wire.Reset(); s.data = nil; s.event = "" }()
 	if s.wire.Len() == 0 {
 		return nil, nil
 	}
 	wire := append(append([]byte(nil), s.wire.Bytes()...), '\n')
 	if len(s.data) == 0 {
-		return []core.Frame{{Data: wire}}, nil
+		return []execv1.Frame{{Data: wire}}, nil
 	}
 	var event struct {
 		Type     string          `json:"type"`
@@ -178,9 +178,9 @@ func (s *streamDecoder) flush() ([]core.Frame, error) {
 		}
 		s.lastSequence = *event.Sequence
 	}
-	frame := core.Frame{Data: wire}
+	frame := execv1.Frame{Data: wire}
 	var response Response
-	var usage *core.Usage
+	var usage *execv1.Usage
 	if present(event.Response) {
 		var err error
 		response, usage, err = ParseResponse(event.Response)
@@ -238,7 +238,7 @@ func (s *streamDecoder) flush() ([]core.Frame, error) {
 		out.WriteString("\n\n")
 		frame.Data = out.Bytes()
 	}
-	return []core.Frame{frame}, nil
+	return []execv1.Frame{frame}, nil
 }
 
 // Rewrite only documented envelope positions. Metadata and output items may
@@ -297,7 +297,7 @@ func rewrite(body []byte, publicID string, responseRoot, errorEvent bool) ([]byt
 	return json.Marshal(root)
 }
 
-func (s *streamDecoder) End() ([]core.Frame, error) {
+func (s *streamDecoder) End() ([]execv1.Frame, error) {
 	frames, err := s.flush()
 	if err != nil {
 		return nil, err
@@ -308,4 +308,4 @@ func (s *streamDecoder) End() ([]core.Frame, error) {
 	return frames, nil
 }
 
-var _ core.Decoder = (*Decoder)(nil)
+var _ execv1.Decoder = (*Decoder)(nil)
