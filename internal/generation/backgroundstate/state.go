@@ -47,6 +47,7 @@ type Record struct {
 	StoredBytes      int64
 	EventCount       int64
 	Deleted          bool
+	ReplayPending    bool
 }
 type Event struct {
 	TaskID     string
@@ -60,10 +61,11 @@ type Claim struct {
 	Token string
 }
 type Update struct {
-	Stage    bg.Stage
-	Snapshot []byte
-	Events   []Event
-	DueAt    int64
+	Stage         bg.Stage
+	Snapshot      []byte
+	Events        []Event
+	DueAt         int64
+	ReplayPending bool
 }
 type Repository interface {
 	InitializeBackground(context.Context, string, string) ([]Record, error)
@@ -72,6 +74,7 @@ type Repository interface {
 	BackgroundKind(context.Context, identity.Binding, string) (bg.ResourceKind, error)
 	DeleteBackground(context.Context, identity.Binding, string, *uint64) error
 	ReadClaimedBackground(context.Context, Claim) (Record, error)
+	ReadClaimedBackgroundEvent(context.Context, Claim, int64) (Event, bool, error)
 	RequestBackgroundCancel(context.Context, Claim) (Record, error)
 	CancelBackground(context.Context, identity.Binding, string) (Record, error)
 	ReadBackgroundEvents(context.Context, identity.Binding, string, int64, int) ([]Event, error)

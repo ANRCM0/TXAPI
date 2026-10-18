@@ -152,7 +152,7 @@ func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Lim
 		in.Stage != string(bg.StageQueued) || in.Revision != 1 || in.CreatedAt <= 0 || in.CreatedAt > now || in.Deadline <= now || in.Deadline-in.CreatedAt > int64(5*time.Minute/time.Millisecond) ||
 		in.ContentExpiresAt < in.Deadline || in.ContentExpiresAt-in.CreatedAt > int64(time.Hour/time.Millisecond) || in.ExpiresAt < in.ContentExpiresAt || in.ExpiresAt-in.CreatedAt > int64(7*24*time.Hour/time.Millisecond) ||
 		len(in.Ciphertext) < 30 || len(in.Ciphertext) > bs.MaxInput+256 || len(in.Snapshot) != 0 || in.ReservedBytes < int64(len(in.Ciphertext)) || in.ReservedBytes > bs.MaxInput+bs.MaxContent+512 ||
-		in.ClaimEpoch != 0 || in.ClaimHash != "" || in.ClaimUntil != 0 || in.CancelRequested || in.Deleted || in.DueAt != 0 || in.LastSequence != -1 || in.StoredBytes != 0 || in.EventCount != 0 || !validBackgroundLimits(limits) {
+		in.ClaimEpoch != 0 || in.ClaimHash != "" || in.ClaimUntil != 0 || in.CancelRequested || in.Deleted || in.ReplayPending || in.DueAt != 0 || in.LastSequence != -1 || in.StoredBytes != 0 || in.EventCount != 0 || !validBackgroundLimits(limits) {
 		return out, bg.ErrConflict
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -346,7 +346,7 @@ func (s *Store) ClaimBackground(ctx context.Context, lease time.Duration) (out b
 			return e
 		}
 		var row model.BackgroundJob
-		query := tx.Where("stage IN ? AND claim_until <= ? AND due_at <= ? AND content_expires_at > ?", []string{string(bg.StageQueued), string(bg.StageRemoteActive)}, now, now, now).Order("created_at,id").Limit(1).Find(&row)
+		query := tx.Where("(stage IN ? OR (stage = ? AND replay_pending = 1)) AND deleted = 0 AND claim_until <= ? AND due_at <= ? AND content_expires_at > ?", []string{string(bg.StageQueued), string(bg.StageRemoteActive)}, bg.StageTerminal, now, now, now).Order("due_at,created_at,id").Limit(1).Find(&row)
 		e := query.Error
 		if e == nil && query.RowsAffected == 0 {
 			return nil
@@ -426,7 +426,8 @@ func (s *Store) UpdateBackground(ctx context.Context, c bs.Claim, revision uint6
 		if e != nil {
 			return e
 		}
-		if row.Revision != revision || row.Revision >= math.MaxInt64 || !validBackgroundTransition(row.Stage, in.Stage) {
+		terminalReplay := row.Stage == string(bg.StageTerminal) && row.ReplayPending && in.Stage == bg.StageTerminal
+		if row.Deleted || row.Revision != revision || row.Revision >= math.MaxInt64 || !validBackgroundTransition(row.Stage, in.Stage) && !terminalReplay || in.ReplayPending && (in.Stage != bg.StageTerminal || !row.Stream) {
 			return bg.ErrConflict
 		}
 		if row.Stage == string(bg.StageQueued) && in.Stage == bg.StageDispatching {
@@ -441,6 +442,9 @@ func (s *Store) UpdateBackground(ctx context.Context, c bs.Claim, revision uint6
 			return bg.ErrCursorUnavailable
 		}
 		if in.Stage == bg.StageRemoteActive && len(in.Snapshot) < 30 {
+			return bg.ErrConflict
+		}
+		if in.ReplayPending && len(in.Snapshot) < 30 {
 			return bg.ErrConflict
 		}
 		for _, event := range in.Events {
@@ -474,10 +478,15 @@ func (s *Store) UpdateBackground(ctx context.Context, c bs.Claim, revision uint6
 		if row.StoredBytes+int64(len(row.Snapshot))+int64(len(row.Ciphertext)) > row.ReservedBytes {
 			return bg.ErrCapacity
 		}
+		// Leave room for bounded control/error facts after event capacity is hit.
+		if len(in.Events) > 0 && row.StoredBytes+int64(len(row.Snapshot))+int64(len(row.Ciphertext)) > row.ReservedBytes-1024 {
+			return bg.ErrCapacity
+		}
 		row.Stage = string(in.Stage)
+		row.ReplayPending = in.ReplayPending
 		row.Revision++
 		row.DueAt = in.DueAt
-		if in.Stage == bg.StageTerminal || in.Stage == bg.StageUncertain {
+		if in.Stage == bg.StageTerminal && !in.ReplayPending || in.Stage == bg.StageUncertain {
 			row.ClaimHash = ""
 			row.ClaimUntil = 0
 		}
@@ -525,7 +534,7 @@ func (s *Store) CleanupBackground(ctx context.Context, limit int) error {
 			if e := tx.Where("task_id = ?", row.ID).Delete(&model.BackgroundEvent{}).Error; e != nil {
 				return e
 			}
-			changes := map[string]interface{}{"ciphertext": []byte{}, "snapshot": []byte{}, "reserved_bytes": 0, "stored_bytes": 0, "revision": gorm.Expr("revision + 1"), "claim_hash": "", "claim_until": 0}
+			changes := map[string]interface{}{"ciphertext": []byte{}, "snapshot": []byte{}, "reserved_bytes": 0, "stored_bytes": 0, "replay_pending": false, "revision": gorm.Expr("revision + 1"), "claim_hash": "", "claim_until": 0}
 			if row.Stage != string(bg.StageTerminal) {
 				changes["stage"] = bg.StageUncertain
 			}

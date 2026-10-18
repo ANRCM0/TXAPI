@@ -21,6 +21,8 @@ import time
 import urllib.error
 import urllib.request
 
+from background import background_workflow
+
 
 ROOT = Path(__file__).resolve().parents[2]
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -453,6 +455,7 @@ def main():
             strict_crash_workflow(strict_gateway, config, config_path, work, strict_env, gateway_port,
                                   f"http://127.0.0.1:{upstream_port}", admin)
             generation_runtime_workflow(gateway, config, config_path, work, clean_env, gateway_port)
+            background_workflow(gateway, work, clean_env, service, ready, request)
     print("PASS: production startup/auth/normal/SSE/console, strict missing-price/input/tariff rejection; isolated main settlement, credential rotation refusal/recovery, encrypted runtime restart/key rejection and shutdown")
 
 

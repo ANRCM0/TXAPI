@@ -315,13 +315,27 @@ func (s *BackgroundService) Events(ctx context.Context, id string, q bg.EventQue
 	if !r.Stream || r.ContentExpiresAt <= time.Now().UnixMilli() {
 		return bg.EventPage{}, bg.ErrCursorUnavailable
 	}
+	if r.Stage == string(bg.StageUncertain) {
+		return bg.EventPage{}, bg.ErrUncertain
+	}
+	snapshot, e := s.openSnapshot(r)
+	if e != nil {
+		return bg.EventPage{}, e
+	}
+	if snapshot.EventUnavailable || after > r.LastSequence || r.Stage == string(bg.StageTerminal) && !snapshot.EventComplete && !r.ReplayPending {
+		return bg.EventPage{}, bg.ErrCursorUnavailable
+	}
 	events, e := s.repository.ReadBackgroundEvents(ctx, b, id, after, limit)
 	if e != nil {
 		return bg.EventPage{}, safeBackgroundError(e)
 	}
-	out := bg.EventPage{Terminal: r.Stage == string(bg.StageTerminal)}
+	out := bg.EventPage{}
 	size := 0
+	last := after
 	for _, event := range events {
+		if event.Sequence != last+1 {
+			return bg.EventPage{}, bg.ErrCursorUnavailable
+		}
 		plain, e := s.keys.Open(event.Ciphertext, backgroundAAD(r, "event/"+strconv.FormatInt(event.Sequence, 10)))
 		if e != nil {
 			return bg.EventPage{}, bg.ErrUnavailable
@@ -336,7 +350,12 @@ func (s *BackgroundService) Events(ctx context.Context, id string, q bg.EventQue
 		n := uint64(event.Sequence)
 		out.Events = append(out.Events, bg.Event{Sequence: n, Data: bytes.Clone(plain)})
 		out.Next = &n
+		last = event.Sequence
 	}
+	if len(events) == 0 && after < r.LastSequence {
+		return bg.EventPage{}, bg.ErrCursorUnavailable
+	}
+	out.Terminal = snapshot.EventComplete && last == r.LastSequence
 	return out, nil
 }
 

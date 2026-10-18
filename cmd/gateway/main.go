@@ -386,6 +386,7 @@ func main() {
 	<-quit
 	slog.Info("正在关闭网关...")
 	generationRuntime.Stop()
+	responsesRuntime.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

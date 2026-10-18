@@ -15,6 +15,8 @@ type RemoteCall struct {
 	Body                      []byte
 	Model, PublicID, RemoteID string
 	Target                    *execution.TargetConstraint
+	Stream                    bool
+	After                     *uint64
 }
 type RateReservation struct {
 	Epoch    string

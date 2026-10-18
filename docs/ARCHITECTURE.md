@@ -1,8 +1,6 @@
 # 架构设计：中转内核、业务层与统一兼容层
 
-FC-002 的 A03-01 已独立验收至 `master/c1b8264`；当前 A03-02 正在原十四组冻结入口之外
-实现候选的 disabled 原生后台 submit/inspect/cancel 和终态删除，尚未验收。原生后台事件恢复仍留给
-A03-03，收费后台与完整 A03/M3 不因此完成；隔离、幂等和临时保留见 [后台运行约定](reference/responses-background.md)。
+FC-002 的 A03-01/02 已独立验收；A03-02 功能头与合并后 `master/8a1da1f` 的完整 CI 均通过（PR #21）。当前 A03-03 从该基线补齐原生事件持久/游标恢复与强杀故障矩阵，尚未验收，两组新增契约仍候选；原十四组冻结入口和 L0 不变。收费后台、背景父链与完整 A03/M3 不因此完成；隔离、幂等和临时保留见 [后台运行约定](reference/responses-background.md)。
 
 2026-10-18，用户批准的 L0 内核、L1 基础框架、L2 兼容层、L3 功能层约束已按 [FC-001](proposals/FC-001-foundation-contracts-v1.md) 的 FND-01 至 FND-05 完成。代码基线 `master/889ecbd` 经最终功能头与合并后完整 CI 验收，L0/L1/L2 v1 已冻结；全部包归属、公开入口、资源规则、独立接入与 DoD 见 [v1 接入清单](reference/foundation-integration-v1.md)。下文三层表保留产品职责视角，生产编译依赖以四层规则为准；状态与下一批以 [PLAN](PLAN.md#地基符合性收口fc-001) 为准。
 
@@ -10,7 +8,7 @@ A03-03，收费后台与完整 A03/M3 不因此完成；隔离、幂等和临时
 
 2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
 
-S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 统一兼容与协调框架、S7-A01 原生 Responses HTTP/SSE 和 A02 持久会话均已独立验收合并，接下来推进后台任务和 WebSocket**。后台/原生 WS 仍是必须开发且尚未实现的目标；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
+S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 统一兼容与协调框架、S7-A01 原生 Responses HTTP/SSE 和 A02 持久会话均已独立验收合并，接下来推进后台任务和 WebSocket**。完整收费后台/原生 WS 仍是必须开发且尚未验收的目标；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
 
 ## 设计总纲与当前差距
 

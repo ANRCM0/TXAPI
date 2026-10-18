@@ -103,6 +103,7 @@ func (h *backgroundHarness) start() {
 	}))
 }
 func (h *backgroundHarness) close() {
+	h.runtime.Stop()
 	if h.front != nil {
 		h.front.Close()
 		h.front = nil

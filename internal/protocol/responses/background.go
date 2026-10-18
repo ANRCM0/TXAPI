@@ -3,8 +3,10 @@ package responses
 import (
 	"bytes"
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +38,7 @@ func (r backgroundRequest) CompletionText([]byte) string { return "" }
 
 func (BackgroundParser) ParseRequest(op execution.Operation, body []byte) (execution.Request, error) {
 	r, e := ParseRequest(body)
-	if e != nil || op != execution.Responses || !r.Background || r.PreviousResponseID != "" || present(r.Conversation) || r.Stream {
+	if e != nil || op != execution.Responses || !r.Background || r.PreviousResponseID != "" || present(r.Conversation) {
 		return nil, errors.New("unsupported native background request")
 	}
 	check := r
@@ -66,6 +68,7 @@ func (BackgroundCodec) Prepare(command bg.RemoteCommand, target execution.Target
 		return bg.Prepared{}, backgroundFailure()
 	}
 	method := http.MethodGet
+	stream := false
 	var body []byte
 	switch command.Action {
 	case bg.RemoteSubmit:
@@ -81,6 +84,7 @@ func (BackgroundCodec) Prepare(command bg.RemoteCommand, target execution.Target
 			return bg.Prepared{}, backgroundFailure()
 		}
 		method = http.MethodPost
+		stream = r.Stream()
 	case bg.RemoteInspect, bg.RemoteCancel:
 		if !validRemoteID(command.RemoteID) || len(command.Body) != 0 || command.After != nil {
 			return bg.Prepared{}, backgroundFailure()
@@ -90,11 +94,22 @@ func (BackgroundCodec) Prepare(command bg.RemoteCommand, target execution.Target
 			u.Path += "/cancel"
 			method = http.MethodPost
 		}
+	case bg.RemoteResume:
+		if !validRemoteID(command.RemoteID) || len(command.Body) != 0 || command.After != nil && *command.After > math.MaxInt64 {
+			return bg.Prepared{}, backgroundFailure()
+		}
+		u.Path += "/" + command.RemoteID
+		query := url.Values{"stream": {"true"}}
+		if command.After != nil {
+			query.Set("starting_after", strconv.FormatUint(*command.After, 10))
+		}
+		u.RawQuery = query.Encode()
+		stream = true
 	default:
 		return bg.Prepared{}, backgroundFailure()
 	}
 	d := &backgroundDecoder{publicID: target.ResponseID, remoteID: command.RemoteID}
-	return bg.Prepared{Input: execution.Input{Method: method, URL: u.String(), Header: http.Header{"Authorization": {"Bearer " + target.APIKey}, "Content-Type": {"application/json"}}, Body: body, Replayable: false, Timeout: 10 * time.Second, Decoder: d}, Progress: d}, nil
+	return bg.Prepared{Input: execution.Input{Method: method, URL: u.String(), Header: http.Header{"Authorization": {"Bearer " + target.APIKey}, "Content-Type": {"application/json"}}, Body: body, Stream: stream, Replayable: false, Timeout: 10 * time.Second, Decoder: d}, Progress: d}, nil
 }
 
 func validRemoteID(id string) bool {
@@ -133,7 +148,9 @@ func (d *backgroundDecoder) Decode(body []byte) ([]byte, *execution.Usage, error
 	d.mu.Unlock()
 	return out, usage, nil
 }
-func (d *backgroundDecoder) NewStream() execution.StreamDecoder { return nil }
+func (d *backgroundDecoder) NewStream() execution.StreamDecoder {
+	return &backgroundStreamDecoder{owner: d, remoteID: d.remoteID, lastSequence: -1}
+}
 func (d *backgroundDecoder) Drain() bg.Observation {
 	d.mu.Lock()
 	defer d.mu.Unlock()
