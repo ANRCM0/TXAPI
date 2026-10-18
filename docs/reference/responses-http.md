@@ -2,6 +2,14 @@
 
 Status (2026-10-18): S7-A01 accepted and merged by PR #10. Final feature head `3195d09` on base `bea97fa` and actual merged `master/a925140` passed their own complete automatic push/PR/master CI, including Linux race and container delivery. See [exact acceptance evidence](../history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance), including the failed initial delivery run and repair. This extends, rather than reopens, the accepted [S6 contracts](compatibility-contracts.md). Responses remains opt-in; A02-A06 and M2 are not complete.
 
+## A02 Working Extension
+
+The current A02 worktree separately implements local encrypted response/history
+and Conversations APIs with full-context continuation. Its 0.4.0 / 91-operation
+contract is **not yet remotely accepted**. See [history contract](responses-history.md)
+and [A02 evidence](../history/implementation-s7-a02.md). The A01 acceptance and its
+exclusions below describe its original scope, not an acceptance of this extension.
+
 ## Supported Surface
 
 `POST /v1/responses` uses API-key authentication and the existing gateway generation/attempt/admission/finalization chain. The native OpenAI-compatible adaptor handles text, instructions, function tools, function_call/function_call_output history and opaque reasoning items without Chat conversion. JSON and native SSE preserve output items, usage details and completed/incomplete/failed/cancelled semantics. A native failure can follow HTTP 200; it is not rewritten to a fabricated success or Chat `[DONE]`. Provider error details are sanitized. Other upstream protocols are not bridged through Chat.

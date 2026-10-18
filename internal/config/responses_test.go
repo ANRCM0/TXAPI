@@ -24,14 +24,17 @@ func TestResponsesRejectsUnsafeLimitsButDoesNotRequireStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, change := range map[string]func(*ResponsesConfig){
-		"keys":         func(c *ResponsesConfig) { c.KeysFile = " " },
-		"retention":    func(c *ResponsesConfig) { c.RetentionSeconds = 59 },
-		"replay":       func(c *ResponsesConfig) { c.ReplaySeconds = c.RetentionSeconds + 1 },
-		"body":         func(c *ResponsesConfig) { c.MaxOutputBytes = 9 << 20 },
-		"records":      func(c *ResponsesConfig) { c.OwnerRecords = c.InstanceRecords },
-		"bytes":        func(c *ResponsesConfig) { c.OwnerBytes = 1 },
-		"active":       func(c *ResponsesConfig) { c.ActiveRequests = 129 },
-		"owner active": func(c *ResponsesConfig) { c.OwnerRequests = c.ActiveRequests },
+		"keys":                   func(c *ResponsesConfig) { c.KeysFile = " " },
+		"retention":              func(c *ResponsesConfig) { c.RetentionSeconds = 59 },
+		"replay":                 func(c *ResponsesConfig) { c.ReplaySeconds = c.RetentionSeconds + 1 },
+		"body":                   func(c *ResponsesConfig) { c.MaxOutputBytes = 9 << 20 },
+		"records":                func(c *ResponsesConfig) { c.OwnerRecords = c.InstanceRecords },
+		"bytes":                  func(c *ResponsesConfig) { c.OwnerBytes = 1 },
+		"active":                 func(c *ResponsesConfig) { c.ActiveRequests = 129 },
+		"owner active":           func(c *ResponsesConfig) { c.OwnerRequests = c.ActiveRequests },
+		"history retention":      func(c *ResponsesConfig) { c.HistorySeconds = 59 },
+		"history bytes":          func(c *ResponsesConfig) { c.HistoryOwnerBytes = 1 },
+		"history instance bytes": func(c *ResponsesConfig) { c.HistoryInstanceBytes = 1 << 31 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := valid

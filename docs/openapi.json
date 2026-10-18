@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.3.0",
-    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored output uses a bounded private encrypted replay cache, not a public response-history API. store=false retains metadata only and cannot replay bodies. Background, continuation, retrieval and WebSocket are not implemented by this contract."
+    "version": "0.4.0",
+    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Background and WebSocket remain unsupported."
   },
   "servers": [
     {
@@ -6587,7 +6587,7 @@
             "CallBearer": []
           }
         ],
-        "description": "Requires responses.enabled and mounted content/credential keys. Limit 1 MiB. Supports text, instructions, native function tools/history and reasoning items; no Chat conversion. Defaults store=true without injecting that field upstream. Local response IDs are stable across replay; upstream IDs are metadata only. Idempotency-Key (1-256 visible ASCII bytes) is scoped to current owner and API key. Object key order/JSON whitespace do not affect the digest; numeric lexical representations and omitted/defaulted fields remain distinct. A known terminal receipt expires after configured retention (default 24h), allowing reuse; dispatching/unknown receipts do not expire automatically. Stored replay expires earlier (default 1h) or may be unavailable after an output failure; store=false never retains response bodies. A retry in those states returns 409 and never re-executes. Replays reauthorize identity/model and do not create attempts, consume generation RPM or charge again. This is not a Responses GET/history/parent/background/WS API. Strict returns 400 unsupported_billing_dimension before any monetary reservation.",
+        "description": "Requires responses.enabled and mounted content/credential keys. Limit 1 MiB. Supports text, instructions, native function tools/history and reasoning items; no Chat conversion. Defaults store=true without injecting that field upstream. Local response IDs are stable across replay; upstream IDs are metadata only. Idempotency-Key (1-256 visible ASCII bytes) is scoped to current owner and API key. Object key order/JSON whitespace do not affect the digest; numeric lexical representations and omitted/defaulted fields remain distinct. A known terminal receipt expires after configured retention (default 24h), allowing reuse; dispatching/unknown receipts do not expire automatically. Stored replay expires earlier (default 1h) or may be unavailable after an output failure; store=false never retains response bodies. A retry in those states returns 409 and never re-executes. Replays reauthorize identity/model and do not create attempts, consume generation RPM or charge again. Stored responses support GET/delete/input_items and local previous_response_id or conversation continuation, mutually exclusive. Expanded stored context is capped at 256 KiB and 1024 items, pinned to the original target and reauthorized per turn; no native parent ID is sent. store=false cannot reference history. Background/WS remain unsupported. Strict returns 400 unsupported_billing_dimension before any monetary reservation.",
         "parameters": [
           {
             "in": "header",
@@ -6648,6 +6648,1352 @@
           },
           "default": {
             "description": "Failure; 409 distinguishes conflicting, processing, unknown or unavailable idempotency results. Committed native SSE failures preserve their event and terminate without Chat DONE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/responses/{response_id}": {
+      "get": {
+        "operationId": "get_v1_responses_response_id",
+        "summary": "GET /v1/responses/{response_id}",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "response_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_v1_responses_response_id",
+        "summary": "DELETE /v1/responses/{response_id}",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "response_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag from the current object revision."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/responses/{response_id}/input_items": {
+      "get": {
+        "operationId": "get_v1_responses_response_id_input_items",
+        "summary": "GET /v1/responses/{response_id}/input_items",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "response_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryItems"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations": {
+      "post": {
+        "operationId": "post_v1_conversations",
+        "summary": "POST /v1/conversations",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": "object",
+                    "maxProperties": 16,
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 512
+                    },
+                    "nullable": true
+                  },
+                  "items": {
+                    "type": "array",
+                    "minItems": 0,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversation_id}": {
+      "get": {
+        "operationId": "get_v1_conversations_conversation_id",
+        "summary": "GET /v1/conversations/{conversation_id}",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_v1_conversations_conversation_id",
+        "summary": "POST /v1/conversations/{conversation_id}",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag from the current object revision."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": "object",
+                    "maxProperties": 16,
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 512
+                    },
+                    "nullable": true
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "metadata"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_v1_conversations_conversation_id",
+        "summary": "DELETE /v1/conversations/{conversation_id}",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag from the current object revision."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversation_id}/items": {
+      "get": {
+        "operationId": "get_v1_conversations_conversation_id_items",
+        "summary": "GET /v1/conversations/{conversation_id}/items",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryItems"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_v1_conversations_conversation_id_items",
+        "summary": "POST /v1/conversations/{conversation_id}/items",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag from the current object revision."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryItems"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "items"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversation_id}/items/{item_id}": {
+      "get": {
+        "operationId": "get_v1_conversations_conversation_id_items_item_id",
+        "summary": "GET /v1/conversations/{conversation_id}/items/{item_id}",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_v1_conversations_conversation_id_items_item_id",
+        "summary": "DELETE /v1/conversations/{conversation_id}/items/{item_id}",
+        "tags": [
+          "responses"
+        ],
+        "security": [
+          {
+            "CallBearer": []
+          }
+        ],
+        "description": "Requires enabled Responses runtime and currently valid creating user/API key. No generation RPM/TPM or billing is consumed. History deliveries have separate bounded rate/capacity limits. Cross-owner/key, expired/deleted or no-longer-authorized model content is non-enumerable. If-Match optionally rejects stale mutations with 409; CAS always protects concurrent writes. Fixed TTL is not extended by reads. Conversation deletion hides the object but retains encrypted items until TTL; it does not delete independently stored responses. Response deletion clears its persistent content and private replay while preserving financial/idempotency facts. No admin role bypasses content ownership.",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "ETag from the current object revision."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Object revision; optional If-Match for mutation."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Content unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active/uncertain generation or stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "History rate/capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime disabled or content unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -8347,6 +9693,33 @@
             "enum": [
               false
             ]
+          },
+          "previous_response_id": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 80
+          },
+          "conversation": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "object",
+                "required": [
+                  "id"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "maxLength": 80
+                  }
+                },
+                "additionalProperties": false
+              }
+            ],
+            "nullable": true
           }
         },
         "additionalProperties": true
@@ -8384,6 +9757,95 @@
           }
         },
         "additionalProperties": true
+      },
+      "Conversation": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "metadata"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "conversation"
+            ]
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "HistoryItems": {
+        "type": "object",
+        "required": [
+          "object",
+          "data",
+          "first_id",
+          "last_id",
+          "has_more"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "list"
+            ]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "first_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        }
+      },
+      "HistoryDeleted": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "deleted"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "deleted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        }
       }
     }
   }

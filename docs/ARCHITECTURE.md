@@ -2,11 +2,13 @@
 
 状态：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确提交与验证记录见 [PLAN.md](PLAN.md) 和 [S6 记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29` 及其 [验收证据](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；完整 S5 和 S7-A 仍未完成。命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，本页不维护第二份活动计划。
 
-2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。A02+ 未实现、M2 未完成，S5 成本门槛继续独立验收。
+2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该 A01 验收当时 A02+ 尚未交付；当前 A02 工作实现仍待独立验收，M2 未完成，S5 成本门槛继续独立验收。
 
-S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 统一兼容与协调框架已验收合并，S7-A01 原生 Responses HTTP/SSE 已完成独立 CI/合并验收，再推进持久会话、后台任务和 WebSocket**。后续会话/后台/原生 WS 仍是必须开发且尚未实现的目标；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
+S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 统一兼容与协调框架已验收合并，S7-A01 原生 Responses HTTP/SSE 已完成独立 CI/合并验收，再推进持久会话、后台任务和 WebSocket**。持久会话已进入 A02 工作实现与验收，后台/原生 WS 仍是必须开发且尚未实现的目标；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
 
 ## 设计总纲与当前差距
+
+A02 当前工作树已从 `master/04fbfa6` 实现本地加密历史/Conversations 和完整上下文续链，尚未完成本批完整 CI/合并验收。它通过 responses 的消费端口使用 store/secrets，并以 gateway 的最小原目标约束接入现有生命周期；没有另建协调器、账本或迁移 runner。具体数据/寿命/CAS/权限和有限支持范围见 [历史契约](reference/responses-history.md)，命令与状态见 [A02 记录](history/implementation-s7-a02.md)。下述 A01/S6/A3 验收仍限各自原提交，不代替 A02。
 
 2026-10-18 用户明确的目标为 **core 内核负责中转，业务层负责业务处理，兼容层统一对外兼容和扩展接入，包括前端契约**。开发顺序为先完成内核与统一兼容框架的验收，再有选择地吸收同类项目的能力，通过适配接入。S6 已复用 A1–A4 底座，交付现有 API、协议、构造扩展与前端的真实契约闭环；范围和消费者见 [兼容契约清单](reference/compatibility-contracts.md)，M1 集成验收已完成，精确证据见 PLAN/批次记录。
 
@@ -217,7 +219,7 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 
 ## 12. 首组状态型扩展：Responses 持久执行
 
-状态：2026-10-18，默认关闭的 S7-A01 前台原生 HTTP/SSE 已完成独立 CI/合并验收，见 [批次记录](history/implementation-s7-a01.md)。以下持久会话/任务/原生 WS 仍是未实现的后续目标；批次与验收以 [PLAN.md](PLAN.md#s7-aresponses-持久执行主线) 为准。它是统一框架的首组状态型消费者，不定义整个项目的中心。持久会话、后台任务和 WebSocket 均必须交付，不能以现有亲和缓存或 HTTP 接口替代。首个完整组合使用标准 API Key 和经验证的原生 Responses 上游。
+状态：2026-10-18，默认关闭的 S7-A01 前台原生 HTTP/SSE 已完成独立 CI/合并验收，见 [批次记录](history/implementation-s7-a01.md)。持久会话已在 A02 工作树实现且尚待独立验收；任务/原生 WS 仍是未实现的后续目标；批次与验收以 [PLAN.md](PLAN.md#s7-aresponses-持久执行主线) 为准。它是统一框架的首组状态型消费者，不定义整个项目的中心。持久会话、后台任务和 WebSocket 均必须交付，不能以现有亲和缓存或 HTTP 接口替代。首个完整组合使用标准 API Key 和经验证的原生 Responses 上游。
 
 ### 12.1 分层与真实复用
 
@@ -227,7 +229,7 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 |---|---|---|
 | server | HTTP/WS 鉴权边界、协议 DTO、查询/取消/会话入口 | 后台 worker、重复预算或迁移逻辑 |
 | generation（A3-01 至 A3-05 基础消费者） | 有界 volatile worker、派发身份、共享 Gateway、加密意图/原 hold 原子受理、独立持久领取/fencing/历史恢复、sealed 输出字节游标；main 默认关闭 runtime | 公开后台/会话 API、原生事件/WS、重发未知 attempt、独立账本或迁移 |
-| responses 应用服务（A01 已验收合并） | 前台持久幂等与私有加密短期重放，调用 gateway 生成入口与持久端口；持久上下文、任务/事件仍为后续目标 | 直接依赖 store/GORM、自己重新实现上游生成与计费 |
+| responses 应用服务（A01 已验收；A02 工作树待验收） | 前台幂等与私有重放；A02 扩展独立加密历史、Conversations 和本地上下文，调用 gateway 生成入口与持久端口；任务/事件仍为后续目标 | 直接依赖 store/GORM、自己重新实现上游生成与计费 |
 | gateway | 统一操作准备、授权、准入、调度、attempt、预算、生成收尾；消费执行与持久端口 | 直接依赖 responses 应用服务、store 或框架任务队列 |
 | protocol | Responses 请求/item/事件与能力、usage 解析 | 数据库、连接池、worker 和模型调用 |
 | core | 保留标准库单次 HTTP 执行，复用已有生命周期 | WS 库、会话/任务/用户逻辑 |

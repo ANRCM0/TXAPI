@@ -6,7 +6,13 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 
 ## 工具与工作目录
 
-2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。A02+ 未实现、M2 未完成，S5 成本门槛继续独立验收。
+2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该 A01 验收当时 A02+ 尚未交付；当前 A02 工作实现仍待独立验收，M2 未完成，S5 成本门槛继续独立验收。
+
+### S7-A02 历史与会话（工作树待验收）
+
+当前分支从 `master/04fbfa6` 扩展 A01，新增 11 个 API Key 鉴权的历史/Conversations/items 操作及本地完整上下文续链。schema v12 新增加密快照，不从旧回执/缓存回填历史；OpenAPI 工作版本 0.4.0 / 91 操作。默认 `history_seconds: 86400`、history 实例/owner 预留 64/16 MiB，单快照 2 MiB；存储型展开请求上限 256 KiB / 1024 items，读取/修改另限每 owner 每分钟 120 次。仍默认关闭 Responses、必须实际凭据加密和挂载内容密钥，strict 全拒绝；后台/WS 未接入。
+
+用户/创建 Key/当前模型范围、完整上下文与原渠道/凭据/映射约束、ETag/CAS、TTL/删除和未知执行均由业务/存储层负责。GET/修改不走生成计费；`store:false` 不建历史且不能引用会话。具体使用和限制见 [历史契约](reference/responses-history.md)，实际验证和未运行项见 [A02 记录](history/implementation-s7-a02.md)。本批尚无匹配提交的完整远端 CI/合并，不能勾选 A02 或 M2。
 
 ### S7-A01 Responses 前台（已验收合并）
 
@@ -14,7 +20,7 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 
 默认限制：请求正文 1 MiB，幂等元数据保留 24 小时、私有重放 1 小时，编码后归档容量每条 256 KiB、总段数最多 8192（元数据/终态占段）；重放保留期须覆盖总超时及额外 5 秒收尾，按受理时间计时。实例/owner 回执上限 1024/128，在途请求上限 32/4。schema v11 只新增无正文幂等回执，不推断历史请求；已知终态按 TTL 清理，未知结果即使过期也不删除或自动重发，容量满时保守拒绝。升级前按既有约定停写备份；旧二进制不能直接打开 schema v11。
 
-`store` 省略保持提供商原生默认 true；true 时额外保存加密私有短期重放，false 不存请求/输出正文，完成后重试返回 409，不重新执行。幂等作用域隔离 owner/Key，重试重新校验当前权限，但不重复计费/准入；它不是 A02 历史或通用恢复接口。strict 在预留/发送前拒绝 Responses；GET、续链、会话、background 和原生 WS 尚未实现。
+`store` 省略保持提供商原生默认 true；true 时额外保存加密私有短期重放，false 不存请求/输出正文，完成后重试返回 409，不重新执行。幂等作用域隔离 owner/Key，重试重新校验当前权限，但不重复计费/准入；它不是 A02 历史或通用恢复接口。strict 在预留/发送前拒绝 Responses；A01 原验收不含 GET/续链/会话；这些已在上文 A02 工作树扩展且尚未验收，background 和原生 WS 仍未实现。
 
 配置、支持矩阵和恢复细节以 [Responses HTTP 运行约定](reference/responses-http.md) 为准。集中验证和提交/CI/合并事实统一记在 [S7-A01 批次](history/implementation-s7-a01.md)；A01 已完成独立验收，不把 S6 历史 CI 作为本批通过证据，A02+ 与 M2 完成状态仍独立保留。
 

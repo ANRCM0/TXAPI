@@ -7,22 +7,35 @@ import (
 
 const EnvResponsesKeysFile = "GATEWAY_RESPONSES_KEYS_FILE"
 
-// ResponsesConfig bounds foreground idempotency, not sessions or background jobs.
+// ResponsesConfig bounds foreground receipts, private replay and local history.
+// Background jobs and native WS are separate consumers.
 type ResponsesConfig struct {
-	Enabled          bool   `yaml:"enabled"`
-	KeysFile         string `yaml:"keys_file"`
-	RetentionSeconds int    `yaml:"retention_seconds"`
-	ReplaySeconds    int    `yaml:"replay_seconds"`
-	MaxOutputBytes   int64  `yaml:"max_output_bytes"`
-	InstanceRecords  int64  `yaml:"instance_records"`
-	OwnerRecords     int64  `yaml:"owner_records"`
-	InstanceBytes    int64  `yaml:"instance_bytes"`
-	OwnerBytes       int64  `yaml:"owner_bytes"`
-	ActiveRequests   int    `yaml:"active_requests"`
-	OwnerRequests    int    `yaml:"owner_requests"`
+	HistorySeconds       int    `yaml:"history_seconds"`
+	HistoryInstanceBytes int64  `yaml:"history_instance_bytes"`
+	HistoryOwnerBytes    int64  `yaml:"history_owner_bytes"`
+	Enabled              bool   `yaml:"enabled"`
+	KeysFile             string `yaml:"keys_file"`
+	RetentionSeconds     int    `yaml:"retention_seconds"`
+	ReplaySeconds        int    `yaml:"replay_seconds"`
+	MaxOutputBytes       int64  `yaml:"max_output_bytes"`
+	InstanceRecords      int64  `yaml:"instance_records"`
+	OwnerRecords         int64  `yaml:"owner_records"`
+	InstanceBytes        int64  `yaml:"instance_bytes"`
+	OwnerBytes           int64  `yaml:"owner_bytes"`
+	ActiveRequests       int    `yaml:"active_requests"`
+	OwnerRequests        int    `yaml:"owner_requests"`
 }
 
 func (c *ResponsesConfig) defaults() {
+	if c.HistorySeconds == 0 {
+		c.HistorySeconds = 86400
+	}
+	if c.HistoryInstanceBytes == 0 {
+		c.HistoryInstanceBytes = 64 << 20
+	}
+	if c.HistoryOwnerBytes == 0 {
+		c.HistoryOwnerBytes = 16 << 20
+	}
 	if c.RetentionSeconds == 0 {
 		c.RetentionSeconds = 86400
 	}
@@ -58,6 +71,9 @@ func (c ResponsesConfig) validate() error {
 	}
 	if strings.TrimSpace(c.KeysFile) == "" {
 		return fmt.Errorf("responses.enabled requires responses.keys_file or %s", EnvResponsesKeysFile)
+	}
+	if c.HistorySeconds < 60 || c.HistorySeconds > 7*86400 || c.HistoryOwnerBytes < 2<<20 || c.HistoryInstanceBytes < c.HistoryOwnerBytes || c.HistoryInstanceBytes > 1<<30 {
+		return fmt.Errorf("responses history retention or capacity is outside supported bounds")
 	}
 	if c.RetentionSeconds < 60 || c.RetentionSeconds > 7*86400 || c.ReplaySeconds < 60 || c.ReplaySeconds > c.RetentionSeconds ||
 		c.MaxOutputBytes < 16384 || c.MaxOutputBytes > 8<<20 || c.InstanceRecords < 2 || c.InstanceRecords > 65536 || c.OwnerRecords < 1 || c.OwnerRecords >= c.InstanceRecords ||

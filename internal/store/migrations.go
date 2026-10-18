@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 11
+const latestMigrationVersion = 12
 
 type dataMigration struct {
 	Version int
@@ -55,6 +55,10 @@ var dataMigrations = []dataMigration{
 	}},
 	{Version: 11, Apply: func(tx *gorm.DB) error {
 		// Foreground receipts start empty; historical logs are not deduplication evidence.
+		return nil
+	}},
+	{Version: 12, Apply: func(tx *gorm.DB) error {
+		// No durable user history can be inferred from old receipts or replay caches.
 		return nil
 	}},
 }

@@ -162,13 +162,21 @@ func NewEngine(deps Deps) *gin.Engine {
 		deps.Gateway.HandleEmbeddings)
 
 	// Deduplication precedes generation RPM/TPM admission inside ExecuteTo.
-	engine.POST("/v1/responses", auth.Handle(), func(c *gin.Context) {
+	responsesHandler := func(c *gin.Context) {
 		if deps.Responses == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "responses_unavailable", "message": "Responses is not enabled"}})
 			return
 		}
 		deps.Responses.ServeHTTP(c.Writer, c.Request)
-	})
+	}
+	engine.POST("/v1/responses", auth.Handle(), responsesHandler)
+	for _, route := range []struct{ method, path string }{
+		{"GET", "/v1/responses/:response_id"}, {"DELETE", "/v1/responses/:response_id"}, {"GET", "/v1/responses/:response_id/input_items"},
+		{"POST", "/v1/conversations"}, {"GET", "/v1/conversations/:conversation_id"}, {"POST", "/v1/conversations/:conversation_id"}, {"DELETE", "/v1/conversations/:conversation_id"},
+		{"GET", "/v1/conversations/:conversation_id/items"}, {"POST", "/v1/conversations/:conversation_id/items"}, {"GET", "/v1/conversations/:conversation_id/items/:item_id"}, {"DELETE", "/v1/conversations/:conversation_id/items/:item_id"},
+	} {
+		engine.Handle(route.method, route.path, auth.Handle(), responsesHandler)
+	}
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。

@@ -111,6 +111,10 @@ responses:
   # GATEWAY_RESPONSES_KEYS_FILE overrides the path; share with generation if both enabled.
   retention_seconds: 86400
   replay_seconds: 3600
+  # Encrypted persistent response/conversation snapshots, fixed TTL per object.
+  history_seconds: 86400
+  history_instance_bytes: 67108864
+  history_owner_bytes: 16777216
   max_output_bytes: 262144
   instance_records: 1024
   owner_records: 128
