@@ -263,7 +263,7 @@ S6-00 已在现有基础层契约矩阵旁补充 API/业务/前端/扩展对照�
 
 #### S7-A02：持久会话、检索与续链
 
-当前批次已从最新已合并 `master/04fbfa6` 建立 `feat/s7-a02-persistent-conversations`，工作树已实现本地加密历史权威、11 个检索/会话/items 操作、完整上下文展开、原目标约束和 CAS/TTL/未知执行边界。负责范围为 responses/store/model、gateway 最小目标约束及 main/config/server/OpenAPI 集成；没有新增账本、鉴权或迁移 runner。本地集中验证与修复已完成：1015 项 Go 测试/子用例、24 包通过（5 个预期 helper 跳过），build/vet/依赖、主程序恢复冒烟和真实控制台联调通过。匹配提交的完整远端 CI/合并尚未发生，以下方框保持未完成。具体默认值、接口与限制见 [历史契约](reference/responses-history.md)，实际命令和后续最终结果见 [A02 批次记录](history/implementation-s7-a02.md)。这是单一公开模型、有限本地快照的文本/函数工具子集，不自动继承 S5 strict 成本许可，也不包含后台或 WS。
+当前批次已从最新已合并 `master/04fbfa6` 建立 `feat/s7-a02-persistent-conversations`，工作树已实现本地加密历史权威、11 个检索/会话/items 操作、完整上下文展开、原目标约束和 CAS/TTL/未知执行边界。负责范围为 responses/store/model、gateway 最小目标约束及 main/config/server/OpenAPI 集成；没有新增账本、鉴权或迁移 runner。本地集中验证与修复已完成：1016 项 Go 测试/子用例、24 包通过（5 个预期 helper 跳过），build/vet/依赖、主程序恢复冒烟和真实控制台联调通过。匹配提交的完整远端 CI/合并尚未发生，以下方框保持未完成。具体默认值、接口与限制见 [历史契约](reference/responses-history.md)，实际命令和后续最终结果见 [A02 批次记录](history/implementation-s7-a02.md)。这是单一公开模型、有限本地快照的文本/函数工具子集，不自动继承 S5 strict 成本许可，也不包含后台或 WS。
 
 - [ ] 实现 stored Responses 的获取/删除/input items，以及 Conversations 与 items 的创建、读取、修改/删除和分页；方法、DTO 和状态码以实施时核对的官方 schema 为准，同批更新 OpenAPI/消费者。
 - [ ] `previous_response_id` 与 `conversation` 各自明确上下文来源与互斥校验；保存父子关系、实际输入/输出、模型/渠道/凭据绑定和价格版本，不把缓存命中当成历史持久化。

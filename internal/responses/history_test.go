@@ -231,7 +231,11 @@ func TestConversationItemsCASConcurrentTurnAndUnknownRecovery(t *testing.T) {
 	if appendResult.Code != 200 {
 		t.Fatal(appendResult.Body)
 	}
-	page := historyCall(s, f.principal, "GET", "/v1/conversations/"+id+"/items?limit=1", "", "", "")
+	latest := historyCall(s, f.principal, "GET", "/v1/conversations/"+id+"/items?limit=1", "", "", "")
+	if latest.Code != 200 || !strings.Contains(latest.Body.String(), "extra") {
+		t.Fatal("default item order is not descending")
+	}
+	page := historyCall(s, f.principal, "GET", "/v1/conversations/"+id+"/items?limit=1&order=asc", "", "", "")
 	var parsed struct {
 		Last string `json:"last_id"`
 		More bool   `json:"has_more"`
@@ -240,7 +244,7 @@ func TestConversationItemsCASConcurrentTurnAndUnknownRecovery(t *testing.T) {
 	if page.Code != 200 || !parsed.More {
 		t.Fatal(page.Body)
 	}
-	if w := historyCall(s, f.principal, "GET", "/v1/conversations/"+id+"/items?after="+parsed.Last, "", "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "extra") {
+	if w := historyCall(s, f.principal, "GET", "/v1/conversations/"+id+"/items?order=asc&after="+parsed.Last, "", "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "extra") {
 		t.Fatal(w.Body)
 	}
 	if w := historyCall(s, f.principal, "GET", "/v1/conversations/"+id+"/items/"+parsed.Last, "", "", ""); w.Code != 200 {

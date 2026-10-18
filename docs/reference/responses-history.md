@@ -35,7 +35,9 @@ Media, hosted tools, item references, native background and WS remain unsupporte
 
 Lists return `object`, `data`, `first_id`, `last_id` and `has_more`. `limit` is
 1-100, default 20; `after` must identify an item in the current owned snapshot.
-The declared local `order` option accepts asc/desc, default asc. Unknown query
+The declared local `order` option accepts asc/desc, default desc. The currently
+fetched endpoint/typed rendering only lists after/limit; this ordering contract
+is stated explicitly rather than claimed as full SDK certification. Unknown query
 switches, duplicate scalar parameters, unknown request fields and ambiguous JSON
 fail explicitly. This batch does not fetch missing provider-only `include` data,
 stream GET results or provide background event cursors. Existing retained opaque
@@ -56,6 +58,15 @@ native continuation. It never sends full local history together with a native
 parent ID and never drops opaque encrypted reasoning or function-call IDs.
 Local input-item IDs generated for list APIs are removed from upstream wire
 objects; native reasoning/function item IDs and `call_id` associations remain.
+A reasoning input must carry nonempty `encrypted_content`; a bare provider item
+ID is refused even on a caller-supplied/store:false request. A stored response
+that omitted this opaque content remains retrievable unchanged, but continuation
+returns 409 `history_context_unavailable` before any attempt rather than dropping
+the reasoning or looking it up under a shared upstream account. Request the
+provider's encrypted reasoning output when needed (the compatible
+`include: ["reasoning.encrypted_content"]` option remains supported); an absent
+provider field is never invented.
+
 Instructions/tools and other options belong to the current generation request;
 they are not silently inherited from the previous request.
 
@@ -155,6 +166,8 @@ or create a new charge; they have their own bounded delivery rate/capacity.
 
 Official pages were fetched on 2026-10-18, including the actual endpoint examples:
 
+- [Reasoning context and encrypted content](https://developers.openai.com/api/docs/guides/reasoning)
+- [Typed list schema](https://developers.openai.com/api/reference/python/resources/conversations/subresources/items/methods/list)
 - [Response retrieval](https://developers.openai.com/api/reference/resources/responses/methods/retrieve)
 - [Response deletion](https://developers.openai.com/api/reference/resources/responses/methods/delete)
 - [Input items](https://developers.openai.com/api/reference/resources/responses/subresources/input_items/methods/list)

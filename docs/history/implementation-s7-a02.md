@@ -112,3 +112,58 @@ Markdown documents and 175 local links/anchors. Rule/status review retained
 all A02/M2/S5 checkboxes and distinguished historical A01 acceptance from
 the new source. The final non-Markdown fingerprint remained unchanged.
 No temporary logs, databases, keys or helper scripts are part of the batch.
+
+## Post-Submission Reconstruction And Ordering Repair
+
+Initial feature head `a760269ee700fc56d49ca2a91fa3c0b750f399cb` was pushed
+from unchanged latest base `04fbfa6` and submitted as PR #12. Its source has the
+1015-test Windows result above; it does not certify the subsequent repair.
+Automatic initial runs are push 39091271249 and PR 39091331439. Their actual
+conclusions are recorded only after reading the completed runs.
+
+Final review found a missing reconstruction boundary: a native reasoning item
+without encrypted content may rely on upstream hidden state. The HTTP validator
+now refuses caller-supplied ID-only reasoning (including store:false); the local
+history application retains native output unchanged but refuses continuation
+with 409 history_context_unavailable when its full input cannot be reconstructed.
+It never drops the reasoning or authorizes a provider lookup by a guessed item ID.
+Encrypted-content round trips remain unchanged. The new regression proves GET
+preserves the item and continuation/native ID-only input causes zero new calls.
+
+Pagination ordering was also made explicit: list default and OpenAPI now use
+desc, the existing ascending-pagination regression requests asc, and a default
+order assertion was added. Search-index text and fetched endpoint/typed pages
+differed in whether they exposed order; the actual fetched pages only list
+after/limit, so the local order extension is documented explicitly without
+claiming complete vendor/SDK certification. Official reasoning/typed-list pages
+were fetched and read on 2026-10-18. Neither repair changes financial authority,
+retention, migration version, existing CI/dependencies or frontend contracts.
+Final exact-source local/CI results supersede the earlier source-specific entries.
+
+The initial a760269 push 39091271249 and PR 39091331439 both completed
+check SUCCESS / delivery SUCCESS (read from their exact head). Those runs
+remain evidence for the initial source only; they do not authorize merging
+the later reasoning/order repair without matching new complete CI.
+
+### Final Repaired Local Source
+
+The repaired frozen source contains 296 non-Markdown paths, SHA-256
+`41d33e323f7741e7146d3030be890e7ecb4fdb74e7bde1ea3e96fb97537512ca`,
+matched before/after the final suite and after subsequent documentation changes.
+On Windows/PowerShell with GOARCH=amd64, `go test -json -count=1 ./...`
+passed **1016 tests/subtests, 24 packages**, five expected helper skips and
+no failures. `go build ./...`, `go vet ./...`, `go mod tidy`, dependency diff,
+31 changed-Go normalized-LF gofmt comparison and delivery.py AST parse passed.
+The repaired `python tests/smoke/local.py --go go` again passed the real main
+startup/auth/normal/SSE/console/strict refusal, forced-kill recovery, encrypted
+credentials/runtime and shutdown scenarios. Focused native protocol/application/
+gateway/server repair tests also passed before that final full suite.
+
+The earlier ten API-client cases and real compatibility.py API/UI desktop/mobile
+workflow on initial head a760269 are reused for their unchanged frontend/Chat/
+management scope: the repair only changes native reasoning admission, local
+history reconstruction errors and list ordering. Native protocol/application/
+HTTP behavior was instead reverified on the repaired source, not inferred
+from the prior browser result. No dependency, workflow, financial or migration
+behavior changed in this repair. Matching new automatic push/PR/master complete
+CI remains mandatory before final functional acceptance.

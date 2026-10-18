@@ -94,13 +94,14 @@ func (r Request) ValidateHTTP() error {
 	}
 	for _, raw := range items {
 		var item struct {
-			Type      string          `json:"type"`
-			Role      string          `json:"role"`
-			CallID    string          `json:"call_id"`
-			Name      string          `json:"name"`
-			Arguments *string         `json:"arguments"`
-			Output    json.RawMessage `json:"output"`
-			Content   json.RawMessage `json:"content"`
+			Type             string          `json:"type"`
+			Role             string          `json:"role"`
+			CallID           string          `json:"call_id"`
+			Name             string          `json:"name"`
+			Arguments        *string         `json:"arguments"`
+			Output           json.RawMessage `json:"output"`
+			Content          json.RawMessage `json:"content"`
+			EncryptedContent *string         `json:"encrypted_content"`
 		}
 		if json.Unmarshal(raw, &item) != nil {
 			return errors.New("invalid Responses input item")
@@ -125,7 +126,11 @@ func (r Request) ValidateHTTP() error {
 				return err
 			}
 		case "reasoning":
-			// Reasoning items are opaque native history, including encrypted content.
+			// A bare provider item ID is not owner-authorized local history.
+			// Require self-contained opaque bytes instead of a native lookup.
+			if item.EncryptedContent == nil || *item.EncryptedContent == "" {
+				return errors.New("Responses reasoning history requires encrypted_content")
+			}
 		default:
 			return errors.New("unsupported Responses input item type")
 		}

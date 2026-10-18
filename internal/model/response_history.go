@@ -6,6 +6,7 @@ var (
 	ErrHistoryNotFound = errors.New("history not found")
 	ErrHistoryConflict = errors.New("history version or execution conflict")
 	ErrHistoryCapacity = errors.New("history capacity exceeded")
+	ErrHistoryContext  = errors.New("history context is not self-contained")
 )
 
 const ResponseHistoryMaxBytes = 2 << 20

@@ -6927,7 +6927,7 @@
                 "asc",
                 "desc"
               ],
-              "default": "asc"
+              "default": "desc"
             }
           }
         ],
@@ -7545,7 +7545,7 @@
                 "asc",
                 "desc"
               ],
-              "default": "asc"
+              "default": "desc"
             }
           }
         ],
@@ -9633,7 +9633,7 @@
                 }
               }
             ],
-            "description": "Text or native message/function_call/function_call_output/reasoning items; media and item references rejected."
+            "description": "Text or native message/function_call/function_call_output/reasoning items; media and item references rejected. Reasoning input must include nonempty encrypted_content; bare native item-ID lookups are refused."
           },
           "instructions": {
             "type": "string"

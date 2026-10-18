@@ -61,6 +61,8 @@ func historyError(w http.ResponseWriter, err error) {
 		respond(w, 409, "history_conflict", "history changed or a generation is active or uncertain")
 	case errors.Is(err, model.ErrHistoryCapacity):
 		respond(w, 429, "history_capacity", "history capacity or context limit exceeded")
+	case errors.Is(err, model.ErrHistoryContext):
+		respond(w, 409, "history_context_unavailable", "complete self-contained history cannot be reconstructed")
 	case errors.Is(err, errHistoryRequest):
 		respond(w, 400, "invalid_request_error", "invalid or unsupported history request")
 	default:
@@ -134,6 +136,9 @@ func listHistoryItems(r *http.Request, items []json.RawMessage) (any, error) {
 		limit = n
 	}
 	order := q.Get("order")
+	if order == "" {
+		order = "desc"
+	}
 	if order != "" && order != "asc" && order != "desc" {
 		return nil, errHistoryRequest
 	}

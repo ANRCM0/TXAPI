@@ -190,7 +190,7 @@ func (h *History) prepare(ctx context.Context, b access.Binding, receipt model.R
 		return nil, nil, err
 	}
 	if err = parsed.ValidateHTTP(); err != nil {
-		return nil, nil, err
+		return nil, nil, model.ErrHistoryContext
 	}
 	t.record, err = h.seal(t.record, t.content)
 	if err != nil {
