@@ -203,6 +203,24 @@
     "type minigateway/internal/foundation/contracts/execution/v1.Usage struct{PromptTokens int \"json:\\\"prompt_tokens\\\"\"; CompletionTokens int \"json:\\\"completion_tokens\\\"\"; TotalTokens int \"json:\\\"total_tokens\\\"\"}",
     "var minigateway/internal/foundation/contracts/execution/v1.ErrDeadlineUnsupported *net/http.ProtocolError"
   ],
+  "minigateway/internal/foundation/contracts/execution/v2": [
+    "const minigateway/internal/foundation/contracts/execution/v2.Complete minigateway/internal/foundation/contracts/execution/v2.Completeness = \"complete\"",
+    "const minigateway/internal/foundation/contracts/execution/v2.Partial minigateway/internal/foundation/contracts/execution/v2.Completeness = \"partial\"",
+    "const minigateway/internal/foundation/contracts/execution/v2.ProviderReported minigateway/internal/foundation/contracts/execution/v2.UsageSource = \"provider_reported\"",
+    "const minigateway/internal/foundation/contracts/execution/v2.SourceUnknown minigateway/internal/foundation/contracts/execution/v2.UsageSource = \"unknown\"",
+    "const minigateway/internal/foundation/contracts/execution/v2.Unknown minigateway/internal/foundation/contracts/execution/v2.Completeness = \"unknown\"",
+    "const minigateway/internal/foundation/contracts/execution/v2.Version untyped string = \"2\"",
+    "type minigateway/internal/foundation/contracts/execution/v2.AttemptFacts struct{Number int; Dispatch minigateway/internal/foundation/contracts/execution/v1.Phase; ProtocolComplete bool; DeliveryCommitted bool; BytesWritten int64; Usage minigateway/internal/foundation/contracts/execution/v2.UsageObservation; Native minigateway/internal/foundation/contracts/execution/v1.NativeCompletion}",
+    "type minigateway/internal/foundation/contracts/execution/v2.Completeness string",
+    "type minigateway/internal/foundation/contracts/execution/v2.Decoder interface{DecodeEnvelope([]byte) (minigateway/internal/foundation/contracts/execution/v2.Envelope, error); NewEnvelopeStream() minigateway/internal/foundation/contracts/execution/v2.StreamDecoder}",
+    "type minigateway/internal/foundation/contracts/execution/v2.Envelope struct{Data []byte; Usage *minigateway/internal/foundation/contracts/execution/v2.UsageObservation; Native *minigateway/internal/foundation/contracts/execution/v1.NativeCompletion; ProtocolTerminal bool; Failed bool}",
+    "type minigateway/internal/foundation/contracts/execution/v2.Executor interface{Execute(context.Context, minigateway/internal/foundation/contracts/execution/v1.Output, minigateway/internal/foundation/contracts/execution/v1.Invocation) minigateway/internal/foundation/contracts/execution/v2.Outcome}",
+    "type minigateway/internal/foundation/contracts/execution/v2.Outcome struct{Legacy minigateway/internal/foundation/contracts/execution/v1.Outcome; Attempts []minigateway/internal/foundation/contracts/execution/v2.AttemptFacts}",
+    "type minigateway/internal/foundation/contracts/execution/v2.StreamDecoder interface{DecodeEnvelopes([]byte) ([]minigateway/internal/foundation/contracts/execution/v2.Envelope, error); EndEnvelopes() ([]minigateway/internal/foundation/contracts/execution/v2.Envelope, error)}",
+    "type minigateway/internal/foundation/contracts/execution/v2.TokenCounts struct{InputTokens *int64; OutputTokens *int64; TotalTokens *int64}",
+    "type minigateway/internal/foundation/contracts/execution/v2.UsageObservation struct{Counts minigateway/internal/foundation/contracts/execution/v2.TokenCounts; Completeness minigateway/internal/foundation/contracts/execution/v2.Completeness; Source minigateway/internal/foundation/contracts/execution/v2.UsageSource; Profile string}",
+    "type minigateway/internal/foundation/contracts/execution/v2.UsageSource string"
+  ],
   "minigateway/internal/foundation/contracts/identity/v1": [
     "const minigateway/internal/foundation/contracts/identity/v1.All untyped string = \"all\"",
     "const minigateway/internal/foundation/contracts/identity/v1.Allowlist untyped string = \"allowlist\"",

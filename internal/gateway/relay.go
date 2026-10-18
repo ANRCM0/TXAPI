@@ -14,6 +14,7 @@ import (
 
 	"minigateway/internal/billing"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
+	executionv2 "minigateway/internal/foundation/contracts/execution/v2"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/scheduler"
 )
@@ -268,6 +269,21 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 
 // doRelay 向单个渠道发一次请求。
 func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.Request, timeout time.Duration) (result core.Result) {
+	number := len(c.result.Attempts) + 1
+	facts := &protocolFacts{usage: unknownUsageFact()}
+	dispatched, returned := false, false
+	defer func() {
+		dispatch := execution.Phase(result.Phase)
+		if dispatched && !returned {
+			dispatch = execution.Dispatching
+		}
+		if dispatch == "" {
+			dispatch = execution.NotDispatched
+		}
+		c.result.protocolFacts = append(c.result.protocolFacts, executionv2.AttemptFacts{Number: number, Dispatch: dispatch,
+			ProtocolComplete: result.ProtocolComplete, DeliveryCommitted: result.Committed, BytesWritten: result.BytesWritten,
+			Usage: cloneUsageFact(facts.usage), Native: facts.native})
+	}()
 	if g.operations[req.Operation()].OpaqueErrors {
 		defer func() {
 			result = sanitizeOperationFailure(result, g.operations[req.Operation()].Errors, c.result.nativeFailed)
@@ -286,6 +302,10 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	}
 	prepared, err := a.Prepare(req, *m)
 	input := ToCoreInput(prepared)
+	richDecoder, hasFacts := prepared.Decoder.(executionv2.Decoder)
+	if hasFacts && !nilInterface(richDecoder) {
+		input.Decoder = factsDecoderBridge{decoder: richDecoder, facts: facts}
+	}
 	if err == nil && (prepared.Stream != req.Stream() || nilInterface(prepared.Decoder)) {
 		err = &execution.Error{StatusCode: 400, Error: execution.ErrorDetail{Message: "prepared request does not match operation transport", Type: "unsupported_operation"}}
 	}
@@ -298,7 +318,6 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	}
 	input.Timeout = timeout
 	pre := c.result.reservation
-	number := len(c.result.Attempts) + 1
 	if g.billingMode == billing.ModeStrict {
 		name := a.Name()
 		known := name != ""
@@ -346,9 +365,17 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	}
 	// If an injected executor/transport panics, non-execution is not established.
 	c.result.Phase = core.Dispatching
+	dispatched = true
 	result = g.executor.ExecuteTo(c.ctx, c.output, input)
-	if decoder, ok := prepared.Decoder.(execution.Observer); ok {
-		observation := decoder.Observation()
+	returned = true
+	var observation execution.Observation
+	if hasFacts {
+		observation = execution.Observation{Native: facts.native, Failed: facts.failed}
+	} else if decoder, ok := prepared.Decoder.(execution.Observer); ok {
+		observation = decoder.Observation()
+		facts.native = observation.Native
+	}
+	if hasFacts || observation.Native.ID != "" || observation.Failed || observation.Usage != nil {
 		c.result.nativeFailed = observation.Failed
 		c.result.ResponseStatus, c.result.UpstreamResponseID = observation.Native.Status, observation.Native.ID
 		if observation.Usage != nil {
