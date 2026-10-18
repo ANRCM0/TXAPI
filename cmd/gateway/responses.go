@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"time"
 
+	"minigateway/internal/compat/httpoutput"
 	"minigateway/internal/config"
+	authority "minigateway/internal/foundation/identity"
+	bridge "minigateway/internal/foundation/runtime"
 	"minigateway/internal/gateway"
 	"minigateway/internal/generation"
 	"minigateway/internal/model"
@@ -62,7 +65,7 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	if err = st.RecoverResponseHistory(ctx); err != nil {
 		return nil, errors.New("Responses history recovery failed")
 	}
-	service, err := responses.New(ctx, responses.Options{History: history, Store: st, Executor: gw, Archive: archive, Resolve: st.ResolvePrincipal, DigestKey: keys.Digest,
+	service, err := responses.New(ctx, responses.Options{History: history, Store: st, Executor: bridge.NewExecutor(gw), Archive: archive, Identity: authority.New(st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: keys.Digest,
 		Retention: time.Duration(cfg.RetentionSeconds) * time.Second, Limits: model.ResponseRequestLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords},
 		ActiveRequests: cfg.ActiveRequests, OwnerRequests: cfg.OwnerRequests})
 	if err != nil {

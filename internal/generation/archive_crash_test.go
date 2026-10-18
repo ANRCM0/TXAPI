@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,7 +20,7 @@ import (
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
@@ -39,9 +40,9 @@ func TestRecordedOutputFailureRetainsStrictUnknownCost(t *testing.T) {
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}},
 				Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"output without reliable usage"}}]}`))}, nil
 		})}})
-	id, result, err := recordGeneration(t, recordingRunner(t, st, a, g.ExecuteTo), binding, gateway.Execution{Operation: protocol.Chat,
+	id, result, err := recordGeneration(t, recordingRunner(t, st, a, bridge.NewExecutor(g).Execute), binding, execv1.Invocation{Operation: protocol.Chat,
 		Body: []byte(`{"model":"m","max_completion_tokens":32,"service_tier":"default","messages":[{"role":"user","content":"hello"}]}`)})
-	if !errors.Is(err, ErrArchiveUnavailable) || result.Termination != core.ClientWriteError || result.BillingState != billing.Pending || hits.Load() != 1 {
+	if !errors.Is(err, ErrArchiveUnavailable) || result.Termination != execv1.ClientWriteError || result.BillingState != billing.Pending || hits.Load() != 1 {
 		t.Fatalf("storage fault refunded/replayed unknown execution: %+v %v hits=%d", result, err, hits.Load())
 	}
 	assertArchiveHolds(t, st)
@@ -80,7 +81,7 @@ func TestArchiveFinalObservationFailureDoesNotUndoSettledBill(t *testing.T) {
 	var hits atomic.Int64
 	g, _ := newGateway(t, gateway.Options{Channels: ch, StrictBilling: engine, BillingMode: billing.ModeStrict, RetryTimes: 2,
 		Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { hits.Add(1); return response(), nil })}})
-	_, result, err := recordGeneration(t, recordingRunner(t, st, a, g.ExecuteTo), binding, gateway.Execution{Operation: protocol.Chat,
+	_, result, err := recordGeneration(t, recordingRunner(t, st, a, bridge.NewExecutor(g).Execute), binding, execv1.Invocation{Operation: protocol.Chat,
 		Body: []byte(`{"model":"m","max_completion_tokens":32,"service_tier":"default","messages":[{"role":"user","content":"hello"}]}`)})
 	if !errors.Is(err, ErrArchiveUnavailable) || !result.Committed || result.Replayable || result.BillingState != billing.Settled || hits.Load() != 1 {
 		t.Fatalf("observation failure changed generation: %+v %v", result, err)
@@ -140,8 +141,8 @@ func TestArchiveCrashWorker(t *testing.T) {
 			}()
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}, nil
 		})}})
-	r := recordingRunner(t, st, a, g.ExecuteTo)
-	_, id, err := r.SubmitRecorded(context.Background(), binding, gateway.Execution{Operation: protocol.Chat,
+	r := recordingRunner(t, st, a, bridge.NewExecutor(g).Execute)
+	_, id, err := r.SubmitRecorded(context.Background(), binding, execv1.Invocation{Operation: protocol.Chat,
 		Body: []byte(`{"model":"m","stream":true,"max_completion_tokens":32,"service_tier":"default","messages":[{"role":"user","content":"hello"}]}`)})
 	if err != nil {
 		t.Fatal(err)

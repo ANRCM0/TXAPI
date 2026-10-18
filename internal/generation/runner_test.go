@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
@@ -25,12 +26,12 @@ import (
 
 type memoryOutput struct {
 	body     bytes.Buffer
-	metadata core.ResponseMetadata
-	state    core.OutputState
+	metadata execv1.ResponseMetadata
+	state    execv1.OutputState
 	flush    func()
 }
 
-func (o *memoryOutput) Commit(ctx context.Context, metadata core.ResponseMetadata) error {
+func (o *memoryOutput) Commit(ctx context.Context, metadata execv1.ResponseMetadata) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -52,7 +53,7 @@ func (o *memoryOutput) Flush(ctx context.Context) error {
 	}
 	return ctx.Err()
 }
-func (o *memoryOutput) State() core.OutputState { return o.state }
+func (o *memoryOutput) State() execv1.OutputState { return o.state }
 
 type transportFunc func(*http.Request) (*http.Response, error)
 
@@ -63,8 +64,8 @@ func response() *http.Response {
 		Body: io.NopCloser(strings.NewReader(`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))}
 }
 
-func execution() gateway.Execution {
-	return gateway.Execution{Operation: protocol.Chat, Body: []byte(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`)}
+func execution() execv1.Invocation {
+	return execv1.Invocation{Operation: protocol.Chat, Body: []byte(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`)}
 }
 
 func fixture(t *testing.T) (*store.Store, access.Binding, access.Binding) {
@@ -113,7 +114,7 @@ func newGateway(t *testing.T, opts gateway.Options) (*gateway.Gateway, *access.C
 	return g, capacity
 }
 
-func newRunner(t *testing.T, resolve func(context.Context, access.Binding) (access.Principal, error), execute func(context.Context, core.Output, gateway.Execution) gateway.RequestResult) *Runner {
+func newRunner(t *testing.T, resolve func(context.Context, access.Binding) (access.Principal, error), execute func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome) *Runner {
 	t.Helper()
 	r, err := New(context.Background(), Options{Workers: 1, QueueCapacity: 2, MaxRequestBytes: 4096, MaxDuration: 5 * time.Second, Resolve: resolve, Execute: execute})
 	if err != nil {
@@ -141,7 +142,7 @@ func submit(t *testing.T, r *Runner, binding access.Binding, out *memoryOutput) 
 	return f
 }
 
-func wait(t *testing.T, f *Future) (gateway.RequestResult, error) {
+func wait(t *testing.T, f *Future) (execv1.Outcome, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -177,7 +178,7 @@ func TestWorkerReauthorizesQueuedBindingBeforeGatewayAdmission(t *testing.T) {
 				}
 				return response(), nil
 			})}})
-			r := newRunner(t, st.ResolvePrincipal, g.ExecuteTo)
+			r := newRunner(t, st.ResolvePrincipal, bridge.NewExecutor(g).Execute)
 			first := submit(t, r, binding, &memoryOutput{})
 			signal(t, started)
 			output := &memoryOutput{}
@@ -203,7 +204,7 @@ func TestWorkerReauthorizesQueuedBindingBeforeGatewayAdmission(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if result.StatusCode != want || result.Phase != core.NotDispatched || len(result.Attempts) != 0 || hits.Load() != 1 {
+			if result.StatusCode != want || result.Phase != execv1.NotDispatched || len(result.Attempts) != 0 || hits.Load() != 1 {
 				t.Fatalf("stale queued authority escaped: %+v %v hits=%d", result, err, hits.Load())
 			}
 			if got := capacity.Snapshot(); got.Requests != 0 || got.Attempts != 0 {
@@ -228,7 +229,7 @@ func TestObserverDisconnectDoesNotCancelHandoffOrRetainItsContext(t *testing.T) 
 		}
 		return response(), nil
 	})}})
-	r := newRunner(t, st.ResolvePrincipal, g.ExecuteTo)
+	r := newRunner(t, st.ResolvePrincipal, bridge.NewExecutor(g).Execute)
 	first := submit(t, r, binding, &memoryOutput{})
 	signal(t, started)
 	observer, disconnect := context.WithCancel(context.Background())
@@ -272,7 +273,7 @@ func TestWorkerQueueBoundCancelAndCloseReleaseSharedCapacity(t *testing.T) {
 		<-req.Context().Done()
 		return nil, req.Context().Err()
 	})}})
-	r := newRunner(t, st.ResolvePrincipal, g.ExecuteTo)
+	r := newRunner(t, st.ResolvePrincipal, bridge.NewExecutor(g).Execute)
 	active := submit(t, r, binding, &memoryOutput{})
 	signal(t, started)
 	queued := submit(t, r, binding, &memoryOutput{})
@@ -286,11 +287,11 @@ func TestWorkerQueueBoundCancelAndCloseReleaseSharedCapacity(t *testing.T) {
 	queued.Cancel()
 	queued.Cancel()
 	closeRunner(t, r)
-	if result, err := wait(t, active); err != nil || len(result.Attempts) != 1 || result.Attempts[0].Termination != core.Canceled {
+	if result, err := wait(t, active); err != nil || len(result.Attempts) != 1 || result.Attempts[0].Termination != execv1.Canceled {
 		t.Fatalf("active cancellation bypassed coordinator: %+v %v", result, err)
 	}
 	for _, f := range []*Future{queued, other} {
-		if result, err := wait(t, f); !errors.Is(err, context.Canceled) || result.Phase != core.NotDispatched {
+		if result, err := wait(t, f); !errors.Is(err, context.Canceled) || result.Phase != execv1.NotDispatched {
 			t.Fatalf("queued cancellation dispatched: %+v %v", result, err)
 		}
 	}
@@ -323,7 +324,7 @@ func TestWorkerPanicKeepsCommitFactsAndWorkerSurvives(t *testing.T) {
 		}
 		return response(), nil
 	})}})
-	r := newRunner(t, st.ResolvePrincipal, g.ExecuteTo)
+	r := newRunner(t, st.ResolvePrincipal, bridge.NewExecutor(g).Execute)
 	out := &memoryOutput{flush: func() { panic("secret panic detail must not escape") }}
 	in := execution()
 	in.Body = []byte(`{"model":"m","stream":true}`)
@@ -332,7 +333,7 @@ func TestWorkerPanicKeepsCommitFactsAndWorkerSurvives(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := wait(t, f)
-	if !errors.Is(err, ErrExecutionPanic) || !result.Committed || result.HTTPStatus != 0 || result.Replayable || result.Phase != core.Dispatching || hits.Load() != 1 {
+	if !errors.Is(err, ErrExecutionPanic) || !result.Committed || result.HTTPStatus != 0 || result.Replayable || result.Phase != execv1.Dispatching || hits.Load() != 1 {
 		t.Fatalf("panic lost commit/unknown facts: %+v %v hits=%d", result, err, hits.Load())
 	}
 	if result, err := wait(t, submit(t, r, binding, &memoryOutput{})); err != nil || result.StatusCode != 200 || hits.Load() != 2 {
@@ -358,9 +359,9 @@ func TestWorkerAuthorityFailsClosedWithoutOutputOrSensitiveErrors(t *testing.T) 
 				default:
 					return access.Principal{UserID: 1, TokenID: 1}, nil
 				}
-			}, func(context.Context, core.Output, gateway.Execution) gateway.RequestResult {
+			}, func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
 				calls.Add(1)
-				return gateway.RequestResult{}
+				return execv1.Outcome{}
 			})
 			out := &memoryOutput{}
 			result, err := wait(t, submit(t, r, access.Binding{UserID: 1, TokenID: 1}, out))
@@ -368,7 +369,7 @@ func TestWorkerAuthorityFailsClosedWithoutOutputOrSensitiveErrors(t *testing.T) 
 			if kind == "panic" {
 				want = ErrExecutionPanic
 			}
-			if !errors.Is(err, want) || calls.Load() != 0 || out.state.Committed || out.body.Len() != 0 || result.Phase != core.NotDispatched {
+			if !errors.Is(err, want) || calls.Load() != 0 || out.state.Committed || out.body.Len() != 0 || result.Phase != execv1.NotDispatched {
 				t.Fatalf("unsafe authority fallback: %+v %v calls=%d", result, err, calls.Load())
 			}
 		})
@@ -381,7 +382,7 @@ func TestRunnerShutdownTimeoutKeepsOwnershipUntilCallbacksReturn(t *testing.T) {
 		close(started)
 		<-release // Simulate a trusted callback that ignores cancellation.
 		return access.Principal{UserID: 1, TokenID: 1, Policy: access.Policy{Mode: access.All}}, nil
-	}, func(context.Context, core.Output, gateway.Execution) gateway.RequestResult {
+	}, func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
 		panic("canceled authorization dispatched")
 	})
 	f := submit(t, r, access.Binding{UserID: 1, TokenID: 1}, &memoryOutput{})
@@ -393,7 +394,7 @@ func TestRunnerShutdownTimeoutKeepsOwnershipUntilCallbacksReturn(t *testing.T) {
 	}
 	close(release)
 	closeRunner(t, r)
-	if result, err := wait(t, f); !errors.Is(err, context.Canceled) || result.Phase != core.NotDispatched {
+	if result, err := wait(t, f); !errors.Is(err, context.Canceled) || result.Phase != execv1.NotDispatched {
 		t.Fatalf("shutdown race dispatched a canceled generation: %+v %v", result, err)
 	}
 }
@@ -404,9 +405,9 @@ func TestRunnerConcurrentSubmitAndCloseCompleteEveryAcceptedFuture(t *testing.T)
 		Resolve: func(context.Context, access.Binding) (access.Principal, error) {
 			return access.Principal{UserID: 1, TokenID: 1, Policy: access.Policy{Mode: access.All}}, nil
 		},
-		Execute: func(ctx context.Context, _ core.Output, _ gateway.Execution) gateway.RequestResult {
+		Execute: func(ctx context.Context, _ execv1.Output, _ execv1.Invocation) execv1.Outcome {
 			<-ctx.Done()
-			return gateway.RequestResult{Result: core.Result{Termination: core.Canceled}}
+			return execv1.Outcome{Result: execv1.Result{Termination: execv1.Canceled}}
 		}})
 	if err != nil {
 		t.Fatal(err)
@@ -444,20 +445,20 @@ func TestRunnerDeadlineBoundsAuthorizationAndExecution(t *testing.T) {
 					}
 					return access.Principal{UserID: 1, TokenID: 1, Policy: access.Policy{Mode: access.All}}, nil
 				},
-				Execute: func(ctx context.Context, _ core.Output, _ gateway.Execution) gateway.RequestResult {
+				Execute: func(ctx context.Context, _ execv1.Output, _ execv1.Invocation) execv1.Outcome {
 					executed.Store(true)
 					<-ctx.Done()
-					return gateway.RequestResult{Result: core.Result{Termination: core.Deadline}}
+					return execv1.Outcome{Result: execv1.Result{Termination: execv1.Deadline}}
 				}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer closeRunner(t, r)
 			result, err := wait(t, submit(t, r, access.Binding{UserID: 1, TokenID: 1}, &memoryOutput{}))
-			if blockAuthority && (!errors.Is(err, context.DeadlineExceeded) || executed.Load() || result.Phase != core.NotDispatched || result.Termination != core.Deadline) {
+			if blockAuthority && (!errors.Is(err, context.DeadlineExceeded) || executed.Load() || result.Phase != execv1.NotDispatched || result.Termination != execv1.Deadline) {
 				t.Fatalf("authority exceeded dispatch deadline: %+v %v", result, err)
 			}
-			if !blockAuthority && (err != nil || !executed.Load() || result.Termination != core.Deadline) {
+			if !blockAuthority && (err != nil || !executed.Load() || result.Termination != execv1.Deadline) {
 				t.Fatalf("execution lost generation deadline: %+v %v", result, err)
 			}
 		})
@@ -467,7 +468,7 @@ func TestRunnerDeadlineBoundsAuthorizationAndExecution(t *testing.T) {
 func TestRunnerRejectsUnboundedConfigurationAndHandoff(t *testing.T) {
 	opts := Options{Workers: 1, QueueCapacity: 1, MaxRequestBytes: 4096, MaxDuration: time.Second,
 		Resolve: func(context.Context, access.Binding) (access.Principal, error) { panic("rejected handoff authorized") },
-		Execute: func(context.Context, core.Output, gateway.Execution) gateway.RequestResult {
+		Execute: func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
 			panic("rejected handoff executed")
 		}}
 	for _, modify := range []func(*Options){
@@ -490,7 +491,7 @@ func TestRunnerRejectsUnboundedConfigurationAndHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeRunner(t, r)
-	for _, in := range []gateway.Execution{{},
+	for _, in := range []execv1.Invocation{{},
 		{Operation: protocol.Chat, Body: make([]byte, 4097)},
 		{Operation: protocol.Chat, Body: []byte(`{}`), SessionID: strings.Repeat("x", 257)},
 		{Operation: protocol.Operation("unknown"), Body: []byte(`{}`)},
@@ -514,9 +515,9 @@ func TestQueueResidenceUsesAcceptanceDeadlineAndDoesNotDispatchExpiredWork(t *te
 			<-release
 			return access.Principal{}, ctx.Err()
 		},
-		Execute: func(context.Context, core.Output, gateway.Execution) gateway.RequestResult {
+		Execute: func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
 			executions.Add(1)
-			return gateway.RequestResult{}
+			return execv1.Outcome{}
 		}})
 	if err != nil {
 		t.Fatal(err)
@@ -532,7 +533,7 @@ func TestQueueResidenceUsesAcceptanceDeadlineAndDoesNotDispatchExpiredWork(t *te
 	close(release)
 	for _, f := range []*Future{first, queued} {
 		result, err := wait(t, f)
-		if !errors.Is(err, context.DeadlineExceeded) || result.Phase != core.NotDispatched || result.Termination != core.Deadline {
+		if !errors.Is(err, context.DeadlineExceeded) || result.Phase != execv1.NotDispatched || result.Termination != execv1.Deadline {
 			t.Fatalf("expired queue entry received a fresh execution lifetime: %+v %v", result, err)
 		}
 	}

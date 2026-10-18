@@ -1,7 +1,9 @@
 package adaptor
 
+import execution "minigateway/internal/foundation/contracts/execution/v1"
+
 // Operation describes semantics, not an HTTP path or a billing permission.
-type Operation string
+type Operation = execution.Operation
 
 const (
 	Chat       Operation = "chat"

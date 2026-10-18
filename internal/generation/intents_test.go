@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"os"
 	"strings"
 	"sync"
@@ -13,7 +14,6 @@ import (
 
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
-	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/store"
 )
@@ -339,7 +339,7 @@ func TestIntentInputSnapshotBeforeAuthorityCallbackAndValidation(t *testing.T) {
 		t.Fatalf("authority callback changed saved request: %s %v", got.Body, err)
 	}
 	for _, body := range [][]byte{[]byte(`{"model":"m","model":"other"}`), []byte(`{"model":"m","messages":[{"role":"user","content":"a","content":"b"}]}`), []byte("null"), {255}, bytes.Repeat([]byte("x"), 65537)} {
-		if _, err := a.Admit(context.Background(), binding, "invalid", gateway.Execution{Operation: "chat", Body: body}); err == nil {
+		if _, err := a.Admit(context.Background(), binding, "invalid", execv1.Invocation{Operation: "chat", Body: body}); err == nil {
 			t.Fatal("ambiguous/oversized input was accepted")
 		}
 	}

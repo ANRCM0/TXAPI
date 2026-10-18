@@ -1,21 +1,14 @@
 package access
 
-import "context"
+import (
+	"context"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
+)
 
 // Principal is the verified model-calling identity. Only the authentication
 // boundary constructs it; HTTP parameters must never supply its IDs or Policy.
 // Fields are snapshots for one request, never mutable cached user/Key objects.
-type Principal struct {
-	UserID               uint
-	TokenID              uint
-	TokenName            string
-	Policy               Policy
-	RPMLimit             int
-	TPMLimit             int
-	UserRPMLimit         int
-	UserConcurrencyLimit int
-	KeyConcurrencyLimit  int
-}
+type Principal = identity.Principal
 
 type principalKey struct{}
 type requestIDKey struct{}

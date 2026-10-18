@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/model"
 )
 
@@ -20,7 +20,7 @@ func TestContentKeyRequirementsIncludeInputOutputAndStableDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := output.Commit(context.Background(), core.ResponseMetadata{StatusCode: 200, ContentType: "application/json"}); err != nil {
+	if err := output.Commit(context.Background(), execv1.ResponseMetadata{StatusCode: 200, ContentType: "application/json"}); err != nil {
 		t.Fatal(err)
 	}
 	requirements, err := st.GenerationKeyRequirements(context.Background())

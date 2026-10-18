@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"minigateway/internal/compat/httpoutput"
+	authority "minigateway/internal/foundation/identity"
+	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -115,7 +118,7 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				service, err := responsesapp.New(context.Background(), responsesapp.Options{History: history, Store: st, Executor: gw, Archive: archive, Resolve: st.ResolvePrincipal, DigestKey: bytes.Repeat([]byte{17}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 16, OwnerRecords: 8}, ActiveRequests: 4, OwnerRequests: 2})
+				service, err := responsesapp.New(context.Background(), responsesapp.Options{History: history, Store: st, Executor: bridge.NewExecutor(gw), Archive: archive, Identity: authority.New(st.ResolvePrincipal), NewOutput: httpoutput.New, DigestKey: bytes.Repeat([]byte{17}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 16, OwnerRecords: 8}, ActiveRequests: 4, OwnerRequests: 2})
 				if err != nil {
 					t.Fatal(err)
 				}

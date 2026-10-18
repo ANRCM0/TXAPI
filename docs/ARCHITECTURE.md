@@ -1,5 +1,7 @@
 # 架构设计：中转内核、业务层与统一兼容层
 
+2026-10-18 新目标：用户提出 L0 内核、L1 基础框架、L2 兼容层、L3 功能层的严格依赖与地基 DoD，当前源码尚未全部符合。具体职责、公开契约、差距和分批迁移见 [FC-001 已批准提案](proposals/FC-001-foundation-contracts-v1.md)，排期以 [PLAN](PLAN.md#地基符合性收口fc-001) 为准。下文三层职责继续描述现有架构与历史验收，不作为新四层契约已冻结的证明；用户已明确批准按 FND-01 至 FND-05 顺序实施；实现/验收状态以 PLAN 为准。
+
 状态：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确提交与验证记录见 [PLAN.md](PLAN.md) 和 [S6 记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29` 及其 [验收证据](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；完整 S5 和 S7-A 仍未完成。命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，本页不维护第二份活动计划。
 
 2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。

@@ -135,6 +135,7 @@ func (g *Gateway) executeScope(c *executionScope, req protocol.Request) {
 		pre = pre.PriceOnly()
 	}
 	result.reservation = pre
+	result.BillingID, result.PriceVersion = pre.BillingID(), pre.PriceVersion()
 	if pre.BillingID() != "" {
 		c.output.setMetadata("X-TXAPI-Billing-ID", pre.BillingID())
 	}

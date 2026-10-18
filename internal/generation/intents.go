@@ -10,12 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"reflect"
 	"time"
 	"unicode/utf8"
 
 	"minigateway/internal/access"
-	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/jsonutil"
@@ -94,7 +94,7 @@ func (a *IntentAcceptor) digest(domain string, data []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func canonicalIntent(in gateway.Execution) (intentPayload, []byte, error) {
+func canonicalIntent(in execv1.Invocation) (intentPayload, []byte, error) {
 	if len(in.Body) == 0 || len(in.Body) > 64<<10 || len(in.SessionID) > 256 || !utf8.Valid(in.Body) || !utf8.ValidString(in.SessionID) {
 		return intentPayload{}, nil, model.ErrIntentCapacity
 	}
@@ -134,28 +134,28 @@ func (a *IntentAcceptor) sealIntent(in model.GenerationIntent, plain []byte) ([]
 	return sealed, nil
 }
 
-func (a *IntentAcceptor) openIntent(in model.GenerationIntent) (gateway.Execution, error) {
+func (a *IntentAcceptor) openIntent(in model.GenerationIntent) (execv1.Invocation, error) {
 	version := sha256.Sum256(a.digestKey)
 	if in.DigestVersion != hex.EncodeToString(version[:]) || !validIntentState(in.State) {
-		return gateway.Execution{}, ErrIntentIntegrity
+		return execv1.Invocation{}, ErrIntentIntegrity
 	}
 	data := in.Ciphertext
 	if len(data) > 68<<10 {
-		return gateway.Execution{}, ErrIntentIntegrity
+		return execv1.Invocation{}, ErrIntentIntegrity
 	}
 	plain, err := a.keys.Open(data, intentAAD(in, nil))
 	if err != nil {
-		return gateway.Execution{}, ErrIntentIntegrity
+		return execv1.Invocation{}, ErrIntentIntegrity
 	}
 	var payload intentPayload
 	if json.Unmarshal(plain, &payload) != nil || in.RequestDigest != a.requestDigest(plain) || string(payload.Operation) != in.Operation {
-		return gateway.Execution{}, ErrIntentIntegrity
+		return execv1.Invocation{}, ErrIntentIntegrity
 	}
 	req, err := protocol.ParseRequest(payload.Operation, payload.Body)
 	if err != nil || req.Model() != in.Model {
-		return gateway.Execution{}, ErrIntentIntegrity
+		return execv1.Invocation{}, ErrIntentIntegrity
 	}
-	return gateway.Execution{Operation: payload.Operation, Body: payload.Body, SessionID: payload.SessionID}, nil
+	return execv1.Invocation{Operation: payload.Operation, Body: payload.Body, SessionID: payload.SessionID}, nil
 }
 
 func validIntentState(state string) bool {
@@ -173,7 +173,7 @@ func (a *IntentAcceptor) requestDigest(plain []byte) string {
 
 // Admit persists an encrypted intent and dual budget hold before returning.
 // It neither enqueues Runner work nor authorizes an upstream/background send.
-func (a *IntentAcceptor) Admit(ctx context.Context, binding access.Binding, idempotencyKey string, in gateway.Execution) (IntentReceipt, error) {
+func (a *IntentAcceptor) Admit(ctx context.Context, binding access.Binding, idempotencyKey string, in execv1.Invocation) (IntentReceipt, error) {
 	if err := ctx.Err(); err != nil {
 		return IntentReceipt{}, err
 	}
@@ -233,24 +233,24 @@ func intentReceipt(in model.GenerationIntent) IntentReceipt {
 	return IntentReceipt{ID: in.ID, BillingID: in.BillingID, State: in.State, OutputRecordID: in.OutputRecordID, CreatedAt: in.CreatedAt, Deadline: in.Deadline, ExpiresAt: in.ExpiresAt}
 }
 
-func (a *IntentAcceptor) Read(ctx context.Context, binding access.Binding, id string) (IntentReceipt, gateway.Execution, error) {
+func (a *IntentAcceptor) Read(ctx context.Context, binding access.Binding, id string) (IntentReceipt, execv1.Invocation, error) {
 	principal, err := currentPrincipal(ctx, a.resolve, binding)
 	if err != nil {
-		return IntentReceipt{}, gateway.Execution{}, err
+		return IntentReceipt{}, execv1.Invocation{}, err
 	}
 	stored, err := a.admission.ReadGenerationIntent(ctx, binding.UserID, binding.TokenID, id)
 	if err != nil {
-		return IntentReceipt{}, gateway.Execution{}, err
+		return IntentReceipt{}, execv1.Invocation{}, err
 	}
 	if stored.UserID != binding.UserID || stored.TokenID != binding.TokenID || stored.ID != id {
-		return IntentReceipt{}, gateway.Execution{}, ErrIntentIntegrity
+		return IntentReceipt{}, execv1.Invocation{}, ErrIntentIntegrity
 	}
 	if !principal.Policy.Allows(stored.Model) {
-		return IntentReceipt{}, gateway.Execution{}, access.ErrUnauthorized
+		return IntentReceipt{}, execv1.Invocation{}, access.ErrUnauthorized
 	}
 	in, err := a.openIntent(stored)
 	if err != nil {
-		return IntentReceipt{}, gateway.Execution{}, err
+		return IntentReceipt{}, execv1.Invocation{}, err
 	}
 	return intentReceipt(stored), in, nil
 }

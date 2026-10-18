@@ -9,9 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"minigateway/internal/access"
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	identity "minigateway/internal/foundation/contracts/identity/v1"
 	"minigateway/internal/model"
 	native "minigateway/internal/protocol/responses"
 )
@@ -114,10 +113,10 @@ type historyTurn struct {
 	content             historyContent
 	conversation        model.ResponseHistory
 	conversationContent historyContent
-	target              *gateway.ResponseTarget
+	target              *execv1.TargetConstraint
 }
 
-func (h *History) prepare(ctx context.Context, b access.Binding, receipt model.ResponseRequest, body []byte) ([]byte, *historyTurn, error) {
+func (h *History) prepare(ctx context.Context, b identity.Binding, receipt model.ResponseRequest, body []byte) ([]byte, *historyTurn, error) {
 	fields, parent, conv, err := stateFields(body)
 	if err != nil {
 		return nil, nil, err
@@ -235,14 +234,14 @@ func wireItems(items []json.RawMessage) []json.RawMessage {
 // captureOutput retains a bounded copy of already validated encoded output.
 // It never changes commitment, errors or downstream backpressure.
 type captureOutput struct {
-	core.Output
+	execv1.Output
 	body                 bytes.Buffer
 	overflow             bool
-	metadata             core.ResponseMetadata
+	metadata             execv1.ResponseMetadata
 	parent, conversation string
 }
 
-func (o *captureOutput) Commit(ctx context.Context, m core.ResponseMetadata) error {
+func (o *captureOutput) Commit(ctx context.Context, m execv1.ResponseMetadata) error {
 	o.metadata = m
 	return o.Output.Commit(ctx, m)
 }
@@ -354,7 +353,7 @@ func terminalObject(o *captureOutput, stream bool) (json.RawMessage, error) {
 	return terminal, nil
 }
 
-func (h *History) finish(b access.Binding, t *historyTurn, result gateway.RequestResult, capture *captureOutput, stream bool, known bool) error {
+func (h *History) finish(b identity.Binding, t *historyTurn, result execv1.Outcome, capture *captureOutput, stream bool, known bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	content := t.content
@@ -372,7 +371,7 @@ func (h *History) finish(b access.Binding, t *historyTurn, result gateway.Reques
 				content.Items = append(append([]json.RawMessage(nil), content.Input...), output...)
 				content.Ready = true
 				t.record.Busy = ""
-				content.Target = result.ResponseTarget
+				content.Target = result.Target
 				content.PriceVersion = capture.metadata.Values["X-TXAPI-Price-Version"]
 				content.BillingID = capture.metadata.Values["X-TXAPI-Billing-ID"]
 				response["previous_response_id"], _ = json.Marshal(content.Parent)
@@ -395,9 +394,9 @@ func (h *History) finish(b access.Binding, t *historyTurn, result gateway.Reques
 		content.Response = nil
 		content.Request = nil
 	}
-	notDispatched := result.Phase == core.NotDispatched
+	notDispatched := result.Phase == execv1.NotDispatched
 	for _, attempt := range result.Attempts {
-		notDispatched = notDispatched && attempt.Phase == core.NotDispatched
+		notDispatched = notDispatched && attempt.Phase == execv1.NotDispatched
 	}
 	if notDispatched {
 		t.record.Busy = ""

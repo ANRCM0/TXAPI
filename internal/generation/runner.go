@@ -12,8 +12,7 @@ import (
 	"time"
 
 	"minigateway/internal/access"
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/protocol"
 )
 
@@ -34,7 +33,7 @@ type Options struct {
 	// Coordinator finalization still runs before a worker releases ownership.
 	MaxDuration time.Duration
 	Resolve     func(context.Context, access.Binding) (access.Principal, error)
-	Execute     func(context.Context, core.Output, gateway.Execution) gateway.RequestResult
+	Execute     func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome
 	// Archive enables opt-in encrypted output recording, not durable job acceptance.
 	Archive *Archive
 }
@@ -52,7 +51,7 @@ type Runner struct {
 }
 
 type outcome struct {
-	result gateway.RequestResult
+	result execv1.Outcome
 	err    error
 }
 
@@ -65,13 +64,13 @@ type Future struct {
 
 func (f *Future) Cancel() { f.cancel() }
 
-func (f *Future) Wait(ctx context.Context) (gateway.RequestResult, error) {
+func (f *Future) Wait(ctx context.Context) (execv1.Outcome, error) {
 	select {
 	case <-ctx.Done():
-		return gateway.RequestResult{}, ctx.Err()
+		return execv1.Outcome{}, ctx.Err()
 	case out, ok := <-f.result:
 		if !ok {
-			return gateway.RequestResult{}, ErrResultConsumed
+			return execv1.Outcome{}, ErrResultConsumed
 		}
 		return out.result, out.err
 	}
@@ -81,8 +80,8 @@ type job struct {
 	ctx       context.Context
 	binding   access.Binding
 	requestID string
-	output    core.Output
-	in        gateway.Execution
+	output    execv1.Output
+	in        execv1.Invocation
 	future    *Future
 }
 
@@ -124,21 +123,21 @@ func New(ctx context.Context, opts Options) (*Runner, error) {
 // A successful handoff is volatile, not durable acceptance or a budget reserve.
 // The caller transfers exclusive output ownership until the result is received
 // or Close finishes, not merely until an observation is canceled.
-func (r *Runner) Submit(observer context.Context, binding access.Binding, output core.Output, in gateway.Execution) (*Future, error) {
+func (r *Runner) Submit(observer context.Context, binding access.Binding, output execv1.Output, in execv1.Invocation) (*Future, error) {
 	f, _, err := r.submit(observer, binding, output, in, false)
 	return f, err
 }
 
 // SubmitRecorded reserves bounded output storage before volatile handoff. Only
 // output is journaled: no request body, job intent, budget hold or restart replay.
-func (r *Runner) SubmitRecorded(observer context.Context, binding access.Binding, in gateway.Execution) (*Future, string, error) {
+func (r *Runner) SubmitRecorded(observer context.Context, binding access.Binding, in execv1.Invocation) (*Future, string, error) {
 	if r.opts.Archive == nil {
 		return nil, "", ErrArchiveUnavailable
 	}
 	return r.submit(observer, binding, nil, in, true)
 }
 
-func (r *Runner) submit(observer context.Context, binding access.Binding, output core.Output, in gateway.Execution, recorded bool) (*Future, string, error) {
+func (r *Runner) submit(observer context.Context, binding access.Binding, output execv1.Output, in execv1.Invocation, recorded bool) (*Future, string, error) {
 	if err := observer.Err(); err != nil {
 		return nil, "", err
 	}
@@ -204,7 +203,7 @@ func (r *Runner) submit(observer context.Context, binding access.Binding, output
 	if preparationErr != nil {
 		r.mu.Unlock()
 		if out, ok := output.(*recordOutput); ok {
-			_ = out.finish(gateway.RequestResult{Operation: in.Operation, Result: core.Result{Phase: core.NotDispatched}}, context.Canceled)
+			_ = out.finish(execv1.Outcome{Operation: in.Operation, Result: execv1.Result{Phase: execv1.NotDispatched}}, context.Canceled)
 		}
 		return nil, id, preparationErr
 	}
@@ -216,9 +215,9 @@ func (r *Runner) submit(observer context.Context, binding access.Binding, output
 }
 
 func (r *Runner) run(j *job) (out outcome) {
-	out.result = gateway.RequestResult{Operation: j.in.Operation,
-		Identity: gateway.Identity{UserID: j.binding.UserID, TokenID: j.binding.TokenID, RequestID: j.requestID},
-		Result:   core.Result{StatusCode: 503, Phase: core.NotDispatched}}
+	out.result = execv1.Outcome{Operation: j.in.Operation,
+		Identity: execv1.Identity{UserID: j.binding.UserID, TokenID: j.binding.TokenID, RequestID: j.requestID},
+		Result:   execv1.Result{StatusCode: 503, Phase: execv1.NotDispatched}}
 	defer func() {
 		if recover() != nil {
 			// Never replay a panicked generation: it may already have reached the
@@ -226,7 +225,7 @@ func (r *Runner) run(j *job) (out outcome) {
 			out.err = ErrExecutionPanic
 			out.result.StatusCode = 500
 			out.result.Replayable = false
-			if out.result.Phase != core.NotDispatched {
+			if out.result.Phase != execv1.NotDispatched {
 				state := panicOutputState(j.output)
 				out.result.Committed, out.result.HTTPStatus = state.Committed, state.HTTPStatus
 			}
@@ -266,20 +265,20 @@ func (r *Runner) run(j *job) (out outcome) {
 	ctx := access.WithPrincipal(j.ctx, principal)
 	ctx = access.WithRequestID(ctx, j.requestID)
 	// Conservative until Execute returns its own phase/commit facts.
-	out.result.Phase = core.Dispatching
+	out.result.Phase = execv1.Dispatching
 	out.result = r.opts.Execute(ctx, j.output, j.in)
 	return out
 }
 
 func (out *outcome) contextError(err error) {
 	out.err = err
-	out.result.StatusCode, out.result.Termination = 499, core.Canceled
+	out.result.StatusCode, out.result.Termination = 499, execv1.Canceled
 	if errors.Is(err, context.DeadlineExceeded) {
-		out.result.StatusCode, out.result.Termination = 504, core.Deadline
+		out.result.StatusCode, out.result.Termination = 504, execv1.Deadline
 	}
 }
 
-func panicOutputState(output core.Output) (state core.OutputState) {
+func panicOutputState(output execv1.Output) (state execv1.OutputState) {
 	defer func() {
 		if recover() != nil {
 			state.Committed = true

@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"minigateway/internal/access"
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 )
 
 // Foreground persists encoded output before delivering it to its one observer.
@@ -18,12 +17,12 @@ import (
 type Foreground struct {
 	mu       sync.Mutex
 	record   *recordOutput
-	target   core.Output
+	target   execv1.Output
 	failed   bool
 	finished bool
 }
 
-func (a *Archive) BeginForeground(ctx context.Context, binding access.Binding, model string, target core.Output) (foreground *Foreground, err error) {
+func (a *Archive) BeginForeground(ctx context.Context, binding access.Binding, model string, target execv1.Output) (foreground *Foreground, err error) {
 	defer func() {
 		if recover() != nil {
 			foreground, err = nil, ErrArchiveUnavailable
@@ -66,7 +65,7 @@ func (f *Foreground) invalidate() {
 	f.record.mu.Unlock()
 }
 
-func (f *Foreground) Commit(ctx context.Context, metadata core.ResponseMetadata) (err error) {
+func (f *Foreground) Commit(ctx context.Context, metadata execv1.ResponseMetadata) (err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	defer func() {
@@ -144,7 +143,7 @@ func (f *Foreground) Flush(ctx context.Context) (err error) {
 	return err
 }
 
-func (f *Foreground) State() (state core.OutputState) {
+func (f *Foreground) State() (state execv1.OutputState) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	defer func() {
@@ -167,10 +166,10 @@ func (f *Foreground) SetWriteDeadline(deadline time.Time) error {
 
 // A complete observed response may include a native failed terminal state.
 // Storage/output failures never acquire a sealed replayable record.
-func (f *Foreground) Finish(result gateway.RequestResult) error {
+func (f *Foreground) Finish(result execv1.Outcome) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.failed || f.finished || result.Termination == core.ClientWriteError || result.Phase != core.NotDispatched && !result.ProtocolComplete {
+	if f.failed || f.finished || result.Termination == execv1.ClientWriteError || result.Phase != execv1.NotDispatched && !result.ProtocolComplete {
 		f.invalidate()
 		return ErrArchiveIncomplete
 	}
@@ -182,4 +181,4 @@ func (f *Foreground) Finish(result gateway.RequestResult) error {
 	return nil
 }
 
-var _ core.Output = (*Foreground)(nil)
+var _ execv1.Output = (*Foreground)(nil)

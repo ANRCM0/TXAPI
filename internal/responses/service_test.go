@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"minigateway/internal/compat/httpoutput"
+	authority "minigateway/internal/foundation/identity"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,8 +17,7 @@ import (
 
 	"minigateway/internal/access"
 	"minigateway/internal/config"
-	"minigateway/internal/core"
-	"minigateway/internal/gateway"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/generation"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
@@ -31,7 +32,7 @@ type responseExecutor struct {
 	before  func()
 }
 
-func (e *responseExecutor) ExecuteTo(ctx context.Context, output core.Output, in gateway.Execution) gateway.RequestResult {
+func (e *responseExecutor) Execute(ctx context.Context, output execv1.Output, in execv1.Invocation) execv1.Outcome {
 	e.calls.Add(1)
 	if e.before != nil {
 		e.before()
@@ -44,7 +45,7 @@ func (e *responseExecutor) ExecuteTo(ctx context.Context, output core.Output, in
 		Stream bool `json:"stream"`
 	}
 	_ = json.Unmarshal(in.Body, &request)
-	content := `{"id":"` + in.ResponseID + `","object":"response","model":"m","status":"` + status + `","output":[{"type":"message","id":"msg-native","role":"assistant","content":[{"type":"output_text","text":"retained native answer"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`
+	content := `{"id":"` + in.OutputID + `","object":"response","model":"m","status":"` + status + `","output":[{"type":"message","id":"msg-native","role":"assistant","content":[{"type":"output_text","text":"retained native answer"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`
 	contentType := "application/json"
 	if request.Stream {
 		contentType = "text/event-stream"
@@ -53,16 +54,16 @@ func (e *responseExecutor) ExecuteTo(ctx context.Context, output core.Output, in
 	if e.unknown {
 		content = `{"partial":"unknown execution"}`
 	}
-	result := gateway.RequestResult{Operation: protocol.Responses, ResponseStatus: status, UpstreamResponseID: "resp-private-upstream",
-		Result: core.Result{StatusCode: 200, Phase: core.ResponseReceived, Termination: core.Success, ProtocolComplete: !e.unknown,
-			Usage: &core.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}}}
-	if err := output.Commit(ctx, core.ResponseMetadata{StatusCode: 200, ContentType: contentType, Values: map[string]string{"X-Request-ID": "first-delivery-trace"}}); err != nil {
-		result.Error = &core.Error{StatusCode: 502, Error: core.ErrorDetail{Type: "fixture_output_error", Message: err.Error()}}
+	result := execv1.Outcome{Operation: protocol.Responses, Native: execv1.NativeCompletion{Status: status, ID: "resp-private-upstream"},
+		Result: execv1.Result{StatusCode: 200, Phase: execv1.ResponseReceived, Termination: execv1.Success, ProtocolComplete: !e.unknown,
+			Usage: &execv1.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}}}
+	if err := output.Commit(ctx, execv1.ResponseMetadata{StatusCode: 200, ContentType: contentType, Values: map[string]string{"X-Request-ID": "first-delivery-trace"}}); err != nil {
+		result.Error = &execv1.Error{StatusCode: 502, Error: execv1.ErrorDetail{Type: "fixture_output_error", Message: err.Error()}}
 		result.StatusCode, result.ProtocolComplete = 502, false
 		return result
 	}
 	if _, err := output.Write(ctx, []byte(content)); err != nil {
-		result.Error = &core.Error{StatusCode: 502, Error: core.ErrorDetail{Type: "fixture_output_error", Message: err.Error()}}
+		result.Error = &execv1.Error{StatusCode: 502, Error: execv1.ErrorDetail{Type: "fixture_output_error", Message: err.Error()}}
 		result.StatusCode, result.ProtocolComplete = 502, false
 	}
 	if request.Stream {
@@ -70,8 +71,8 @@ func (e *responseExecutor) ExecuteTo(ctx context.Context, output core.Output, in
 	}
 	result.Committed, result.HTTPStatus = output.State().Committed, output.State().HTTPStatus
 	if e.unknown || status == "failed" || status == "cancelled" {
-		result.StatusCode, result.Termination = 502, core.UpstreamError
-		result.Error = &core.Error{StatusCode: 502, Error: core.ErrorDetail{Type: "upstream_error", Message: "Upstream generation failed."}}
+		result.StatusCode, result.Termination = 502, execv1.UpstreamError
+		result.Error = &execv1.Error{StatusCode: 502, Error: execv1.ErrorDetail{Type: "upstream_error", Message: "Upstream generation failed."}}
 	}
 	return result
 }
@@ -119,7 +120,7 @@ func (f *responseFixture) newService(t *testing.T, receipts app.ReceiptStore) *a
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := app.New(context.Background(), app.Options{Store: receipts, Executor: f.executor, Archive: archive, Resolve: f.st.ResolvePrincipal,
+	service, err := app.New(context.Background(), app.Options{Store: receipts, Executor: f.executor, Archive: archive, Identity: authority.New(f.st.ResolvePrincipal), NewOutput: httpoutput.New,
 		DigestKey: bytes.Repeat([]byte{47}, 32), Retention: time.Hour, Limits: model.ResponseRequestLimits{InstanceRecords: 32, OwnerRecords: 16}, ActiveRequests: 4, OwnerRequests: 2})
 	if err != nil {
 		t.Fatal(err)

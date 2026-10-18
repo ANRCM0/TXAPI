@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"os"
 	"strings"
@@ -15,7 +16,7 @@ import (
 	"minigateway/internal/access"
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
-	"minigateway/internal/core"
+	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	"minigateway/internal/gateway"
 	"minigateway/internal/model"
 	"minigateway/internal/store"
@@ -36,7 +37,7 @@ func testArchive(t *testing.T, opts ArchiveOptions) *Archive {
 	return a
 }
 
-func recordingRunner(t *testing.T, st *store.Store, a *Archive, execute func(context.Context, core.Output, gateway.Execution) gateway.RequestResult) *Runner {
+func recordingRunner(t *testing.T, st *store.Store, a *Archive, execute func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome) *Runner {
 	t.Helper()
 	r, err := New(context.Background(), Options{Workers: 1, QueueCapacity: 2, MaxRequestBytes: 4096, MaxDuration: 5 * time.Second,
 		Resolve: st.ResolvePrincipal, Execute: execute, Archive: a})
@@ -47,7 +48,7 @@ func recordingRunner(t *testing.T, st *store.Store, a *Archive, execute func(con
 	return r
 }
 
-func recordGeneration(t *testing.T, r *Runner, binding access.Binding, in gateway.Execution) (string, gateway.RequestResult, error) {
+func recordGeneration(t *testing.T, r *Runner, binding access.Binding, in execv1.Invocation) (string, execv1.Outcome, error) {
 	t.Helper()
 	f, id, err := r.SubmitRecorded(context.Background(), binding, in)
 	if err != nil {
@@ -75,7 +76,7 @@ func TestRecordedWorkerJSONAndSSESurviveDatabaseReopenWithoutPlaintext(t *testin
 			g, _ := newGateway(t, gateway.Options{BillingMode: billing.ModeDisabled, Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(wire))}, nil
 			})}})
-			r := recordingRunner(t, st, a, g.ExecuteTo)
+			r := recordingRunner(t, st, a, bridge.NewExecutor(g).Execute)
 			id, result, err := recordGeneration(t, r, binding, in)
 			if err != nil || result.StatusCode != 200 || !result.Committed || result.HTTPStatus != 0 {
 				t.Fatalf("recorded execution: %+v %v", result, err)
@@ -136,7 +137,7 @@ func TestArchiveKeyRotationCopiesKeysAndRejectsMissingOrCorruptContent(t *testin
 	opts.Keys["key-1"][0]++
 	delete(opts.Keys, "key-1")
 	g, _ := newGateway(t, gateway.Options{BillingMode: billing.ModeDisabled, Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { return response(), nil })}})
-	id, _, err := recordGeneration(t, recordingRunner(t, st, a, g.ExecuteTo), binding, execution())
+	id, _, err := recordGeneration(t, recordingRunner(t, st, a, bridge.NewExecutor(g).Execute), binding, execution())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +174,7 @@ func TestArchiveReadAppliesCurrentModelPolicyAndOwnerStatus(t *testing.T) {
 	st, binding, _ := fixture(t)
 	a := testArchive(t, archiveOptions(st))
 	g, _ := newGateway(t, gateway.Options{BillingMode: billing.ModeDisabled, Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { return response(), nil })}})
-	id, _, err := recordGeneration(t, recordingRunner(t, st, a, g.ExecuteTo), binding, execution())
+	id, _, err := recordGeneration(t, recordingRunner(t, st, a, bridge.NewExecutor(g).Execute), binding, execution())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +210,7 @@ func TestArchiveModelAndDispatchUseTheSameInputSnapshotAcrossAuthorityCallbacks(
 		}
 		return response(), nil
 	})}})
-	id, result, err := recordGeneration(t, recordingRunner(t, st, a, g.ExecuteTo), binding, in)
+	id, result, err := recordGeneration(t, recordingRunner(t, st, a, bridge.NewExecutor(g).Execute), binding, in)
 	if err != nil || result.StatusCode != 200 {
 		t.Fatalf("snapshot mismatch: %+v %v", result, err)
 	}
@@ -223,7 +224,7 @@ func TestArchiveAuthenticatesOwnershipSequenceAndRetentionMetadata(t *testing.T)
 	st, binding, _ := fixture(t)
 	a := testArchive(t, archiveOptions(st))
 	g, _ := newGateway(t, gateway.Options{BillingMode: billing.ModeDisabled, Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { return response(), nil })}})
-	id, _, err := recordGeneration(t, recordingRunner(t, st, a, g.ExecuteTo), binding, execution())
+	id, _, err := recordGeneration(t, recordingRunner(t, st, a, bridge.NewExecutor(g).Execute), binding, execution())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,14 +285,14 @@ func TestArchiveStorageFailureAndFinalizerPanicNeverReplayOrKillWorker(t *testin
 			a := testArchive(t, opts)
 			var calls atomic.Int64
 			g, capacity := newGateway(t, gateway.Options{BillingMode: billing.ModeDisabled, RetryTimes: 2, Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { calls.Add(1); return response(), nil })}})
-			r := recordingRunner(t, st, a, g.ExecuteTo)
+			r := recordingRunner(t, st, a, bridge.NewExecutor(g).Execute)
 			for range 2 {
 				id, result, err := recordGeneration(t, r, binding, execution())
 				if !errors.Is(err, ErrArchiveUnavailable) || strings.Contains(err.Error(), "private") || !result.Committed || result.HTTPStatus != 0 {
 					t.Fatalf("storage failure lost facts/leaked error: %+v %v", result, err)
 				}
 				if kind == "metadata" || kind == "body" || kind == "ack-metadata" || kind == "ack-body" {
-					if result.Termination != core.ClientWriteError {
+					if result.Termination != execv1.ClientWriteError {
 						t.Fatalf("output failure pretended success: %+v", result)
 					}
 				}
@@ -327,7 +328,7 @@ func TestArchiveHandoffDoesNotHoldShutdownLockAndCloseJoinsStorage(t *testing.T)
 	opts := archiveOptions(st)
 	started, release := make(chan struct{}), make(chan struct{})
 	opts.Store = blockedArchiveCreate{ArchiveStore: st, started: started, release: release}
-	r := recordingRunner(t, st, testArchive(t, opts), func(context.Context, core.Output, gateway.Execution) gateway.RequestResult {
+	r := recordingRunner(t, st, testArchive(t, opts), func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
 		panic("closed handoff executed")
 	})
 	submitted := make(chan error, 1)
@@ -365,7 +366,7 @@ func TestArchiveQuotaOutputBoundsDeletionAndInterruptedRecovery(t *testing.T) {
 	opts.Limits = model.GenerationArchiveLimits{InstanceBytes: 16384, OwnerBytes: 16384, InstanceRecords: 1, OwnerRecords: 1}
 	a := testArchive(t, opts)
 	g, _ := newGateway(t, gateway.Options{BillingMode: billing.ModeDisabled, Client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { return response(), nil })}})
-	r := recordingRunner(t, st, a, g.ExecuteTo)
+	r := recordingRunner(t, st, a, bridge.NewExecutor(g).Execute)
 	id, _, err := recordGeneration(t, r, binding, execution())
 	if err != nil {
 		t.Fatal(err)
@@ -380,7 +381,7 @@ func TestArchiveQuotaOutputBoundsDeletionAndInterruptedRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := o.Commit(context.Background(), core.ResponseMetadata{StatusCode: 200}); err != nil {
+	if err := o.Commit(context.Background(), execv1.ResponseMetadata{StatusCode: 200}); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := o.Write(context.Background(), bytes.Repeat([]byte("x"), 32768)); !errors.Is(err, ErrArchiveLimit) || n != 0 {
@@ -426,7 +427,7 @@ func TestArchiveRejectsMissingKeysAndCanceledObserversWithoutRecords(t *testing.
 		}
 	}
 	a := testArchive(t, archiveOptions(st))
-	r := recordingRunner(t, st, a, func(context.Context, core.Output, gateway.Execution) gateway.RequestResult {
+	r := recordingRunner(t, st, a, func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
 		panic("canceled handoff dispatched")
 	})
 	ctx, cancel := context.WithCancel(context.Background())

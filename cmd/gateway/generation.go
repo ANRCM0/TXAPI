@@ -8,6 +8,7 @@ import (
 
 	"minigateway/internal/billing"
 	"minigateway/internal/config"
+	bridge "minigateway/internal/foundation/runtime"
 	"minigateway/internal/gateway"
 	"minigateway/internal/generation"
 	"minigateway/internal/model"
@@ -84,7 +85,7 @@ func startGenerationRuntime(cfg config.GenerationConfig, st *store.Store, engine
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	runner, err := generation.NewDurableRunner(ctx, generation.DurableOptions{Acceptor: acceptor, Leases: engine, Archive: archive, Workers: cfg.Workers,
-		PollInterval: time.Duration(cfg.PollMilliseconds) * time.Millisecond, LeaseDuration: time.Duration(cfg.LeaseSeconds) * time.Second, Execute: gw.ExecuteClaimedTo})
+		PollInterval: time.Duration(cfg.PollMilliseconds) * time.Millisecond, LeaseDuration: time.Duration(cfg.LeaseSeconds) * time.Second, Execute: bridge.NewExecutor(gw).ExecuteClaimed})
 	if err != nil {
 		cancel()
 		return nil, err

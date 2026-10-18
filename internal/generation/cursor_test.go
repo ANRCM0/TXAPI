@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	bridge "minigateway/internal/foundation/runtime"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -38,7 +39,7 @@ func cursorRecordedOutput(t *testing.T, st *store.Store, binding access.Binding)
 	a := testArchive(t, archiveOptions(st))
 	in := execution()
 	in.Body = []byte(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
-	id, result, err := recordGeneration(t, recordingRunner(t, st, a, g.ExecuteTo), binding, in)
+	id, result, err := recordGeneration(t, recordingRunner(t, st, a, bridge.NewExecutor(g).Execute), binding, in)
 	if err != nil || result.StatusCode != 200 || !result.ProtocolComplete {
 		t.Fatalf("cursor consumer fixture failed: %+v %v", result, err)
 	}
