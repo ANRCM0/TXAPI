@@ -238,3 +238,57 @@ Windows/PowerShell，所有 Go 命令显式 GOARCH=amd64。
 原 HTTP/JSON/SSE、错误/幂等/回放/ETag/CAS、会话/角色/Key/额度、账本决策和旧加密/恢复用例继续运行。
 无真实上游或生产数据操作；没有修改 OpenAPI/schema/migration/workflow/依赖或部署格式。
 最终头的自动 Linux race/冒烟/容器交付和合并后 master 仍须通过，当前不勾选 FND-04、不冻结 v1。
+
+
+### FND-04 最终 CI 与合并验收
+
+功能头 `203d80f17adee792f88841dbe0111ab96fbd9626` 的自动 push
+[39104078257](https://github.com/ANRCM0/TXAPI/actions/runs/39104078257) 与 PR
+[39104216724](https://github.com/ANRCM0/TXAPI/actions/runs/39104216724) 的 check/delivery 全部 SUCCESS。
+核对精确 head、clean worktree、未漂移的 master/3bf2540 后，
+`gh pr merge 17 --merge --match-head-commit 203d80f17adee792f88841dbe0111ab96fbd9626`
+将 [PR #17](https://github.com/ANRCM0/TXAPI/pull/17) 合并为
+`14bb9c967e55918c0ce0b221509b588a43b34b4c`，与功能头树一致。
+合并后自动 [39104465314](https://github.com/ANRCM0/TXAPI/actions/runs/39104465314) 的
+check/delivery 也全部 SUCCESS，含 Linux race、契约/依赖、构建/vet/格式、冒烟和容器交付。
+FND-04 已验收，上述本地时点的 pending 描述保留原时点，不覆盖此结果。
+
+## FND-05：全层约束、独立接入与冻结准备
+
+从已验收 master/14bb9c9 新建 feat/fnd-05-foundation-freeze；六项开工边界见 PLAN。
+逐包登记所有生产 Go 包、公开入口与版本，递归类型检查和 API 签名快照不扩大私有实现入口。
+L3 summary 与 L2 codec 分别只消费公开值；测试组装使用真实临时 Store、当前身份、容量、Gateway、
+原 core 和 loopback/真实 HTTP 输出，不修改框架操作 switch。新操作严格计费仍在发送前拒绝。
+实现细节和 DoD 位置见 [接入说明](../reference/foundation-integration-v1.md)。
+当前实施候选，不记最终 PASS，不冻结；集中验证与最终 CI 结果按实际完成后补记。
+
+
+### FND-05 本地最终集中验证
+
+最终非 Markdown 来源为 356 路径，SHA-256
+`2b714cf86fb8f420bed280eff6c57902cfddaeb1faaef9d5051cb11d5fec64b4`，
+集中检查前后相同；此后仅写说明文档。基线 master/14bb9c9，Windows PowerShell，Go 命令显式 GOARCH=amd64。
+
+| 实际命令与环境 | 结果 |
+|---|---|
+| go test -json -count=1 ./... | 1124 项测试/子用例、30 个有测试包 PASS，5 预期 helper SKIP，无失败 |
+| go build ./...；go vet ./...；go mod tidy 与 go.mod/go.sum diff | PASS，无依赖变化 |
+| normalized-LF gofmt 比较，仅本批变更 Go | 8 文件 PASS，无无关格式化 |
+| node --check app.mjs/api.mjs；node --test web/assets/api.test.mjs | 语法和 10 项 API PASS |
+| python tests/smoke/local.py --go go | main/auth/Chat/SSE/控制台、strict 拒绝、强杀与原双 hold、审计豁免、凭据轮换拒绝/恢复、加密 durable 重启/密钥拒绝/关闭 PASS |
+| python tests/smoke/compatibility.py --go go | 已安装 Playwright/Chromium，临时二进制/SQLite/真实 API/UI、保存/发布、角色/Key/模型隔离与桌面/移动 PASS |
+| python .local/validation/check-foundation-all-docs.py；git diff --check | 全仓 28 份 Markdown / 300 个本地链接锚点与差异检查 PASS |
+
+真实样例与负面检查先定向验证，最终全量再包含它们。首次样例编译发现 Capacity.Close 无返回值，
+改用原 Close 的清理函数后通过；首次格式命令误指不存在的 json.go，改为实际 validate.go 后全部 8 文件比较通过。
+递归审阅补上标准库泛型实参的检查，并以真实 type-checked atomic.Pointer[core/ORM 类型] 拒绝夹具验证，
+不因标准库具名类型被允许就漏掉其类型参数。API 快照记录常量值、字段标签及导出方法，正常测试禁止静默漂移。
+全包 56 个精确登记、14 个公开入口及 L0 共 15 个签名快照包，没有未清依赖豁免。
+
+core 原机制缺少源码版本标记，本批只增加 Version=1，机制实现与运行参数均未变化；json 同样补齐已有纯规则的版本。
+这属于 FC-001 已批准的版本/冻结范围，无新增 L0 执行功能。无需持久迁移，回退可整体回到前一匹配版本。
+Go/HTTP/存储和浏览器回归使用原测试及临时资源，无真实上游、真实凭据或生产库操作。
+现有 OpenAPI 0.4.0/91 操作、schema v12、密文格式、财务权威、依赖、CI workflow 与生产 main 保持。
+历史提案的 gateway/handler.go 已迁走，其原差距链接改指经过 git cat-file 验证存在的 4312f77 精确历史源码；未改批准范围。
+
+上述是本地验证，最终自动 Linux race/冒烟/容器与合并后 master CI 仍待通过；此时不冻结、不勾选 FND-05。

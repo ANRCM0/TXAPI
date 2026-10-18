@@ -60,7 +60,7 @@ L1 的持久实现可按 L1 端口调用数据库，L2 的协议/传输实现可
 | D01 | [Responses 应用](../../internal/responses/service.go) 的 Executor 签名暴露 core/gateway 类型，并调用 `core.NewHTTPOutput` | FND-01 提供 L1 执行契约与 L2 HTTP 输出适配，功能只接受注入的输出；保留 JSON/SSE、提交与短写回归 |
 | D02 | [公共 Execution](../../internal/gateway/coordinator.go) 暴露 `protocol.Operation`、`ResponseTarget`；[RequestResult](../../internal/gateway/instance.go) 嵌入 `core.Result` | FND-01 建立中立公开值类型与显式桥接；禁止用公开 type alias 把实现类型泄漏到 v1 |
 | D03 | [gateway relay](../../internal/gateway/relay.go) 导入 Responses Observation，按操作解释终态/重试；[protocol.Request](../../internal/protocol/request.go) 用固定 switch 选择操作 | FND-02 用真实注册操作与协议会话承接差异；L1 统一执行安全规则，未知操作拒绝，不能默认回落 Chat |
-| D04 | [gateway handler](../../internal/gateway/handler.go) 同包保留 Gin 入口；Responses 同包同时有 HTTP、业务与存储编排 | FND-02/FND-04 拆清兼容入口和功能用例，让框架实现不导入 Gin 或 L2 包；HTTP 成功码/错误/头保持 |
+| D04 | [gateway handler（4312f77 原始差距）](https://github.com/ANRCM0/TXAPI/blob/4312f774e48ad8f5066f1e238589666549b3a533/internal/gateway/handler.go) 同包保留 Gin 入口；Responses 同包同时有 HTTP、业务与存储编排 | FND-02/FND-04 拆清兼容入口和功能用例，让框架实现不导入 Gin 或 L2 包；HTTP 成功码/错误/头保持 |
 | D05 | [ConfigurationStore](../../internal/management/configuration.go) 的参数使用 `store.ChannelInput` / `CredentialInput`；若干 server API 直接调用 store/billing 实现 | FND-03/FND-04 迁移公开 DTO 与受限服务端口，保留当前事务/发布排序、角色与 owner 检查 |
 | D06 | [HistoryStore](../../internal/responses/history.go) 消费带持久模型的快照和限额；加密正文记录保存目标字段 | FND-03 使用无 ORM/实现依赖的状态 DTO/小端口，桥接现有事务；既有密文、关联数据和 JSON 字段仍可读取 |
 | D07 | [依赖检查](../../internal/architecture/dependencies_test.go) 明确允许 responses->core、gateway->protocol；只覆盖旧模块边界 | FND-01 开始禁止新依赖，FND-05 收紧最终四层规则；既有债务逐项列出路径/目标/退出批次，不新增大范围豁免 |
