@@ -44,10 +44,12 @@ type Round struct {
 }
 
 type RoundResult struct {
-	Dispatch         v1.Phase
-	FramesRead       uint64
-	FramesWritten    uint64
-	BytesWritten     uint64
+	Dispatch      v1.Phase
+	FramesRead    uint64
+	FramesWritten uint64
+	// BytesWritten is a confirmed payload-byte lower bound, not a wire count.
+	BytesWritten uint64
+	// Committed includes an attempted write whose delivery cannot be disproved.
 	Committed        bool
 	ProtocolComplete bool
 	Termination      v1.Termination
@@ -55,4 +57,9 @@ type RoundResult struct {
 
 type RoundExecutor interface {
 	ExecuteRound(context.Context, Round) RoundResult
+}
+
+type Lease interface {
+	Revision() string
+	Release() error
 }

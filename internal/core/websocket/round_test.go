@@ -11,6 +11,7 @@ type fakeConnection struct {
 	writes    []Frame
 	partial   int
 	writeErr  error
+	zeroWrite bool
 	closeCall int
 }
 
@@ -27,6 +28,9 @@ func (c *fakeConnection) Read(ctx context.Context) (Frame, error) {
 }
 func (c *fakeConnection) Write(_ context.Context, frame Frame) (int, error) {
 	c.writes = append(c.writes, frame)
+	if c.zeroWrite {
+		return 0, c.writeErr
+	}
 	if c.partial > 0 {
 		return c.partial, c.writeErr
 	}
@@ -54,6 +58,40 @@ func TestExecuteRoundPreservesPartialWriteAndDoesNotInventTerminal(t *testing.T)
 	}})
 	if result.Termination != ClientWriteError || !result.Committed || result.BytesWritten != 2 || result.FramesWritten != 0 || result.ProtocolComplete {
 		t.Fatalf("partial write was reported as complete: %+v", result)
+	}
+}
+
+func TestExecuteRoundRejectsShortWriteWithoutError(t *testing.T) {
+	connection := &fakeConnection{frames: []Frame{{Data: []byte("request")}}, partial: 2}
+	result := Execute(context.Background(), Round{Connection: connection, Handle: func(context.Context, Frame) ([]Frame, bool, error) {
+		return []Frame{{Data: []byte("response")}, {Data: []byte("must not write")}}, true, nil
+	}})
+	if result.Dispatch != Dispatching || result.Termination != ClientWriteError || !result.Committed ||
+		result.BytesWritten != 2 || result.FramesWritten != 0 || result.ProtocolComplete || len(connection.writes) != 1 {
+		t.Fatalf("short write was accepted or retried: %+v, writes=%d", result, len(connection.writes))
+	}
+}
+
+func TestExecuteRoundKeepsUnknownWriteCommit(t *testing.T) {
+	connection := &fakeConnection{frames: []Frame{{Data: []byte("request")}}, writeErr: errors.New("unknown write"), zeroWrite: true}
+	result := Execute(context.Background(), Round{Connection: connection, Handle: func(context.Context, Frame) ([]Frame, bool, error) {
+		return []Frame{{Data: []byte("response")}}, true, nil
+	}})
+	if result.Termination != ClientWriteError || !result.Committed || result.ProtocolComplete || result.FramesWritten != 0 || result.BytesWritten != 0 {
+		t.Fatalf("unknown write was treated as safely uncommitted: %+v", result)
+	}
+}
+
+func TestExecuteRoundRejectsCompletionAfterHandlerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connection := &fakeConnection{frames: []Frame{{Data: []byte("request")}}}
+	result := Execute(ctx, Round{Connection: connection, Handle: func(context.Context, Frame) ([]Frame, bool, error) {
+		cancel()
+		return []Frame{{Data: []byte("must not write")}}, true, nil
+	}})
+	if result.Termination != Canceled || result.ProtocolComplete || result.Committed || len(connection.writes) != 0 || result.Dispatch != Dispatching {
+		t.Fatalf("canceled handler was allowed to finish: %+v", result)
 	}
 }
 

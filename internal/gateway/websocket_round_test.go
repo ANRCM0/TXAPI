@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
 )
@@ -96,4 +98,88 @@ func TestRuntimeLeaseSetRejectsRetiringOverflowAndKeepsCurrent(t *testing.T) {
 	}
 	_ = first.Release()
 	_ = second.Release()
+}
+
+func TestRuntimeLeaseSetRejectsReusingLiveRetiringRevision(t *testing.T) {
+	set, err := NewRuntimeLeaseSet("r1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := set.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Publish("r2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Publish("r1"); err == nil || set.Current() != "r2" {
+		t.Fatalf("retiring revision was reused: %v, current=%s", err, set.Current())
+	}
+	if err := first.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Publish("r1"); err != nil {
+		t.Fatalf("fully drained revision remained reserved: %v", err)
+	}
+}
+
+func TestWebSocketRoundsRejectOverlapAndReleaseAfterCompletion(t *testing.T) {
+	entered, finish := make(chan struct{}), make(chan struct{})
+	connection := &roundConnection{frames: []v2.Frame{{Data: []byte("request")}, {Data: []byte("next")}}}
+	finished := make(chan v2.RoundResult, 1)
+	go func() {
+		finished <- (WebSocketRoundExecutor{}).ExecuteRound(context.Background(), v2.Round{Connection: connection, Handle: func(context.Context, v2.Frame) ([]v2.Frame, bool, error) {
+			close(entered)
+			<-finish
+			return nil, true, nil
+		}})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first round did not start")
+	}
+	overlap := (WebSocketRoundExecutor{}).ExecuteRound(context.Background(), v2.Round{Connection: connection, Handle: func(context.Context, v2.Frame) ([]v2.Frame, bool, error) {
+		t.Error("overlapping round invoked handler")
+		return nil, true, nil
+	}})
+	close(finish)
+	first := <-finished
+	if overlap.Dispatch != v2.NotDispatched || overlap.Termination != v2.Failed || first.Termination != v2.Success {
+		t.Fatalf("overlapping round was not isolated: first=%+v overlap=%+v", first, overlap)
+	}
+	next := (WebSocketRoundExecutor{}).ExecuteRound(context.Background(), v2.Round{Connection: connection, Handle: func(context.Context, v2.Frame) ([]v2.Frame, bool, error) {
+		return nil, true, nil
+	}})
+	if next.Termination != v2.Success {
+		t.Fatalf("completed round retained its connection: %+v", next)
+	}
+}
+
+func TestRuntimeLeaseConcurrentReleaseDrainsExactlyOnce(t *testing.T) {
+	set, err := NewRuntimeLeaseSet("r1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := set.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Publish("r2"); err != nil {
+		t.Fatal(err)
+	}
+	var workers sync.WaitGroup
+	for range 32 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			if err := lease.Release(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	workers.Wait()
+	if len(set.retiring) != 0 || lease.generation.refs != 0 || set.Current() != "r2" {
+		t.Fatalf("concurrent release retained generation: %+v", set)
+	}
 }

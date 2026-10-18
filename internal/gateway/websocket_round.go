@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"sync"
 
 	corews "minigateway/internal/core/websocket"
 	v1 "minigateway/internal/foundation/contracts/execution/v1"
@@ -10,11 +11,25 @@ import (
 
 type WebSocketRoundExecutor struct{}
 
+var activeWebSocketRounds sync.Map
+
 func (WebSocketRoundExecutor) ExecuteRound(ctx context.Context, round v2.Round) v2.RoundResult {
 	result := v2.RoundResult{Dispatch: v2.NotDispatched, Termination: v2.Failed}
 	if round.Connection == nil || round.Handle == nil {
 		return result
 	}
+	id := round.Connection.ID()
+	if id == "" {
+		return result
+	}
+	if ctx.Err() != nil {
+		result.Termination = v2.Canceled
+		return result
+	}
+	if _, active := activeWebSocketRounds.LoadOrStore(id, struct{}{}); active {
+		return result
+	}
+	defer activeWebSocketRounds.Delete(id)
 	mechanical := corews.Execute(ctx, corews.Round{
 		Connection: connectionAdapter{round.Connection},
 		Deadline:   round.Deadline,

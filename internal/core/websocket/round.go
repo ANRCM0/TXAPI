@@ -57,6 +57,10 @@ func Execute(parent context.Context, round Round) Result {
 		defer cancel()
 	}
 	for {
+		if ctx.Err() != nil {
+			result.Termination = Canceled
+			return result
+		}
 		frame, err := round.Connection.Read(ctx)
 		if err != nil {
 			result.Termination = termination(ctx, err)
@@ -71,17 +75,31 @@ func Execute(parent context.Context, round Round) Result {
 			result.Termination = termination(ctx, err)
 			return result
 		}
+		if ctx.Err() != nil {
+			result.Termination = Canceled
+			return result
+		}
 		for _, output := range frames {
+			if ctx.Err() != nil {
+				result.Termination = Canceled
+				return result
+			}
+			// A failed frame write may have emitted bytes even when the
+			// transport cannot confirm a payload count. Keep that uncertainty.
+			result.Committed = true
 			written, err := round.Connection.Write(ctx, output)
-			if written > 0 {
-				result.Committed = true
+			if written > 0 && written <= len(output.Data) {
 				result.BytesWritten += uint64(written)
 			}
-			if err != nil {
+			if err != nil || written != len(output.Data) {
 				result.Termination = ClientWriteError
 				return result
 			}
 			result.FramesWritten++
+		}
+		if ctx.Err() != nil {
+			result.Termination = Canceled
+			return result
 		}
 		if complete {
 			result.Dispatch = ResponseReceived

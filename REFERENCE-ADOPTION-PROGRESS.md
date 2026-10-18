@@ -92,6 +92,18 @@ R03a 本地最终检查（基线 `master/5938c055ab69097adeab460919b4e5c21410939
 
 R03a 新增执行快照只增加 execution/v2 WS 成员，并登记 L0 `core/websocket`；既有 v1/v2 HTTP 事实、L0 HTTP、OpenAPI、schema 和计费行为保持。一次架构快照检查发现新 L0 包缺显式 Version，已补登记并重新通过；一次 lease 溢出测试误把无引用 current 当作退休占用，已改为同时持有两代 lease 后验证拒绝。
 
+### R03a 合并前复核与最终本地检查
+
+2026-10-19，在相同 Windows/PowerShell、Go 1.26.3、GOARCH=amd64、CGO_ENABLED=0 环境集中复核。首个功能头 `3b66cae` 的 push `39144385351` 与 PR #26 `39145020494` 已完整成功，但这些旧头证据不覆盖下述修复。
+
+- core 拒绝无 error 的短写；写调用开始即保守保留可能已交付，确认字节只取合法下界，不把 transport 返回的零下界当作未发送。callback 取消后不再写出或报告成功。
+- gateway 拒绝相同服务端 connection ID 的重叠轮次，结束后释放槽；lease 拒绝复用仍被持有的退休 revision，覆盖并发 Release。追加的 `execution/v2.Lease` 是原已批准签名的漏项补齐，原有公开声明不变。
+- 新增真实 `httptest` WS 客户端/transport/gateway 集成：同连接两轮、在途 N/N+1、SQLite 身份逐轮刷新与 Key 撤销、重复关闭和容量归零。测试协议不是生产原生 OpenAI WS。
+
+最终实际执行 `go build ./...`、`go vet ./...`、`go mod tidy` 及 go.mod/go.sum 无差异、`go test -json -count=1 ./...`、架构/公开签名检查和 `git diff --check` 均通过：1275 项测试/子用例、33 个测试包 PASS，6 个预期 helper SKIP，零失败。真实主程序 `python -B tests/smoke/local.py --go go` 再次通过，包含普通/SSE/控制台、strict 拒绝、结算、凭据轮换、加密重启及后台 SSE 强杀/恢复/续传/取消/TTL。前端沿用 `3b66cae` 的五脚本语法和 10/10 API 证据，相应脚本和 HTTP 接口未变。只格式化本批 Go 文件。最终原始日志和源码清单在仓库外 `D:\my-project\TXAPI-references\validation-r03a`。
+
+本批只完成机械 round 与 lease 标识模型，尚未冻结新增契约。R02 的真实可关闭资源、Prepare/Publish/Discard、管理 applied 接线和 drain deadline 尚未实现；不能凭本批内存 lease 与真实测试连接宣称 R02 或原生 WS 产品通过。最终修复提交的自动完整 CI 与合并状态待发生后更新；不运行真实 Provider、不发布镜像或标签。
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。

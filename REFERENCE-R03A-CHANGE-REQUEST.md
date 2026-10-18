@@ -2,7 +2,7 @@
 
 状态：R03a 范围及 2026-10-19 修订签名均已获用户批准，正在实施。R00 与 R01 已分别完成合并验收。
 
-修订内容：Connection.Write 返回已写入的字节数和 error；Round 增加正文已经要求的协议处理回调。两者分别用于部分发送事实和由协议所有者声明终态。下述代码是修订后完整签名，候选实现尚未接入生产目录。
+修订内容：Connection.Write 返回已写入的字节数和 error；Round 增加正文已经要求的协议处理回调。两者分别用于部分发送事实和由协议所有者声明终态。下述签名已接入候选生产包；验收以最终提交的 CI 和真实 transport 回归为准，尚未冻结。
 
 ## 1. 目标
 
@@ -78,6 +78,7 @@ type Lease interface {
 - `Read`/`Write` 的 context 取消立即结束当前轮次；连接关闭由 connection owner 决定，轮次结束不能自动关闭仍被其他轮次使用的物理连接。
 - 首次成功读到请求帧后记录 `Dispatching`；输出帧写入前的失败仍可能已经派发，不能重试或声称未执行。
 - 每次成功写入累计 frame/byte 事实；短写、写超时和连接关闭保留 `Committed`/已写字节，不补终态、不自动重发。
+- `Committed` 保守表示写调用可能已经交付，写失败不重置为 false；`BytesWritten` 只表示已确认载荷字节的下界。真实 transport 的底层写失败无法报告部分载荷计数时，保留 `Committed=true` 和已有确认字节，不把零下界解释成没有发送。无 error 的短写同样失败，不计完整帧。
 - 只有协议适配器通过显式 callback 返回 `ProtocolComplete`；机械 core 不从 JSON、文本或 close code 猜终态。
 - `Close` 幂等，释放 round lease 后才允许旧代次退出；关闭超时不关闭共享 gateway/store。
 - 连接容量、消息大小、读/写/握手期限继续由现有 transport Manager 限制；R03a 不放宽这些上限。
@@ -98,6 +99,8 @@ old current -> retiring -> last lease release -> close
 - 发布 N+1 不影响 N 的已派发轮次；新轮次使用 N+1。
 - retiring 代次有上限和 drain deadline；达到上限时拒绝新发布或新连接，不能强杀正在收尾的账务/输出。
 - 关闭顺序是：停止新握手 -> 停止新轮次 -> 等待已派发轮次 -> 释放 lease -> 关闭 transport/runtime；超时返回错误并保留依赖存活。
+
+当前批次的交付边界：`RuntimeLeaseSet` 实现内存 revision/ref 模型，真实 WS 测试消费者持有和释放租约；它尚未持有可关闭资源，也未接入配置 applied revision、资源准备/失败清理及 drain deadline。这些 R02 产品接线要求仍为后续 R03b 的进入/验收条件，不能以本批引用计数测试替代。
 
 ## 6. 兼容与回退
 

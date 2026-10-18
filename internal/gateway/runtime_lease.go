@@ -3,6 +3,8 @@ package gateway
 import (
 	"errors"
 	"sync"
+
+	v2 "minigateway/internal/foundation/contracts/execution/v2"
 )
 
 var errRuntimeRevision = errors.New("runtime revision is unavailable")
@@ -26,6 +28,8 @@ type RuntimeLease struct {
 	once       sync.Once
 }
 
+var _ v2.Lease = (*RuntimeLease)(nil)
+
 func NewRuntimeLeaseSet(initial string, maxRetiring int) (*RuntimeLeaseSet, error) {
 	if initial == "" || maxRetiring < 0 {
 		return nil, errRuntimeRevision
@@ -41,6 +45,9 @@ func (s *RuntimeLeaseSet) Publish(revision string) error {
 	defer s.mu.Unlock()
 	if s.current != nil && s.current.revision == revision {
 		return nil
+	}
+	if _, exists := s.retiring[revision]; exists {
+		return errRuntimeRevision
 	}
 	if len(s.retiring) >= s.maxRetiring && s.current != nil && s.current.refs > 0 {
 		return errRuntimeRevision
