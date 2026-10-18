@@ -56,7 +56,7 @@ R00 六文件归一化 LF 的清单摘要：`c568e2427005ee20dfac65ac19742699ed0
 
 具体新增签名及范围由 `REFERENCE-R01-CHANGE-REQUEST.md` 定义，用户已于 2026-10-18 明确回复“批准 R01 具体变更”。
 实施内容限追加 execution/v2、L1 decoder 桥、原生 Responses 真实消费者与独立 L3 样例；保留 v1 与 L0 签名。
-源码已实现，本地集中验证通过，尚未由最终头 CI/合并验收或冻结。新增签名快照只增加 execution/v2 的 16 个条目，原有所有冻结条目逐项相同；L0 与 v1 签名不变。
+已验收并合并：功能头 `a66a0706034c3bb86d60742931b7fcc8182e7aef`，PR #25，合并后 `master/5938c055ab69097adeab460919b4e5c21410939c`。功能头基于 `master/231af3a`，新增签名快照只增加 execution/v2 的 16 个条目，原有所有冻结条目逐项相同；L0 与 v1 签名不变。
 
 真实 Responses HTTP/SSE 消费者通过显式 v2 decoder 能力使用新桥；独立 L3 facts 样例通过真实 SQLite 身份、当前 Key 撤销、真实 gateway 与假上游证明接入。用量完整性、事实来源、原始表示和宿主派发/交付水位分别保存。
 
@@ -82,7 +82,15 @@ R00 六文件归一化 LF 的清单摘要：`c568e2427005ee20dfac65ac19742699ed0
 
 `go test ./internal/architecture -run TestVersionedPublicSignaturesHideImplementationTypes -record-foundation-api <仓库外候选文件>` 只用于导出候选快照；先逐项确认所有旧公开声明不变，仅新增批准的 execution/v2 条目后才复制进记录。初次架构检查发现版本路径白名单未登记 execution/v2，已仅追加该已批准入口，原越层/类型检查保持。
 
-本地未运行 Linux race、容器 delivery 或真实 Provider。最终头和合并后 CI 均仍需独立记录。
+本地未运行 Linux race、容器 delivery 或真实 Provider。R01 功能头 push `39141714771`、PR `39141745597`、合并后 master/5938c05 的 `39142273005` 均 check/delivery SUCCESS，覆盖 Linux 全量 race 与容器交付；真实 Provider 仍未运行。
+
+## R02/R03a：运行代次与 WS 机械执行
+
+R03a 范围及修订签名已获用户批准。候选实现已接入本地生产包：L0 `internal/core/websocket` 只处理有界读写/取消/部分写，L1 gateway 映射 execution/v2，L2 transport 仍保留连接容量/消息/期限边界；生产 OpenAI WS 路由尚未注册。RuntimeLeaseSet 已覆盖发布、获取、退休和并发释放，真实 WS 产品消费者仍是下一步 R03b。
+
+R03a 本地最终检查（基线 `master/5938c055ab69097adeab460919b4e5c21410939c`，Windows/PowerShell，Go 1.26.3，GOARCH=amd64）：`go build ./...`、`go vet ./...`、`go mod tidy`、`go test -count=1 ./...`、架构/公开签名检查、`git diff --check`、真实主程序恢复冒烟均通过；1267 项测试/子用例 PASS，6 个预期 helper SKIP，32 个测试包 PASS。新增代码清单摘要为 `cfda046bea954af44345032bde8e5b17131bff4d99f25f240384e873a57a42c6`，原始日志和清单在 `D:\my-project\TXAPI-references\validation-r03a`。本地未运行 Linux race、容器 delivery 或真实 Provider。
+
+R03a 新增执行快照只增加 execution/v2 WS 成员，并登记 L0 `core/websocket`；既有 v1/v2 HTTP 事实、L0 HTTP、OpenAPI、schema 和计费行为保持。一次架构快照检查发现新 L0 包缺显式 Version，已补登记并重新通过；一次 lease 溢出测试误把无引用 current 当作退休占用，已改为同时持有两代 lease 后验证拒绝。
 
 ## 后续批次
 
