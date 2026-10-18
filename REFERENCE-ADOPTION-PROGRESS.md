@@ -131,7 +131,7 @@ R03a 最终功能头 `2111467540ef31ee8ad9515be2298d1a5e7d5673` 的 push `391466
 
 首轮集中通过 1303 项后，复核移除 codec 重复校验、为 prepare 增加 10 秒上界，并补充 prepare/drain 竞争及测试 close-worker join；随后重新执行最终 build/vet/tidy/全量 1304 项检查。主程序冒烟已通过，之后的私有 owner/codec 修复尚未接入 main，HTTP/SSE/background 组装与对应实现未变，因此其证据继续适用；新 owner 的最终行为由全量测试中的真实 WS/管理发布和排空用例覆盖。
 
-最终功能头自动 CI、PR 和合并后状态仍待更新；本地未运行 Linux race、容器 delivery 或真实 Provider，不提前宣称这些通过。新增契约尚未冻结，未发布标签或 release。
+R03b-1 功能头 `08c4c28f9cb1cfa4da0b817f9f4ba608667c6501` 的 push `39152357936` 与 PR #28 `39152398277` 均 check/delivery SUCCESS；覆盖 Linux 全量 race、主程序恢复冒烟和容器交付。PR #28 已合并为 `master/0ec80e0139125bf60901f7a9779459bc8a476598`，合并树 `2abc9c873a80ff60b17dfa48a0afcbebe4c954f1` 与功能头完全一致。合并后自动运行 `39152906538` 当前仍在执行，故 post-merge 状态单独待更新。真实 Provider 未运行，新增契约尚未冻结，未发布标签或 release。
 
 ## 后续批次
 
