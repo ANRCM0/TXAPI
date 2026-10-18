@@ -99,7 +99,7 @@ func TestResponseHistoryV12MigrationPreservesV11ReceiptsAndFinancialState(t *tes
 	if err := s.DB().Create(&balance).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DB().Where("version = 12").Delete(&model.SchemaMigration{}).Error; err != nil {
+	if err := s.DB().Where("version >= 12").Delete(&model.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DB().Migrator().DropTable(&model.ResponseHistory{}); err != nil {
@@ -115,7 +115,7 @@ func TestResponseHistoryV12MigrationPreservesV11ReceiptsAndFinancialState(t *tes
 		}
 		var rows []model.SchemaMigration
 		_ = s.DB().Order("version").Find(&rows).Error
-		if len(rows) != len(released)+1 || rows[len(rows)-1].Version != 12 {
+		if len(rows) != len(released)+2 || rows[len(rows)-2].Version != 12 || rows[len(rows)-1].Version != 13 {
 			t.Fatal("v12 not idempotent")
 		}
 		for i := range released {

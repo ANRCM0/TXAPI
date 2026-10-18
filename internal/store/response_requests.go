@@ -146,6 +146,9 @@ func (s *Store) BeginResponseRequest(ctx context.Context, in model.ResponseReque
 				return model.ErrResponseCapacity
 			}
 		}
+		if err := noBackgroundResource(tx, in.ResponseID); err != nil {
+			return err
+		}
 		inserted := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&in)
 		if inserted.Error != nil {
 			return inserted.Error
