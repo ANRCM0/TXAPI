@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.10.0",
+    "version": "0.11.0",
     "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported."
   },
   "servers": [
@@ -10340,6 +10340,452 @@
           }
         }
       }
+    },
+    "/api/me/billing/summary": {
+      "get": {
+        "operationId": "me_billing_summary",
+        "summary": "Owner strict balance summary",
+        "description": "Current login session only, always own owner scope including administrator sessions. No supplied owner ID or financial mutation. Current session/active user/soft deletion are rechecked within the database read transaction; creation Key revocation/deletion does not remove historical access. No-store, shared owner 120/minute, five-second reads, no price recalculation. String amounts preserve exact integers; missing balance and unsettled charge remain null. No Provider cost, attempts, raw evidence, reasons or credentials are exposed. All query parameters are rejected.",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Owner strict balance summary",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OwnerBillingSummary"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated, empty, unknown or noncanonical query",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current active login session required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner rate exceeded; Retry-After: 60",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Owner ledger unavailable; fixed error without private source details",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/billing/reservations": {
+      "get": {
+        "operationId": "me_billing_reservations",
+        "summary": "Owner financial reservation list",
+        "description": "Current login session only, always own owner scope including administrator sessions. No supplied owner ID or financial mutation. Current session/active user/soft deletion are rechecked within the database read transaction; creation Key revocation/deletion does not remove historical access. No-store, shared owner 120/minute, five-second reads, no price recalculation. String amounts preserve exact integers; missing balance and unsettled charge remain null. No Provider cost, attempts, raw evidence, reasons or credentials are exposed. List order created_at DESC,id DESC; pages are independent snapshots.",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "reserved",
+                "active",
+                "pending",
+                "settled"
+              ]
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "description": "Canonical positive platform ID bounded to signed machine int; foreign Key returns an empty list."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner financial reservation list",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerBillingPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated, empty, unknown or noncanonical query",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current active login session required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner rate exceeded; Retry-After: 60",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Owner ledger unavailable; fixed error without private source details",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/billing/reservations/{id}": {
+      "get": {
+        "operationId": "me_billing_read",
+        "summary": "Owner financial reservation detail",
+        "description": "Current login session only, always own owner scope including administrator sessions. No supplied owner ID or financial mutation. Current session/active user/soft deletion are rechecked within the database read transaction; creation Key revocation/deletion does not remove historical access. No-store, shared owner 120/minute, five-second reads, no price recalculation. String amounts preserve exact integers; missing balance and unsettled charge remain null. No Provider cost, attempts, raw evidence, reasons or credentials are exposed. All query parameters are rejected.",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$",
+              "maxLength": 32
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner financial reservation detail",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OwnerBillingDetail"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated, empty, unknown or noncanonical query",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current active login session required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner rate exceeded; Retry-After: 60",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Owner ledger unavailable; fixed error without private source details",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or not owned, including malformed IDs; indistinguishable.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -13516,6 +13962,159 @@
             "maximum": 2592000
           }
         }
+      },
+      "OwnerBillingSummary": {
+        "type": "object",
+        "required": [
+          "unit_scale",
+          "balance_known",
+          "posted_used_units",
+          "held_units",
+          "pending_count",
+          "as_of"
+        ],
+        "properties": {
+          "unit_scale": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "description": "Integer units per one legacy account unit, not a currency."
+          },
+          "balance_known": {
+            "type": "boolean"
+          },
+          "posted_used_units": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "nullable": true,
+            "description": "Committed strict balance including legacy opening; not an all-time invoice sum."
+          },
+          "held_units": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "nullable": true,
+            "description": "Current user hold only; never add Key holds. Expired lease alone does not release it."
+          },
+          "pending_count": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "as_of": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix milliseconds for this read transaction."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OwnerBillingReservation": {
+        "type": "object",
+        "required": [
+          "id",
+          "token_id",
+          "origin_model",
+          "price_version",
+          "state",
+          "original_reserved_units",
+          "held_units",
+          "charge_units",
+          "lease_until",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "token_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "origin_model": {
+            "type": "string"
+          },
+          "price_version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "reserved",
+              "active",
+              "pending",
+              "settled"
+            ]
+          },
+          "original_reserved_units": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "description": "Historical ceiling, retained after settlement."
+          },
+          "held_units": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "description": "Original ceiling while reserved/active/pending, zero after settlement."
+          },
+          "charge_units": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "nullable": true,
+            "description": "Null until settled, including uncertain pending; settled zero is known zero user charge and does not prove Provider cost."
+          },
+          "lease_until": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OwnerBillingDetail": {
+        "type": "object",
+        "required": [
+          "reservation"
+        ],
+        "properties": {
+          "reservation": {
+            "$ref": "#/components/schemas/OwnerBillingReservation"
+          },
+          "resolution_action": {
+            "type": "string",
+            "enum": [
+              "settle_usage",
+              "cap_usage",
+              "waive"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "OwnerBillingPage": {
+        "type": "object",
+        "required": [
+          "data",
+          "has_more"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OwnerBillingReservation"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       }
     }
   }

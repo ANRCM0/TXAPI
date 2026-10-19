@@ -149,6 +149,16 @@ def control_workflow(base, upstream_url, routing_env=None, quotation_enabled=Fal
     other = api("/api/auth/login", payload={
         "username": "console-other", "password": "console-other-test-password"
     })["session_token"]
+    for owner_session in (session, other):
+        summary = api("/api/me/billing/summary", owner_session)["data"]
+        assert summary["unit_scale"] == "1000000000" and summary["balance_known"] is False
+        assert summary["posted_used_units"] is None and summary["held_units"] is None
+        assert summary["pending_count"] == "0"
+        assert api("/api/me/billing/reservations", owner_session) == {"data": [], "has_more": False}
+    api("/api/me/billing/summary", expected=401)
+    api("/api/me/billing/reservations?user_id=1", session, expected=400)
+    api("/api/me/billing/reservations?limit=01", session, expected=400)
+    api("/api/me/billing/reservations/" + "a" * 32, session, expected=404)
     api("/api/admin/config-status", session, expected=403)
     api("/api/admin/quotations/current", session, expected=403)
     # Reject before parsing. urllib closes each connection; an unread POST body
@@ -265,6 +275,16 @@ def strict_crash_workflow(gateway, config, config_path, work, env, gateway_port,
         assert cost_snapshot["contract"]["input_bound_profile"] == "openai_chat_v1"
         assert cost_snapshot["format"] == 2 and cost_snapshot["selling_bound_units"] == "19219200000"
         assert cost_snapshot["selling_price_version"] == detail["reservation"]["price_version"]
+        owner_path = "/api/me/billing/reservations/" + billing_id
+        owner_detail = api(owner_path)["data"]
+        assert owner_detail["reservation"]["state"] == "pending"
+        assert owner_detail["reservation"]["held_units"] == "20000000000"
+        assert owner_detail["reservation"]["charge_units"] is None
+        for private in ("provider_", "reason", "evidence", "actor_id", "attempts", "credential_id"):
+            assert private not in json.dumps(owner_detail), (private, owner_detail)
+        owner_before = api("/api/me/billing/summary")["data"]
+        assert owner_before["balance_known"] and owner_before["pending_count"] == "1"
+        assert int(owner_before["held_units"]) >= 20000000000
         decision = {"action": "waive", "reason": "test operator accepts uncertain upstream cost",
                     "evidence": "isolated forced-kill fixture; no free-execution assumption"}
         for _ in range(2):
@@ -274,6 +294,15 @@ def strict_crash_workflow(gateway, config, config_path, work, env, gateway_port,
         assert detail["reservation"]["state"] == "settled" and detail["resolution"]["action"] == "waive"
         assert detail["resolution"]["actor_id"] == 1
         assert detail["reservation"]["provider_held_units"] == "19219200"
+        owner_after = api(owner_path)["data"]
+        assert owner_after["reservation"]["state"] == "settled"
+        assert owner_after["reservation"]["held_units"] == "0"
+        assert owner_after["reservation"]["charge_units"] == "0"
+        assert owner_after["reservation"]["original_reserved_units"] == "20000000000"
+        assert owner_after["resolution_action"] == "waive"
+        owner_summary = api("/api/me/billing/summary")["data"]
+        assert owner_summary["pending_count"] == "0" and owner_summary["posted_used_units"] == owner_before["posted_used_units"]
+        assert int(owner_summary["held_units"]) == int(owner_before["held_units"]) - 20000000000
     with contextlib.closing(sqlite3.connect((work / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
         assert db.execute("SELECT COUNT(*) FROM billing_resolutions WHERE reservation_id=?", (billing_id,)).fetchone() == (1,)
         assert db.execute("SELECT used_units,reserved_units FROM billing_balances WHERE owner_type='key' AND owner_id=?", (key["id"],)).fetchone() == (0, 0)

@@ -780,6 +780,32 @@ in2.489s and all UsageHistory groups in7.139s. These are owner command summaries
 not invented raw logs. The full f406503 results are preserved separately and
 do not accept the corrected source; final local and automatic CI run again.
 
+## R05a-3 Final Integration And R06d Scope
+
+R05a-3 final head906f6e4c20ec51f87c46b7fdfe1b6908a27f23a2, tree
+7b505d1a2cd152503d829112409a554d1f318e80, passed complete automatic
+push39207672342 and PR39207678441 check/delivery. PR #38 merged as
+master/ef7a1da5660a661fd90067b757e54af15ec91c1a with the identical tree;
+independent main39208662187 also completed check/delivery success. Final
+local1600 tests/subtests in40 packages, build/vet and actual-main smoke passed.
+Evidence outside Git is validation-r05a3; olderf406503 passes remain separate.
+
+R06d then adds current-owner financial reads per its prior six-part decision:
+new ownerledger/v1, L3 ownerbilling, Store projections, API/assembly, OpenAPI
+0.11.0/111 operations and the owner guide. No prior public declaration/HTTP
+operation, schema16, model/migration, billing writer or frontend change.
+The independent consumer and Store risk groups have directed passes; exact
+final local and automatic CI/merge acceptance are still pending.
+
+A controlled official Python SDK check on accepted R05a-3 source passed nine
+bounded fixture subsets. Optional background retrieve returned None once;
+that run did not capture its raw response. Later diagnostic polls were200
+JSON objects, so the original SDK failure remains an unaccepted observation.
+Independent code review found persisted dispatch Document:null can be returned
+as200 JSONnull. A separate corrective worktree owns its deterministic regression
+and acceptance; no successful retry is used to hide that defect. External
+SDK evidence is sdk-validation-2026-10-19. No real Provider/OAuth was called.
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。

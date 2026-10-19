@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"minigateway/internal/billing"
+	ownerledger "minigateway/internal/foundation/contracts/ownerledger/v1"
 	quotation "minigateway/internal/foundation/contracts/quotation/v1"
 	routes "minigateway/internal/foundation/contracts/routes/v1"
 	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
@@ -168,7 +169,8 @@ func TestOpenAPIMetadataFieldsMatchPublicDTOs(t *testing.T) {
 		"QuotationCurrent": quotation.Current{}, "SellingQuotation": quotation.Quote{},
 		"UsageHistoryHost": usagehistory.HostFacts{}, "UsageHistorySummary": usagehistory.Summary{},
 		"UsageHistoryCounts": usagehistory.UsageView{}, "UsageHistoryAttempt": usagehistory.AttemptView{},
-		"UsageHistoryDetail": usagehistory.Detail{}, "UsageHistoryPage": usagehistory.Page{}}
+		"UsageHistoryDetail": usagehistory.Detail{}, "UsageHistoryPage": usagehistory.Page{},
+		"OwnerBillingSummary": ownerledger.Summary{}, "OwnerBillingReservation": ownerledger.Reservation{}, "OwnerBillingDetail": ownerledger.Detail{}, "OwnerBillingPage": ownerledger.Page{}}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
 			typ := reflect.TypeOf(value)
