@@ -8,6 +8,14 @@ the current user instruction. The prior chat explicitly authorized autonomous fu
 The current chat confirmed backend-first scope. The new contract remains
 candidate and its concrete signatures are recorded before implementation.
 
+Integration baseline updated after the separate corrective PR #39: original
+local owner commit52cbe2c was rebased as04799e8 onto master/755128df7612a00bed5f62c91c6b34a96fbd3a1b.
+That merge exactly matches final corrective headbb5a006/tree2f56eaeee85a222a9fcb740504c43891706d5b2a,
+whose complete push39215267374 and PR39215271764 pass every check/delivery step.
+Independent main39216287290 has now passed complete check/delivery with no
+failed steps, verified separately before owner integration. New owner full checks run on this actual
+merged source. Prior directed results remain tied to their earlier owner source.
+
 ## Six-Part Boundary
 
 1. Store reads existing billing balances/reservations with current owner session

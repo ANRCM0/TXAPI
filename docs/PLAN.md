@@ -7,8 +7,8 @@ reservation list/detail and a real L3 consumer. It reads the existing strict
 ledger without financial writes, price recalculation, Provider disclosure,
 schema changes or frontend work. The [decision](../REFERENCE-R06D-IMPLEMENTATION.md)
 and [owner contract](reference/owner-billing.md) define permissions and unknown
-versus zero. Implementation is authored; final local/CI/merge acceptance remains
-pending in the [batch record](../REFERENCE-ADOPTION-PROGRESS.md). R06 remains partial.
+versus zero. On accepted master/755128d the full local1642-test suite and
+actual-main smoke pass; exact-head CI/merge acceptance remains pending in the [batch record](../REFERENCE-ADOPTION-PROGRESS.md). R06 remains partial.
 
 核对日期：2026-10-18。本文是唯一活动开发计划；产品边界和最终分层见 [ARCHITECTURE.md](ARCHITECTURE.md)，操作命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，团队接线规则见 [COLLABORATION.md](COLLABORATION.md)。历史 P 系列方案不再用于排期；阶段证据见 [S0–S5 历史验收](history/acceptance-s0-s5.md)，后续实现、命令和合并事实见 [S5–A3 批次记录](history/implementation-s5-a3.md)。
 
