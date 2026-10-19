@@ -3,7 +3,7 @@ PYTHON ?= python3
 NODE ?= node
 CONFIG ?= config.yaml
 
-.PHONY: init prepare build run test vet check smoke delivery compatibility contracts web-check clean
+.PHONY: init prepare build run test vet check smoke delivery compatibility sdk-conformance contracts web-check clean
 
 prepare:
 	mkdir -p bin .local/data
@@ -46,6 +46,10 @@ smoke:
 
 delivery:
 	$(PYTHON) tests/smoke/delivery.py --go "$(GO)"
+
+# Install tests/smoke/requirements-sdk.txt in an isolated environment first.
+sdk-conformance:
+	$(PYTHON) tests/smoke/sdk_conformance.py --go "$(GO)"
 
 # Requires Playwright and a local Chromium executable, like the browser checks.
 compatibility:

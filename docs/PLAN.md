@@ -326,6 +326,15 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 - **验收：**多工具交错、参数分片/UTF-8、delta/done 去重、调用 ID/名称恢复、failed/incomplete、未知字段、usage 不完整、背压、取消和断流不伪造完成；补指定版本真实客户端组合。
 - **协作影响：**不改资金/路由许可，能力变化同批更新 OpenAPI/已有消费者和支持声明；新前端暂缓。
 
+#### P4 SDK 受控客户端子批
+
+1. **层级与目录：**仅 `tests/smoke/sdk_conformance.py`、固定依赖、Makefile 和现有 Verify；使用生产二进制、临时加密 SQLite 和真实 owner/调用 Key 鉴权。
+2. **公开依赖：**消费现有 Chat/Responses HTTP JSON/SSE 接口，无 Go 公开端口或冻结范围变更；固定官方 Python `openai==2.11.0`、`httpx==0.28.1`。
+3. **地基影响：**无生产、L0、schema、配置或计费许可变化。每个故障场景使用独立渠道/凭据，避免健康冷却污染下一场景。
+4. **行为与回退：**SDK 禁用自动重试、代理环境和环境凭据；loopback 上游使用逐字节 UTF-8 和多行事件。检查类型化 JSON、文本/函数参数、completed/failed/incomplete、终态后保持连接、截断、取消和单 Key 名额释放；13 个实际上游场景各一条请求，忙时请求不发送。SDK 该版本在干净 EOF 截断时不会自行报错，断言只得到部分内容且没有成功终态，不能把 EOF 当完成。
+5. **验证：**Windows 独立虚拟环境定向运行已通过；Verify 增加相同固定依赖和回归，精确提交 Linux 证据待 CI。所有账号、Key 与上游均为一次性夹具，无真实 Provider 调用，不代表官方服务、其它 SDK 版本或 Codex/WS/后台已验收。
+6. **协作：**保留已有冒烟、架构、race 和交付门槛；可通过 `make sdk-conformance PYTHON=<虚拟环境解释器>` 单独运行。新前端、收费和账号路线无变化。
+
 ### P5：账号信号与调度评估
 
 - **层级/目录：**L1 scheduler/gateway；L3 routes 查询。

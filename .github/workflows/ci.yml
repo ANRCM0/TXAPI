@@ -81,6 +81,13 @@ jobs:
       - name: 端到端冒烟（假上游 + 临时库）
         run: make smoke
 
+      - name: 固定官方 Python SDK 的受控兼容回归
+        timeout-minutes: 6
+        run: |
+          python3 -m venv "$RUNNER_TEMP/txapi-sdk-venv"
+          "$RUNNER_TEMP/txapi-sdk-venv/bin/python" -m pip install -r tests/smoke/requirements-sdk.txt
+          "$RUNNER_TEMP/txapi-sdk-venv/bin/python" tests/smoke/sdk_conformance.py --go go
+
       - name: 转发性能基线（仅报告）
         run: |
           set -o pipefail
