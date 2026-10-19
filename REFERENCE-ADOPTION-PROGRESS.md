@@ -1109,3 +1109,55 @@ sampler/integration review found no actionable remaining issue. Raw full logs,
 commands and final source manifest are external validation-r00-shadow/full-final.
 Final automatic push/PR and independent merged-main verification remain the
 acceptance gates for this source; no manual workflow run or reduced CI is used.
+
+
+## Shadow Final Integration And Whole-Program Status
+
+Final head6dc08bd9363cd6434c5f889ebdc709f747fd1060 passed complete automatic
+push39223342711 and PR39223350698 without failed steps. PR #41 merged as
+master/8ac00c95bfa74d72de83090c4c23f2f3443a5600 with identical tested tree
+ebf82faa0f306dd35e4aabbe571688ffcbef57ec. Independent main39224567863 also
+completed full check/delivery success with no failed steps. Remote master was
+fetched and compared after completion. Final source and job/merge evidence are
+external validation-r00-shadow; earlier pending checkpoints remain historical.
+
+One fresh frozen official Python SDK run on a newly compiled final-tree binary
+passed all10 preserved controlled cases in8.106s. It made13 simulated Provider
+POSTs, zero Provider GETs, no automatic SDK/gateway retries or Provider errors,
+and joined its Provider thread. Source, binary/script hashes, embedded VCS
+limitations and exact untested scope are in the
+[complete status/evidence index](docs/reference/reference-adoption-status.md).
+This refresh does not relabel earlier failures or prove real Provider/OAuth,
+native SDK WS, charging or universal compatibility.
+
+The overall R00-R07 objective is incomplete. The index maps every original
+batch and section8 risk row to implementation/evidence and remaining gates;
+R04/R05b/R07 still lack real code as well as entry evidence, and frontend is
+deferred by the user. Further WS/background quantity capture is a separate
+optional R05a slice, not a hidden missing consumer of the accepted profiles.
+
+### Status Documentation Batch Boundary
+
+1. Layer/directories: documentation only, PLAN, this log, the shadow decision
+   and docs/reference/reference-adoption-status.md.
+2. Dependencies: read existing versioned contracts and accepted source/CI;
+   no public or candidate interface is changed or frozen.
+3. Foundation: no executable source, schema, configuration or CI edit.
+4. Contract: no runtime/API/permission/lifetime change.
+5. Verification: Markdown differences/links/evidence consistency and exact
+   non-Markdown source equality with accepted master/8ac00c9. Reuse1707 tests,
+   full main smoke and automatic head/main CI from the identical source above;
+   no manual Go, race, browser or workflow rerun for explanation-only changes.
+6. Parallel impact: no shared source or deferred frontend modification.
+
+This corrects the active PLAN's stale pending label and records final
+acceptance inside the repository. The documentation commit follows normal
+push/PR automatic workflow triggers; those triggers are not changed or bypassed.
+
+Documentation validation on2026-10-19: git diff --check passed; a Python
+Markdown path/heading check resolved all113 local links and anchors across
+the four changed documents. Git changed/untracked path checks confirmed only
+those four Markdown files; every non-Markdown source is identical to accepted
+master/8ac00c9. Saved merge/CI/SDK JSON consistency checks passed. The exact
+check command and result are external validation-doc-status/document-check.json;
+no new local executable test or manual CI was run for this documentation batch.

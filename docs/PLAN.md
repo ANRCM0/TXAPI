@@ -8,9 +8,13 @@ foreground HTTP host observations. Actual weighted/extension/affinity routing
 remains authoritative. No frozen contract, L0, schema or frontend is changed.
 The [six-part decision](../REFERENCE-R00-SHADOW-IMPLEMENTATION.md) and
 [operational consumer](reference/shadow-routing.md) define missing-data,
-publication, storage and rollback behavior. The final local1707-test suite and actual-main smoke pass; complete exact-head
-automatic CI and merge/main verification remain pending in the batch record.
-This does not enable a production scoring algorithm.
+publication, storage and rollback behavior. Final head6dc08bd passed the local
+1707-test suite, actual-main smoke and complete automatic push/PR CI. PR #41
+merged as master/8ac00c9 with the identical tree; independent main39224567863
+also passed full check/delivery. The [batch record](../REFERENCE-ADOPTION-PROGRESS.md)
+retains exact evidence. This accepts only shadow comparisons; it does not enable
+a production scoring algorithm. The [whole-program status](reference/reference-adoption-status.md)
+keeps the remaining R00-R07 requirements and entry gates visible.
 
 ## R06d: Personal Financial Read Backend
 

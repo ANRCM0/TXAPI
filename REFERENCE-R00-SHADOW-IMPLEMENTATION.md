@@ -261,5 +261,11 @@ Final local source passes complete build/vet/dependency/contract checks,
 1707 tests/subtests and actual-main smoke on accepted master/9a12642.
 The source-bound commands, fixed-ring allocation result and before/after
 performance limitations are recorded in REFERENCE-ADOPTION-PROGRESS.md.
-Exact-head automatic CI, tested/merged tree equality and independent main
-checks remain pending. No frozen API or live traffic scoring is added.
+Final head6dc08bd9363cd6434c5f889ebdc709f747fd1060 passed complete automatic
+push39223342711 and PR39223350698. PR #41 merged as
+master/8ac00c95bfa74d72de83090c4c23f2f3443a5600 with the identical
+ebf82faa0f306dd35e4aabbe571688ffcbef57ec tree. Independent main39224567863
+also passed full check/delivery with no failed steps. The shadow slice is
+accepted; no frozen API or live traffic scoring is added. Full R00-R07 scope
+and its unresolved gates are retained in
+[the status matrix](docs/reference/reference-adoption-status.md).
