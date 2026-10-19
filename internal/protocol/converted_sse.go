@@ -56,12 +56,15 @@ func (s *streamDecoder) decodeConvertedLine(line []byte) ([]execv1.Frame, error)
 
 func (s *streamDecoder) dispatchConvertedEvent() ([]execv1.Frame, error) {
 	e := &s.converted
-	data, hasData, errorEvent := e.data, e.hasData, e.errorEvent
+	data, hasData, errorEvent, wireBytes := e.data, e.hasData, e.errorEvent, e.wireBytes
 	*e = convertedSSEEvent{started: e.started}
 	if errorEvent {
 		return nil, errors.New("upstream reported stream error")
 	}
 	if !hasData {
+		if wireBytes > 1 {
+			s.progress.CompleteEvents++
+		}
 		return nil, nil
 	}
 	data = data[:len(data)-1]
@@ -69,7 +72,11 @@ func (s *streamDecoder) dispatchConvertedEvent() ([]execv1.Frame, error) {
 		if s.name == "anthropic" {
 			return nil, errors.New("missing native Anthropic stream terminal")
 		}
+		if !s.finish {
+			return nil, errors.New("stream terminal without finish")
+		}
 		s.done = true
+		s.progress.CompleteEvents++
 		return []execv1.Frame{{Complete: true}}, nil
 	}
 	var envelope struct {
@@ -83,7 +90,7 @@ func (s *streamDecoder) dispatchConvertedEvent() ([]execv1.Frame, error) {
 		return nil, errors.New("upstream reported stream error")
 	}
 	line := append([]byte("data: "), data...)
-	lines, err := ConvertStreamLine(s.decoder.a, line, s.session, &s.decoder.target)
+	lines, effective, err := convertStreamLine(s.decoder.a, line, s.session, &s.decoder.target)
 	if err != nil {
 		return nil, err
 	}
@@ -98,5 +105,7 @@ func (s *streamDecoder) dispatchConvertedEvent() ([]execv1.Frame, error) {
 		s.done = true
 		frames = append(frames, execv1.Frame{Complete: true})
 	}
+	s.progress.CompleteEvents++
+	s.progress.EffectiveOutput = s.progress.EffectiveOutput || effective
 	return frames, nil
 }

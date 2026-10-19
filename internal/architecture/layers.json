@@ -123,6 +123,12 @@
     "public": true,
     "version": "3"
   },
+  "minigateway/internal/foundation/contracts/execution/v4": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "4"
+  },
   "minigateway/internal/foundation/contracts/quotation/v1": {
     "layer": "L1",
     "owner": "foundation",

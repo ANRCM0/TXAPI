@@ -232,7 +232,7 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 			// SSE headers/body are already visible; never append an error JSON or retry
 			// after the client may have consumed part of this response.
 			responseCommitted = true
-			if ctx.Err() == nil && err.StatusCode != 499 && attemptResult.Termination != core.ClientWriteError {
+			if ctx.Err() == nil && err.StatusCode != 499 && attemptResult.TimeoutStage == "" && attemptResult.Termination != core.ClientWriteError {
 				g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
 			}
 			break
@@ -241,13 +241,13 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 		// 见 scheduler.ShouldPenalizeCredential）。必须在 shouldRetry
 		// 判断之前：400 这类错误本来就不会重试，但反馈还是要做——
 		// 「不重试」和「不惩罚」是两件独立的事。
-		if ctx.Err() == nil && attemptResult.Termination != core.ClientWriteError {
+		if ctx.Err() == nil && attemptResult.TimeoutStage == "" && attemptResult.Termination != core.ClientWriteError {
 			g.reportCredentialHealth(ch.name, cred, err.StatusCode, err.Error.Message)
 		}
 
 		// 只有「可重试的错误」才换渠道。
 		// 比如 400 参数错误，换渠道也没用，反而浪费一次请求。
-		if !attemptResult.Replayable || ctx.Err() != nil || attemptResult.Termination == core.ClientWriteError || !shouldRetry(err.StatusCode) {
+		if (attemptResult.TimeoutStage != "" && attemptResult.Phase != core.NotDispatched) || !attemptResult.Replayable || ctx.Err() != nil || attemptResult.Termination == core.ClientWriteError || !shouldRetry(err.StatusCode) {
 			// warn：上游返回了错误状态码。这是「本次请求没成」，
 			// 属于必须留痕的事件，但网关本身在正确工作（分类、
 			// 不重试都是设计行为），所以不是 error。
@@ -390,6 +390,11 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		return core.Result{Phase: core.NotDispatched, StatusCode: err.StatusCode, Error: toCoreError(err), Termination: core.UpstreamError}
 	}
 	input.Timeout = timeout
+	if c.source == invocationForeground {
+		if failure := g.prepareHTTPStageTimeouts(&input, c.output); failure != nil {
+			return core.Result{Phase: core.NotDispatched, StatusCode: failure.StatusCode, Error: failure, Termination: core.UpstreamError}
+		}
+	}
 	if failure := g.authorizeManagedInput(c, m, req, &input); failure != nil {
 		term := core.UpstreamError
 		if c.ctx.Err() != nil {
@@ -465,6 +470,7 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		wireContext = context.WithValue(wireContext, managedObservationKey{}, &managedObservation)
 	}
 	result = g.executor.ExecuteTo(wireContext, c.output, input)
+	attachHTTPTimeoutCode(&result)
 	g.observeManagedResult(c, &managedObservation, prepared.Decoder, result)
 	rawCoreResult = result
 	returned = true
@@ -717,6 +723,7 @@ func writeError(c *executionScope, statusCode int, message, errType string) {
 	c.result.StatusCode = statusCode
 	c.result.ErrorMessage = message
 	c.result.Error = &core.Error{StatusCode: statusCode, Error: core.ErrorDetail{Message: message, Type: errType}}
+	attachHTTPTimeoutCode(&c.result.Result)
 	defer c.syncOutput()
 	if err := c.output.Commit(c.ctx, core.ResponseMetadata{StatusCode: statusCode, ContentType: "application/json; charset=utf-8"}); err != nil {
 		c.result.Termination = core.ClientWriteError
@@ -726,7 +733,7 @@ func writeError(c *executionScope, statusCode int, message, errType string) {
 		c.result.Termination = core.ClientWriteError
 		return
 	}
-	body, _ := json.Marshal(map[string]any{"error": map[string]string{"message": message, "type": errType}})
+	body, _ := json.Marshal(map[string]any{"error": c.result.Error.Error})
 	if _, err := c.output.Write(c.ctx, append(body, '\n')); err != nil {
 		c.result.Termination = core.ClientWriteError
 	}

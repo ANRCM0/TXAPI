@@ -53,6 +53,7 @@ const (
 // Result reports execution independently of the HTTP status already sent.
 // Committed is monotonic: irreversible output commitment cannot be reset.
 type Result struct {
+	TimeoutStage     TimeoutStage
 	Phase            Phase
 	UpstreamStatus   int
 	ProtocolComplete bool
@@ -68,6 +69,8 @@ type Result struct {
 }
 
 type Frame struct {
+	EffectiveOutput bool
+	EventComplete   bool
 	// Deferred frame commit is handled solely by core, never by the decoder.
 	Data  []byte
 	Usage *Usage
@@ -86,14 +89,15 @@ type Decoder interface {
 }
 
 type Input struct {
-	Method     string
-	URL        string
-	Header     http.Header
-	Body       []byte
-	Stream     bool
-	Replayable bool
-	Timeout    time.Duration
-	Decoder    Decoder
+	HTTPStageTimeouts HTTPStageTimeouts
+	Method            string
+	URL               string
+	Header            http.Header
+	Body              []byte
+	Stream            bool
+	Replayable        bool
+	Timeout           time.Duration
+	Decoder           Decoder
 }
 
 type Options struct {
@@ -154,9 +158,23 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 		ctx, cancel = context.WithTimeout(parent, in.Timeout)
 		defer cancel()
 	}
+	var stages *httpStageWatchdog
+	if in.HTTPStageTimeouts.enabled() {
+		ctx, stages = newHTTPStageWatchdog(ctx, in.HTTPStageTimeouts)
+		defer stages.close()
+	}
 	fail := func(message string, cause error, term Termination) {
 		result.StatusCode = http.StatusBadGateway
 		result.Termination = term
+		if stage := stages.timeoutStage(); stage != "" {
+			result.TimeoutStage = stage
+			result.StatusCode, result.Termination = http.StatusGatewayTimeout, Deadline
+			if stage == TimeoutDownstreamWrite {
+				result.Termination = ClientWriteError
+			}
+			result.Error = failure(result.StatusCode, message, string(result.Termination))
+			return
+		}
 		if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
 			if errors.Is(parent.Err(), context.Canceled) || errors.Is(cause, context.Canceled) {
 				result.StatusCode = 499
@@ -178,6 +196,26 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 		result.StatusCode = http.StatusInternalServerError
 		result.Error = failure(result.StatusCode, "execution output is already committed", "internal_error")
 		return
+	}
+	if !in.HTTPStageTimeouts.valid() {
+		result.StatusCode = http.StatusInternalServerError
+		result.Error = failure(500, "invalid HTTP stage timeout", "internal_error")
+		return
+	}
+	controller, supported := output.(interface{ SetWriteDeadline(time.Time) error })
+	if in.HTTPStageTimeouts.DownstreamWrite > 0 {
+		deadline, _ := ctx.Deadline()
+		if !supported {
+			result.StatusCode = http.StatusInternalServerError
+			result.Error = failure(500, "output does not support write deadlines", "internal_error")
+			return
+		}
+		if err := controller.SetWriteDeadline(deadline); err != nil {
+			result.StatusCode = http.StatusInternalServerError
+			result.Error = failure(500, "output does not support write deadlines", "internal_error")
+			return
+		}
+		defer controller.SetWriteDeadline(time.Time{})
 	}
 	if err := ctx.Err(); err != nil {
 		fail("request canceled before upstream execution", err, Canceled)
@@ -203,7 +241,9 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 	}
 	// Once Do starts, a transport error cannot establish non-execution.
 	result.Phase = Dispatching
+	stages.headers(true, false)
 	resp, err := e.client.Do(req)
+	stages.headers(false, err == nil && resp.StatusCode == http.StatusOK && in.Stream)
 	if err != nil {
 		fail("upstream request failed", err, UpstreamError)
 		return
@@ -237,6 +277,32 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 			defer controller.SetWriteDeadline(time.Time{})
 		}
 	}
+	outputCall := func(call func() error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		stages.beginOutput()
+		defer stages.endOutput()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if budget := in.HTTPStageTimeouts.DownstreamWrite; budget > 0 {
+			deadline := time.Now().Add(budget)
+			outer, bounded := ctx.Deadline()
+			if bounded && outer.Before(deadline) {
+				deadline = outer
+			}
+			if err := controller.SetWriteDeadline(deadline); err != nil {
+				return err
+			}
+			defer controller.SetWriteDeadline(outer)
+		}
+		err := call()
+		if err != nil {
+			stages.outputFailed(err)
+		}
+		return err
+	}
 	write := func(data []byte, stream bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -246,14 +312,17 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 			if stream {
 				contentType = "text/event-stream"
 			}
-			if err := output.Commit(ctx, ResponseMetadata{StatusCode: http.StatusOK, ContentType: contentType}); err != nil {
+			if err := outputCall(func() error {
+				return output.Commit(ctx, ResponseMetadata{StatusCode: http.StatusOK, ContentType: contentType})
+			}); err != nil {
 				return err
 			}
 			if !output.State().Committed {
 				return errors.New("output did not commit the response")
 			}
 		}
-		n, err := output.Write(ctx, data)
+		var n int
+		err := outputCall(func() error { var err error; n, err = output.Write(ctx, data); return err })
 		if n < 0 || n > len(data) {
 			return errors.New("output returned an invalid write count")
 		}
@@ -262,7 +331,7 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 			err = io.ErrShortWrite
 		}
 		if err == nil && stream {
-			err = output.Flush(ctx)
+			err = outputCall(func() error { return output.Flush(ctx) })
 		}
 		return err
 	}
@@ -291,6 +360,12 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 		}
 		emit := func(frames []Frame) error {
 			for _, frame := range frames {
+				if !stages.progress(frame) {
+					return ctx.Err()
+				}
+				if frame.Complete && stages != nil {
+					result.ProtocolComplete = true
+				}
 				if frame.Usage != nil {
 					result.Usage = frame.Usage
 				}
@@ -335,6 +410,10 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 		frames, err := decoder.End()
 		if err != nil {
 			fail("upstream stream ended prematurely", err, UpstreamError)
+			return
+		}
+		if !stages.progress(Frame{Complete: true}) {
+			fail("stream canceled before protocol completion", ctx.Err(), Canceled)
 			return
 		}
 		result.ProtocolComplete = true

@@ -12,6 +12,7 @@ import (
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	execv2 "minigateway/internal/foundation/contracts/execution/v2"
 	execv3 "minigateway/internal/foundation/contracts/execution/v3"
+	execv4 "minigateway/internal/foundation/contracts/execution/v4"
 	authv3 "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	"minigateway/internal/protocol/jsonutil"
 	"minigateway/internal/protocol/openaiauth"
@@ -194,7 +195,10 @@ type streamDecoder struct {
 	enrichedUsage *execv3.UsageObservation
 	factUsage     *execv2.UsageObservation
 	factNative    *execv1.NativeCompletion
+	progress      execv4.Progress
 }
+
+func (s *streamDecoder) Progress() execv4.Progress { return s.progress }
 
 const maxEventBytes = 1 << 20
 
@@ -234,12 +238,15 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	}
 	wire := append(append([]byte(nil), s.wire.Bytes()...), '\n')
 	if len(s.data) == 0 {
+		s.progress.CompleteEvents++
 		return []execv1.Frame{{Data: wire}}, nil
 	}
 	var event struct {
 		Type     string          `json:"type"`
 		Sequence *int64          `json:"sequence_number"`
 		Response json.RawMessage `json:"response"`
+		Delta    any             `json:"delta"`
+		Item     any             `json:"item"`
 	}
 	data := []byte(strings.Join(s.data, "\n"))
 	if err := jsonutil.Validate(data); err != nil {
@@ -250,6 +257,11 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	}
 	if event.Type == "" || s.event != "" && s.event != event.Type {
 		return nil, errors.New("Responses event type mismatch")
+	}
+	if event.Type == "response.output_text.delta" || event.Type == "response.function_call_arguments.delta" {
+		if _, ok := event.Delta.(string); !ok {
+			return nil, errors.New("invalid Responses output delta")
+		}
 	}
 	if event.Sequence != nil {
 		if *event.Sequence < 0 || *event.Sequence <= s.lastSequence {
@@ -340,6 +352,23 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	if frame.Complete {
 		s.owner.observeFailure(data)
 	}
+	// These fields were decoded with the owning event. Unknown event types and
+	// snapshots do not imply text or tool progress.
+	effective := false
+	switch event.Type {
+	case "response.output_text.delta", "response.function_call_arguments.delta":
+		if delta, ok := event.Delta.(string); ok {
+			effective = delta != ""
+		}
+	case "response.output_item.added":
+		if item, ok := event.Item.(map[string]any); ok && item["type"] == "function_call" {
+			name, _ := item["name"].(string)
+			arguments, _ := item["arguments"].(string)
+			effective = name != "" || arguments != ""
+		}
+	}
+	s.progress.EffectiveOutput = s.progress.EffectiveOutput || effective
+	s.progress.CompleteEvents++
 	return []execv1.Frame{frame}, nil
 }
 

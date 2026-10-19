@@ -1,6 +1,6 @@
 # TXAPI 后端开发方案
 
-更新日期：2026-10-19。本文是当前唯一开发方案，统一记录实际能力、后端开发顺序、架构约束和验收门槛。批次验证证据写入 PR/提交记录，不再新增平行方案或进度文档；第三方适配声明与许可证保留在文末。
+更新日期：2026-10-20。本文是当前唯一开发方案，统一记录实际能力、后端开发顺序、架构约束和验收门槛。批次验证证据写入 PR/提交记录，不再新增平行方案或进度文档；第三方适配声明与许可证保留在文末。
 
 ## 目标与范围
 
@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；后台/WS 明细与收费未覆盖；S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/SDK WS/Codex 完整组合未验收；账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.0` / 117 操作；数据库迁移追加 schema v19，FC-P1/P3-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.1` / 117 操作；数据库迁移追加 schema v19，FC-P1/P3-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -145,7 +145,7 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 后续同条件性能改动的前瞻预算先固定为：正常样本完成率 100%、每请求一个上游 attempt、drain 失败 0；配对首正文与首有效文本增量 P95 各不超过 5ms，网关完整事件观察延迟上界 P95 不超过 2ms。此预算用于下一轮同机重复对照，尚非本批通过声明或 CI 硬门槛；资源预算须先取得 Linux 可靠基线，P99 须扩大独立请求和重复轮次。TLS/HTTP2/反代、慢读/不读、持续并发/过载恢复、取消风暴及真实 Provider/客户端验收继续开放，P0 完整性能矩阵未完成。
 
 <details>
-<summary>FC-P0-HTTP-001：前台 HTTP 阶段超时具体 CR（待批准）</summary>
+<summary>FC-P0-HTTP-001：前台 HTTP 阶段超时具体 CR（已批准，实施中）</summary>
 
 本 CR 的目标是让同一个既有 attempt 在响应头、首有效输出、流事件空闲或下游写阻塞时有界退出并可定位原因，不新增 sender、重试权威或读队列。实现按“header/write 机械部分 → L2 进展与 first/idle → 集中验证”连续交付，全部配置默认0关闭。
 
@@ -156,7 +156,13 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 5. **结果、权限与兼容。** 仅接现有前台 HTTP 执行源；后台受理/查询/取消、durable claimed 和 WS 保持现有预算。已有 attempt/total deadline 永远优先约束，新增阶段不延长它们。L0 保持原 Termination 枚举，上游等待阶段为 Deadline，write 为 ClientWriteError，并用 TimeoutStage 精确归因；未提交时等待超时可返回504，已提交状态单调且保留原 HTTP status。L1 通过现有 ErrorDetail.Code 承载固定 `{"timeout_stage":"..."}`（不改 v1 类型），已有 routing Trace.Reason 追加相应固定原因并更新 OpenAPI。金额/unknown 仍由执行 owner 处理，不以错误文案为资金权威。已 dispatch 的新增阶段超时不新增自动重试；write 不重试、不处罚凭据。静态/托管凭据权限不扩大，prelude 已提交时不恢复重试资格；没有 usage 不补零。0配置保持原行为，自定义 decoder/client 的旧路线继续可用；关闭新增配置并回退原二进制即可，无数据迁移。
 6. **验证与协作。** 定向覆盖延迟 headers、持续 role/heartbeat、慢首文本/工具、usage-only、合法空终态、半事件滴流、首输出后 idle、错误/incomplete/截断；真实 socket/TLS/HTTP2/反代慢读和不读、write/flush 阻塞、取消/终态/timer 竞态与 close/join。检查一次发送、commit单调、取消不占租借、无伪完成、未知成本不清零、managed反馈不误罚，以及0配置静态/Responses/后台/WS回归。先集中本地验证、Linux race/交付及精确头 CI再合并；不把阶段超时当性能优化排名，不跳过现有鉴权/账本，不新增前端或收费许可。新 v4 仅登记候选，不宣称全量冻结。
 
-待用户明确批准后实施本 CR 的公开/L0 变化；当前可独立继续 P0 网络验证和已有批次 CI。
+本 CR 已按批准范围完成源码：启动配置/组装 → gateway 前台 source 与 capability 预检 → 同一个 L2 stream 的 v4 进展 → 既有 L0 executor 的单 watchdog/同步输出 deadline → ErrorDetail.Code 与固定 route reason。后台/claimed/WS不接新增阶段。新增阶段超时不重试或处罚凭据；strict仍由既有EndAttempt/Finish处理未知用量和双hold。候选v4已登记并更新公开快照，未宣称冻结。
+
+定向验证已覆盖实际socket的role/usage/finish-only、半事件滴流、文本后idle、Chat/Responses工具、空/incomplete终态；三类等待超时各仅一个attempt且strict保留pending、Provider hold及user/Key双hold。L0定向覆盖write暂停、合法终态与late-timer仲裁、取消/join、TLS/HTTP2不读下游。零配置下的既有End确认与资金事实回归保持原行为。Windows GOARCH=amd64 build ./...、vet ./...、全量 go test ./... -count=1、生产主进程 local.py 冒烟与定向协议/网关/配置/架构检查均已通过。包含当前授权、静态Key/Responses/后台/WS、强杀恢复、usage与shadow回归；小数秒/越界/溢出/拼错阶段字段拒绝启动。精确提交Linux race/交付CI待运行，不将本地通过写成远端验收。
+
+实际限制单列：当前Go HTTP/1 TLS写入失败后的标准库close_notify关闭路径可能额外等待约5秒；阶段触发与最终返回不是同一时刻，不能声称所有TLS阻塞都在配置秒数内完成释放。真实TLS/H2测试验证写阶段归因并以8秒封顶检查退出。Windows明文HTTP/1测试可能被内核完整缓冲，未实际阻塞的子场景标记skip，不作为TCP写阻塞证据。同步自定义Output必须遵守已声明deadline语义，无遗留写goroutine兜底；真实Provider及外部部署仍未验收。
+
+用户已明确批准直接实施并集中验证修复；默认关闭、无真实账号调用授权，已有批次CI在后台运行。
 
 </details>
 
