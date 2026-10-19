@@ -46,6 +46,7 @@ import (
 	"minigateway/internal/logging"
 	"minigateway/internal/metrics"
 	"minigateway/internal/model"
+	"minigateway/internal/quoteconsole"
 	"minigateway/internal/routeconsole"
 	"minigateway/internal/scheduler"
 	"minigateway/internal/server"
@@ -138,6 +139,19 @@ func main() {
 	// ReloadPrices 失效；额度扣减走 gorm 的原子 UPDATE（并发不丢）。
 	priceTable := billing.NewPriceTableWithHistory(st.PriceData, billing.DefaultPriceTTL, st.RecordPriceSnapshot)
 	engine := billing.New(st.DB(), priceTable)
+	quotationBook := billing.NewQuotationBook(st.RecordPriceSnapshot, st.QuotationHistory)
+	if cfg.Quotation.Enabled {
+		prices := make([]billing.QuotationPrice, len(cfg.Quotation.Prices))
+		for i, price := range cfg.Quotation.Prices {
+			prices[i] = billing.QuotationPrice{Model: price.Model, UncachedInputUnitsPer1K: price.UncachedInputUnitsPer1K,
+				CachedInputUnitsPer1K: price.CachedInputUnitsPer1K, CacheWriteInputUnitsPer1K: price.CacheWriteInputUnitsPer1K,
+				OutputUnitsPer1K: price.OutputUnitsPer1K}
+		}
+		if err := quotationBook.Replace(billing.QuotationConfig{Currency: cfg.Quotation.Currency, Prices: prices, GroupRateUnits: cfg.Quotation.GroupRateUnits}); err != nil {
+			slog.Error("selling quotation initialization failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	slog.Info("billing mode selected", "mode", cfg.Billing.Mode)
 	if cfg.Billing.Mode == string(billing.ModeLegacy) {
 		marker, err := st.GetSetting(billing.StrictEnabledSetting)
@@ -354,6 +368,7 @@ func main() {
 		Control:       controlplane.New(persistence.Control(st)),
 		Tasks:         taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
 		Routes:        routeconsole.New(gw.Diagnostics(), controlplane.New(persistence.Control(st)), limiter),
+		Quotation:     quoteconsole.New(quotationBook, controlplane.New(persistence.Control(st)), limiter),
 		Configuration: configurationService,
 		Ledger:        engine,
 		Metrics:       gw.Metrics(),

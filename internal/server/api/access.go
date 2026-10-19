@@ -62,6 +62,8 @@ func (h *Handler) RegisterAccess(r *gin.RouterGroup) {
 	me.GET("/background/:id", h.taskRead(false))
 	me.POST("/background/:id/cancel", h.taskCancel)
 	admin := r.Group("/api/admin", h.session(true))
+	admin.GET("/quotations/current", h.QuotationCurrent)
+	admin.POST("/quotations/calculate", h.QuotationCalculate)
 	admin.GET("/background", h.taskList(true))
 	admin.GET("/routing", h.routeList(true))
 	admin.GET("/routing/:id", h.routeRead(true))

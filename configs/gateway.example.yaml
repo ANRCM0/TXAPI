@@ -98,6 +98,21 @@ responses_ws:
 # Optional durable generation runtime. This does not expose a background API.
 # Secret bytes belong in a separately mounted JSON file, never in this YAML.
 # The runtime requires configured strict fee/provider ceilings and contracts.
+# Optional read-only selling quotations, separate from billing/Provider budgets.
+# Rates are exact integer strings: 1e-9 configured currency per 1K tokens.
+# No upstream rates are assumed by this disabled example. See usage-quotations.md.
+quotation:
+  enabled: false
+  # currency: "ACCOUNT_UNIT"
+  # prices:
+  #   - model: "EXACT_MODEL"
+  #     uncached_input_units_per_1k: "1000000"
+  #     cached_input_units_per_1k: "200000"
+  #     cache_write_input_units_per_1k: "1200000"
+  #     output_units_per_1k: "2000000"
+  # group_rate_units:
+  #   default: "1000000000"
+
 generation:
   enabled: false
   # keys_file: "/run/secrets/txapi-generation.json"

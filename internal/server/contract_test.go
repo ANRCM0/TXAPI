@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"minigateway/internal/billing"
+	quotation "minigateway/internal/foundation/contracts/quotation/v1"
 	routes "minigateway/internal/foundation/contracts/routes/v1"
 	"minigateway/internal/model"
 	"minigateway/internal/server/api"
@@ -162,7 +163,8 @@ func TestOpenAPIMetadataFieldsMatchPublicDTOs(t *testing.T) {
 	c := loadContract(t)
 	cases := map[string]any{"User": model.User{}, "APIKey": model.Token{}, "Channel": model.Channel{}, "Credential": model.Credential{}, "Log": model.RequestLog{}, "Price": model.ModelPrice{}, "Ability": model.Ability{}, "UsageSummary": store.LogSummary{}, "ModelStat": store.ModelStat{}, "ChannelStat": store.ChannelStat{}, "PublicationStatus": api.PublicationStatus{}, "ConfigStatus": api.ConfigStatus{},
 		"BillingReservation": billing.ReservationView{}, "BillingAttempt": billing.AttemptView{}, "BillingResolution": billing.ResolutionView{}, "BillingReservationDetail": billing.ReservationDetail{}, "BillingResolutionInput": billing.ResolutionInput{}, "BillingResolutionUsage": billing.ResolutionUsage{},
-		"RoutingSelection": routes.Selection{}, "RoutingAttempt": routes.Attempt{}, "RoutingTrace": routes.Trace{}, "RoutingPage": routes.Page{}}
+		"RoutingSelection": routes.Selection{}, "RoutingAttempt": routes.Attempt{}, "RoutingTrace": routes.Trace{}, "RoutingPage": routes.Page{},
+		"QuotationCurrent": quotation.Current{}, "SellingQuotation": quotation.Quote{}}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
 			typ := reflect.TypeOf(value)

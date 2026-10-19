@@ -87,7 +87,7 @@ def service(command, log_path, env=None):
                     process.wait(timeout=5)
 
 
-def control_workflow(base, upstream_url, routing_env=None):
+def control_workflow(base, upstream_url, routing_env=None, quotation_enabled=False):
     """Exercise the actual console APIs without using the legacy admin key."""
     assert request(base + "/v1/responses")[0] == 404, "Disabled native WS exposed an upgrade route"
     def api(path, session=None, payload=None, method=None, expected=200):
@@ -105,6 +105,28 @@ def control_workflow(base, upstream_url, routing_env=None):
     admin = api("/api/auth/login", payload={
         "username": "smoke-admin", "password": "smoke-admin-password-only"
     })["session_token"]
+    current_quote = api("/api/admin/quotations/current", admin)["data"]
+    assert current_quote["enabled"] == quotation_enabled
+    version = current_quote["version"] or "0" * 64
+    quote_input = {
+        "price_version": version, "model": "mapped-model", "group": "default",
+        "usage": {"input_tokens": "10", "output_tokens": "6", "total_tokens": "16",
+                  "cached_input_tokens": "3", "cache_write_input_tokens": "2",
+                  "reasoning_output_tokens": "4", "completeness": "complete",
+                  "source": "provider_reported", "profile": "responses_native_tokens_v2"},
+    }
+    if quotation_enabled:
+        assert current_quote["currency"] == "ACCOUNT_UNIT"
+        assert len(version) == 64 and current_quote["unit_scale"] == "1000000000"
+        quote = api("/api/admin/quotations/calculate", admin, quote_input)["data"]
+        assert quote["known"] and quote["amount_units"] == "28" and quote["price_version"] == version
+        unknown_quote = json.loads(json.dumps(quote_input))
+        unknown_quote["usage"]["cached_input_tokens"] = None
+        unknown = api("/api/admin/quotations/calculate", admin, unknown_quote)["data"]
+        assert not unknown["known"] and unknown["amount_units"] == "" and unknown["reason"] == "usage_unknown"
+    else:
+        assert all(value == "" for name, value in current_quote.items() if name != "enabled")
+        api("/api/admin/quotations/calculate", admin, quote_input, expected=503)
     initial = api("/api/admin/config-status", admin)["data"]
     for name in ["console-user", "console-other"]:
         api("/api/admin/users", admin, {
@@ -127,6 +149,10 @@ def control_workflow(base, upstream_url, routing_env=None):
         "username": "console-other", "password": "console-other-test-password"
     })["session_token"]
     api("/api/admin/config-status", session, expected=403)
+    api("/api/admin/quotations/current", session, expected=403)
+    # Reject before parsing. urllib closes each connection; an unread POST body
+    # can reset that connection on Windows before the early 403 is received.
+    api("/api/admin/quotations/calculate", session, method="POST", expected=403)
     assert api("/api/me/models", session)["data"] == ["console-model"]
     key = api("/api/me/keys", session, {
         "name": "console-client", "model_mode": "allowlist", "models": ["console-model"],
@@ -340,6 +366,10 @@ def main():
         config = {
             "server": {"addr": f"127.0.0.1:{gateway_port}", "retry_times": 1, "timeout_seconds": 10, "route_diagnostics": True},
             "admin_key": admin_key,
+            "quotation": {"enabled": True, "currency": "ACCOUNT_UNIT", "prices": [{
+                "model": "mapped-model", "uncached_input_units_per_1k": "1000",
+                "cached_input_units_per_1k": "100", "cache_write_input_units_per_1k": "2000",
+                "output_units_per_1k": "3000"}], "group_rate_units": {"default": "1000000000"}},
             "database": {"driver": "sqlite", "path": str(work / "gateway.db")},
             "channels": [{"name": "local", "type": "openai", "base_url": f"http://127.0.0.1:{upstream_port}",
                           "key": "sk-local-upstream-only", "models": ["smoke-model"],
@@ -397,7 +427,7 @@ def main():
                 assert text == "你好，这是流式响应。", text
                 assert any(choice.get("finish_reason") == "stop" for choice in choices)
                 assert any(chunk.get("usage", {}).get("total_tokens") == 18 for chunk in chunks)
-                control_workflow(base, f"http://127.0.0.1:{upstream_port}", clean_env)
+                control_workflow(base, f"http://127.0.0.1:{upstream_port}", clean_env, quotation_enabled=True)
                 if args.preview:
                     print(f"PASS: all smoke checks; isolated console preview at {base}", flush=True)
                     print("Test login: smoke-admin / smoke-admin-password-only. Ctrl+C stops and removes test data.", flush=True)

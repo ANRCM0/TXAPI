@@ -585,6 +585,91 @@ original shutdown-lock, join and zero-row assertions remain. Independent read-on
 review found no actionable issue. Already committed observations are not deleted,
 and cancellation is not claimed globally atomic with database commit.
 
+### Archive Shutdown Integration
+
+Final head `9bca697ce6310c2f662ee69ff37168fe3d0f977d` passed complete push
+39198978768 and PR39199006870 check/delivery. PR #36 merged it as
+`master/c14178dec7d57aeabacf43da53c0ac6e16989cc6`; the two trees are equal.
+Independent post-merge39199597911 also passed complete check/delivery,
+including Linux full race, actual-main recovery smoke and container delivery.
+No workflow was manually repeated and no image/tag/release was published.
+
+## R05a-2: Versioned Dimensional Selling Quotations
+
+The backend-first batch resumes on accepted master/c14178d. The original local
+2c42b11 checkpoint was cherry-picked as eaba025 before final integration; neither
+checkpoint is accepted evidence. Scope and exact candidate Reader/Service/API
+signatures were recorded before implementation in the
+[six-part decision](REFERENCE-R05A2-IMPLEMENTATION.md). Running configuration,
+arithmetic, unknown quantities, history, permissions and rollback are described
+in the [selling quotation guide](docs/reference/usage-quotations.md).
+
+L1 billing compiles canonical format2 dimensional documents and persists them
+before publication. The new bounded store reader verifies exact byte size and
+digest. It retains old format1 payloads unchanged. L3 quoteconsole consumes
+registered current-session/shared-admission ports; the two new administrator
+routes are read-only hypothetical calculations, with canonical decimal string
+quantities and amounts. The real L3 facts sample captures a price version before
+one JSON/SSE generation and quotes the actual model/group afterward. It rejects
+ambiguous retry bindings without repeating the already executed generation.
+
+No new schema, L0 source, balance/hold, strict reservation price, old settlement
+algorithm, original HTTP operation/schema, existing public signature or frontend
+is changed. Quotations are separate from committed charges and Provider spend.
+The new quotation/v1 is candidate, not frozen; full R05a/R05b/R00-R07 remain open.
+
+### R05a-2 Final Local Evidence
+
+2026-10-19, Windows PowerShell, Go1.26.3, GOARCH=amd64, CGO_ENABLED=0.
+The 25 changed/new non-Markdown source manifest has LF-normalized digest
+`f0fa3dea1edff934aa5c442fb0a2092531fff71ca67fe16b780e97a4e8cc1d36`.
+Logs/manifests are external in D:\my-project\TXAPI-references\validation-r05a2.
+
+| Actual Command / Check | Final Result |
+|---|---|
+| go build ./...; go vet ./... | PASS |
+| go test -json -count=1 ./... | 1533 tests/subtests and 39 test packages PASS; six expected helper SKIP |
+| go mod tidy; module diff; core/protocol dependency filter | PASS; no new third-party module |
+| architecture/visibility/public signatures and HTTP contracts | PASS in complete suite; all 23 previous packages and all 102 previous operations/schemas remain exact; one candidate contract and two operations appended |
+| touched-Go gofmt; git diff --check; batch Markdown links | PASS; only batch Go files formatted, all referenced local targets resolve |
+| final python -B tests/smoke/local.py --go go | PASS, including actual quotation main composition, admin/owner permissions, exact amount28/unknown, existing strict/encryption/rotation and forced-kill/background recovery |
+| default-disabled actual-main shared console workflow | PASS after the fixture correction; empty quotation metadata, calculation503, owner403 and original console path |
+| independent real-main HTTP probe | 30 rounds of full-body owner POST403, owner GET403 and administrator quote28 PASS; no retries |
+| frontend syntax/API/browser | Reuse accepted d12123d/R06b: web assets, browser scripts, API tests and all pre-existing HTTP operations are exact; final actual-main smoke rerun |
+
+Focused SQLite/facts commands were run by agents and are recorded as command
+summaries, not invented raw logs: `go test ./internal/store -run '^TestQuotationHistory'
+-count=1` passed in2.987s; the two quotation consumer tests in
+`./internal/examples/facts` passed in 8.408s. The latter publish N+1 from the
+actual upstream, retain N's quote44 versus explicit N+1 quote170, verify one
+wire/upstream execution, reopen the database and preserve nonzero used/reserved
+balances and an existing reservation. The final complete suite includes both.
+
+The first formatting check detected CRLF restored by the checkpoint cherry-pick;
+gofmt corrected only batch files and all normalized tested source hashes stayed
+equal. The first Windows smoke hit ConnectionResetError when urllib forced
+Connection:close while ordinary-user authorization rejected an unread POST body.
+The isolated old transport reproduced it; ordinary keep-alive real HTTP passed
+30 complete-body rounds. The new smoke authorization negative now sends an empty
+POST and still requires 403; complete-body unit/probe coverage remains. No network
+retry or shared authorization/transport change was added. This smoke-only change
+was followed by the final passing complete smoke; Go sources remain those of
+the passing complete suite. Linux race/container delivery and final-head merge
+are still the existing CI gates, not local claims. A final independent read-only
+backend review found no actionable issue; it did not run additional tests.
+
+The first pushed head f770c56 exposed a shared smoke-fixture error: both delivery
+jobs in push39201155517/PR39201190081 expected enabled selling quotations in the
+default-disabled container install. Full race passed, but those heads are not
+accepted. `control_workflow` now takes an explicit default-false expectation:
+the enabled local-main fixture checks amount28/unknown, and the ordinary delivery
+fixture checks disabled metadata and calculation503. Neither fixture changes
+production defaults. The corrected complete enabled smoke and an independent
+default-disabled actual-main console workflow both passed. All Go/module/API
+source hashes remain exact to the passing full suite; only the Python consumer
+changed. This correction requires the new final head's full automatic CI,
+including Linux race and container delivery, before merge.
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。
