@@ -26,12 +26,23 @@ post-merge run 39192304586 also passed complete check/delivery, recorded in
 
 ## R02: Runtime Cleanup Recovery
 
-2026-10-19: source audit confirms production WS resource ownership/publication
-already exists through R03b, but failed candidate/retired cleanup cannot recover
-through normal Apply. The independent corrective batch on master/deb9e21 is
-defined in [the R02 cleanup decision](../REFERENCE-R02-CLEANUP-IMPLEMENTATION.md).
-Private recovery and join behavior require fresh acceptance; no new public
+2026-10-19: failed candidate/retired cleanup now recovers through normal Apply.
+Final head 135e657 passed complete push/PR CI; PR #34 merged as master/252c379
+with the same tree, and independent post-merge 39193688299 passed check/delivery.
+The [cleanup decision](../REFERENCE-R02-CLEANUP-IMPLEMENTATION.md) and
+[evidence log](../REFERENCE-ADOPTION-PROGRESS.md) retain its scope. No new public
 contract, charging permission, Provider/SDK result or full R02 freeze is claimed.
+
+## R05a-1: Native Token Breakdown Observations
+
+Backend work now takes priority. Candidate execution/v3 and native JSON/SSE
+observations add optional cached-input, cache-write-input and reasoning-output
+counts through the existing execution chain. Exact boundaries and source
+attribution are in the [decision](../REFERENCE-R05A-IMPLEMENTATION.md);
+integration and limitations are in the [usage guide](reference/usage-observations.md).
+Pricing, durable records and new charging permission remain later R05 batches.
+R06c frontend work is preserved locally on feat/reference-r06-ledger/28fc3ec
+for later integration; future frontend work should prioritize codex-proxy-rs.
 
 ## R03b-2 当前实施批次
 

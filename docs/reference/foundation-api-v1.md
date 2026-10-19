@@ -8,6 +8,14 @@
 
 ## 公开接口与所有权
 
+R05a-1 additionally registers candidate `execution/v3` (Version="3"):
+optional TokenBreakdown/UsageObservation, checked Validate, single-delivery
+Envelope/Decoder/StreamDecoder and Executor/Outcome. It consumes the existing
+public v1/v2 value contracts and has a native Responses decoder plus independent
+L3 consumer. Existing signatures remain exact. Profile, unknown/zero semantics,
+ownership, limitations and rollback are defined in the
+[usage guide](usage-observations.md); no financial permission is added.
+
 | 路径 / 版本 | 内容与实际消费者 | 语义与限制 |
 |---|---|---|
 | `foundation/contracts/execution/v1` / `Version="1"` | Executor.Execute、Invocation、Output/DeadlineOutput、Outcome/AttemptOutcome/Result、目标连续性约束；Responses、generation worker/归档、HTTP 集成消费 | 输入正文/目标、输出元数据与可变结果跨桥复制；公共签名不引用 core/gateway/protocol/model 实现类型，不允许 `any` 逃逸 |

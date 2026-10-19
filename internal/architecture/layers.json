@@ -107,6 +107,12 @@
     "public": true,
     "version": "2"
   },
+  "minigateway/internal/foundation/contracts/execution/v3": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "3"
+  },
   "minigateway/internal/foundation/contracts/identity/v1": {
     "layer": "L1",
     "owner": "foundation",

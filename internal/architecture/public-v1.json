@@ -260,6 +260,18 @@
     "type minigateway/internal/foundation/contracts/execution/v2.UsageObservation struct{Counts minigateway/internal/foundation/contracts/execution/v2.TokenCounts; Completeness minigateway/internal/foundation/contracts/execution/v2.Completeness; Source minigateway/internal/foundation/contracts/execution/v2.UsageSource; Profile string}",
     "type minigateway/internal/foundation/contracts/execution/v2.UsageSource string"
   ],
+  "minigateway/internal/foundation/contracts/execution/v3": [
+    "const minigateway/internal/foundation/contracts/execution/v3.Version untyped string = \"3\"",
+    "func (minigateway/internal/foundation/contracts/execution/v3.UsageObservation).Validate() error",
+    "type minigateway/internal/foundation/contracts/execution/v3.AttemptUsage struct{Number int; Usage minigateway/internal/foundation/contracts/execution/v3.UsageObservation}",
+    "type minigateway/internal/foundation/contracts/execution/v3.Decoder interface{DecodeUsageEnvelope([]byte) (minigateway/internal/foundation/contracts/execution/v3.Envelope, error); NewUsageEnvelopeStream() minigateway/internal/foundation/contracts/execution/v3.StreamDecoder}",
+    "type minigateway/internal/foundation/contracts/execution/v3.Envelope struct{Execution minigateway/internal/foundation/contracts/execution/v2.Envelope; Usage *minigateway/internal/foundation/contracts/execution/v3.UsageObservation}",
+    "type minigateway/internal/foundation/contracts/execution/v3.Executor interface{Execute(context.Context, minigateway/internal/foundation/contracts/execution/v1.Output, minigateway/internal/foundation/contracts/execution/v1.Invocation) minigateway/internal/foundation/contracts/execution/v3.Outcome}",
+    "type minigateway/internal/foundation/contracts/execution/v3.Outcome struct{Execution minigateway/internal/foundation/contracts/execution/v2.Outcome; Usage []minigateway/internal/foundation/contracts/execution/v3.AttemptUsage}",
+    "type minigateway/internal/foundation/contracts/execution/v3.StreamDecoder interface{DecodeUsageEnvelopes([]byte) ([]minigateway/internal/foundation/contracts/execution/v3.Envelope, error); EndUsageEnvelopes() ([]minigateway/internal/foundation/contracts/execution/v3.Envelope, error)}",
+    "type minigateway/internal/foundation/contracts/execution/v3.TokenBreakdown struct{CachedInputTokens *int64; CacheWriteInputTokens *int64; ReasoningOutputTokens *int64}",
+    "type minigateway/internal/foundation/contracts/execution/v3.UsageObservation struct{Counts minigateway/internal/foundation/contracts/execution/v2.TokenCounts; Breakdown minigateway/internal/foundation/contracts/execution/v3.TokenBreakdown; Completeness minigateway/internal/foundation/contracts/execution/v2.Completeness; Source minigateway/internal/foundation/contracts/execution/v2.UsageSource; Profile string}"
+  ],
   "minigateway/internal/foundation/contracts/identity/v1": [
     "const minigateway/internal/foundation/contracts/identity/v1.All untyped string = \"all\"",
     "const minigateway/internal/foundation/contracts/identity/v1.Allowlist untyped string = \"allowlist\"",
