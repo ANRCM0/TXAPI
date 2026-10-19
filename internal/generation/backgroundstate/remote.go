@@ -4,6 +4,7 @@ import (
 	"context"
 
 	bg "minigateway/internal/foundation/contracts/background/v1"
+	bgv2 "minigateway/internal/foundation/contracts/background/v2"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
 )
 
@@ -26,6 +27,10 @@ type Progress interface {
 	Validate(context.Context, RemoteCall) error
 	Dispatch(context.Context, execution.TargetConstraint, RateReservation) error
 	Observe(context.Context, bg.Observation) error
+}
+
+type UsageProgress interface {
+	ObserveUsage(context.Context, bgv2.Observation) error
 }
 type Remote interface {
 	Execute(context.Context, RemoteCall, Progress) error

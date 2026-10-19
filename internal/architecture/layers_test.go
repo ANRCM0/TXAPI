@@ -190,7 +190,8 @@ func TestEveryProductionPackageHasFourLayerOwnership(t *testing.T) {
 		}
 		version := "1"
 		if path == module+"internal/foundation/contracts/responses/v2" || path == module+"internal/foundation/contracts/execution/v2" ||
-			path == module+"internal/foundation/contracts/configuration/v2" || path == module+"internal/foundation/contracts/upstreamauth/v2" {
+			path == module+"internal/foundation/contracts/configuration/v2" || path == module+"internal/foundation/contracts/upstreamauth/v2" ||
+			path == module+"internal/foundation/contracts/background/v2" {
 			version = "2"
 		}
 		if path == module+"internal/foundation/contracts/execution/v3" || path == module+"internal/foundation/contracts/upstreamauth/v3" {

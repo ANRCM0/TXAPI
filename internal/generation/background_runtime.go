@@ -12,6 +12,7 @@ import (
 	"minigateway/internal/access"
 	bg "minigateway/internal/foundation/contracts/background/v1"
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	execv3 "minigateway/internal/foundation/contracts/execution/v3"
 	lifecycle "minigateway/internal/foundation/contracts/lifecycle/v1"
 	bs "minigateway/internal/generation/backgroundstate"
 )
@@ -24,10 +25,11 @@ type backgroundSnapshot struct {
 	Usage            *execv1.Usage
 	Rate             bs.RateReservation
 	Failures         int
-	NativeState      bg.RemoteState `json:"native_state,omitempty"`
-	EventComplete    bool           `json:"event_complete,omitempty"`
-	EventUnavailable bool           `json:"event_unavailable,omitempty"`
-	RateFinalized    bool           `json:"rate_finalized,omitempty"`
+	NativeState      bg.RemoteState           `json:"native_state,omitempty"`
+	EventComplete    bool                     `json:"event_complete,omitempty"`
+	EventUnavailable bool                     `json:"event_unavailable,omitempty"`
+	RateFinalized    bool                     `json:"rate_finalized,omitempty"`
+	DetailedUsage    *execv3.UsageObservation `json:"detailed_usage,omitempty"`
 }
 
 func (s *BackgroundService) openSnapshot(r bs.Record) (backgroundSnapshot, error) {
@@ -45,6 +47,9 @@ func (s *BackgroundService) openSnapshot(r bs.Record) (backgroundSnapshot, error
 	// Legacy dispatch snapshots encode an absent RawMessage as JSON null.
 	if bytes.Equal(bytes.TrimSpace(out.Document), []byte("null")) {
 		out.Document = nil
+	}
+	if out.DetailedUsage != nil && out.DetailedUsage.Validate() != nil {
+		return backgroundSnapshot{}, bg.ErrUnavailable
 	}
 	return out, nil
 }

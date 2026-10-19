@@ -12,7 +12,9 @@ import (
 	"time"
 
 	bg "minigateway/internal/foundation/contracts/background/v1"
+	bgv2 "minigateway/internal/foundation/contracts/background/v2"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
+	usagev3 "minigateway/internal/foundation/contracts/execution/v3"
 )
 
 const BackgroundRegistrationID = "openai-native-background"
@@ -128,15 +130,24 @@ type backgroundDecoder struct {
 	publicID, remoteID string
 	mu                 sync.Mutex
 	observation        bg.Observation
+	detailedUsage      *usagev3.UsageObservation
 }
 
 func (d *backgroundDecoder) Decode(body []byte) ([]byte, *execution.Usage, error) {
 	if len(body) > 1<<20 {
 		return nil, nil, errors.New("background response too large")
 	}
-	r, usage, e := ParseResponse(body)
+	r, usage, details, e := parseResponse(body)
 	if e != nil || !validRemoteID(r.ID) || d.remoteID != "" && r.ID != d.remoteID {
 		return nil, nil, errors.New("invalid native background response")
+	}
+	base, e := usageObservation(r.Usage)
+	if e != nil {
+		return nil, nil, e
+	}
+	enriched, e := enrichedUsageObservation(details, base)
+	if e != nil {
+		return nil, nil, e
 	}
 	states := map[string]bg.RemoteState{"queued": bg.RemoteAccepted, "in_progress": bg.RemoteRunning, "completed": bg.RemoteSucceeded, "incomplete": bg.RemoteIncomplete, "failed": bg.RemoteFailed, "cancelled": bg.RemoteCancelled}
 	out, e := rewrite(body, d.publicID, true, false)
@@ -145,6 +156,7 @@ func (d *backgroundDecoder) Decode(body []byte) ([]byte, *execution.Usage, error
 	}
 	d.mu.Lock()
 	d.observation = bg.Observation{RemoteID: r.ID, State: states[r.Status], Document: bytes.Clone(out), Usage: usage}
+	d.detailedUsage = enriched
 	d.mu.Unlock()
 	return out, usage, nil
 }
@@ -152,17 +164,23 @@ func (d *backgroundDecoder) NewStream() execution.StreamDecoder {
 	return &backgroundStreamDecoder{owner: d, remoteID: d.remoteID, lastSequence: -1}
 }
 func (d *backgroundDecoder) Drain() bg.Observation {
+	return d.DrainUsage().Observation
+}
+func (d *backgroundDecoder) DrainUsage() bgv2.Observation {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	o := d.observation
+	u := d.detailedUsage
 	d.observation = bg.Observation{}
+	d.detailedUsage = nil
 	o.Document = bytes.Clone(o.Document)
 	if o.Usage != nil {
 		u := *o.Usage
 		o.Usage = &u
 	}
-	return o
+	return bgv2.Observation{Observation: o, Usage: u}
 }
 
 var _ execution.Parser = BackgroundParser{}
 var _ bg.Codec = BackgroundCodec{}
+var _ bgv2.Observer = (*backgroundDecoder)(nil)

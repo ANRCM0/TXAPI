@@ -8,6 +8,7 @@ import (
 
 	bg "minigateway/internal/foundation/contracts/background/v1"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
+	usagev3 "minigateway/internal/foundation/contracts/execution/v3"
 	"minigateway/internal/protocol/jsonutil"
 )
 
@@ -69,10 +70,19 @@ func (s *backgroundStreamDecoder) flush() ([]execution.Frame, error) {
 	}
 	remoteID := s.remoteID
 	observation := bg.Observation{}
+	var enriched *usagev3.UsageObservation
 	if present(event.Response) {
-		r, usage, e := ParseResponse(event.Response)
+		r, usage, details, e := parseResponse(event.Response)
 		if e != nil || !validRemoteID(r.ID) || remoteID != "" && r.ID != remoteID {
 			return nil, errors.New("invalid background event identity")
+		}
+		base, e := usageObservation(r.Usage)
+		if e != nil {
+			return nil, e
+		}
+		enriched, e = enrichedUsageObservation(details, base)
+		if e != nil {
+			return nil, e
 		}
 		remoteID = r.ID
 		observation.State = backgroundState(r.Status)
@@ -125,6 +135,7 @@ func (s *backgroundStreamDecoder) flush() ([]execution.Frame, error) {
 	observation.Events = []bg.Event{{Sequence: uint64(*event.Sequence), Data: bytes.Clone(wire)}}
 	s.owner.mu.Lock()
 	s.owner.observation = observation
+	s.owner.detailedUsage = enriched
 	s.owner.mu.Unlock()
 	s.remoteID, s.lastSequence, s.terminal = remoteID, *event.Sequence, terminal
 	return []execution.Frame{{Data: wire, Usage: observation.Usage, Complete: terminal}}, nil

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	bg "minigateway/internal/foundation/contracts/background/v1"
+	bgv2 "minigateway/internal/foundation/contracts/background/v2"
 	bs "minigateway/internal/generation/backgroundstate"
 )
 
@@ -54,6 +55,23 @@ func (p *backgroundProgress) prepareEvents(ctx context.Context, events []bg.Even
 }
 
 func (p *backgroundProgress) Observe(ctx context.Context, o bg.Observation) error {
+	return p.ObserveUsage(ctx, bgv2.Observation{Observation: o, Usage: legacyBackgroundUsage(o.Usage)})
+}
+
+func (p *backgroundProgress) ObserveUsage(ctx context.Context, detail bgv2.Observation) error {
+	o := detail.Observation
+	if detail.Usage != nil {
+		if detail.Usage.Validate() != nil {
+			return bg.ErrCursorUnavailable
+		}
+		if o.Usage != nil {
+			legacy := legacyBackgroundUsage(o.Usage)
+			counts := detail.Usage.Counts
+			if legacy.Validate() != nil || counts.InputTokens == nil || counts.OutputTokens == nil || counts.TotalTokens == nil || *counts.InputTokens != *legacy.Counts.InputTokens || *counts.OutputTokens != *legacy.Counts.OutputTokens || *counts.TotalTokens != *legacy.Counts.TotalTokens {
+				return bg.ErrCursorUnavailable
+			}
+		}
+	}
 	if o.RemoteID == "" || len(o.Document) > 1<<20 || len(o.Document) == 0 && len(o.Events) == 0 || len(o.Document) > 0 && !json.Valid(o.Document) {
 		return bg.ErrCursorUnavailable
 	}
@@ -84,6 +102,20 @@ func (p *backgroundProgress) Observe(ctx context.Context, o bg.Observation) erro
 		}
 		if !wasTerminal {
 			next.Usage = nil
+			next.DetailedUsage = nil
+		}
+		previousUsage := next.DetailedUsage
+		if previousUsage == nil && next.Usage != nil {
+			previousUsage = legacyBackgroundUsage(next.Usage)
+		}
+		incoming := detail.Usage
+		if incoming == nil {
+			incoming = legacyBackgroundUsage(o.Usage)
+		}
+		var e error
+		next.DetailedUsage, e = mergeBackgroundUsage(previousUsage, incoming)
+		if e != nil {
+			return e
 		}
 		if o.Usage != nil {
 			u := *o.Usage
@@ -114,7 +146,8 @@ func (p *backgroundProgress) Observe(ctx context.Context, o bg.Observation) erro
 			return e
 		}
 		pending := stage == bg.StageTerminal && p.row.Stream && !next.EventComplete && !next.EventUnavailable
-		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: stage, Snapshot: snapshot, Events: events, ReplayPending: pending, DueAt: time.Now().Add(time.Second).UnixMilli()})
+		metadata := &bs.UsageMetadata{NativeState: next.NativeState, Usage: next.DetailedUsage}
+		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: stage, Snapshot: snapshot, Events: events, ReplayPending: pending, DueAt: time.Now().Add(time.Second).UnixMilli(), UsageMetadata: metadata})
 		if errors.Is(e, bg.ErrConflict) {
 			continue
 		}
