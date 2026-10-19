@@ -17,6 +17,7 @@ import (
 	ownerledger "minigateway/internal/foundation/contracts/ownerledger/v1"
 	quotation "minigateway/internal/foundation/contracts/quotation/v1"
 	routes "minigateway/internal/foundation/contracts/routes/v1"
+	eligibility "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	"minigateway/internal/model"
 	"minigateway/internal/server/api"
@@ -172,6 +173,7 @@ func TestOpenAPIMetadataFieldsMatchPublicDTOs(t *testing.T) {
 		"UsageHistoryHost": usagehistory.HostFacts{}, "UsageHistorySummary": usagehistory.Summary{},
 		"UsageHistoryCounts": usagehistory.UsageView{}, "UsageHistoryAttempt": usagehistory.AttemptView{},
 		"UsageHistoryDetail": usagehistory.Detail{}, "UsageHistoryPage": usagehistory.Page{},
+		"ManagedEligibility":  eligibility.Eligibility{},
 		"ManagedBindingInput": managed.ManagedBindingInput{}, "ManagedCredential": managed.ManagedCredential{}, "ManagedChannel": managed.ManagedChannel{}, "ManagedChannelInput": managed.ManagedChannelInput{},
 		"OwnerBillingSummary": ownerledger.Summary{}, "OwnerBillingReservation": ownerledger.Reservation{}, "OwnerBillingDetail": ownerledger.Detail{}, "OwnerBillingPage": ownerledger.Page{}}
 	for name, value := range cases {

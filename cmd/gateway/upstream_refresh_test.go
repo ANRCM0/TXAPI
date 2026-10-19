@@ -161,7 +161,7 @@ func TestUpstreamRefreshRuntimeUsesRealEncryptedManagerAndPublishesNewGeneration
 	directory := upstreamhttp.NewCaller(client)
 	defer directory.Close()
 	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), BillingMode: billing.ModeDisabled, Client: client,
-		ManagedInference: &gateway.ManagedInferenceOptions{Enabled: true, Credentials: st.InferenceCredentials(), DirectoryCaller: directory, ValidateModel: openaiauth.ValidateVisibleModel}})
+		ManagedInference: &gateway.ManagedInferenceOptions{Enabled: true, Credentials: st.InferenceCredentials(), DirectoryCaller: directory, ValidateModel: openaiauth.ValidateVisibleModel, FailureRecorder: st.InferenceEligibility(), ClassifyFailure: openaiauth.ClassifyInferenceFailure}})
 	if err != nil {
 		t.Fatal(err)
 	}

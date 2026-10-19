@@ -229,6 +229,12 @@
     "public": true,
     "version": "2"
   },
+  "minigateway/internal/foundation/contracts/upstreamauth/v3": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "3"
+  },
   "minigateway/internal/foundation/httpoutput/v1": {
     "layer": "L1",
     "owner": "foundation",

@@ -72,6 +72,8 @@ func (h *Handler) RegisterAccess(r *gin.RouterGroup) {
 	admin.GET("/managed-credentials/:id", h.GetManagedCredential)
 	admin.PUT("/managed-credentials/:id", h.UpdateManagedCredential)
 	admin.POST("/managed-credentials/:id/disable", h.DisableManagedCredential)
+	admin.GET("/managed-credentials/:id/eligibility", h.GetManagedEligibility)
+	admin.POST("/managed-credentials/:id/eligibility/resume", h.ResumeManagedEligibility)
 	admin.GET("/usage-records", h.usageHistoryList(true))
 	admin.GET("/usage-records/:id", h.usageHistoryRead(true))
 	admin.GET("/quotations/current", h.QuotationCurrent)

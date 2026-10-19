@@ -113,6 +113,7 @@ func (s *Store) AutoMigrate() error {
 		&model.SchemaMigration{},
 		&model.Channel{},
 		&model.Credential{},
+		&model.InferenceEligibility{},
 		&model.ManagedUpstreamAccount{},
 		&model.Token{},
 		&model.Ability{},

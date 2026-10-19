@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；后台/WS 明细与收费未覆盖；S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/SDK WS/Codex 完整组合未验收；账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.12.0` / 115 操作；数据库迁移追加 schema v18，FC-P1-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.0` / 117 操作；数据库迁移追加 schema v19，FC-P1/P3-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -78,7 +78,7 @@ R04a 命令为 `-upstream-account authorize|reauthorize|list|refresh|disable`，
 
 历史绑定当前 owner、创建 Key 和模型权限，内容加密、CAS/TTL/容量受限。`previous_response_id` 与 conversation 明确上下文来源，原生父 ID 和本地全上下文不能重复叠加；只有完整可重建、重新准入和计价的上下文才允许显式重放。`store=false` 不变永久历史，原生后台仍按声明临时保存恢复内容。后台受理先持久化任务和适用准入/预留事实再确认；内部任务状态、公开协议状态和财务终态分别映射。事件序号先持久提交再公开，按 `sequence_number` / `starting_after` 恢复；事件过期、丢失或不可重建时显式报错。
 
-迁移只追加版本，不修改已发布步骤。schema v18 升级前停写并一致备份；旧 schema17 二进制拒绝打开 v18，回退需恢复匹配的停写备份，不能删账号或改写账本/迁移修复。凭据/内容密钥、备份/WAL、内存和公网 TLS 的边界独立维护，管理掩码不构成加密。
+迁移只追加版本，不修改已发布步骤。schema v19 升级前停写并一致备份；旧 schema18 二进制拒绝打开 v19，回退需恢复匹配的停写备份，不能删账号或改写账本/迁移修复。凭据/内容密钥、备份/WAL、内存和公网 TLS 的边界独立维护，管理掩码不构成加密。
 
 ## 严格计费边界
 
@@ -273,6 +273,27 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 - **行为/契约：**区分权限不足、凭据失效、账号/模型/窗口限流、拥塞和网络故障；记录 reset/未知值及 revision，先资格后评分、发送前复核，提供脱敏拒绝/恢复理由。
 - **验收：**本地估计不伪造真实窗口，旧响应不处罚新凭据，模型限流不扩大到账号，权限不足不盲目重试，专属不可用不静默回落，reset 缺失/时钟偏差可解释。
 - **协作影响：**为推理、刷新和 shadow 提供唯一资格事实，不在本批启用真实多因素评分。
+
+<details>
+<summary>FC-P3-001：单绑定推理资格反馈与人工恢复 CR（已批准，源码及本地验证完成）</summary>
+
+本 CR 仅覆盖 P1 已批准的唯一 active SIWC 绑定和当前 HTTP 文本目录/Responses 消费者。依据固定 sub2api `f2e5b55f3e8069df1c02a9a27af537b5fdefa64e` 的 `backend/internal/service/openai_account_runtime_block_fastpath.go` 分类与最小作用域思路独立实现；不采用其推测 reset、账号切换及同请求重试。官方核对来源为 [SIWC errors and recovery](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery)：401/403 需核验授权上下文，429 不自动证明整个套餐耗尽或重置时间，503 不证明凭据失效。
+
+1. **层级与写入。** L1 `upstreamidentity/store/gateway/management` 持有资格和 CAS；L2 `protocol/openaiauth`/`protocol/responses` 只分类可信固定上游的完整错误；`server/api` 提供管理员查询/恢复；组装、model、schema19、OpenAPI 和契约登记统一协调。保持现有 sender、执行、授权和刷新 owner。
+2. **公开依赖与字段。** 经批准后给候选 `upstreamauth/v2.AccessCredential` 追加 `GateEpoch int64`；`AcquireAccess` 在原短写事务内检查资格，提交成功才发放 token 与 epoch。新增候选 `upstreamauth/v3` 的 `FailureRecorder`、可选 L2 `FailureObserver` 和 `EligibilityAdmin`，不修改冻结 v1、不宣称 v2/v3 全量冻结。`FailureSignal` 只含 reason/scope/provider-code 白名单、HTTPStatus 和 source，禁止正文、原始 message、token、URL 或任意标签；`FailureWrite` 包含原 `v2.AccessRequest`、issued GateEpoch 和 signal。`RecordFailure(ctx, write)` 返回 applied 与脱敏资格；`ReadEligibility(ctx, credentialID)` 和 `ResumeEligibility(ctx, request)` 返回同一资格 DTO。恢复请求必须带 credentialID、expected binding revision、expected gate revision、expected epoch，HTTP revision/epoch 均为正十进制字符串。
+3. **持久化与权限。** schema19 在现有凭据下固定一条资格行，外键删除级联，不按请求或 token 轮换追加；最多 1000 行，超过容量时发放/创建资格失败关闭。字段为 credential/account/binding/model 标识、epoch、revision、blocked、固定 reason/scope/provider-code/status/source、observedAt、证据 account/credential revision、resetKnown 与 nullable resetAt。首批 reset 始终 unknown，无自建远端窗口估计。资格不改 account.State、token 或 refresh claim；静态 Key 不读写该状态。新增 SessionBearer 管理接口 `GET /api/admin/managed-credentials/{id}/eligibility` 和 `POST .../{id}/eligibility/resume`；调用 Key、普通用户和匿名请求不能操作。OpenAPI 预期升为 0.13.0/117 操作，既有四个绑定端点不改变 DTO。
+4. **状态、排序与恢复。** Record 使用既有跨进程短写事务，核对完整 issued binding、account row revision、credential revision 和 gate epoch；停用/刷新/重授权先提交时，旧响应作为 stale no-op，不处罚新凭据。已有 gate 跨 token 刷新保留。成功响应永不清 gate，同 epoch 后续失败不能降级覆盖已阻断状态。人工恢复及每次重绑递增 epoch；同 account/model 重绑保留阻断，更换 account/model 才更新作用域，旧回包仍丢弃。恢复必须 CAS gate revision/epoch 和当前绑定，不等同于 Provider 已恢复；之后目录缓存键包含新 epoch，重新获取目录并发放凭据。新发放与 gate 写入按提交先后排序，已经授权的在途发送不承诺撤回。
+5. **消费与兼容。** 现有 managed transport 仅按原读取节奏有界旁路观察非 200 错误（最多捕获 64KiB，截断/超限不解析 code），L2 分类不改变下游正文；SSE 通过可选 observer 从完整、已验证的原生终态保留固定 code，不从用户错误文案反推。目录/Responses 401/403 写 grant/authorization_review，保留 token；精确 usage-limit 429 暂停当前 grant，其他 429 至多暂停当前 model，reset_unknown 均需管理员恢复，不扩到整个账号/套餐。目录 200 但模型不可见沿现有拒绝，不写永久 gate。503 仅进程内 5 秒退避后允许下一条新请求沿既有 admission 尝试，不重放旧请求，不承诺单 probe 租约；取消、客户端写失败和普通参数错误不处罚凭据。反馈提交失败不能改写已发送输出，本进程阻止后续托管发送并先修复有界待写反馈；强杀前尚未提交的反馈不能保证恢复，不声称跨该窗口 exactly-once。
+6. **验证、回退与影响。** 覆盖反馈→Acquire 拒绝、重启保留、跨进程刷新/重授权/停用排序、人工恢复后同 credential revision 的晚到旧响应、并发成功不清新拒绝、模型限流不扩账号、未知 reset 不自动放行、目录/SSE 分类、503 退避无重放、重复反馈/容量上限、提交失败及管理员权限隔离、静态路线回归和最终完整 CI。迁移只追加19，旧 schema18 二进制拒绝打开19；回退须停写并恢复匹配备份，不能关闭 gate 或删除行绕过拒绝。本 CR 不开放账号池、窗口调度、shadow 真实评分、收费、后台/WS 或真实账号调用。新前端仍后置。
+
+用户已明确批准本 CR 的源码实施与集中验证修复；无真实账号调用授权。CI 后台执行，连续推进源码批次后集中修复，但未通过的检查不记为通过。
+
+本子批已接通唯一存储、gateway 发放/反馈、L2 旁路分类、configuration 管理和真实 SessionBearer HTTP 查询/恢复链。定向测试已覆盖持久拒绝、独立重开读取、管理员恢复、恢复后重新获取目录、旧 epoch 回包 no-op，以及精确 int64 字符串、权限拒绝和错误脱敏。Windows GOARCH=amd64 完整 build、vet、全量 Go 测试及生产主进程冒烟均已通过；包含静态 Key、严格计费拒绝、SSE 强杀/恢复、后台、usage 和 shadow 回归。独立审查发现的取消等待问题已修复并定向复验。精确提交 Linux race/交付 CI 待运行，不把本地通过写成远端验收。
+
+资源边界：待写反馈最多16个 issued tuple，同 tuple 合并固定分类，溢出永久阻止本进程新发放；未提交反馈不能靠重启恢复，不能把重启当解除拒绝的流程。串行反馈/发放的等待可按请求取消，普通内存锁不包数据库 I/O；发放含等待最多5秒，反馈独立5秒，SQLite COMMIT 失败另允许最多1秒清理确切连接，清理失败丢弃连接。反馈不会撤回已授权发送，不承诺强杀未提交窗口 exactly-once。
+
+
+</details>
 
 ### P4：协议回归与转换诊断
 

@@ -17,6 +17,7 @@ import (
 	execution "minigateway/internal/foundation/contracts/execution/v1"
 	auth "minigateway/internal/foundation/contracts/upstreamauth/v1"
 	authv2 "minigateway/internal/foundation/contracts/upstreamauth/v2"
+	authv3 "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	"minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/protocol/openaiauth"
@@ -34,7 +35,13 @@ func (f *managedAccessFixture) AcquireAccess(_ context.Context, request authv2.A
 	if f.failAt != 0 && len(f.requests) >= f.failAt {
 		return authv2.AccessCredential{}, errors.New("private-refresh-token")
 	}
-	return authv2.AccessCredential{AccountID: request.AccountID, Revision: request.ExpectedRevision, CredentialRevision: request.ExpectedCredentialRevision, AccessToken: auth.NewSecret("fixture-access-token"), ExpiresAt: time.Now().Add(time.Hour)}, nil
+	return authv2.AccessCredential{AccountID: request.AccountID, Revision: request.ExpectedRevision, CredentialRevision: request.ExpectedCredentialRevision, GateEpoch: 1, AccessToken: auth.NewSecret("fixture-access-token"), ExpiresAt: time.Now().Add(time.Hour)}, nil
+}
+
+type managedRecorderFixture struct{}
+
+func (*managedRecorderFixture) RecordFailure(context.Context, authv3.FailureWrite) (authv3.RecordResult, error) {
+	return authv3.RecordResult{}, nil
 }
 
 type managedDirectoryFixture struct {
@@ -65,7 +72,7 @@ func managedTestTerminal(status string) string {
 func newManagedTestGateway(t *testing.T, accessFixture *managedAccessFixture, directory *managedDirectoryFixture, response func(*http.Request) (*http.Response, error)) *Gateway {
 	t.Helper()
 	g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, RetryTimes: 2, Channels: managedTestChannels(),
-		ManagedInference: &ManagedInferenceOptions{Enabled: true, Credentials: accessFixture, DirectoryCaller: directory, ValidateModel: openaiauth.ValidateVisibleModel},
+		ManagedInference: &ManagedInferenceOptions{Enabled: true, Credentials: accessFixture, DirectoryCaller: directory, ValidateModel: openaiauth.ValidateVisibleModel, FailureRecorder: &managedRecorderFixture{}, ClassifyFailure: openaiauth.ClassifyInferenceFailure},
 		Client:           &http.Client{Transport: roundTripFunc(response)}})
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +246,7 @@ func TestManagedRedirectPolicyKeepsStaticClientBehavior(t *testing.T) {
 				client.CheckRedirect = func(*http.Request, []*http.Request) error { redirects++; return nil }
 			}
 			g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, Channels: managedTestChannels(), Client: client,
-				ManagedInference: &ManagedInferenceOptions{Enabled: true, Credentials: a, DirectoryCaller: d, ValidateModel: openaiauth.ValidateVisibleModel}})
+				ManagedInference: &ManagedInferenceOptions{Enabled: true, Credentials: a, DirectoryCaller: d, ValidateModel: openaiauth.ValidateVisibleModel, FailureRecorder: &managedRecorderFixture{}, ClassifyFailure: openaiauth.ClassifyInferenceFailure}})
 			if err != nil {
 				t.Fatal(err)
 			}

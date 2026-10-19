@@ -13,6 +13,7 @@ import (
 	cfgv2 "minigateway/internal/foundation/contracts/configuration/v2"
 	auth "minigateway/internal/foundation/contracts/upstreamauth/v1"
 	authv2 "minigateway/internal/foundation/contracts/upstreamauth/v2"
+	authv3 "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	"minigateway/internal/model"
 )
 
@@ -149,6 +150,9 @@ func (r *managedChannels) CreateManagedChannel(ctx context.Context, in *cfgv2.Ma
 		if err := tx.Create(&cred).Error; err != nil {
 			return err
 		}
+		if err := createEligibility(tx, cred); err != nil {
+			return err
+		}
 		return syncAbilities(tx, ch)
 	})
 	if err != nil {
@@ -193,6 +197,7 @@ func (r *managedChannels) change(ctx context.Context, id uint, revision int64, i
 		if cred.BindingRevision != revision {
 			return cfgv2.ErrConflict
 		}
+		oldCredential := cred
 		if !disable {
 			if err := managedBindingValidate(tx, in); err != nil {
 				return err
@@ -229,7 +234,7 @@ func (r *managedChannels) change(ctx context.Context, id uint, revision int64, i
 		if changed.RowsAffected != 1 {
 			return cfgv2.ErrConflict
 		}
-		return nil
+		return rebindEligibility(tx, oldCredential, cred)
 	})
 	if err != nil {
 		return nil, err
@@ -242,7 +247,7 @@ func (r *managedChannels) change(ctx context.Context, id uint, revision int64, i
 }
 
 func (r *upstreamAccounts) AcquireAccess(ctx context.Context, in authv2.AccessRequest) (out authv2.AccessCredential, err error) {
-	if in.CredentialID == 0 || in.ExpectedBindingRevision <= 0 || !auth.ValidAccountID(in.AccountID) || in.ExpectedRevision <= 0 || in.ExpectedCredentialRevision <= 0 || in.OwnerID == 0 || in.TokenID == 0 || !managedSlugValid(in.Model) {
+	if !validAccessRequest(in) {
 		return out, auth.ErrInvalid
 	}
 	err = r.write(ctx, true, func(tx *gorm.DB) error {
@@ -290,11 +295,18 @@ func (r *upstreamAccounts) AcquireAccess(ctx context.Context, in authv2.AccessRe
 		if e != nil || !row.ScopesKnown || !slices.Contains(scopes, "resource.invoke") || !slices.Contains(scopes, "chatgpt.tokens.use.direct") {
 			return auth.ErrConflict
 		}
+		gate, e := findEligibility(tx, c)
+		if e != nil {
+			return e
+		}
+		if gate.Blocked {
+			return authv3.ErrBlocked
+		}
 		tokens, e := r.store.openUpstreamAccount(tx, row)
 		if e != nil {
 			return e
 		}
-		out = authv2.AccessCredential{AccountID: row.ID, Revision: row.RowRevision, CredentialRevision: row.CredentialRevision, AccessToken: tokens.AccessToken, ExpiresAt: tokens.ExpiresAt}
+		out = authv2.AccessCredential{AccountID: row.ID, Revision: row.RowRevision, CredentialRevision: row.CredentialRevision, GateEpoch: gate.GateEpoch, AccessToken: tokens.AccessToken, ExpiresAt: tokens.ExpiresAt}
 		return nil
 	})
 	if err != nil {

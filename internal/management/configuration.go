@@ -9,6 +9,7 @@ import (
 
 	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 	managed "minigateway/internal/foundation/contracts/configuration/v2"
+	eligibility "minigateway/internal/foundation/contracts/upstreamauth/v3"
 )
 
 // ConfigurationStore is the persistence consumed by configuration use cases.
@@ -62,12 +63,13 @@ func (p *publication) snapshot() PublicationStatus {
 // Configuration serializes persistence and runtime publication across all
 // channel, credential and price writes. It is shared by legacy and session APIs.
 type Configuration struct {
-	mu       sync.Mutex
-	store    ConfigurationStore
-	managed  managed.Repository
-	epoch    string
-	channels publication
-	prices   publication
+	mu          sync.Mutex
+	store       ConfigurationStore
+	managed     managed.Repository
+	eligibility eligibility.EligibilityAdmin
+	epoch       string
+	channels    publication
+	prices      publication
 }
 
 func NewConfiguration(st ConfigurationStore, channels, prices func() error) *Configuration {
