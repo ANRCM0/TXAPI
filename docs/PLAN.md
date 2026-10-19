@@ -429,6 +429,7 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 5. **验证：**独立 Python 虚拟环境、每客户端进程25秒总预算、唯一 reader、fixture进程 Kill/Wait 清理；核对8行历史/usage、7已知加1uncertain、完整上下文与工具call_id、真实Key鉴权及私有头隔离。集中受影响包/脚本检查与精确头完整CI，默认全量Go测试跳过需要Python依赖的helper。
 6. **协作/边界：**这是固定SDK与生产组件组装的受控兼容证据，不等于实际main镜像、官方Provider、其它SDK/Codex、自动恢复、收费或长期容量验收；实际镜像由P6独立批验证。官方文档 WebSocket mode 用于核对connect/create方式，当前固定安装包源码另核对精确版本签名，无第三方实现复制。
 2026-10-20 本地证据：固定 openai3.8.0/websockets15.0.1 的真实 socket 回归通过，SDK 解析8次新生成的类型化事件，同连接前三轮和新连接完整上下文/工具关联正确；HTTP 检索不触发上游。5次 completed、1次failed、1次incomplete与1次客户端取消分别保留事实；8条历史/usage和8条已发送attempt独立核对，取消历史uncertain且父链拒绝不发送，5条已知3 Token保留，另3条未知不补零。非成功终态及父链拒绝可能按既有策略关闭连接，仅对成功多轮声明同连接复用，后续使用明确新连接。Windows GOARCH=amd64 完整cmd/gateway回归通过（50.940s）及该包vet通过；新增独立持久事实断言随后在同一SDK harness内通过。Python AST、CI结构及diff检查通过。此处仍是生产组件组装和受控Provider证据，精确头完整CI另验，不表示官方服务或SDK自动重连通过。
+P4 本批组合验证扩展：①在同一SDK脚本增加显式deployed入口，复用全部8个固定SDK用例；②仅扩展已受控验收的native_ws_delivery.py、fixture与既有delivery步骤，继续使用当前HTTP/WS接口；③实际gateway镜像和生产拨号/权限不变，独立非root Python SDK镜像只在构建阶段安装固定依赖，运行时加入唯一Docker internal网络；④在原6次部署生成之后执行8次SDK生成，核对全部14次create、2条unknown不可重放、13sealed/1interrupted用量、历史及恢复，不把组件与镜像的分离证据直接等同组合证据；⑤复用SDK客户端的25秒执行预算、容器命名/显式清理、网络与只读挂载检查，Linux精确头delivery验收；⑥本机无Docker，组合只能由CI证明，原有局部证据保留，不宣称真实Provider、自动恢复或收费许可。
 ### P5：账号信号与调度评估
 
 - **层级/目录：**L1 scheduler/gateway；L3 routes 查询。
