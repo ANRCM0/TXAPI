@@ -154,7 +154,8 @@ func (r *usageRecorder) Begin(ctx context.Context, in history.Start) error {
 	if !usageLimitsValid(r.limits) || !usageID(in.ID) || !usageText(in.RequestID, 64, true) || !usageText(in.Model, 256, false) || !usageText(string(in.Operation), 32, false) || in.MaxAttempts < 1 || in.MaxAttempts > 11 || in.QuotationVersion != "" && !quotationVersionID(in.QuotationVersion) {
 		return history.ErrInvalid
 	}
-	return r.write(ctx, in.ID, func(tx *gorm.DB, p access.Principal) error {
+	capacityRejected := false
+	err := r.write(ctx, in.ID, func(tx *gorm.DB, p access.Principal) error {
 		view, err := resolveTokenView(tx.Where("id = ? AND user_id = ?", p.TokenID, p.UserID))
 		if err != nil {
 			if errors.Is(err, access.ErrUnauthorized) {
@@ -195,12 +196,21 @@ func (r *usageRecorder) Begin(ctx context.Context, in history.Start) error {
 				return err
 			}
 			if count >= int64(bound) {
-				return history.ErrCapacity
+				// A business rejection must not undo this pass's bounded expiry cleanup.
+				capacityRejected = true
+				return nil
 			}
 		}
 		now := time.Now().UnixMilli()
 		return tx.Create(&model.UsageInvocation{ID: in.ID, UserID: p.UserID, TokenID: p.TokenID, RequestID: in.RequestID, Operation: string(in.Operation), Model: in.Model, Stream: in.Stream, QuotationVersion: in.QuotationVersion, MaxAttempts: in.MaxAttempts, State: "open", CreatedAt: now, ExpiresAt: now + int64(r.limits.RetentionSeconds)*1000, Host: history.HostFacts{Phase: execution.NotDispatched}, StartFingerprint: fingerprint}).Error
 	})
+	if err != nil {
+		return err
+	}
+	if capacityRejected {
+		return history.ErrCapacity
+	}
+	return nil
 }
 
 func quotationVersionID(s string) bool {

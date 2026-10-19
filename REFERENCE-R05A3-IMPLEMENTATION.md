@@ -162,6 +162,13 @@ recognized as orphan at startup. Expired rows still consume capacity until
 actually deleted. Expiry means metadata is no longer retained, not nonexecution.
 No extra timer, worker, async writer or unbounded version/cache map is introduced.
 
+A capacity rejection commits successful bounded expiry cleanup before returning
+ErrCapacity. Otherwise an older unrelated owner's expired records could be
+repeatedly deleted and rolled back, preventing cleanup from ever reaching the
+requesting owner's records. Authorization failures and actual storage/insert
+failures retain their transaction rollback behavior. This cleanup cannot change
+financial records or admit the rejected invocation.
+
 All store operations honor finite contexts. Post-execution persistence uses a
 two-second context detached from client cancellation while preserving the
 original trusted binding. Closing check/active registration/Begin admission use

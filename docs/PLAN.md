@@ -75,7 +75,7 @@ quantities in two schema16 metadata tables. Session-authorized owner/admin APIs
 are read-only; quantities remain distinct from charges, spend and holds.
 Exact admission/failure/retention/close boundaries are recorded before source in
 the [decision](../REFERENCE-R05A3-IMPLEMENTATION.md) and
-[operating guide](reference/usage-history.md). Final local build/vet,1599 tests
+[operating guide](reference/usage-history.md). Final local build/vet,1600 tests
 across40 packages and actual-main recovery smoke pass. Exact-head complete CI,
 merge and independent main acceptance are pending. Native WS/background/claimed
 capture, R05b charging and real OAuth/Provider/SDK gates are not opened.

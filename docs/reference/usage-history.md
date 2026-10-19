@@ -150,6 +150,11 @@ remain counted/readable; restart must first identify orphans. Expired rows still
 occupy capacity until actually deleted. Metadata expiry never deletes a billing
 hold, changes response idempotency or proves that no execution happened.
 
+Capacity rejection preserves successful bounded expiry cleanup, so later requests
+can continue making progress through older expired records. It does not admit
+the rejected invocation. Authorization or storage/insert failures retain normal
+transaction rollback; cleanup never changes balances, holds or financial history.
+
 Writes are synchronous and finite. Post-execution writes detach client
 cancellation while retaining the trusted owner/key binding. Gateway shutdown
 rejects new recorded work, joins every admitted recording including failures,

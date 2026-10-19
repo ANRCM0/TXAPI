@@ -304,6 +304,107 @@ func TestUsageHistoryCapacityCleanupAndLiveExpiry(t *testing.T) {
 	}
 }
 
+func TestUsageHistoryCapacityRejectionCommitsBoundedExpiryCleanup(t *testing.T) {
+	f := usageTestFixture(t)
+	for _, row := range []any{
+		&model.BillingBalance{OwnerType: "user", OwnerID: f.owner.ID, UsedUnits: 19, ReservedUnits: 71},
+		&model.BillingBalance{OwnerType: "key", OwnerID: f.token, UsedUnits: 19, ReservedUnits: 71},
+		&model.BillingReservation{ID: strings.Repeat("c", 32), UserID: f.owner.ID, TokenID: f.token, PriceVersion: strings.Repeat("d", 64), State: "pending", ReservedUnits: 71, ProviderHeldUnits: 23, LeaseUntil: time.Now().Add(time.Hour).UnixMilli()},
+		&model.BillingPriceVersion{Version: strings.Repeat("d", 64), Payload: `{"format":1,"unchanged":"cleanup-financial-sentinel"}`},
+	} {
+		if e := f.st.DB().Create(row).Error; e != nil {
+			t.Fatal(e)
+		}
+	}
+	financialSnapshot := func() []byte {
+		t.Helper()
+		values := make(map[string][]map[string]any)
+		for _, table := range []string{"billing_balances", "billing_reservations", "billing_attempts", "billing_resolutions", "billing_price_versions", "users", "tokens"} {
+			var rows []map[string]any
+			if e := f.st.DB().Table(table).Find(&rows).Error; e != nil {
+				t.Fatal(e)
+			}
+			values[table] = rows
+		}
+		encoded, e := json.Marshal(values)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return encoded
+	}
+	before := financialSnapshot()
+	parents := make([]model.UsageInvocation, 1002)
+	children := make([]model.UsageAttemptReceipt, len(parents))
+	expiredAt := time.Now().Add(-time.Hour).UnixMilli()
+	for i := range parents {
+		owner, token := f.other.ID, f.otherToken
+		if i >= 1000 {
+			owner, token = f.owner.ID, f.token
+		}
+		id := fmt.Sprintf("usage_%032x", 100000+i)
+		parents[i] = model.UsageInvocation{ID: id, UserID: owner, TokenID: token, State: "sealed", MaxAttempts: 1, AttemptCount: 1, ExpiresAt: expiredAt + int64(i)}
+		children[i] = model.UsageAttemptReceipt{InvocationID: id, Number: 1, State: "observed", Completeness: "unknown", Source: "unknown"}
+	}
+	if e := f.st.DB().CreateInBatches(&parents, 50).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := f.st.DB().CreateInBatches(&children, 50).Error; e != nil {
+		t.Fatal(e)
+	}
+	r := f.st.UsageRecorder(model.UsageHistoryLimits{InstanceRecords: 1002, OwnerRecords: 2, RetentionSeconds: 3600})
+	start := usageStart(90000)
+	if e := r.Begin(f.ctx, start); e != history.ErrCapacity {
+		t.Fatal("first admission should remain rejected by owner capacity", e)
+	}
+	var parentCount, childCount, admitted int64
+	if e := f.st.DB().Model(&model.UsageInvocation{}).Count(&parentCount).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := f.st.DB().Model(&model.UsageAttemptReceipt{}).Count(&childCount).Error; e != nil {
+		t.Fatal(e)
+	}
+	if parentCount != 2 || childCount != 2 {
+		t.Fatalf("capacity rejection rolled back bounded expiry progress: parents=%d children=%d; want 2 each", parentCount, childCount)
+	}
+	if e := f.st.DB().Model(&model.UsageInvocation{}).Where("id = ?", start.ID).Count(&admitted).Error; e != nil || admitted != 0 {
+		t.Fatal("capacity rejection created a new invocation", admitted, e)
+	}
+	if !bytes.Equal(before, financialSnapshot()) {
+		t.Fatal("capacity cleanup changed financial authority")
+	}
+	if e := r.Begin(f.ctx, start); e != nil {
+		t.Fatal("next admission could not advance past expired owner records", e)
+	}
+	if e := f.st.DB().Model(&model.UsageInvocation{}).Count(&parentCount).Error; e != nil || parentCount != 1 {
+		t.Fatal("second admission did not replace expired records", parentCount, e)
+	}
+	if e := f.st.DB().Model(&model.UsageAttemptReceipt{}).Count(&childCount).Error; e != nil || childCount != 0 {
+		t.Fatal("second cleanup retained expired children", childCount, e)
+	}
+	// An insert failure still rolls its preceding cleanup back with the transaction.
+	if e := f.st.DB().Create(&parents[0]).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := f.st.DB().Create(&children[0]).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := f.st.DB().Exec("CREATE TRIGGER fail_usage_insert_after_cleanup BEFORE INSERT ON usage_invocations BEGIN SELECT RAISE(ABORT, 'private insert failure after cleanup'); END").Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := r.Begin(f.ctx, usageStart(90001)); e != history.ErrUnavailable {
+		t.Fatal("insert failure must remain fixed unavailable", e)
+	}
+	if e := f.st.DB().Model(&model.UsageInvocation{}).Where("id = ?", parents[0].ID).Count(&parentCount).Error; e != nil || parentCount != 1 {
+		t.Fatal("insert failure committed cleanup", parentCount, e)
+	}
+	if e := f.st.DB().Model(&model.UsageAttemptReceipt{}).Where("invocation_id = ?", parents[0].ID).Count(&childCount).Error; e != nil || childCount != 1 {
+		t.Fatal("insert failure split parent/child cleanup", childCount, e)
+	}
+	if !bytes.Equal(before, financialSnapshot()) {
+		t.Fatal("expiry retries changed financial authority")
+	}
+}
+
 func TestUsageHistoryConcurrentCapacityAndPrepareConflict(t *testing.T) {
 	f := usageTestFixture(t)
 	limits := model.UsageHistoryLimits{InstanceRecords: 2, OwnerRecords: 2, RetentionSeconds: 3600}

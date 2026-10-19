@@ -725,14 +725,14 @@ overall reference-adoption goal are not declared complete.
 
 2026-10-19, Windows PowerShell, Go1.26.3, GOARCH=amd64, CGO_ENABLED=0.
 The41 changed/new non-Markdown source manifest has LF-normalized digest
-`13f546b4353f91438b9efe62cde6d450f5aeb2c2fa2d20aefb799fc28fc0824f`.
+`b208ea58dd86d673dda57860a40a4f12e950cd79487e222769077ce9bf8642b0`.
 Raw logs, manifests and helper results are external in
 D:\my-project\TXAPI-references\validation-r05a3.
 
 | Actual Command / Check | Final Result |
 |---|---|
 | go build ./...; go vet ./... | PASS |
-| go test -json -count=1 ./... |1599 tests/subtests and40 test packages PASS; seven expected subprocess helper SKIP;37 packages without tests |
+| go test -json -count=1 ./... |1600 tests/subtests and40 test packages PASS; seven expected subprocess helper SKIP;37 packages without tests |
 | go mod tidy; unchanged modules; core/protocol dependency filter | PASS; no added third-party module |
 | architecture/visibility/public signatures and HTTP contracts | PASS in final complete suite; all24 prior public packages and104 prior operations/schemas remain exact; one candidate package and four read operations appended |
 |34 touched-Go gofmt; git diff --check; Python AST/JSON and batch Markdown links | PASS; unrelated source not formatted;137 local links resolve |
@@ -744,7 +744,8 @@ panic correction. Earlier risk/facts/three-process-kill combinations and the
 full initial1595-test source passed before that correction; their logs/manifests
 are preserved with before-final-panic-fix names and are not used as evidence
 for later source. The corrected source was rebuilt, vetted and completely tested
-again. A final independent read-only review found no actionable issue.
+again. A final independent read-only review found no actionable issue; the later
+capacity correction also received its own independent read-only review.
 
 Actual store owner command summaries (not invented raw logs): the complete store
 package passed in21.330s, upgrade/usage groups in7.702s and its later additional
@@ -758,6 +759,26 @@ Final automatic Linux race, main smoke, schema16 container upgrade/backup/restor
 exact-head acceptance, merge-tree comparison and independent main CI remain
 integration gates. No workflow trigger, old regression or financial rule was
 removed or weakened. No image, tag or release is published by this batch.
+
+Before merge, head f406503 passed complete automatic push39206390975 and
+PR39206431769 check/delivery, but a separate capacity audit found a missing
+retention-progress regression. Begin deleted at most1000 expired parents inside
+the admission transaction; a subsequent owner-capacity rejection rolled those
+deletions back. An older unrelated owner's records could therefore prevent a
+full owner from ever progressing to its own expired rows. The regression on
+the old code failed in2.588s with1002 parents/children still retained.
+
+The focused fix commits successful bounded cleanup on a capacity rejection,
+then returns ErrCapacity without admitting the invocation. Current Key/model
+authorization and the SQLite write lock remain in the same transaction; actual
+SQL/insert/commit failures retain rollback/error precedence. The new test proves
+the first rejected pass removes1000 expired parents/children, the next request
+removes the remaining two and admits one new parent, and an injected insert
+failure still rolls cleanup back. Existing nonzero balances/holds, price
+history, users and Key projections remain exact. The new directed test passed
+in2.489s and all UsageHistory groups in7.139s. These are owner command summaries,
+not invented raw logs. The full f406503 results are preserved separately and
+do not accept the corrected source; final local and automatic CI run again.
 
 ## 后续批次
 
