@@ -442,6 +442,18 @@ func main() {
 		AdminAuth:  middleware.AdminAuth(cfg.AdminKey),
 	})
 
+	refreshRuntime, err := startUpstreamRefreshRuntime(context.Background(), cfg.UpstreamAccounts, st, func(ctx context.Context) error {
+		return refreshPublication(ctx, func() bool {
+			status := configurationService.Apply().Channels
+			return status.LastError == "" && status.DesiredRevision == status.AppliedRevision
+		})
+	}, nil)
+	if err != nil {
+		slog.Error("启动托管账号刷新失败", "err", err)
+		os.Exit(1)
+	}
+	defer joinUpstreamRefreshRuntime(refreshRuntime)
+
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
 		Handler:           httpEngine,
@@ -472,6 +484,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	slog.Info("正在关闭网关...")
+	refreshRuntime.Stop()
 	nativeResponsesRuntime.Stop()
 	generationRuntime.Stop()
 	responsesRuntime.Stop()

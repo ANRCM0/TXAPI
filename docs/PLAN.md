@@ -250,12 +250,20 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 
 ### P2：有界自动刷新
 
-- **层级/目录：**L1 upstreamauth owner 与统一 lifecycle；组装根仅负责启动、取消和 join。
-- **依赖入口：**复用 claim/start/complete/failure/recover、现有 List 和 lifecycle 的已批准语义。
-- **地基影响：**L1 增量；先评估现有分页能力，缺候选查询或生命周期端口再提 CR，不在 worker 直接读取私有 store。
-- **行为/契约：**候选扫描、Provider QPS/并发、周期预算、退避与队列有界；请求刷新和后台刷新使用同一入口，started/uncertain 不重放。
-- **验收：**分页公平、重复 worker、手动刷新/停用/重授权竞争、轮换后持久失败、取消 join、强杀重启，以及单 Provider 故障隔离。
-- **协作影响：**与 P1 共用账号状态机；迁移/配置统一协调，不新增第二套 OAuth 或分布式协调设施。
+- **层级/目录：**L1 `internal/upstreamidentity` 持有 worker；`internal/config` 定义启动参数，`cmd/gateway` 只构造既有 Manager/Provider/caller、注入配置发布、启动、取消和 join。
+- **依赖入口：**复用 `upstreamauth/v1.Manager.List/Refresh`、既有 claim/start/complete/failure/recover 和 `lifecycle/v1.Drainer`；通过既有管理配置 Apply 发布代次。worker 不读私有 store、不发送 HTTP。
+- **地基影响：**既有 owner 内增量，无公开地基契约、迁移、管理 API 或 L0 变化。当前账号容量 1000 与每页 100 可满足完整扫描，未增加候选查询接口。
+- **行为/契约：**默认关闭；单 OpenAI Provider 串行、无队列，完整分页扫描后按账号 ID 轮转。扫描失败/重复/超限时本周期不刷新；started/uncertain 不重放。刷新与手动 CLI 共用同一 claim/CAS 权威，发布失败只修复发布，不重做刷新。
+- **验收：**分页公平、跨周期限速、预算、状态过滤、重复 worker/手动竞争、轮换后持久失败、取消 join、四个持久点的真实子进程强杀重启与 Provider 连续失败冷却；本批精确提交的完整检查记录于 PR，真实 OAuth/账号验收暂缓。
+- **协作影响：**刷新独立于推理开关和收费模式，但要求既有 AEAD 密钥。账号代次变化通过既有配置 owner 更新推理快照；关闭先取消/join worker，再释放 caller 和共享 gateway/store。关闭刷新或旧版本回退保留全部账号持久状态，不新增第二套 OAuth 或分布式协调设施。
+
+本切片参考 sub2api 固定 `f2e5b55f3e8069df1c02a9a27af537b5fdefa64e` 的 `backend/internal/service/token_refresh_service.go`（Start/Stop、`processRefreshContext` 的全量分页、Provider 门控），用 TXAPI 的 Go 类型和既有账号状态机独立实现；未复制参考项目的存储、锁、网络发送或结果重放流程，许可归属沿用文末记录。
+
+`upstream_accounts.refresh` 为启动配置：`enabled: false`，`interval_seconds: 30`（5..3600）、`before_expiry_seconds: 600`（30..86400 且不小于扫描间隔）、`max_attempts_per_cycle: 4`（1..16）。启用时立即扫描，之后每周期结束再等间隔；只刷新 active/openai、有 refresh token、临近到期且已过 NextRefreshAt 的账号，不将 reauthorize/uncertain 自动恢复为可发送。
+
+每周期最多 60 秒、扫描最多 5 秒/10 页/1000 条，单次 Refresh 最多 20 秒；既有 Manager 可另用最多 5 秒持久化取消结果。Provider 相邻尝试至少 1 秒，同账号至少 60 秒；连续两次 unavailable/uncertain/deadline（含跨周期）暂停该 Provider 60 秒。内存计时只作节流，持久 claim/fence 才是执行权威；进程重启不凭内存节流证明 exactly-once。
+
+首次非空扫描、检测到账号集合/代次变化和每次 Refresh 后均通过 Apply 发布；发布失败保留待修复标记并阻止后续刷新，下次完整扫描先修复发布。Apply 沿用同步发布的既有生命周期，context 在入口和返回时核验，不能中断已开始的 Apply；join 超时保留依赖并继续等待，不后台遗留占用 store 的 worker。强杀测试在 claim、started、上游轮换返回但未保存、保存完成四点分别 Kill/Wait，再模拟 lease 到期验证恢复，不把缩短模拟时钟当真实等待或真实 Provider 证据。
 
 ### P3：账号资格与限流恢复
 

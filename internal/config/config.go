@@ -289,6 +289,7 @@ func (c *Config) applyChannelKeyEnv() {
 }
 
 func (c *Config) applyDefaults() {
+	c.UpstreamAccounts.defaults()
 	c.UsageHistory.defaults()
 	if c.Billing.Mode == "" {
 		c.Billing.Mode = "legacy"
@@ -366,6 +367,9 @@ func (c *Config) applyDefaults() {
 // 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
 // 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	if err := c.UpstreamAccounts.validate(c.Database.CredentialKeysFile); err != nil {
+		return err
+	}
 	if c.UpstreamAccounts.Inference.Enabled && (c.Billing.Mode != "disabled" || strings.TrimSpace(c.Database.CredentialKeysFile) == "" || !c.Responses.Enabled) {
 		return fmt.Errorf("upstream_accounts.inference.enabled requires billing.mode disabled, database.credential_keys_file and responses.enabled")
 	}

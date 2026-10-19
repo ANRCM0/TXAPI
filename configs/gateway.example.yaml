@@ -173,6 +173,12 @@ responses:
 # 真实使用时替换 base_url、模型名和两个 key 占位符；
 # 渠道上游 Key 也可用环境变量 GATEWAY_CHANNEL_KEY_<id> 覆盖（部署时更推荐）。
 upstream_accounts:
+  refresh:
+    # Default off; requires credential encryption. No real account is auto-added.
+    enabled: false
+    interval_seconds: 30
+    before_expiry_seconds: 600
+    max_attempts_per_cycle: 4
   inference:
     # Requires disabled billing, credential encryption and Responses enabled.
     # Create the single real account/owner/Key/model binding through the admin API.
