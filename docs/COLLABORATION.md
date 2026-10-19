@@ -1,12 +1,12 @@
 # 多团队开发与框架基线
 
-核对日期：2026-10-19，集成基线 `master/bdcb307`。A1–A4、S6/M1、A01/A02/M2 和 FC-001 四层地基均已验收合并，L0/L1/L2 v1 已冻结。FC-002 追加冻结 `background/v1` / `responses/v2` 的 disabled 子集，R03 已接入 disabled 原生 WS 产品消费者；完整 S5、A03–A06、R00–R07 仍未完成。活动排期以 [PLAN](PLAN.md) 为准，精确验收见 [历史索引](PLAN.md#批次与验收记录) 和 [能力矩阵](reference/reference-adoption-status.md)。
+核对日期：2026-10-19，本次整合基线 `master/290ba5d`。A1–A4、S6/M1、A01/A02/M2 和 FC-001 四层地基均已验收合并，L0/L1/L2 v1 已冻结。FC-002 追加冻结 `background/v1` / `responses/v2` 的 disabled 子集，R03 已接入 disabled 原生 WS 产品消费者；完整 S5、A03–A06、R00–R07 仍未完成。活动排期以 [PLAN](PLAN.md) 为准，精确验收见 [历史索引](PLAN.md#批次与验收记录) 和 [能力矩阵](reference/reference-adoption-status.md)。
 
-L3 按独立目录与 [已登记公开接口](reference/foundation-integration-v1.md) 协作，生产依赖遵守四层约束；新增候选接口不自动冻结。共享入口、注册点、schema 版本、OpenAPI、main 与 CI 单点协调，地基契约/行为变更按 [Agent 六项协议](../AGENTS.md#地基分层与-agent-工作协议) 先具名提案确认。R04a 账号工具在独立未提交工作树推进，本批分支/文档整理不代改或代提交其源码。
+L3 按独立目录与 [已登记公开接口](reference/foundation-integration-v1.md) 协作，生产依赖遵守四层约束；新增候选接口不自动冻结。共享入口、注册点、schema 版本、OpenAPI、main 与 CI 单点协调，地基契约/行为变更按 [Agent 六项协议](../AGENTS.md#地基分层与-agent-工作协议) 先具名提案确认。用户现已要求整合保留分支；R04a 原始工作树快照迁入本批，R06c 账本展示恢复集成，共享文件由本批单点协调，原工作树/index 保留。
 
 core 负责 HTTP/WS 中转和 I/O 事实；业务层负责身份、准入、路由、账务、任务/会话；兼容层负责协议、客户端 API、扩展与前端应用契约。功能复用唯一执行、授权、账本和迁移权威，不通过直接导入地基实现绕过公开入口。F0 是初始接线基线，其历史通过不代替后续批次验收。多人协作不为产品新增团队/组织租户。
 
-当前机器可读基线为 [OpenAPI 0.11.0 / 111 个操作](openapi.json)，schema v16；A02 的 0.4.0 / 91 操作及各旧阶段版本仅说明对应历史批次。运行范围分别见 [HTTP](reference/responses-http.md)、[历史](reference/responses-history.md)、[后台](reference/responses-background.md)、[WS](reference/responses-websocket.md)。收费、真实上游和新前端按各自独立门槛推进。
+当前机器可读基线为 [OpenAPI 0.11.0 / 111 个操作](openapi.json)，本批追加 schema v17；A02 的 0.4.0 / 91 操作及各旧阶段版本仅说明对应历史批次。运行范围分别见 [HTTP](reference/responses-http.md)、[历史](reference/responses-history.md)、[后台](reference/responses-background.md)、[WS](reference/responses-websocket.md)。收费、真实上游和新前端按各自独立门槛推进。
 
 ## 1. 可以并行推进的分工
 
@@ -142,7 +142,7 @@ type Admission interface {
 
 ## 3. 前后端契约
 
-唯一机器可读 HTTP 契约：[openapi.json](openapi.json)，当前为 `0.11.0` / 111 个操作；主线 schema v16。A02 `0.4.0` / 91、A01 `0.3.0` / 80、S6 `0.2.3` / 79 为各自已验收历史基线。路径沿用 `/api/...` 与 `/v1/...`；版本标识契约文档，不为 URL 增加隐式前缀，不承诺完整官方协议或真实客户端全兼容。
+唯一机器可读 HTTP 契约：[openapi.json](openapi.json)，当前为 `0.11.0` / 111 个操作；主线 本批追加 schema v17。A02 `0.4.0` / 91、A01 `0.3.0` / 80、S6 `0.2.3` / 79 为各自已验收历史基线。路径沿用 `/api/...` 与 `/v1/...`；版本标识契约文档，不为 URL 增加隐式前缀，不承诺完整官方协议或真实客户端全兼容。
 
 - 新前端使用 `/api/auth`、`/api/admin`、`/api/me`；旧 `/api/channels` 等路径标记 deprecated，暂保留原管理密钥鉴权。
 - `APIKey` 为无明文 metadata，`APIKeyCreated` 才有一次性 key。不要将数据库 model.Token 直接作为前端所有场景的通用类型。

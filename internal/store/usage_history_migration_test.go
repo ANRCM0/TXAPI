@@ -54,10 +54,10 @@ func TestUsageHistoryV16UpgradePreservesV15AuthoritiesAndOpaqueContent(t *testin
 	for _, table := range tables {
 		before[table] = snapshot(table)
 	}
-	if e := st.DB().Migrator().DropTable(&model.UsageAttemptReceipt{}, &model.UsageInvocation{}); e != nil {
+	if e := st.DB().Migrator().DropTable(&model.ManagedUpstreamAccount{}, &model.UsageAttemptReceipt{}, &model.UsageInvocation{}); e != nil {
 		t.Fatal(e)
 	}
-	if e := st.DB().Where("version = ?", 16).Delete(&model.SchemaMigration{}).Error; e != nil {
+	if e := st.DB().Where("version > ?", 15).Delete(&model.SchemaMigration{}).Error; e != nil {
 		t.Fatal(e)
 	}
 	var released []model.SchemaMigration
@@ -78,7 +78,7 @@ func TestUsageHistoryV16UpgradePreservesV15AuthoritiesAndOpaqueContent(t *testin
 			}
 		}
 		var got []model.SchemaMigration
-		if e := st.DB().Order("version").Find(&got).Error; e != nil || len(got) != len(released)+1 || got[len(got)-1].Version != 16 {
+		if e := st.DB().Order("version").Find(&got).Error; e != nil || len(got) != len(released)+2 || got[len(got)-2].Version != 16 || got[len(got)-1].Version != 17 {
 			t.Fatal(got, e)
 		}
 		for i, old := range released {

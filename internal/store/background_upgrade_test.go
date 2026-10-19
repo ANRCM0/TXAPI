@@ -49,7 +49,7 @@ func TestBackgroundV14UpgradePreservesV13StateWithoutInventingDeletionOrNamespac
 			t.Fatalf("v14 rewrote v13 accepted facts: before=%+v after=%+v", row, got)
 		}
 		var ledger []model.SchemaMigration
-		if e = st.DB().Order("version").Find(&ledger).Error; e != nil || len(ledger) != len(released)+3 || ledger[len(ledger)-3].Version != 14 || ledger[len(ledger)-2].Version != 15 || ledger[len(ledger)-1].Version != 16 {
+		if e = st.DB().Order("version").Find(&ledger).Error; e != nil || len(ledger) != len(released)+4 || ledger[len(ledger)-4].Version != 14 || ledger[len(ledger)-3].Version != 15 || ledger[len(ledger)-2].Version != 16 || ledger[len(ledger)-1].Version != 17 {
 			t.Fatal("v14 migration not appended once", e)
 		}
 		for i, old := range released {
@@ -106,7 +106,7 @@ func TestBackgroundV15UpgradePreservesV14TaskEventAndMigrationFacts(t *testing.T
 			t.Fatal("v15 altered event ciphertext", e)
 		}
 		var ledger []model.SchemaMigration
-		if e = st.DB().Order("version").Find(&ledger).Error; e != nil || len(ledger) != len(released)+2 || ledger[len(ledger)-2].Version != 15 || ledger[len(ledger)-1].Version != 16 {
+		if e = st.DB().Order("version").Find(&ledger).Error; e != nil || len(ledger) != len(released)+3 || ledger[len(ledger)-3].Version != 15 || ledger[len(ledger)-2].Version != 16 || ledger[len(ledger)-1].Version != 17 {
 			t.Fatal("v15 not appended once", e)
 		}
 		for i, old := range released {

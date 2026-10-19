@@ -4,7 +4,7 @@
 
 ## 当前能做什么
 
-核对日期：2026-10-19，已合并基线 `master/bdcb307`（PR #42），对应完整 Verify `39228308923` 的 check/delivery 成功。当前 [OpenAPI](docs/openapi.json) 为 **0.11.0 / 111 个操作**，数据库 schema v16。详细状态与后续门槛统一见 [开发计划](docs/PLAN.md) 和 [R00–R07 状态矩阵](docs/reference/reference-adoption-status.md)。
+核对日期：2026-10-19。本次从已验收 `master/290ba5d` 整合保留分支，提供 R04a 本地账号命令和 R06c 账本展示；精确本地/CI/合并状态见 [整合记录](docs/history/branch-integration-20261019.md)。当前 [OpenAPI](docs/openapi.json) 为 **0.11.0 / 111 个操作**，数据库 schema v17。详细状态与后续门槛统一见 [开发计划](docs/PLAN.md) 和 [R00–R07 状态矩阵](docs/reference/reference-adoption-status.md)。
 
 | 能力 | 已交付范围 | 配置与限制 |
 |---|---|---|
@@ -15,9 +15,10 @@
 | 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、任务控制台与故障恢复 | 默认关闭，仅 disabled、自包含文本/函数工具；store=false 仍临时保留内容，见 [后台契约](docs/reference/responses-background.md) |
 | 原生 WebSocket | 双端原生连接、单连接串行文本/函数轮次、逐轮授权、连接内最新父 ID 续链 | 默认关闭且仅 disabled；不含收费、持久重连或任意多路复用，见 [WS 契约](docs/reference/responses-websocket.md) |
 | 用量与财务读取 | 原生缓存/推理 Token 明细、版本化售价报价、持久前台 HTTP 用量和个人账本读取 | 均有明确 opt-in/权限范围；观察与报价不等于入账，见 [用量](docs/reference/usage-history.md)、[报价](docs/reference/usage-quotations.md)、[账本](docs/reference/owner-billing.md) |
+| 上游账号命令 | 本地授权/重新授权、元数据列表、单次刷新及停用，独立加密保存 | operator-only，不参与推理路由或自动刷新；候选契约和真实账号范围见 [指南](docs/reference/upstream-accounts.md) |
 | strict 账务 | 定点价格版本、用户/Key 双预留、持久结算、对账和强杀恢复 | S5 仍为 5/6，完整厂商成本上界未完成，原生 Responses/后台/WS 收费尚未开放 |
 
-A1–A4、S6/M1、FC-001 四层地基与 A01/A02/M2 已验收合并；FC-002 与 R03 只完成各自明确的后台/WS 子集。完整 S5、A03–A06 和 R00–R07 目标仍开放。OAuth 账号工具处于独立源码批次，尚未成为主线推理凭据；支付、媒体、分布式和外部 SDK/Runtime 不属于已交付能力。
+A1–A4、S6/M1、FC-001 四层地基与 A01/A02/M2 已验收合并；FC-002 与 R03 只完成各自明确的后台/WS 子集。完整 S5、A03–A06 和 R00–R07 目标仍开放。账号授权工具仅提供本地运维命令，尚未成为推理凭据；支付、媒体、分布式和外部 SDK/Runtime 不属于已交付能力。
 
 已有受控官方 Python SDK、假上游和 CI 证据不代表真实 Provider、OAuth、SDK WS 或所有客户端兼容，也不代表新版本发布、镜像发布或生产收费就绪。
 
@@ -113,6 +114,7 @@ docs/                  活动计划、运行契约与历史证据
 | [贡献约定](CONTRIBUTING.md) / [代理约束](AGENTS.md) | 开发执行与验收规则 |
 | [批次索引](docs/PLAN.md#批次与验收记录) / [吸收记录](REFERENCE-ADOPTION-PROGRESS.md) | 精确提交、失败、命令、CI 与验收边界 |
 | [固定上游快照](docs/reference/upstream-snapshots.md) / [来源通知](THIRD_PARTY_NOTICES.md) | 历史阅读版本、实际复用来源和许可 |
+| [保留分支整合](docs/history/branch-integration-20261019.md) / [账号命令](docs/reference/upstream-accounts.md) / [账本含义](docs/reference/billing-console.md) | 原 WIP 的差异取舍、恢复点、operator-only 账号与账本展示 |
 | [分支与文档整理记录](docs/history/repository-cleanup-20261019.md) | 本地归档、保留工作树与本次整理范围 |
 
 后续先收口正在进行的独立后端批次；成本证明、真实 Provider/客户端、前端恢复及外部 Runtime 分别按 PLAN 的进入条件推进。开发遵循“批量开发 → 集中验证 → 集中修复 → 合并”，不因局部编辑重复全量测试；最终合并保留完整 CI，纯说明文档只检查差异、链接与一致性。

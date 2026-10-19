@@ -188,3 +188,9 @@ L3 发出已持久的不透明协议字节，页尾未追平不能报完整。�
 本次冻结记录只改 Markdown，复用同一 388 路径的已验收代码来源
 `adc6d18a07911a0d5e324c16bff37a126b9df04ce6ee3883abbd2212d820cd8d`；
 只做本地差异/链接/状态一致性，不重复 Go/main 行为测试。正常自动 push/PR/master CI 不修改、不绕过。
+
+## R04a 候选账号命令接入
+
+保留分支整合追加 upstreamauth/v1 候选端口及已具名的 core raw HTTP 原语；全部原冻结声明保持。真实消费者为 main 的 operator 命令、upstreamidentity 协调、纯 OpenAI 协议、loopback 接收器和原 Store/AEAD 桥，未新建推理或账务权威。
+
+新增源码的层级/owner 与公开类型签名已登记，候选接口未冻结。入口/签名与原基线比较见 [API 清单](foundation-api-v1.md#r04a-candidate-upstream-account-operations)，原因、影响和回退见 [R04a 决策](../../REFERENCE-R04A-IMPLEMENTATION.md)。运行命令、权限/错误/生命周期/容量和 schema17 见 [账号指南](upstream-accounts.md)，真实受控消费者及完整验收见 [整合记录](../history/branch-integration-20261019.md)。既有冻结 DoD 不自动覆盖新候选接口。

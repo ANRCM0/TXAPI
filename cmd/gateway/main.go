@@ -74,7 +74,12 @@ func main() {
 	initAdmin := flag.Bool("init-admin", false, "create the first admin from TXAPI_ADMIN_USERNAME/TXAPI_ADMIN_PASSWORD and exit")
 	claimToken := flag.Uint("claim-token", 0, "claim one unowned legacy token ID and exit")
 	claimOwner := flag.Uint("owner-user", 0, "active user ID for -claim-token")
+	upstreamAccount := upstreamAccountFlags(flag.CommandLine)
 	flag.Parse()
+	if err := upstreamAccount.validate(*seedOnly || *initAdmin || *claimToken != 0 || *claimOwner != 0); err != nil {
+		slog.Error("invalid upstream account command", "err", err)
+		os.Exit(2)
+	}
 
 	// 1. 加载配置
 	cfg, err := config.Load(*configPath)
@@ -106,6 +111,17 @@ func main() {
 	// defer 保证任何退出路径都 flush 异步日志：Close 先排空日志队列
 	// 再关连接；普通日志可能因队列满/写库失败而丢弃并计数。
 	defer st.Close()
+	if upstreamAccount.action != "" {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		err := runUpstreamAccount(ctx, st, *upstreamAccount, os.Stdout, nil)
+		cancel()
+		if err != nil {
+			st.Close()
+			slog.Error("upstream account command failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if !st.CredentialEncryptionReady(context.Background()) {
 		slog.Warn("upstream credentials use plaintext compatibility storage; this is not the production security baseline")
 	}

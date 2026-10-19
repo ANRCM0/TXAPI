@@ -88,7 +88,7 @@ func (s *Store) initializeCredentialVault() error {
 			if encrypted != 0 {
 				return ErrCredentialEncryption
 			}
-			return nil
+			return s.initializeUpstreamAccountVault(tx)
 		}
 		if enabled && setting.Value != s.vault.version {
 			return ErrCredentialEncryption
@@ -138,9 +138,11 @@ func (s *Store) initializeCredentialVault() error {
 			}
 		}
 		if !enabled {
-			return tx.Create(&model.Setting{Key: credentialEncryptionSetting, Value: s.vault.version}).Error
+			if err := tx.Create(&model.Setting{Key: credentialEncryptionSetting, Value: s.vault.version}).Error; err != nil {
+				return err
+			}
 		}
-		return nil
+		return s.initializeUpstreamAccountVault(tx)
 	})
 }
 

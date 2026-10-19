@@ -94,3 +94,13 @@ integration; no remote CI/merge acceptance is claimed. Subsequent frontend work
 should preferentially borrow codex-proxy-rs page/interaction/component mechanisms
 and adapt them to the established TXAPI stack with provenance and regression
 checks. Backend R05a work starts separately on the accepted master baseline.
+
+## Integration Resumed
+
+On 2026-10-19 the user requested consolidation of the preserved branches into
+master. This resumes only this existing ledger presentation slice. It is ported
+onto master/290ba5d alongside the independently scoped R04a source integration;
+the original backend-first checkpoint above remains historical. No additional
+page expansion, financial authority, HTTP fields or currency conversion is added.
+The current API/desktop/mobile regressions and final CI/merge evidence are
+recorded in [the integration record](docs/history/branch-integration-20261019.md).

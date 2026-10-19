@@ -1,5 +1,20 @@
 # Foundation API v1：实施清单与迁移边界
 
+## R04a Candidate Upstream Account Operations
+
+The preserved-branch integration appends candidate upstreamauth/v1 (Version="1")
+and the concrete operator command, pure protocol, loopback callback and existing
+SQLite/AEAD consumers. Original frozen declarations remain exact. The reviewed
+raw HTTP addition to core supplies RawInput, RawResult and ExecuteRaw without
+model decoding, billing, OAuth policy or a second execution authority.
+The candidate surface is recorded in public-v1.json; this is not a new freeze.
+
+The [R04a decision](../../REFERENCE-R04A-IMPLEMENTATION.md) defines the L0
+reason, six-part scope and compatibility/rollback. The [operator guide](upstream-accounts.md)
+defines commands, secret handling, single refresh/CAS, uncertain outcomes and
+schema17. Exact integration proof is in the [branch record](../history/branch-integration-20261019.md).
+No inference route, static credential replacement or paid execution is enabled.
+
 ## R06d Candidate Owner Financial Reads
 
 `foundation/contracts/ownerledger/v1` (Version="1") adds Access, Query,
