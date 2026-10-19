@@ -15,6 +15,7 @@ import (
 type executionOutput struct {
 	target       core.Output
 	metadata     map[string]string
+	upstream     upstreamResponseMetadata
 	capture      bytes.Buffer
 	captureLimit int
 	written      int64
@@ -35,6 +36,7 @@ func (o *executionOutput) Commit(ctx context.Context, metadata core.ResponseMeta
 	if values == nil {
 		values = make(map[string]string)
 	}
+	o.upstream.merge(values, metadata.StatusCode)
 	for name, value := range o.metadata {
 		values[name] = value
 	}

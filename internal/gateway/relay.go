@@ -145,6 +145,8 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 			break
 		}
 		triedCred[cred.ID] = true
+		// Metadata belongs to this selected attempt, including pre-send rejections.
+		c.output.upstream = upstreamResponseMetadata{}
 
 		m := buildMeta(ch, cred, req, c.responseID)
 		// 记账用：把命中的渠道/凭据写进 context，handler 收尾时取用。
@@ -391,6 +393,9 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	}
 	input.Timeout = timeout
 	if c.source == invocationForeground {
+		if g.forwardUpstreamMetadata {
+			input.ObserveResponseHeaders = c.output.observeUpstreamHeaders
+		}
 		if failure := g.prepareHTTPStageTimeouts(&input, c.output); failure != nil {
 			return core.Result{Phase: core.NotDispatched, StatusCode: failure.StatusCode, Error: failure, Termination: core.UpstreamError}
 		}

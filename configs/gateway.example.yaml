@@ -17,6 +17,8 @@ server:
     downstream_write_seconds: 0
   # 可选会话亲和。默认关闭；确认上游缓存/延迟有实际收益后再开启。
   session_affinity: false
+  # Opt-in final-attempt request ID and 429/503 Retry-After only; docs/PLAN.md.
+  forward_upstream_metadata: false
   # Opt-in metadata only: up to 512 completed HTTP routing traces for 15 minutes.
   route_diagnostics: false
   # Recommendation comparison only; requires route_diagnostics, never steers traffic.

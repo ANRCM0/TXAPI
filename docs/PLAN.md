@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的合并基线：`master/75be4bf7edc0cb2fe43d5b71e9761de6c84b68d0`，Verify `39286276760` 已成功，包含受控 P1/P2。随后 SDK/P3/真实网络回归 PR #50/#51/#52 各自精确头 Verify 均成功且已合并；最新集成主线 `444bb67331f017dcb1956ba8df10b24f74b1f3ae` 的合并后 Verify 仍在后台，不能继承旧 CI。此证据仅覆盖相应提交，不表示当前 HTTP 阶段超时已通过远端验收。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/07fb7ecbebcdbb9a03d7383f31b1ee2102337b0d`，Verify `39293208953` 已成功，包含受控P1/P2/P3、固定SDK、真实网络回归和HTTP阶段超时；PR #53精确头 `b239adcd1ad31fce47a684682b95406fefd24ca8` 的Verify也成功。容量基线PR #54精确头 `bf8793cbb4b2d3af3ed2bf2431e7a31bf50d660e` 的Verify `39293616754` 已成功并合并；最新主线 `10443877f4a75ca9930bc23f58500e4b0b601c9b` 的合并后Verify尚在后台。此证据仅覆盖相应提交，不表示当前响应头元数据切片已通过远端验收。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -33,11 +33,11 @@
 | 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复 | 默认关闭；仅 disabled、自包含文本/函数工具；收费和后台父链未完成 |
 | 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；持久重连、跨模式续链、收费和任意多路复用未完成 |
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
-| 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；P3合并后CI待确认，真实账号未验收 |
+| 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；真实账号未验收 |
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；后台/WS 明细与收费未覆盖；S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/SDK WS/Codex 完整组合未验收；账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.1` / 117 操作；数据库迁移追加 schema v19，FC-P1/P3-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.2` / 117 操作；数据库迁移追加 schema v19，FC-P1/P3-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -54,7 +54,7 @@
 - FC-001 已冻结 admission、configuration、control、execution、identity、json、ledger、lifecycle、observability、responses、state、text 的 v1，以及 L2 `foundation/httpoutput/v1`、`compat/responses/v1`。L3 接收输出端口，不持有 HTTP writer。
 - FC-002 追加冻结 `background/v1` 与 `responses/v2`，仅覆盖已验收的 disabled、自包含原生后台子集，不扩大收费许可。
 - execution/v2/v3、responsesws、routes、taskcontrol、ownerledger、quotation、usagehistory、upstreamauth 等后续入口只按既有批准范围消费；登记、导出、版本常量和 CI 均不等于全量冻结。
-- 地基公开接口新增或签名、语义、权限、生命周期变化，先提交具体变更请求，列明原因、影响、消费者、迁移、兼容/回退与验证，经用户明确确认后实施。已批准范围内的例行实现不重复请示。
+- 地基公开接口新增或签名、语义、权限、生命周期变化，先记录具体变更请求，列明原因、影响、消费者、迁移、兼容/回退与验证。2026-10-20 用户在当前完成本方案任务中已授权后续同类开发契约调整按最优方案直接实施、集中验证修复，不再逐次请求批准；其他任务仍按其明确授权。真实账号、预算与数据、收费许可和范围后置要求继续按各自约束判断。
 - 新冻结必须具备文档/版本、契约测试、最小运行样例、扩展说明、基础约定、限制清单及独立上层消费者。L0 变化额外说明现有扩展点为何不足和上层迁移；本路线优先保持 L0 稳定。
 
 ## 运行不变量
@@ -167,7 +167,7 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 
 本 CR 已按批准范围完成源码：启动配置/组装 → gateway 前台 source 与 capability 预检 → 同一个 L2 stream 的 v4 进展 → 既有 L0 executor 的单 watchdog/同步输出 deadline → ErrorDetail.Code 与固定 route reason。后台/claimed/WS不接新增阶段。新增阶段超时不重试或处罚凭据；strict仍由既有EndAttempt/Finish处理未知用量和双hold。候选v4已登记并更新公开快照，未宣称冻结。
 
-定向验证已覆盖实际socket的role/usage/finish-only、半事件滴流、文本后idle、Chat/Responses工具、空/incomplete终态；三类等待超时各仅一个attempt且strict保留pending、Provider hold及user/Key双hold。L0定向覆盖write暂停、合法终态与late-timer仲裁、取消/join、TLS/HTTP2不读下游。零配置下的既有End确认与资金事实回归保持原行为。Windows GOARCH=amd64 build ./...、vet ./...、全量 go test ./... -count=1、生产主进程 local.py 冒烟与定向协议/网关/配置/架构检查均已通过。包含当前授权、静态Key/Responses/后台/WS、强杀恢复、usage与shadow回归；小数秒/越界/溢出/拼错阶段字段拒绝启动。精确提交Linux race/交付CI待运行，不将本地通过写成远端验收。
+定向验证已覆盖实际socket的role/usage/finish-only、半事件滴流、文本后idle、Chat/Responses工具、空/incomplete终态；三类等待超时各仅一个attempt且strict保留pending、Provider hold及user/Key双hold。L0定向覆盖write暂停、合法终态与late-timer仲裁、取消/join、TLS/HTTP2不读下游。零配置下的既有End确认与资金事实回归保持原行为。Windows GOARCH=amd64 build ./...、vet ./...、全量 go test ./... -count=1、生产主进程 local.py 冒烟与定向协议/网关/配置/架构检查均已通过。包含当前授权、静态Key/Responses/后台/WS、强杀恢复、usage与shadow回归；小数秒/越界/溢出/拼错阶段字段拒绝启动。PR #53精确头Linux race/交付Verify及合并后主线 `07fb7ec` Verify均已成功；证据仅覆盖该阶段超时切片。
 
 实际限制单列：当前Go HTTP/1 TLS写入失败后的标准库close_notify关闭路径可能额外等待约5秒；阶段触发与最终返回不是同一时刻，不能声称所有TLS阻塞都在配置秒数内完成释放。真实TLS/H2测试验证写阶段归因并以8秒封顶检查退出。Windows明文HTTP/1测试可能被内核完整缓冲，未实际阻塞的子场景标记skip，不作为TCP写阻塞证据。同步自定义Output必须遵守已声明deadline语义，无遗留写goroutine兜底；真实Provider及外部部署仍未验收。
 
@@ -176,9 +176,9 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 </details>
 
 <details>
-<summary>FC-P0-HEADERS-001：前台 HTTP 上游诊断与重试头具体 CR（待批准）</summary>
+<summary>FC-P0-HEADERS-001：前台 HTTP 上游诊断与重试头具体 CR（已批准，源码与定向验证完成）</summary>
 
-此切片补当前 `ExecuteTo` 丢失全部上游 Header 的具体缺口：客户端看不到最终上游的 request ID，也收不到429/503的 Retry-After。只追加有限元数据，不改变现有 JSON/SSE 正文、状态码、ID/错误改写、HTTP 提交屏障或重试许可。本节是具体变更请求，获明确批准前不实施新增地基字段或转发语义。
+此切片补当前 `ExecuteTo` 丢失全部上游 Header 的具体缺口：客户端看不到最终上游的 request ID，也收不到429/503的 Retry-After。只追加有限元数据，不改变现有 JSON/SSE 正文、状态码、ID/错误改写、HTTP 提交屏障或重试许可。本 CR 已获用户明确批准实施与集中验证；随后用户又授权本任务后续同类开发契约调整记录方案后直接推进。
 
 1. **层级/目录及现有扩展不足：**L0 `internal/core` 持有唯一实际 HTTP response，既有 Decoder 只看正文，L1无法在首次输出/错误收尾前读取 Header；`ExecuteRaw` 有独立 Header，但改走 Raw 会旁路当前流/执行事实。L0只增加同步只读机械观察入口，L1 `gateway` 决定白名单、校验、attempt隔离及最终提交；L2现有HTTP Output继续只渲染已有 `ResponseMetadata.Values`；config、组装、OpenAPI、架构快照与测试同批更新。不另建 HTTP client、Transport、正文/错误解析器或执行链。
 2. **精确公开变化：**L0 `core.Input` 追加可选 `ObserveResponseHeaders func(status int, headers http.Header)`。每个成功返回非nilresponse的 `ExecuteTo` attempt 在标记ResponseReceived后、任何正文读取/输出前同步调用一次；无response/未发送则不调用。Header为仅回调期间有效的只读借用，回调禁止保留/修改map、I/O、阻塞或panic；L1实现只复制经过有限校验的两个字符串。nil维持原行为，Raw/WS不接该入口。L1 `gateway.Options.ForwardUpstreamMetadata bool` 和startup `server.forward_upstream_metadata` 默认false；仅foreground HTTP使用。保持冻结execution/v1/v2/v3/v4的类型/签名不变，不新增地基版本或数据库迁移。L0不携带项目白名单、重试/健康/账本策略，也不将完整原始Header加入Result/日志/持久状态。
@@ -186,6 +186,8 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 4. **提交/attempt/兼容：**上游元数据保存在请求Output的独立私有attempt槽，选定下一attempt并检查准入前清空，不覆盖本地billing/usage/retry等元数据。只有最终实际输出合并该槽；先前429/503/ID不能进入后来成功、无response或本地拒绝的回复。只读headers观察不提前Commit，不增加prelude；已Commit后不再改Header。成功、协议失败、上游错误、取消/阶段超时都复用现有终态、资金与安全错误规则；HTTP status不一致时不残留Retry-After。关闭开关并回退旧二进制即可，无数据回退；默认false及后台/claimed/WS维持原行为。自定义Executor调用者的非nil回调须遵守同步只读约定。
 5. **验证/验收：**L0测试一次回调/时序、零配置、无response/发送前失败不调用、原正文/终态/关闭不变；L1/L2实socket覆盖Chat JSON/SSE、embeddings、Responses与现有转换、429/503数值和HTTP-date、重复/超长/非法头、Connection动态排除、本地ID与元数据优先级。多attempt验证首个错误的Header不串入后续成功/本地准入拒绝/无response；发送前拒绝与已提交失败均不重试越权，strict未知与双hold不变。config默认/布尔类型拒绝、OpenAPI与公开快照同步；集中本地回归和完整精确头CI后合并，真实Provider不在授权范围。
 6. **协作/边界：**这是P0/P4的诊断与客户端退避元数据切片，不扩大账号推理范围、定价、收费、额度恢复或后台/WS；新开关只重启生效。RFC9110第7.6.1与10.2.3节用于Connection逐跳排除及Retry-After语法核对，不复制参考项目实现。参考：`https://www.rfc-editor.org/rfc/rfc9110.html`。无新前端、依赖、迁移或性能提升声明。
+
+源码已按该范围接入；OpenAPI `0.13.2` / 117操作与L0公开快照同步。定向验证覆盖只读观察时序、配置布尔类型、实socket的Chat JSON/SSE、embeddings、Responses及Anthropic/Gemini现有转换、原生HTTP自动gzip解压、429/503数值/HTTP-date、重复/超长/非法值、Connection动态排除和未入选敏感头不转发。重试回归分别证明旧响应头不进入后续成功、无response及本地准入拒绝，已提交截断只发送一次且不伪造完成；非foreground不继承开关。strict阶段超时回归保留pending、Provider hold及user/Key双hold，并保留独立billing ID。本批Windows GOARCH=amd64的build ./...、vet ./...和全量go test ./... -count=1均已通过；主进程受控冒烟与精确头远端CI状态另行更新，不继承其他批次通过。
 
 </details>
 
