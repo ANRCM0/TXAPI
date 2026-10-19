@@ -113,6 +113,16 @@
     "public": true,
     "version": "3"
   },
+  "minigateway/internal/foundation/contracts/quotation/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
+  "minigateway/internal/quoteconsole": {
+    "layer": "L3",
+    "owner": "quotation"
+  },
   "minigateway/internal/foundation/contracts/identity/v1": {
     "layer": "L1",
     "owner": "foundation",

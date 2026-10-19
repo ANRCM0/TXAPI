@@ -14,6 +14,7 @@ import (
 	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 	control "minigateway/internal/foundation/contracts/control/v1"
 	ledger "minigateway/internal/foundation/contracts/ledger/v1"
+	quotation "minigateway/internal/foundation/contracts/quotation/v1"
 	routes "minigateway/internal/foundation/contracts/routes/v1"
 	task "minigateway/internal/foundation/contracts/taskcontrol/v1"
 
@@ -30,6 +31,7 @@ import (
 // 通过回调和 billing.Engine 注入依赖，api 包不反向 import gateway/server，
 // 避免形成 HTTP 装配层的依赖环。
 type Handler struct {
+	quotation     quotation.Service
 	routes        routes.Service
 	tasks         task.Service
 	control       control.Service
@@ -37,6 +39,7 @@ type Handler struct {
 	configuration cfg.Service
 }
 type Dependencies struct {
+	Quotation     quotation.Service
 	Routes        routes.Service
 	Tasks         task.Service
 	Control       control.Service
@@ -48,7 +51,7 @@ func New(deps Dependencies) *Handler {
 	if deps.Control == nil || deps.Configuration == nil {
 		panic("management application services must be explicitly supplied")
 	}
-	return &Handler{control: deps.Control, ledger: deps.Ledger, configuration: deps.Configuration, tasks: deps.Tasks, routes: deps.Routes}
+	return &Handler{control: deps.Control, ledger: deps.Ledger, configuration: deps.Configuration, tasks: deps.Tasks, routes: deps.Routes, quotation: deps.Quotation}
 }
 
 // Register 把管理路由挂到引擎上。

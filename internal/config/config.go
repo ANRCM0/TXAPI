@@ -159,6 +159,7 @@ type Config struct {
 	LogRetentionDays int               `yaml:"log_retention_days"`
 	Database         DatabaseConfig    `yaml:"database"`
 	Billing          BillingConfig     `yaml:"billing"`
+	Quotation        QuotationConfig   `yaml:"quotation"`
 	Generation       GenerationConfig  `yaml:"generation"`
 	Responses        ResponsesConfig   `yaml:"responses"`
 	ResponsesWS      ResponsesWSConfig `yaml:"responses_ws"`
@@ -360,6 +361,9 @@ func (c *Config) applyDefaults() {
 // 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
 // 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	if err := c.Quotation.validate(); err != nil {
+		return err
+	}
 	if err := c.ResponsesWS.validate(); err != nil {
 		return err
 	}
