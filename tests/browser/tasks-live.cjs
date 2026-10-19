@@ -14,8 +14,20 @@ const {chromium}=require('playwright');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
  if(process.env.TXAPI_TASK_SCREENSHOT_DIR)await page.screenshot({path:process.env.TXAPI_TASK_SCREENSHOT_DIR+'/tasks-live-'+width+'.png',fullPage:true});
  await page.getByLabel('Task scope').selectOption('admin');await row().getByRole('button',{name:'Inspect task'}).click();await page.getByRole('heading',{name:'Task metadata',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Request cancellation'}).count(),0);
- if(width===390){await page.getByLabel('Task scope').selectOption('me');await row().getByRole('button',{name:'Inspect task'}).click();await page.getByRole('button',{name:'Request cancellation'}).click();await page.getByRole('status').filter({hasText:'Cancellation recorded'}).waitFor();}
+ if(width===390){
+ await page.getByLabel('Task scope').selectOption('me');await row().getByRole('button',{name:'Inspect task'}).click();
+ // A live worker may advance the revision. Each conflict requires another
+ // explicit click after the page refreshes; the product must not retry POST.
+ let recorded=false;
+ for(let attempt=0;attempt<3;attempt++){
+ const [response]=await Promise.all([page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/'+id+'/cancel')&&r.request().method()==='POST'),page.getByRole('button',{name:'Request cancellation'}).click()]);
+ if(response.status()===409){await page.getByRole('alert').filter({hasText:'Task changed'}).waitFor();continue;}
+ assert.equal(response.status(),200);recorded=true;break;
+ }
+ assert.equal(recorded,true,'Live task kept changing across three explicit cancellation attempts');
+ await page.getByRole('status').filter({hasText:'Cancellation recorded'}).waitFor();
+ }
  assert.deepEqual(errors,[]);await context.close();
  }}finally{await browser.close();}
  console.log('PASS: actual main task console owner/admin metadata, cancellation and desktop/mobile');
-})().catch(e=>{console.error('FAIL: live task browser '+e.name);process.exitCode=1;});
+})().catch(e=>{console.error('FAIL: live task browser '+e.stack);process.exitCode=1;});

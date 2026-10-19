@@ -182,6 +182,18 @@ def background_workflow(gateway, work, env, service, ready, request):
             status, body = request(base + "/v1/responses", token, dict(payload, stream=False))
             assert status == 200
             console_id = json.loads(body)["id"]
+            # Receipt delivery can precede dispatch. Exercise remote cancellation
+            # in both headless CI and the slower optional browser workflow.
+            deadline = time.monotonic() + 10
+            while True:
+                status, body = request(base + "/api/me/background/" + console_id, session)
+                assert status == 200, (status, body)
+                if json.loads(body)["data"]["stage"] == "remote_active":
+                    break
+                assert time.monotonic() < deadline, "Console task never became remote active"
+                time.sleep(0.05)
+            with lock:
+                assert state["posts"] == 3, "Console fixture did not dispatch exactly once"
             if env.get("TXAPI_TASK_BROWSER"):
                 browser_env = dict(env, TXAPI_BASE_URL=base, TXAPI_TEST_ADMIN_USERNAME="bg-smoke-admin",
                                    TXAPI_TEST_ADMIN_PASSWORD="bg-smoke-password-only", TXAPI_TEST_TASK_ID=console_id)
@@ -198,7 +210,8 @@ def background_workflow(gateway, work, env, service, ready, request):
                     break
                 assert time.monotonic() < deadline, (status, body)
                 time.sleep(0.1)
-            assert state["posts"] == 3, "Console cancellation dispatched another generation"
+            with lock:
+                assert state["posts"] == 3 and state["cancels"] == 2, "Console cancellation replayed or skipped remote cleanup"
 
         for mode in ("legacy", "strict"):
             config["billing"]["mode"] = mode

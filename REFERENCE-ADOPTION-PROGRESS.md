@@ -234,7 +234,7 @@ See [six-part decision](REFERENCE-R06A-IMPLEMENTATION.md) and
 
 2026-10-19, Windows/PowerShell, Go 1.26.3, GOARCH=amd64, GOOS=windows,
 CGO_ENABLED=0. Twenty-two non-Markdown sources, LF-normalized SHA-256
-`202beb3dbcebe4687bff48ec3fd0a031ac1a5c756826502a646e728bf4534a8d`.
+`ea745f2acabbe3b5ddb06fd62a21cb01025e83ab550fa1177ce1b3b5cb45753a`.
 Manifest/raw logs/screenshots: D:/my-project/TXAPI-references/validation-r06a.
 
 | Executed check | Result |
@@ -243,7 +243,7 @@ Manifest/raw logs/screenshots: D:/my-project/TXAPI-references/validation-r06a.
 | go test -json -count=1 ./... | 1345 tests/subtests and 36 packages PASS; six expected helper SKIP |
 | architecture/public signatures/OpenAPI and dependency filter | PASS |
 | touched-Go gofmt and git diff --check | PASS; unrelated Go untouched |
-| seven Node syntax checks; node --test web/assets/api.test.mjs | PASS, 10/10 API cases; reused from the preceding manifest as described below |
+| seven Node syntax checks; node --test web/assets/api.test.mjs | PASS, 10/10 API cases; unchanged-source evidence reused; changed live browser script syntax rechecked |
 | browser tasks.cjs, navigation.cjs, billing.cjs | PASS on local Chromium, desktop/mobile; reused unchanged-source evidence |
 | python -B tests/smoke/local.py --go go with TXAPI_TASK_BROWSER=1 | PASS, including actual-main task console desktop/mobile cancellation, old HTTP/SSE/strict and forced-kill/background recovery |
 
@@ -284,7 +284,30 @@ Static checks confirmed all 93 old operations/schemas and 20 public package
 declarations unchanged, three smoke Python ASTs valid and 129 local links in
 the six batch Markdown files resolving. No extra workflow run was dispatched.
 
-Exact-head automatic Linux race/container CI, commit and merge remain pending.
+The first committed head e11ce9d exposed a smoke fixture ordering race in push
+run 39187167410 and PR run 39187195359: their Linux race suites and container
+delivery passed, but the
+console-cancel scenario asserted exactly three dispatches without waiting for
+the third task to leave queued state. A fast cancellation is allowed to prevent
+that dispatch. The fixture now waits for remote_active before testing remote
+cleanup, verifies exactly three posts before cancellation and exactly two remote
+cancels afterwards; queued no-send cancellation remains covered by the real
+worker regression. No production code or CI gate changed for this correction.
+The final script passed both the default headless path and the optional
+desktop/mobile browser path. Logs are smoke-ci-order.log and
+smoke-ci-order-live-final.log; source-manifest-ci-order-final.json records the final
+digest. The complete Go/build/vet/contract evidence is reused from e11ce9d
+because every Go file, module, public declaration and HTTP contract is exact.
+One optional browser rerun timed out with the old name-only error reporter;
+the detailed diagnostic repeat passed. The live test now reports its stack and
+handles worker revision conflicts with at most three explicit user clicks,
+waiting for each 409 refresh before another action. It does not catch unrelated
+errors or add automatic product POST retries. This final live script's syntax
+and actual-main browser/recovery workflow passed; mock browser/API sources
+remain unchanged and retain their earlier evidence.
+The final automatic push/PR CI still has to accept the corrected head.
+
+Exact-head automatic Linux race/container CI and merge remain pending.
 No real Provider, official SDK, billing expansion, OAuth, external Runtime, tag
 or release is claimed. R06's other pages and the full R00-R07 goal stay open.
 
