@@ -27,7 +27,7 @@ func (s *Store) QuotationHistory(ctx context.Context, version string) (string, e
 	}
 	// Reject large corrupted/unrelated rows without first allocating their body.
 	err = s.db.WithContext(ctx).Model(&model.BillingPriceVersion{}).
-		Select("CASE WHEN length(payload) <= ? THEN payload ELSE '' END AS payload, length(payload) AS size", 256*1024).
+		Select("CASE WHEN length(CAST(payload AS BLOB)) <= ? THEN payload ELSE '' END AS payload, length(CAST(payload AS BLOB)) AS size", 256*1024).
 		Where("version = ?", version).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", quotation.ErrNotFound

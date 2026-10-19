@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.8.0",
+    "version": "0.9.0",
     "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported."
   },
   "servers": [
@@ -9427,6 +9427,196 @@
           }
         }
       }
+    },
+    "/api/admin/quotations/current": {
+      "get": {
+        "operationId": "get_admin_quotation_current",
+        "summary": "Read the current opt-in selling quotation version",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only selling result; Cache-Control: no-store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/QuotationCurrent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query or amount overflow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current login session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current active administrator required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner quotation limit; Retry-After: 60",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Quotation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "No query parameters. Default disabled. Does not reserve or charge any balance."
+      }
+    },
+    "/api/admin/quotations/calculate": {
+      "post": {
+        "operationId": "calculate_admin_selling_quotation",
+        "summary": "Calculate supplied hypothetical quantities using an explicit historical selling version",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only selling result; Cache-Control: no-store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellingQuotation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query or amount overflow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current login session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current active administrator required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner quotation limit; Retry-After: 60",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Quotation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Explicit selling version is not retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Administrator diagnostic only; never starts generation or attests supplied counts. Exact model/group only, no latest/wildcard fallback. Reject query parameters, duplicate/unknown fields, trailing JSON and bodies over 16 KiB. Canonical nonnegative int64 decimal string counts preserve unknown/null/zero. Current session is revalidated per request, shared owner limit 120/minute.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuotationInput"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12071,6 +12261,206 @@
             ]
           }
         }
+      },
+      "QuotationUsageInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "completeness",
+          "source"
+        ],
+        "properties": {
+          "input_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Optional canonical nonnegative int64 count, maximum 9223372036854775807. Null/absent is unknown; the string 0 is explicit zero."
+          },
+          "output_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Optional canonical nonnegative int64 count, maximum 9223372036854775807. Null/absent is unknown; the string 0 is explicit zero."
+          },
+          "total_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Optional canonical nonnegative int64 count, maximum 9223372036854775807. Null/absent is unknown; the string 0 is explicit zero."
+          },
+          "cached_input_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Optional canonical nonnegative int64 count, maximum 9223372036854775807. Null/absent is unknown; the string 0 is explicit zero."
+          },
+          "cache_write_input_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Optional canonical nonnegative int64 count, maximum 9223372036854775807. Null/absent is unknown; the string 0 is explicit zero."
+          },
+          "reasoning_output_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Optional canonical nonnegative int64 count, maximum 9223372036854775807. Null/absent is unknown; the string 0 is explicit zero."
+          },
+          "completeness": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "partial",
+              "complete"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "provider_reported"
+            ]
+          },
+          "profile": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Declared quantity profile; empty/absent only for fully unknown usage."
+          }
+        },
+        "description": "Hypothetical cumulative token quantities. Known fields must satisfy containment, total and overflow checks. Counts are decimal strings, never JSON numbers."
+      },
+      "QuotationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "price_version",
+          "model",
+          "group",
+          "usage"
+        ],
+        "properties": {
+          "price_version": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "group": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "usage": {
+            "$ref": "#/components/schemas/QuotationUsageInput"
+          }
+        }
+      },
+      "QuotationCurrent": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "version",
+          "currency",
+          "price_profile",
+          "usage_profile",
+          "unit_scale"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^([a-f0-9]{64})?$"
+          },
+          "currency": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "price_profile": {
+            "type": "string"
+          },
+          "usage_profile": {
+            "type": "string"
+          },
+          "unit_scale": {
+            "type": "string",
+            "enum": [
+              "",
+              "1000000000"
+            ]
+          }
+        },
+        "description": "Startup-only read-only selling schedule. Disabled returns false with empty metadata. Version is a content digest, not runtime desired/applied revision; usage_profile names the required quantity profile."
+      },
+      "SellingQuotation": {
+        "type": "object",
+        "required": [
+          "price_version",
+          "model",
+          "group",
+          "currency",
+          "price_profile",
+          "usage_profile",
+          "unit_scale",
+          "amount_units",
+          "reason",
+          "known"
+        ],
+        "properties": {
+          "price_version": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "model": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "price_profile": {
+            "type": "string"
+          },
+          "usage_profile": {
+            "type": "string"
+          },
+          "unit_scale": {
+            "type": "string",
+            "enum": [
+              "1000000000"
+            ]
+          },
+          "amount_units": {
+            "type": "string",
+            "pattern": "^(|0|[1-9][0-9]{0,18})$"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "quoted",
+              "usage_unknown",
+              "usage_profile_unsupported",
+              "price_missing",
+              "group_missing"
+            ]
+          },
+          "known": {
+            "type": "boolean"
+          }
+        },
+        "description": "One read-only selling calculation. Known=false has empty amount_units, never a zero charge. Known zero has amount_units=0 as a string. Input partitions are disjoint and output already includes reasoning; one final upward rounding. This is not settlement, invoice, Provider spend, hold, execution permission or attestation that supplied quantities occurred."
       }
     }
   }

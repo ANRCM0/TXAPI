@@ -2,6 +2,14 @@
 
 ## Reference Adoption Additions
 
+R05a-2 appends candidate `quotation/v1` Reader/Service values for version-pinned,
+read-only selling calculations. L1 billing owns arithmetic and history; L3
+quoteconsole consumes current sessions/shared admission, and the independent
+facts sample consumes the reader around a real JSON/SSE generation. No existing
+registered signature changes or new freeze are included. See the
+[selling quotation guide](usage-quotations.md) and
+[implementation decision](../../REFERENCE-R05A2-IMPLEMENTATION.md).
+
 R05a-1 adds candidate `execution/v3` for optional native token breakdowns,
 with a real JSON/SSE decoder and independent L3 consumer. Existing registered
 declarations remain exact; this is not a new freeze. See

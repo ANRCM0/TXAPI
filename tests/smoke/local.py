@@ -105,6 +105,23 @@ def control_workflow(base, upstream_url, routing_env=None):
     admin = api("/api/auth/login", payload={
         "username": "smoke-admin", "password": "smoke-admin-password-only"
     })["session_token"]
+    current_quote = api("/api/admin/quotations/current", admin)["data"]
+    assert current_quote["enabled"] and current_quote["currency"] == "ACCOUNT_UNIT"
+    version = current_quote["version"]
+    assert len(version) == 64 and current_quote["unit_scale"] == "1000000000"
+    quote_input = {
+        "price_version": version, "model": "mapped-model", "group": "default",
+        "usage": {"input_tokens": "10", "output_tokens": "6", "total_tokens": "16",
+                  "cached_input_tokens": "3", "cache_write_input_tokens": "2",
+                  "reasoning_output_tokens": "4", "completeness": "complete",
+                  "source": "provider_reported", "profile": "responses_native_tokens_v2"},
+    }
+    quote = api("/api/admin/quotations/calculate", admin, quote_input)["data"]
+    assert quote["known"] and quote["amount_units"] == "28" and quote["price_version"] == version
+    unknown_quote = json.loads(json.dumps(quote_input))
+    unknown_quote["usage"]["cached_input_tokens"] = None
+    unknown = api("/api/admin/quotations/calculate", admin, unknown_quote)["data"]
+    assert not unknown["known"] and unknown["amount_units"] == "" and unknown["reason"] == "usage_unknown"
     initial = api("/api/admin/config-status", admin)["data"]
     for name in ["console-user", "console-other"]:
         api("/api/admin/users", admin, {
@@ -127,6 +144,10 @@ def control_workflow(base, upstream_url, routing_env=None):
         "username": "console-other", "password": "console-other-test-password"
     })["session_token"]
     api("/api/admin/config-status", session, expected=403)
+    api("/api/admin/quotations/current", session, expected=403)
+    # Reject before parsing. urllib closes each connection; an unread POST body
+    # can reset that connection on Windows before the early 403 is received.
+    api("/api/admin/quotations/calculate", session, method="POST", expected=403)
     assert api("/api/me/models", session)["data"] == ["console-model"]
     key = api("/api/me/keys", session, {
         "name": "console-client", "model_mode": "allowlist", "models": ["console-model"],
@@ -340,6 +361,10 @@ def main():
         config = {
             "server": {"addr": f"127.0.0.1:{gateway_port}", "retry_times": 1, "timeout_seconds": 10, "route_diagnostics": True},
             "admin_key": admin_key,
+            "quotation": {"enabled": True, "currency": "ACCOUNT_UNIT", "prices": [{
+                "model": "mapped-model", "uncached_input_units_per_1k": "1000",
+                "cached_input_units_per_1k": "100", "cache_write_input_units_per_1k": "2000",
+                "output_units_per_1k": "3000"}], "group_rate_units": {"default": "1000000000"}},
             "database": {"driver": "sqlite", "path": str(work / "gateway.db")},
             "channels": [{"name": "local", "type": "openai", "base_url": f"http://127.0.0.1:{upstream_port}",
                           "key": "sk-local-upstream-only", "models": ["smoke-model"],

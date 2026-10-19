@@ -45,11 +45,24 @@ R06c frontend work is preserved locally on feat/reference-r06-ledger/28fc3ec
 for later integration; future frontend work should prioritize codex-proxy-rs.
 
 R05a-1 final head a440a4d passed complete push/PR CI and merged through PR #35
-as master/5998e43 with an equal tree. Independent main39197079265 failed an
-existing archive handoff cancellation regression while delivery passed. The
+as master/5998e43 with an equal tree. Independent main39197079265 exposed an
+archive handoff cancellation regression while delivery passed. The
 [independent shutdown correction](../REFERENCE-ARCHIVE-SHUTDOWN-IMPLEMENTATION.md)
-takes priority before the next backend batch. R05a-2 quote source is checkpointed
-only locally at feat/reference-r05a-quotation/2c42b11 and is not accepted or merged.
+passed complete push/PR CI at 9bca697, merged through PR #36 as master/c14178d
+with an equal tree, and passed independent main39199597911 check/delivery.
+
+## R05a-2: Versioned Selling Quotations
+
+The backend batch resumes on accepted master/c14178d. It adds opt-in immutable
+selling schedules, exact dimensional arithmetic, administrator diagnostic HTTP
+routes and an independent real JSON/SSE consumer. The original 102 operations,
+registered signatures and strict format1 price/recovery behavior remain exact;
+OpenAPI 0.9.0 appends two operations. The new quotation/v1 contract is candidate.
+See the [six-part decision](../REFERENCE-R05A2-IMPLEMENTATION.md),
+[configuration and integration guide](reference/usage-quotations.md) and
+[verification record](../REFERENCE-ADOPTION-PROGRESS.md). Local and final-head CI
+acceptance are being completed; this batch is not yet accepted or merged.
+Durable observations, new charging dimensions and R05b remain later backend work.
 
 ## R03b-2 当前实施批次
 

@@ -6,6 +6,14 @@ head a440a4d. Push 39196504025 and PR 39196509658 passed full check/delivery;
 independent post-merge 39197079265 is tracked separately. Backend remains first,
 frontend is deferred and OAuth real-account acceptance stays closed.
 
+The original independent main failed an existing archive-preparation shutdown
+race. Quotation work was checkpointed locally as 2c42b11, without push/PR, while
+the lifetime correction 9bca697 passed complete push39198978768/PR39199006870
+and merged as master/c14178dec7d57aeabacf43da53c0ac6e16989cc6 with an equal
+tree. This batch resumes on that latest integration base; main39199597911 also
+passed complete check/delivery. The checkpoint cherry-pick is local eaba025,
+not acceptance.
+
 ## Six-Part Boundary
 
 1. L1 billing owns immutable dimensional selling documents, publication and
@@ -137,6 +145,14 @@ version after provider observations. Tests publish N+1 during the actual
 upstream request and prove N still applies, then reopen the real SQLite store
 and read N again. It must not alter used/reserved balances or retry generation.
 Amounts are per-attempt quotations; there is no new aggregate settlement policy.
+
+The independent example is deliberately limited to one observed attempt:
+frozen v1 AttemptOutcome exposes Model but no per-attempt group, and using the
+final outcome's group for earlier retries would misprice them. It rejects an
+unsupported multi-attempt binding after preserving the executed outcome, never
+replays generation or fabricates target metadata. A later real multi-attempt
+consumer requires its owner's trustworthy binding capability, not a silent
+expansion of existing frozen/candidate declarations.
 
 ## Alternatives, Attribution And Rollback
 

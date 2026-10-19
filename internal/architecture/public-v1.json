@@ -328,6 +328,22 @@
     "func minigateway/internal/foundation/contracts/observability/v1.RequestID(ctx context.Context) string",
     "func minigateway/internal/foundation/contracts/observability/v1.WithRequestID(ctx context.Context, id string) context.Context"
   ],
+  "minigateway/internal/foundation/contracts/quotation/v1": [
+    "const minigateway/internal/foundation/contracts/quotation/v1.Version untyped string = \"1\"",
+    "type minigateway/internal/foundation/contracts/quotation/v1.Access struct{Session string}",
+    "type minigateway/internal/foundation/contracts/quotation/v1.Current struct{Enabled bool \"json:\\\"enabled\\\"\"; Version string \"json:\\\"version\\\"\"; Currency string \"json:\\\"currency\\\"\"; PriceProfile string \"json:\\\"price_profile\\\"\"; UsageProfile string \"json:\\\"usage_profile\\\"\"; UnitScale string \"json:\\\"unit_scale\\\"\"}",
+    "type minigateway/internal/foundation/contracts/quotation/v1.Input struct{PriceVersion string; Model string; Group string; Usage minigateway/internal/foundation/contracts/execution/v3.UsageObservation}",
+    "type minigateway/internal/foundation/contracts/quotation/v1.Quote struct{PriceVersion string \"json:\\\"price_version\\\"\"; Model string \"json:\\\"model\\\"\"; Group string \"json:\\\"group\\\"\"; Currency string \"json:\\\"currency\\\"\"; PriceProfile string \"json:\\\"price_profile\\\"\"; UsageProfile string \"json:\\\"usage_profile\\\"\"; UnitScale string \"json:\\\"unit_scale\\\"\"; AmountUnits string \"json:\\\"amount_units\\\"\"; Reason string \"json:\\\"reason\\\"\"; Known bool \"json:\\\"known\\\"\"}",
+    "type minigateway/internal/foundation/contracts/quotation/v1.Reader interface{Calculate(context.Context, minigateway/internal/foundation/contracts/quotation/v1.Input) (minigateway/internal/foundation/contracts/quotation/v1.Quote, error); Current(context.Context) (minigateway/internal/foundation/contracts/quotation/v1.Current, error)}",
+    "type minigateway/internal/foundation/contracts/quotation/v1.Service interface{Calculate(context.Context, minigateway/internal/foundation/contracts/quotation/v1.Access, minigateway/internal/foundation/contracts/quotation/v1.Input) (minigateway/internal/foundation/contracts/quotation/v1.Quote, error); Current(context.Context, minigateway/internal/foundation/contracts/quotation/v1.Access) (minigateway/internal/foundation/contracts/quotation/v1.Current, error)}",
+    "var minigateway/internal/foundation/contracts/quotation/v1.ErrForbidden error",
+    "var minigateway/internal/foundation/contracts/quotation/v1.ErrInvalid error",
+    "var minigateway/internal/foundation/contracts/quotation/v1.ErrNotFound error",
+    "var minigateway/internal/foundation/contracts/quotation/v1.ErrOverflow error",
+    "var minigateway/internal/foundation/contracts/quotation/v1.ErrRateLimited error",
+    "var minigateway/internal/foundation/contracts/quotation/v1.ErrUnauthorized error",
+    "var minigateway/internal/foundation/contracts/quotation/v1.ErrUnavailable error"
+  ],
   "minigateway/internal/foundation/contracts/responses/v1": [
     "const minigateway/internal/foundation/contracts/responses/v1.AddItems minigateway/internal/foundation/contracts/responses/v1.Action = \"conversation.items.add\"",
     "const minigateway/internal/foundation/contracts/responses/v1.ConversationDocument minigateway/internal/foundation/contracts/responses/v1.DocumentKind = \"conversation\"",
