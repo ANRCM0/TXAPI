@@ -32,15 +32,16 @@ type HTTPStageTimeouts struct {
 type Options struct {
 	Admission Admission
 	// Registrations are copied once; an absent registration never falls back.
-	Protocols         []execution.ProtocolRegistration
-	Operations        []execution.OperationRegistration
-	Channels          []dbmodel.Channel
-	Client            *http.Client
-	RetryTimes        int
-	AttemptTimeout    time.Duration
-	TotalTimeout      time.Duration
-	HTTPStageTimeouts HTTPStageTimeouts
-	Billing           LegacyBilling
+	Protocols               []execution.ProtocolRegistration
+	Operations              []execution.OperationRegistration
+	Channels                []dbmodel.Channel
+	Client                  *http.Client
+	RetryTimes              int
+	AttemptTimeout          time.Duration
+	TotalTimeout            time.Duration
+	HTTPStageTimeouts       HTTPStageTimeouts
+	ForwardUpstreamMetadata bool
+	Billing                 LegacyBilling
 	// StrictBilling can be supplied independently. For existing callers, Billing
 	// is also used when it implements StrictBilling. Strict never uses legacy fees.
 	StrictBilling      StrictBilling
@@ -58,35 +59,36 @@ type Options struct {
 }
 
 type Gateway struct {
-	shadow            *shadowSampler
-	appliedEpoch      atomic.Uint64
-	shadowNow         func() time.Time
-	shadowLogMu       sync.Mutex
-	shadowLastLog     time.Time
-	routeHistory      *routeHistory
-	admission         Admission
-	adaptors          map[string]execution.Adapter
-	operations        map[execution.Operation]execution.OperationRegistration
-	reg               *registry
-	executor          *core.Executor
-	retryTimes        int
-	attemptTimeout    time.Duration
-	totalTimeout      time.Duration
-	httpStageTimeouts HTTPStageTimeouts
-	billing           LegacyBilling
-	strictBilling     StrictBilling
-	billingMode       billing.Mode
-	limiter           access.Limiter
-	metrics           *metrics.Registry
-	logRecorder       func(*dbmodel.RequestLog)
-	picker            credentialPicker
-	healthReporter    credentialHealthReporter
-	managed           *managedInference
-	usageHistory      usagehistory.Recorder
-	usageQuotation    quotation.Reader
-	recordingMu       sync.Mutex
-	recordingClosed   bool
-	recordingActive   sync.WaitGroup
+	shadow                  *shadowSampler
+	appliedEpoch            atomic.Uint64
+	shadowNow               func() time.Time
+	shadowLogMu             sync.Mutex
+	shadowLastLog           time.Time
+	routeHistory            *routeHistory
+	admission               Admission
+	adaptors                map[string]execution.Adapter
+	operations              map[execution.Operation]execution.OperationRegistration
+	reg                     *registry
+	executor                *core.Executor
+	retryTimes              int
+	attemptTimeout          time.Duration
+	totalTimeout            time.Duration
+	httpStageTimeouts       HTTPStageTimeouts
+	forwardUpstreamMetadata bool
+	billing                 LegacyBilling
+	strictBilling           StrictBilling
+	billingMode             billing.Mode
+	limiter                 access.Limiter
+	metrics                 *metrics.Registry
+	logRecorder             func(*dbmodel.RequestLog)
+	picker                  credentialPicker
+	healthReporter          credentialHealthReporter
+	managed                 *managedInference
+	usageHistory            usagehistory.Recorder
+	usageQuotation          quotation.Reader
+	recordingMu             sync.Mutex
+	recordingClosed         bool
+	recordingActive         sync.WaitGroup
 }
 
 func New(opts Options) (*Gateway, error) {
@@ -163,7 +165,7 @@ func New(opts Options) (*Gateway, error) {
 	if opts.Metrics == nil {
 		opts.Metrics = metrics.New()
 	}
-	g := &Gateway{admission: opts.Admission, adaptors: protocols, operations: operations, executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout, httpStageTimeouts: opts.HTTPStageTimeouts,
+	g := &Gateway{admission: opts.Admission, adaptors: protocols, operations: operations, executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout, httpStageTimeouts: opts.HTTPStageTimeouts, forwardUpstreamMetadata: opts.ForwardUpstreamMetadata,
 		billing: opts.Billing, strictBilling: opts.StrictBilling, billingMode: opts.BillingMode, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter,
 		usageHistory: opts.UsageHistory, usageQuotation: opts.UsageQuotation}
 	g.managed = managed

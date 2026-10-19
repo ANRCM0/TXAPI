@@ -46,7 +46,7 @@
     "type minigateway/internal/core.Frame struct{EffectiveOutput bool; EventComplete bool; Data []byte; Usage *minigateway/internal/core.Usage; Complete bool}",
     "type minigateway/internal/core.HTTPOutput struct{writer net/http.ResponseWriter; state minigateway/internal/core.OutputState}",
     "type minigateway/internal/core.HTTPStageTimeouts struct{Headers time.Duration; FirstEffectiveOutput time.Duration; StreamIdle time.Duration; DownstreamWrite time.Duration}",
-    "type minigateway/internal/core.Input struct{HTTPStageTimeouts minigateway/internal/core.HTTPStageTimeouts; Method string; URL string; Header net/http.Header; Body []byte; Stream bool; Replayable bool; Timeout time.Duration; Decoder minigateway/internal/core.Decoder}",
+    "type minigateway/internal/core.Input struct{ObserveResponseHeaders func(status int, headers net/http.Header); HTTPStageTimeouts minigateway/internal/core.HTTPStageTimeouts; Method string; URL string; Header net/http.Header; Body []byte; Stream bool; Replayable bool; Timeout time.Duration; Decoder minigateway/internal/core.Decoder}",
     "type minigateway/internal/core.Options struct{Client *net/http.Client; MaxResponseBytes int64; MaxLineBytes int}",
     "type minigateway/internal/core.Output interface{Commit(context.Context, minigateway/internal/core.ResponseMetadata) error; Flush(context.Context) error; State() minigateway/internal/core.OutputState; Write(context.Context, []byte) (int, error)}",
     "type minigateway/internal/core.OutputState struct{Committed bool; HTTPStatus int}",
