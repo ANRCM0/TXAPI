@@ -17,6 +17,7 @@ import (
 	quotation "minigateway/internal/foundation/contracts/quotation/v1"
 	routes "minigateway/internal/foundation/contracts/routes/v1"
 	task "minigateway/internal/foundation/contracts/taskcontrol/v1"
+	eligibility "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	"net/http"
 
@@ -42,6 +43,7 @@ type Deps struct {
 	Control              control.Service
 	Configuration        configuration.Service
 	ManagedConfiguration managed.Service
+	ManagedEligibility   eligibility.EligibilityAdmin
 	Ledger               ledger.Service
 	Tasks                task.Service
 	Routes               routes.Service
@@ -194,7 +196,7 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。
-	apiHandler := api.New(api.Dependencies{OwnerLedger: deps.OwnerLedger, Control: deps.Control, Ledger: deps.Ledger, Configuration: deps.Configuration, ManagedConfiguration: deps.ManagedConfiguration, Tasks: deps.Tasks, Routes: deps.Routes, Quotation: deps.Quotation, UsageHistory: deps.UsageHistory})
+	apiHandler := api.New(api.Dependencies{OwnerLedger: deps.OwnerLedger, Control: deps.Control, Ledger: deps.Ledger, Configuration: deps.Configuration, ManagedConfiguration: deps.ManagedConfiguration, ManagedEligibility: deps.ManagedEligibility, Tasks: deps.Tasks, Routes: deps.Routes, Quotation: deps.Quotation, UsageHistory: deps.UsageHistory})
 	apiHandler.Register(engine.Group(""), deps.AdminAuth)
 	apiHandler.RegisterAccess(engine.Group(""))
 

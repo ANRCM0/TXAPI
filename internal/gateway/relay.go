@@ -459,10 +459,13 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		shadowBegun = true
 	}
 	wireContext := c.ctx
+	var managedObservation managedWireObservation
 	if c.managedTarget != nil {
 		wireContext = context.WithValue(wireContext, managedWireKey{}, true)
+		wireContext = context.WithValue(wireContext, managedObservationKey{}, &managedObservation)
 	}
 	result = g.executor.ExecuteTo(wireContext, c.output, input)
+	g.observeManagedResult(c, &managedObservation, prepared.Decoder, result)
 	rawCoreResult = result
 	returned = true
 	var observation execution.Observation

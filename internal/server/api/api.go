@@ -19,6 +19,7 @@ import (
 	quotation "minigateway/internal/foundation/contracts/quotation/v1"
 	routes "minigateway/internal/foundation/contracts/routes/v1"
 	task "minigateway/internal/foundation/contracts/taskcontrol/v1"
+	eligibility "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 
 	"net/http"
@@ -43,6 +44,7 @@ type Handler struct {
 	ledger        ledger.Service
 	configuration cfg.Service
 	managed       managed.Service
+	eligibility   eligibility.EligibilityAdmin
 }
 type Dependencies struct {
 	OwnerLedger          ownerledger.Service
@@ -54,13 +56,14 @@ type Dependencies struct {
 	Ledger               ledger.Service
 	Configuration        cfg.Service
 	ManagedConfiguration managed.Service
+	ManagedEligibility   eligibility.EligibilityAdmin
 }
 
 func New(deps Dependencies) *Handler {
 	if deps.Control == nil || deps.Configuration == nil {
 		panic("management application services must be explicitly supplied")
 	}
-	return &Handler{ownerLedger: deps.OwnerLedger, control: deps.Control, ledger: deps.Ledger, configuration: deps.Configuration, managed: deps.ManagedConfiguration, tasks: deps.Tasks, routes: deps.Routes, quotation: deps.Quotation, usageHistory: deps.UsageHistory}
+	return &Handler{ownerLedger: deps.OwnerLedger, control: deps.Control, ledger: deps.Ledger, configuration: deps.Configuration, managed: deps.ManagedConfiguration, eligibility: deps.ManagedEligibility, tasks: deps.Tasks, routes: deps.Routes, quotation: deps.Quotation, usageHistory: deps.UsageHistory}
 }
 
 // Register 把管理路由挂到引擎上。

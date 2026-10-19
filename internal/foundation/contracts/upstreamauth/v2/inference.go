@@ -25,6 +25,7 @@ type AccessCredential struct {
 	AccountID          string
 	Revision           int64
 	CredentialRevision int64
+	GateEpoch          int64
 	AccessToken        v1.Secret
 	ExpiresAt          time.Time
 }

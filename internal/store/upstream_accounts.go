@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,6 +16,7 @@ import (
 
 	"gorm.io/gorm"
 	auth "minigateway/internal/foundation/contracts/upstreamauth/v1"
+	authv3 "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	"minigateway/internal/model"
 )
 
@@ -42,7 +45,7 @@ func upstreamError(err error) error {
 		return nil
 	}
 	for _, fixed := range []error{auth.ErrInvalid, auth.ErrUnavailable, auth.ErrNotFound, auth.ErrConflict, auth.ErrEncryptionRequired,
-		auth.ErrIdentityMismatch, auth.ErrBusy, auth.ErrBackoff, auth.ErrReauthorize, auth.ErrUncertain, context.Canceled, context.DeadlineExceeded} {
+		auth.ErrIdentityMismatch, auth.ErrBusy, auth.ErrBackoff, auth.ErrReauthorize, auth.ErrUncertain, authv3.ErrBlocked, authv3.ErrCapacity, context.Canceled, context.DeadlineExceeded} {
 		if errors.Is(err, fixed) {
 			return fixed
 		}
@@ -75,20 +78,39 @@ func (r *upstreamAccounts) read(ctx context.Context, fn func(*gorm.DB) error) er
 
 func (r *upstreamAccounts) write(ctx context.Context, secret bool, fn func(*gorm.DB) error) error {
 	return r.read(ctx, func(db *gorm.DB) error {
-		return db.Transaction(func(tx *gorm.DB) error {
-			// A write before any claim/capacity read also serializes other CLI
-			// processes; Store's single connection alone cannot provide that.
-			locked := tx.Exec("UPDATE schema_migrations SET version = version WHERE version = ?", latestMigrationVersion)
-			if locked.Error != nil {
-				return locked.Error
+		return db.Connection(func(connection *gorm.DB) error {
+			commitAttempted := false
+			err := connection.Transaction(func(tx *gorm.DB) error {
+				// A write before any claim/capacity read also serializes other CLI
+				// processes; Store's single connection alone cannot provide that.
+				locked := tx.Exec("UPDATE schema_migrations SET version = version WHERE version = ?", latestMigrationVersion)
+				if locked.Error != nil {
+					return locked.Error
+				}
+				if locked.RowsAffected != 1 {
+					return auth.ErrUnavailable
+				}
+				if secret && (r.store.vault == nil || r.store.checkCredentialMode(tx) != nil) {
+					return auth.ErrEncryptionRequired
+				}
+				err := fn(tx)
+				commitAttempted = err == nil
+				return err
+			})
+			// SQLite may leave a transaction active after a deferred constraint
+			// rejects COMMIT, while database/sql already marks its Tx done. Keep
+			// the exact connection leased until rollback/discard completes.
+			if err != nil && commitAttempted {
+				if raw, ok := connection.Statement.ConnPool.(*sql.Conn); ok {
+					cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
+					_, cleanupErr := raw.ExecContext(cleanup, "ROLLBACK")
+					cancel()
+					if cleanupErr != nil {
+						_ = raw.Raw(func(any) error { return driver.ErrBadConn })
+					}
+				}
 			}
-			if locked.RowsAffected != 1 {
-				return auth.ErrUnavailable
-			}
-			if secret && (r.store.vault == nil || r.store.checkCredentialMode(tx) != nil) {
-				return auth.ErrEncryptionRequired
-			}
-			return fn(tx)
+			return err
 		})
 	})
 }

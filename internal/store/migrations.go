@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 18
+const latestMigrationVersion = 19
 
 type dataMigration struct {
 	Version int
@@ -85,6 +85,24 @@ var dataMigrations = []dataMigration{
 			return err
 		}
 		return tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_managed_binding ON credentials(source) WHERE source = 'managed_account' AND status = 'active'").Error
+	}},
+	{Version: 19, Apply: func(tx *gorm.DB) error {
+		var credentials []model.Credential
+		if err := tx.Where("source = ?", model.CredentialSourceManaged).Limit(inferenceEligibilityCapacity + 1).Find(&credentials).Error; err != nil {
+			return err
+		}
+		if len(credentials) > inferenceEligibilityCapacity {
+			return fmt.Errorf("managed inference eligibility capacity exceeded")
+		}
+		for _, c := range credentials {
+			if !managedCredentialValid(c) {
+				return fmt.Errorf("invalid managed credential during eligibility migration")
+			}
+			if err := createEligibility(tx, c); err != nil {
+				return err
+			}
+		}
+		return nil
 	}},
 }
 

@@ -93,7 +93,7 @@ func New(opts Options) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
-	if managed != nil && opts.Client != nil {
+	if managed != nil {
 		opts.Client = managedHTTPClient(opts.Client)
 	}
 	if opts.UsageHistory != nil && nilInterface(opts.UsageHistory) || opts.UsageQuotation != nil && nilInterface(opts.UsageQuotation) {

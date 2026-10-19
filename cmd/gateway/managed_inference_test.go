@@ -21,6 +21,7 @@ import (
 	managed "minigateway/internal/foundation/contracts/configuration/v2"
 	auth "minigateway/internal/foundation/contracts/upstreamauth/v1"
 	authv2 "minigateway/internal/foundation/contracts/upstreamauth/v2"
+	authv3 "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	authentication "minigateway/internal/foundation/identity"
 	"minigateway/internal/foundation/persistence"
 	"minigateway/internal/foundation/upstreamhttp"
@@ -69,6 +70,7 @@ func TestManagedInferenceAdminCreateRestartAndRealResponsesConsumer(t *testing.T
 	}
 	configuration := management.NewConfiguration(persistence.Configuration(st), nil, nil)
 	configuration.SetManagedRepository(st.ManagedChannels())
+	configuration.SetEligibilityRepository(st.InferenceEligibility())
 	h := api.New(api.Dependencies{Control: controlplane.New(persistence.Control(st)), Configuration: configuration, ManagedConfiguration: configuration})
 	e := gin.New()
 	h.RegisterAccess(e.Group(""))
@@ -109,7 +111,7 @@ func TestManagedInferenceAdminCreateRestartAndRealResponsesConsumer(t *testing.T
 			}
 		}
 	}
-	var catalogs, attempts atomic.Int64
+	var catalogs, attempts, rejectStatus atomic.Int64
 	client := &http.Client{Transport: generationTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Scheme != "https" || r.URL.Host != "api.openai.com" || r.Header.Get("Authorization") != "Bearer synthetic-access-token-private" {
 			t.Error("wrong managed target or credential")
@@ -123,6 +125,9 @@ func TestManagedInferenceAdminCreateRestartAndRealResponsesConsumer(t *testing.T
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"models":[{"slug":"synthetic-model","visibility":"list"}]}`))}, nil
 		case "/v1/responses":
 			attempts.Add(1)
+			if status := rejectStatus.Load(); status != 0 {
+				return &http.Response{StatusCode: int(status), Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"subscription_sharing_usage_limit_exceeded","message":"synthetic-secret-body"}}`))}, nil
+			}
 			body, _ := io.ReadAll(r.Body)
 			if r.Method != "POST" || strings.Contains(string(body), "previous_response_id") || !strings.Contains(string(body), `"store":false`) {
 				t.Error("wrong managed body", string(body))
@@ -144,12 +149,14 @@ func TestManagedInferenceAdminCreateRestartAndRealResponsesConsumer(t *testing.T
 		t.Fatal(err)
 	}
 	defer capacity.Close()
-	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), BillingMode: billing.ModeDisabled, RetryTimes: 3, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: capacity}, Client: client, ManagedInference: &gateway.ManagedInferenceOptions{Enabled: true, Credentials: st.InferenceCredentials(), DirectoryCaller: caller, ValidateModel: openaiauth.ValidateVisibleModel}})
+	gw, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), BillingMode: billing.ModeDisabled, RetryTimes: 3, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: capacity}, Client: client, ManagedInference: &gateway.ManagedInferenceOptions{Enabled: true, Credentials: st.InferenceCredentials(), DirectoryCaller: caller, ValidateModel: openaiauth.ValidateVisibleModel, FailureRecorder: st.InferenceEligibility(), ClassifyFailure: openaiauth.ClassifyInferenceFailure}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer gw.Close()
-	runtime, err := startResponsesRuntime(responsesRuntimeConfig(runtimeKeyFile(t, "managed-content", 47, 53)), st, gw)
+	receiptConfig := responsesRuntimeConfig(runtimeKeyFile(t, "managed-content", 47, 53))
+	receiptConfig.InstanceRecords, receiptConfig.OwnerRecords = 64, 32
+	runtime, err := startResponsesRuntime(receiptConfig, st, gw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +169,8 @@ func TestManagedInferenceAdminCreateRestartAndRealResponsesConsumer(t *testing.T
 		return gw.Publish(channels)
 	}, nil)
 	configuration.SetManagedRepository(st.ManagedChannels())
-	engine := server.NewEngine(server.Deps{Generation: gateway.NewHTTPExecutor(gw), TokenAuth: authentication.NewTokenAuthenticator(st), Control: controlplane.New(persistence.Control(st)), Configuration: configuration, ManagedConfiguration: configuration, Metrics: gw.Metrics(), Responses: runtime.Handler(), AdminAuth: middleware.AdminAuth("synthetic-admin-key"), RateLimiter: limiter, RateGate: access.NewRateGate(limiter)})
+	configuration.SetEligibilityRepository(st.InferenceEligibility())
+	engine := server.NewEngine(server.Deps{Generation: gateway.NewHTTPExecutor(gw), TokenAuth: authentication.NewTokenAuthenticator(st), Control: controlplane.New(persistence.Control(st)), Configuration: configuration, ManagedConfiguration: configuration, ManagedEligibility: configuration, Metrics: gw.Metrics(), Responses: runtime.Handler(), AdminAuth: middleware.AdminAuth("synthetic-admin-key"), RateLimiter: limiter, RateGate: access.NewRateGate(limiter)})
 	socket := httptest.NewServer(engine)
 	defer socket.Close()
 	request := func(body, token string) (int, string) {
@@ -205,6 +213,85 @@ func TestManagedInferenceAdminCreateRestartAndRealResponsesConsumer(t *testing.T
 	if attempts.Load() != 2 || catalogs.Load() != 1 {
 		t.Fatal("rejected input made upstream request")
 	}
+
+	// A real response is observed, persisted, and enforced by the next real
+	// request. Administrator resume changes the epoch and invalidates directory
+	// cache, while a late failure from before resume becomes stale.
+	rejectStatus.Store(429)
+	if code, raw := request(valid, key.Key); code < 400 || strings.Contains(raw, "response.completed") {
+		t.Fatalf("managed refusal: %d %s", code, raw)
+	}
+	rejectStatus.Store(0)
+	if code, _ := request(valid, key.Key); code < 400 {
+		t.Fatal("blocked eligibility sent")
+	}
+	if attempts.Load() != 3 || catalogs.Load() != 1 {
+		t.Fatal("refusal retried or gate not enforced")
+	}
+	adminRequest := func(method, path, body string) (int, authv3.Eligibility) {
+		t.Helper()
+		req, e := http.NewRequest(method, socket.URL+path, strings.NewReader(body))
+		if e != nil {
+			t.Fatal(e)
+		}
+		req.Header.Set("Authorization", "Bearer "+admin)
+		req.Header.Set("Content-Type", "application/json")
+		res, e := socket.Client().Do(req)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer res.Body.Close()
+		raw, e := io.ReadAll(res.Body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		var envelope struct {
+			Data authv3.Eligibility `json:"data"`
+		}
+		if res.StatusCode == 200 {
+			if e = json.Unmarshal(raw, &envelope); e != nil {
+				t.Fatal(e)
+			}
+		}
+		if strings.Contains(string(raw), "synthetic-secret-body") || strings.Contains(string(raw), "synthetic-access-token-private") {
+			t.Fatal("eligibility leaked provider content")
+		}
+		return res.StatusCode, envelope.Data
+	}
+	gatePath := fmt.Sprintf("/api/admin/managed-credentials/%d/eligibility", created.Data.Credential.CredentialID)
+	code, gate := adminRequest("GET", gatePath, "")
+	if code != 200 || !gate.Blocked || gate.Reason != authv3.UsageLimited || gate.ResetKnown || gate.ResetAt != nil {
+		t.Fatalf("refusal not queryable: %d %+v", code, gate)
+	}
+	separate, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := separate.InferenceEligibility().ReadEligibility(ctx, gate.CredentialID)
+	if err != nil || !persisted.Blocked || persisted.GateEpoch != gate.GateEpoch {
+		t.Fatal("independent reopen lost refusal", err)
+	}
+	if err = separate.Close(); err != nil {
+		t.Fatal(err)
+	}
+	resume := fmt.Sprintf(`{"expected_binding_revision":"%d","expected_gate_revision":"%d","expected_gate_epoch":"%d"}`, gate.BindingRevision, gate.Revision, gate.GateEpoch)
+	code, resumed := adminRequest("POST", gatePath+"/resume", resume)
+	if code != 200 || resumed.Blocked || resumed.GateEpoch <= gate.GateEpoch {
+		t.Fatalf("resume failed: %d %+v", code, resumed)
+	}
+	if code, _ := adminRequest("POST", gatePath+"/resume", resume); code != 409 {
+		t.Fatal("stale resume accepted")
+	}
+	stale, err := st.InferenceEligibility().RecordFailure(ctx, authv3.FailureWrite{Issued: authv2.AccessRequest{CredentialID: gate.CredentialID, ExpectedBindingRevision: gate.BindingRevision, AccountID: account.ID, ExpectedRevision: account.Revision, ExpectedCredentialRevision: account.CredentialRevision, OwnerID: owner.ID, TokenID: key.ID, Model: "synthetic-model"}, GateEpoch: gate.GateEpoch, Signal: authv3.FailureSignal{Reason: authv3.UsageLimited, Scope: authv3.Grant, ProviderCode: "subscription_sharing_usage_limit_exceeded", HTTPStatus: 429, Source: authv3.ResponsesHTTP}})
+	if err != nil || stale.Applied {
+		t.Fatal("late failure reapplied after resume", err)
+	}
+	if code, raw := request(valid, key.Key); code != 200 || !strings.Contains(raw, "response.completed") {
+		t.Fatalf("resumed consumer: %d %s", code, raw)
+	}
+	if attempts.Load() != 4 || catalogs.Load() != 2 {
+		t.Fatal("resume failed to refresh directory or retried")
+	}
 	independent, err := store.Open(db)
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +303,7 @@ func TestManagedInferenceAdminCreateRestartAndRealResponsesConsumer(t *testing.T
 	if code, raw := request(valid, key.Key); code < 400 || strings.Contains(raw, "response.completed") {
 		t.Fatalf("cross-process disable ignored: %d %s", code, raw)
 	}
-	if attempts.Load() != 2 || catalogs.Load() != 1 {
+	if attempts.Load() != 4 || catalogs.Load() != 2 {
 		t.Fatal("disable retried or fell back")
 	}
 }

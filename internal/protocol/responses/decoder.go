@@ -12,7 +12,9 @@ import (
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	execv2 "minigateway/internal/foundation/contracts/execution/v2"
 	execv3 "minigateway/internal/foundation/contracts/execution/v3"
+	authv3 "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	"minigateway/internal/protocol/jsonutil"
+	"minigateway/internal/protocol/openaiauth"
 )
 
 type Response struct {
@@ -89,6 +91,8 @@ type Decoder struct {
 	publicID    string
 	mu          sync.Mutex
 	observation Observation
+	failure     authv3.FailureSignal
+	hasFailure  bool
 }
 
 func NewDecoder() *Decoder                      { return NewDecoderWithID("") }
@@ -107,6 +111,25 @@ func (d *Decoder) observe(o Observation) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.observation = o
+	if o.ID == "" && o.Status == "" {
+		d.failure, d.hasFailure = authv3.FailureSignal{}, false
+	}
+}
+
+func (d *Decoder) InferenceFailure() (authv3.FailureSignal, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.failure, d.hasFailure
+}
+
+func (d *Decoder) observeFailure(data []byte) {
+	signal, ok := openaiauth.ClassifyInferenceFailure(0, data, true, authv3.ResponsesEvent)
+	if !ok {
+		return
+	}
+	d.mu.Lock()
+	d.failure, d.hasFailure = signal, true
+	d.mu.Unlock()
 }
 func terminalStatus(status string) bool {
 	return status == "completed" || status == "incomplete" || status == "failed" || status == "cancelled"
@@ -313,6 +336,9 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 		out.Write(rewritten)
 		out.WriteString("\n\n")
 		frame.Data = out.Bytes()
+	}
+	if frame.Complete {
+		s.owner.observeFailure(data)
 	}
 	return []execv1.Frame{frame}, nil
 }

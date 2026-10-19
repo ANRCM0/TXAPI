@@ -193,7 +193,7 @@ func TestEveryProductionPackageHasFourLayerOwnership(t *testing.T) {
 			path == module+"internal/foundation/contracts/configuration/v2" || path == module+"internal/foundation/contracts/upstreamauth/v2" {
 			version = "2"
 		}
-		if path == module+"internal/foundation/contracts/execution/v3" {
+		if path == module+"internal/foundation/contracts/execution/v3" || path == module+"internal/foundation/contracts/upstreamauth/v3" {
 			version = "3"
 		}
 		if r.Public && (r.Version != version || !strings.HasSuffix(path, "/v"+version)) {

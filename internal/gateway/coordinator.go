@@ -8,6 +8,7 @@ import (
 	"minigateway/internal/billing"
 	"minigateway/internal/core"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
+	authv3 "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	"minigateway/internal/model"
 )
 
@@ -140,6 +141,7 @@ type executionScope struct {
 	responseID      string
 	responseTarget  *ResponseTarget
 	managedTarget   *model.Credential
+	managedIssued   *authv3.FailureWrite
 	requestAdmitted bool
 	claim           *model.GenerationClaim
 }

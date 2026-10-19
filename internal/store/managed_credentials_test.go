@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -322,7 +323,7 @@ func TestManagedCredentialCommitFailureDoesNotReturnToken(t *testing.T) {
 		"PRAGMA foreign_keys=ON",
 		"CREATE TABLE managed_commit_parent (id integer PRIMARY KEY)",
 		"CREATE TABLE managed_commit_child (parent_id integer REFERENCES managed_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)",
-		"CREATE TRIGGER managed_defer_commit_failure AFTER UPDATE ON schema_migrations WHEN OLD.version = 18 BEGIN INSERT INTO managed_commit_child(parent_id) VALUES(99); END",
+		fmt.Sprintf("CREATE TRIGGER managed_defer_commit_failure AFTER UPDATE ON schema_migrations WHEN OLD.version = %d BEGIN INSERT INTO managed_commit_child(parent_id) VALUES(99); END", latestMigrationVersion),
 	} {
 		if err := f.store.DB().Exec(statement).Error; err != nil {
 			t.Fatal(err)
@@ -396,7 +397,7 @@ func TestManagedCredentialSchema18DoesNotInferOldAccountProvenance(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.DB().Where("version = ?", 18).Delete(&model.SchemaMigration{}).Error; err != nil {
+	if err := f.store.DB().Where("version >= ?", 18).Delete(&model.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.DB().Exec("DROP INDEX idx_one_active_managed_binding").Error; err != nil {

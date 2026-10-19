@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	jsonvalue "minigateway/internal/foundation/contracts/json/v1"
 	auth "minigateway/internal/foundation/contracts/upstreamauth/v1"
 	authv2 "minigateway/internal/foundation/contracts/upstreamauth/v2"
+	authv3 "minigateway/internal/foundation/contracts/upstreamauth/v3"
 	"minigateway/internal/model"
 )
 
@@ -31,6 +33,11 @@ func managedWireRequest(r *http.Request) bool {
 // Keep the supplied client's static-route behavior. Managed requests alone
 // suppress redirects and cookie exchange within the same mechanical executor.
 func managedHTTPClient(original *http.Client) *http.Client {
+	if original == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns, transport.MaxIdleConnsPerHost = 200, 50
+		original = &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
 	client := *original
 	redirect := original.CheckRedirect
 	client.CheckRedirect = func(r *http.Request, via []*http.Request) error {
@@ -68,9 +75,44 @@ func (t managedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		copy.Header = response.Header.Clone()
 		copy.Header.Del("Set-Cookie")
 		copy.Header.Del("Set-Cookie2")
+		if observation, ok := r.Context().Value(managedObservationKey{}).(*managedWireObservation); ok && r.Method == http.MethodPost && r.URL.String() == managedOrigin+"/responses" {
+			observation.status = response.StatusCode
+			if response.StatusCode != http.StatusOK && response.Body != nil {
+				copy.Body = &managedObservedBody{ReadCloser: response.Body, observation: observation}
+			}
+		}
 		response = &copy
 	}
 	return response, err
+}
+
+type managedObservationKey struct{}
+type managedWireObservation struct {
+	status             int
+	body               []byte
+	complete, overflow bool
+}
+type managedObservedBody struct {
+	io.ReadCloser
+	observation *managedWireObservation
+}
+
+func (b *managedObservedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	o := b.observation
+	if !o.overflow {
+		if len(o.body)+n > 64<<10 {
+			o.body, o.overflow = nil, true
+		} else {
+			o.body = append(o.body, p[:n]...)
+		}
+	}
+	if err == io.EOF {
+		o.complete = !o.overflow
+	} else if err != nil {
+		o.complete = false
+	}
+	return n, err
 }
 
 func (t managedTransport) CloseIdleConnections() {
@@ -86,20 +128,29 @@ type ManagedInferenceOptions struct {
 	Credentials     authv2.InferenceCredentials
 	DirectoryCaller auth.HTTPCaller
 	ValidateModel   func([]byte, string) error
+	FailureRecorder authv3.FailureRecorder
+	ClassifyFailure func(int, []byte, bool, authv3.Source) (authv3.FailureSignal, bool)
 }
 
 type managedInference struct {
-	credentials authv2.InferenceCredentials
-	caller      auth.HTTPCaller
-	validate    func([]byte, string) error
-	mu          sync.Mutex
-	cache       managedCatalog
+	credentials      authv2.InferenceCredentials
+	caller           auth.HTTPCaller
+	validate         func([]byte, string) error
+	recorder         authv3.FailureRecorder
+	classify         func(int, []byte, bool, authv3.Source) (authv3.FailureSignal, bool)
+	mu               sync.Mutex
+	feedbackGate     chan struct{}
+	cache            managedCatalog
+	pending          []authv3.FailureWrite
+	feedbackOverflow bool
+	backoffUntil     time.Time
 }
 
 // One metadata-only slot bounds cache cardinality across account generations.
 type managedCatalog struct {
 	account, slug        string
 	revision, credential int64
+	epoch                int64
 	expires              time.Time
 }
 
@@ -107,10 +158,10 @@ func newManagedInference(opts *ManagedInferenceOptions, mode billing.Mode) (*man
 	if opts == nil || !opts.Enabled {
 		return nil, nil
 	}
-	if mode != billing.ModeDisabled || nilInterface(opts.Credentials) || nilInterface(opts.DirectoryCaller) || opts.ValidateModel == nil {
+	if mode != billing.ModeDisabled || nilInterface(opts.Credentials) || nilInterface(opts.DirectoryCaller) || opts.ValidateModel == nil || nilInterface(opts.FailureRecorder) || opts.ClassifyFailure == nil {
 		return nil, errors.New("managed inference requires disabled billing and complete dependencies")
 	}
-	return &managedInference{credentials: opts.Credentials, caller: opts.DirectoryCaller, validate: opts.ValidateModel}, nil
+	return &managedInference{credentials: opts.Credentials, caller: opts.DirectoryCaller, validate: opts.ValidateModel, recorder: opts.FailureRecorder, classify: opts.ClassifyFailure, feedbackGate: make(chan struct{}, 1)}, nil
 }
 
 func isManaged(c *model.Credential) bool { return c.Source == model.CredentialSourceManaged }
@@ -333,21 +384,22 @@ func (g *Gateway) acquireManaged(ctx context.Context, c *executionScope, cred *m
 	if g.managed == nil || ctx.Err() != nil || c.result.Identity.Policy == nil || !c.result.Identity.Policy.Allows(cred.BindingModel) || c.result.Identity.UserID != cred.BindingOwnerID || c.result.Identity.TokenID != cred.BindingTokenID {
 		return authv2.AccessCredential{}, auth.ErrRejected
 	}
-	access, err := g.managed.credentials.AcquireAccess(ctx, authv2.AccessRequest{CredentialID: cred.ID, ExpectedBindingRevision: cred.BindingRevision, AccountID: cred.AccountID,
+	access, err := g.managed.issue(ctx, authv2.AccessRequest{CredentialID: cred.ID, ExpectedBindingRevision: cred.BindingRevision, AccountID: cred.AccountID,
 		ExpectedRevision: cred.AccountRevision, ExpectedCredentialRevision: cred.CredentialRevision, OwnerID: c.result.Identity.UserID, TokenID: c.result.Identity.TokenID, Model: cred.BindingModel})
-	if err != nil || access.AccountID != cred.AccountID || access.Revision != cred.AccountRevision || access.CredentialRevision != cred.CredentialRevision || !access.ExpiresAt.After(time.Now()) || !auth.ValidWireText(access.AccessToken.Value(), auth.MaxTokenBytes) || strings.ContainsAny(access.AccessToken.Value(), " \t") {
+	if err != nil || access.AccountID != cred.AccountID || access.Revision != cred.AccountRevision || access.CredentialRevision != cred.CredentialRevision || access.GateEpoch < 1 || !access.ExpiresAt.After(time.Now()) || !auth.ValidWireText(access.AccessToken.Value(), auth.MaxTokenBytes) || strings.ContainsAny(access.AccessToken.Value(), " \t") {
 		return authv2.AccessCredential{}, auth.ErrRejected
 	}
 	return access, nil
 }
 
-func (m *managedInference) visible(ctx context.Context, access authv2.AccessCredential, slug string) (bool, error) {
+func (m *managedInference) visible(ctx context.Context, access authv2.AccessCredential, cred *model.Credential) (bool, error) {
+	slug := cred.BindingModel
 	m.mu.Lock()
 	if ctx.Err() != nil {
 		m.mu.Unlock()
 		return false, ctx.Err()
 	}
-	if m.cache.account == access.AccountID && m.cache.revision == access.Revision && m.cache.credential == access.CredentialRevision && m.cache.slug == slug && time.Now().Before(m.cache.expires) {
+	if m.cache.account == access.AccountID && m.cache.revision == access.Revision && m.cache.credential == access.CredentialRevision && m.cache.epoch == access.GateEpoch && m.cache.slug == slug && time.Now().Before(m.cache.expires) {
 		m.mu.Unlock()
 		return false, nil
 	}
@@ -355,6 +407,9 @@ func (m *managedInference) visible(ctx context.Context, access authv2.AccessCred
 	m.mu.Unlock()
 	started := time.Now()
 	response := m.caller.Call(ctx, auth.Request{Method: http.MethodGet, URL: managedOrigin + "/models", Header: http.Header{"Authorization": {"Bearer " + access.AccessToken.Value()}, "Accept": {"application/json"}}})
+	if ctx.Err() == nil {
+		m.observeHTTP(issuedManaged(cred, access), response.Status, []byte(response.Body.Value()), response.Complete, authv3.ModelsHTTP)
+	}
 	if ctx.Err() != nil || !response.Complete || response.Status != 200 || m.validate([]byte(response.Body.Value()), slug) != nil {
 		return true, auth.ErrUnavailable
 	}
@@ -366,7 +421,7 @@ func (m *managedInference) visible(ctx context.Context, access authv2.AccessCred
 		return true, auth.ErrUnavailable
 	}
 	m.mu.Lock()
-	m.cache = managedCatalog{account: access.AccountID, revision: access.Revision, credential: access.CredentialRevision, slug: slug, expires: expires}
+	m.cache = managedCatalog{account: access.AccountID, revision: access.Revision, credential: access.CredentialRevision, epoch: access.GateEpoch, slug: slug, expires: expires}
 	m.mu.Unlock()
 	return true, nil
 }
@@ -393,7 +448,7 @@ func (g *Gateway) authorizeManagedInput(c *executionScope, target *execution.Tar
 	if err != nil {
 		return managedFailure(503, "provider_credential_unavailable")
 	}
-	fetched, err := g.managed.visible(c.ctx, access, cred.BindingModel)
+	fetched, err := g.managed.visible(c.ctx, access, cred)
 	if err != nil {
 		return managedFailure(503, "provider_model_unavailable")
 	}
@@ -407,5 +462,7 @@ func (g *Gateway) authorizeManagedInput(c *executionScope, target *execution.Tar
 	}
 	input.Method = http.MethodPost
 	input.Header = http.Header{"Authorization": {"Bearer " + access.AccessToken.Value()}}
+	issued := issuedManaged(cred, access)
+	c.managedIssued = &issued
 	return nil
 }

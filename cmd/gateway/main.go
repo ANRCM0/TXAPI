@@ -258,7 +258,7 @@ func main() {
 	if cfg.UpstreamAccounts.Inference.Enabled {
 		caller := upstreamhttp.NewCaller(nil)
 		defer caller.Close()
-		managedInference = &gateway.ManagedInferenceOptions{Enabled: true, Credentials: st.InferenceCredentials(), DirectoryCaller: caller, ValidateModel: openaiauth.ValidateVisibleModel}
+		managedInference = &gateway.ManagedInferenceOptions{Enabled: true, Credentials: st.InferenceCredentials(), DirectoryCaller: caller, ValidateModel: openaiauth.ValidateVisibleModel, FailureRecorder: st.InferenceEligibility(), ClassifyFailure: openaiauth.ClassifyInferenceFailure}
 	}
 	gw, err = gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(),
 		ManagedInference:   managedInference,
@@ -410,6 +410,7 @@ func main() {
 	})
 	if cfg.UpstreamAccounts.Inference.Enabled {
 		configurationService.SetManagedRepository(st.ManagedChannels())
+		configurationService.SetEligibilityRepository(st.InferenceEligibility())
 	}
 	gw.Metrics().SetCredentialStatsProvider(gw.CredentialStats)
 	gw.Metrics().SetLogStatsProvider(func() metrics.LogQueueStats {
@@ -427,6 +428,7 @@ func main() {
 		UsageHistory:         usageconsole.New(st.UsageHistory(cfg.UsageHistory.Enabled, cfg.UsageHistory.RetentionSeconds), controlplane.New(persistence.Control(st)), limiter),
 		Configuration:        configurationService,
 		ManagedConfiguration: configurationService,
+		ManagedEligibility:   configurationService,
 		Ledger:               engine,
 		Metrics:              gw.Metrics(),
 		RateGate:             access.NewRateGate(limiter),
