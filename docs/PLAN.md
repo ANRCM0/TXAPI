@@ -153,6 +153,95 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 - **验收：**停用/重授权/刷新与发送竞争、旧 revision、过期、uncertain 禁发、取消、无密钥泄漏和静态 Key 回归；授权真实账号下分别记录成功/拒绝/断开证据。
 - **协作影响：**共享配置、注册、组装由本批协调；不扩大 strict，不顺带建设完整账号池或管理页面。
 
+<details>
+<summary>FC-P1-001：SIWC 单账号 Responses 推理接线具体 CR（已批准）</summary>
+
+#### FC-P1-001：SIWC 单账号 Responses 推理接线（已批准）
+
+日期：2026-10-19。用户已明确批准以下 CR 的源码实施与受控验证；不代表真实账号调用授权，也不表示实现或验收完成。
+
+##### 1. 层级、落点与完整切片
+
+交付“持久托管凭据绑定 → 重启加载 → 唯一 registry/scheduler → 当前 owner/Key/model 校验 → 发送前账号凭据复核 → 现有 Responses HTTP/SSE 执行与输出”。L1：store、controlplane、upstreamidentity、scheduler、gateway；L2：protocol/openaiauth、现有 Responses、server；组装根：cmd/gateway。测试及 OpenAPI 同批更新；不新增前端。
+
+仅一个启用的绑定：一个既有 R04a OpenAI SIWC 账号、一个 owner、一个调用 Key、一个实际模型 slug、一个真实渠道与真实 credential 行。仅 `billing.mode=disabled`、文本、自包含 `input` 数组、`store=false`、`stream=true` 的 Responses HTTP/SSE。操作、字段和权限不合规时在网络前拒绝；拒绝本地/远端父链、conversation、background、WS、工具和媒体。专用入口不改变独立标准 API Key 路线。
+
+##### 2. 依赖与新增公开端口
+
+复用已批准的 execution v1/v2/v3、identity/admission、Responses 及配置 publication。保持现有 upstreamauth/v1 与 configuration/v1 类型/签名。新增候选 upstreamauth/v2 的窄凭据接口（版本登记不代表冻结）：
+
+```go
+type AccessRequest struct {
+    CredentialID uint
+    ExpectedBindingRevision int64
+    AccountID string
+    ExpectedRevision int64
+    ExpectedCredentialRevision int64
+    OwnerID uint
+    TokenID uint
+    Model string
+}
+type AccessCredential struct {
+    AccountID string
+    Revision int64
+    CredentialRevision int64
+    AccessToken upstreamauthv1.Secret
+    ExpiresAt time.Time
+}
+type InferenceCredentials interface {
+    AcquireAccess(context.Context, AccessRequest) (AccessCredential, error)
+}
+```
+
+L1 gateway 是唯一推理凭据消费者；不返回 refresh/id token，不缓存 access token 到渠道快照、任务、管理 API 或日志。不开新 sender、刷新流程、重试权威或一次性授权流水表。
+
+configuration/v2 追加托管配置端口：`ManagedBindingInput{AccountID string; OwnerID,TokenID uint; Model string}`；持久视图追加真实 `ChannelID/CredentialID`、绑定 `Revision` 和启用状态。提供创建托管渠道及其初始绑定、读取、按预期 revision 更新/停用的管理操作；由现有配置 owner 事务保存并发布。创建输入复用 v1 的渠道基本字段，但不接收静态 API Key；渠道模型必须恰为绑定 slug，暂不允许模型映射。现有 v1 静态写接口遇到托管行返回明确冲突，不能覆盖来源或 grant；托管读取通过 v2 明确展示来源和脱敏绑定。
+
+管理员 API：`POST /api/admin/managed-channels` 接收 `{channel: <v1渠道字段，禁止api_key>, binding: <ManagedBindingInput>}`，原子创建真实渠道/credential/绑定并返回201；`GET /api/admin/managed-credentials/{id}` 读取；`PUT` 同路径接收 `{expected_revision: <十进制字符串>, binding: <ManagedBindingInput>}` 做CAS更新；`POST /api/admin/managed-credentials/{id}/disable` 接收 `{expected_revision: <十进制字符串>}` 停用。字段缺失/非法400，当前管理员权限不足403，缺失404，revision/来源/唯一绑定冲突409；保存成功但发布失败沿既有SavedError/Change语义，不能谎称未保存。上述操作复用现有认证与配置owner，不增加第二管理平台；JSON与错误写入OpenAPI。
+
+##### 3. 地基影响、迁移与回退
+
+schema18 追加 credential 来源与持久绑定（账号、owner、调用 Key、模型、绑定 revision；必要时使用与真实 credential 一对一的表），已有 credential 默认 static_api_key。托管绑定使用真实数据库 ID；不伪造 Key/ID，不把 OAuth token 复制入静态凭据字段。已有账号 token 继续由既有 AEAD envelope 持有；账号解密器、静态密钥迁移器及健康持久化按来源分支，不能将空静态 Key 当托管损坏或反向复制密钥。
+
+保持 L0 不变。execution/v1 的 CredentialID 在此子集允许引用真实托管 credential 绑定行，需要明确批准该语义；不追加 Invocation/Outcome/TargetConstraint 版本。托管目标 fingerprint 绑定来源、绑定 revision、账号/credential revision、官方目标和模型，不包含 token。本批拒绝托管续链与持久重放，不将此语义外推其他模式。
+
+升级按 PLAN 停写、一致备份并应用 schema18；旧 schema17 二进制拒绝打开18。回退恢复匹配的停写备份；不删除账号、改写旧迁移或账本来降级。迁移失败不得部分发布绑定。
+
+##### 4. 授权、目标与生命周期语义
+
+`AcquireAccess` 复用账号仓储已有跨进程 SQLite 短写事务锁：事务内先校验真实credential绑定启用、binding revision与可信调用身份/Key/model匹配，再校验账号provider、Active、无 refresh claim、两个账号revision、凭据有效期、已获批且已知scopes与受控SIWC来源，解密后只在提交成功时返回access token。请求中的owner/TokenID由L1从已认证principal填入，不能直接接受外部请求自报身份。配置绑定修改/停用同样参与该事务排序；提交失败或结果不确定不返回token、不发送、不自动补试。
+
+**线性化点是成功提交的凭据发放。** Disable/Refresh/重授权先提交则后续 Acquire 拒绝；Acquire 先提交则当前 attempt 已获授权，之后停用/刷新阻止新发放，但不保证撤回已授权的实际网络发送。此边界明确适用于另一个 CLI 进程，不以进程内 mutex 宣称全局撤销。每次发送前重新取凭据，不跨 attempt 复用；gateway 私有调用栈只消费一次，仍沿既有 executor 发送并记录实际/未知事实，不声称上游 exactly-once。
+
+当前可信身份、Key/模型权限、grant 与绑定状态在 registry/scheduler 筛选及实际 attempt 准备前核对。托管选中后失效/错误即结束，不换其他账号、渠道、静态 Key，不自动刷新或恢复旧 attempt。原静态路线保留现有行为。
+
+只允许受控 R04a SIWC flow 为 `resource=https://api.openai.com/v1` 签发、具备 `resource.invoke` 与 `chatgpt.tokens.use.direct` 的 access token；ID token 的 client audience 不充当资源授权证明。Issuer/client 身份沿现有校验，来源缺失、scopes 未知或不匹配则拒绝。未知/任意导入 OAuth token 不继承许可。
+
+推理 URL 固定 `https://api.openai.com/v1/responses`，模型目录 URL 固定 `/v1/models`；禁任意 base URL、跨 origin redirect、额外用户上游 Header 和 backend-api 目的地。部署 transport 保持正常 TLS 验证，代理不能改变已验证 origin。模型目录采用专用有界 decoder，识别 `models[]/slug/visibility`；按账号/credential revision 缓存最多60秒，只接受配置的一个可见 slug，目录缺失/过期或代次变化失败关闭。目录调用复用 core 支撑的现有机械 HTTP owner；需要将现有 OAuth Caller 的目标白名单明确扩展为上述固定 GET，并只为该 GET允许有界 Bearer Header，不把 OAuth token endpoint白名单改成通用请求器。
+
+##### 5. 配置、消费者与验收
+
+新增 `upstream_accounts.inference.enabled: false`，只在 disabled、凭据加密已启用时允许开启；绑定由上述管理员配置端口持久创建，不用 YAML 静态渠道 seed 填假 Key。启用但无有效绑定时拒绝托管调用。最多一个绑定，删除/撤销 Key、用户或账号后失败关闭。当前配置重载、启动、退出仍沿唯一 lifecycle。
+
+受控验收贯穿真实消费者并覆盖：创建/重启/发布回退、跨 owner/Key/model拒绝、源类型隔离、无静态假凭据、两独立 DB 连接的 Acquire↔Disable/Refresh排序、提交失败无 token、旧 revision/expired/unknown scopes/uncertain 拒发、禁字段发送前拒绝、目录状态/代次绑定、403/429/failed/incomplete/截断、取消/退出与不补 DONE、access/id/refresh 无日志泄漏、单次 executor及无fallback、静态 API Key 回归。全量现有 CI（Linux race、冒烟、交付）按精确提交验收。
+
+真实闭环另需明确账号、模型、请求次数/订阅或费用预算与测试输入授权；批准本 CR 只批准源码实现及受控测试，不能自动调用真实服务或宣称账号已验收。
+
+##### 6. 其他模块影响与批准范围
+
+共享契约、schema18、配置发布、OpenAPI和组装统一集成；独立协议/性能工作继续。暂不交付自动刷新 worker、账号池、窗口调度、后台/WS收费或付费开放。未批准的原工作区 `upstreamauth/v1/inference.go` 保持原样，不能视作接口授权来源。
+
+已批准范围：上述 P1 子集、configuration/v2/upstreamauth/v2 追加端口、schema18真实来源/绑定、CredentialID指向托管绑定的语义、凭据发放与停用排序及不撤回已授权发送的边界、固定目录/推理目标和单grant无fallback。公开字段、生命周期或范围超出这些边界时另提CR。
+
+官方依据（2026-10-19核对）：
+- https://developers.openai.com/siwc/token-sharing-open-source/sign-in
+- https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions
+- https://developers.openai.com/siwc/token-sharing-open-source/token-reference
+- https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+- https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+
+</details>
+
 ### P2：有界自动刷新
 
 - **层级/目录：**L1 upstreamauth owner 与统一 lifecycle；组装根仅负责启动、取消和 join。
