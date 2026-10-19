@@ -120,7 +120,7 @@ Linux/macOS 直接运行同一 go test 命令。无需实际凭据、外部提�
 | 关键行为/最小运行 | [执行/取消](../../internal/core/core_test.go)、[输出/短写](../../internal/core/output_test.go)，样例实际派发原 core | [注册](../../internal/gateway/registered_test.go)、[容量](../../internal/gateway/capacity_test.go)、原 billing/generation/store 全量与独立样例 | [协议输入](../../internal/protocol/request_test.go)、[工具保真](../../internal/protocol/tools_test.go)、HTTP/OpenAPI/前端与真实样例输出 |
 | 扩展与资源寿命 | HTTP attempt 只管本次 I/O；[内部边界](foundation-contracts.md) | 原授权/准入/成本/attempt/收尾、状态 CAS/fencing 和共享关闭；[API 清单](foundation-api-v1.md) | 注册与独立 session；HTTP 输出/Body/Call 的 join、关闭与缓存/头表示；同上清单 |
 | 错误/日志/配置约定 | phase/committed/protocolComplete 保持不同事实，原错误不被成功覆盖 | 未证明即拒绝、unknown 保留原 hold；保存后错误/发布状态、请求关联和脱敏仍按 [开发指南](../DEVELOPMENT.md) | 不可表示语义拒绝；流已提交不能改状态/假造 DONE；91 操作/配置与前端契约保持 |
-| 范围与限制 | HTTP/SSE 机制；WS I/O 不等于产品执行接线 | 单实例 SQLite/有界资源与既有 strict 许可；不新增成本证明 | [支持矩阵](compatibility-contracts.md)；Responses 默认关闭、strict 全拒绝，后台/原生 WS 未交付 |
+| 范围与限制 | HTTP/SSE 机制；WS I/O 不等于产品执行接线 | 单实例 SQLite/有界资源与既有 strict 许可；不新增成本证明 | [支持矩阵](compatibility-contracts.md)；Responses 默认关闭、strict 全拒绝；后续 [后台](responses-background.md)/[WS](responses-websocket.md) disabled 子集独立验收 |
 | 独立上层证明 | L3 源码无法导入 L0 | summary 只用公开身份/执行端口，实际经过原协调与容量 | codec 不导入功能，真实 loopback/HTTP consumer 验证字节与拒绝路径 |
 
 本次已在最新集成基线上通过自动完整 CI（契约/依赖、构建/vet/格式、Linux 全量 race、
@@ -167,7 +167,7 @@ A03-03 与已验收 A03-02 的全部十七项完全相同；A03-02 唯一符号�
 | 最小可运行样例 | 下方命令使用临时加密 SQLite、挂载测试密钥、真实 owner/gateway/core 与 loopback 原生上游；[生产二进制 smoke](../../tests/smoke/background.py) 由既有 local.py 自动调用，真实 SIGKILL/重启查询/游标/取消/关闭/模式拒绝/feature-off TTL；不依赖真实提供商 |
 | 扩展说明 | 新 L2 通过具名 Registration 的纯 Parser/Codec.Prepare 返回每次独立的 Input/Decoder/Observer，main 显式注册/选择渠道，L1 拥有受限派发。v2 是独立 facade，不给 v1 接口强加新方法；进一步签名/语义/权限/寿命变更仍先具名批准 |
 | 基础约定 | 当前 owner/创建 Key/模型与事务权威不变；有界 worker/租约/网络/读/写期限，错误脱敏、不记录密钥/正文，固定 TTL 与关闭 join；native sequence 的 nil/0 不同，JSON 任务终态不等于事件尾部完成，持久后再公开，观察断开不取消任务，unknown 不盲重发；细则见后台指南 |
-| 限制清单 | 默认关闭，仅 disabled、自包含文本/函数工具、明确 opt-in 的原生 API-key Bearer 渠道；store=false 仍临时加密保留；单实例 SQLite。收费双 hold/成本、父链/会话组合、原生 WS、真实提供商/SDK 与 ZDR 认证均未完成，完整 A03/M3 保持未验收 |
+| 限制清单 | 默认关闭，仅 disabled、自包含文本/函数工具、明确 opt-in 的原生 API-key Bearer 渠道；store=false 仍临时加密保留；单实例 SQLite。本 FC-002 批次不包含收费双 hold/成本、父链/会话组合、原生 WS、真实提供商/SDK 或 ZDR 认证，完整 A03/M3 保持未验收；后续 R03 disabled WS 子集见独立契约 |
 | 独立上层接入 | [L3 Responses](../../internal/responses/background.go) 只消费登记的 background/v1 与应用 v2/其他公开端口，不导入 Store/Gateway/协议/网络；[L2 原生 codec](../../internal/protocol/responses/background.go) 与 [HTTP v2](../../internal/compat/responseshttp/background.go) 不持有业务/SQL。实际 HTTP 集成、[五个强杀窗口](../../internal/generation/background_runtime_test.go) 与 [故障/尾部矩阵](../../internal/generation/background_event_failures_test.go) 穿过真实链路，不用 mock 证明持久性 |
 
 最小运行（仅隔离测试数据，无真实密钥/账号/外部调用）：
