@@ -176,13 +176,17 @@ type streamDecoder struct {
 const maxEventBytes = 1 << 20
 
 func (s *streamDecoder) DecodeLine(line []byte) ([]execv1.Frame, error) {
+	// The HTTP scanner removes CRLF; tolerate a retained CR from other line
+	// consumers as well, without making it part of the SSE field value.
+	line = bytes.TrimSuffix(line, []byte{'\r'})
 	if s.terminal {
 		return nil, errors.New("Responses event after terminal state")
 	}
 	if len(line) == 0 {
 		return s.flush()
 	}
-	if s.wire.Len()+len(line)+1 > maxEventBytes {
+	// Reserve the final blank line as part of the complete event budget.
+	if s.wire.Len()+len(line)+2 > maxEventBytes {
 		return nil, errors.New("Responses event exceeds limit")
 	}
 	s.wire.Write(line)
@@ -370,14 +374,15 @@ func rewrite(body []byte, publicID string, responseRoot, errorEvent bool) ([]byt
 }
 
 func (s *streamDecoder) End() ([]execv1.Frame, error) {
-	frames, err := s.flush()
-	if err != nil {
-		return nil, err
-	}
+	// Only a blank line dispatches an SSE event. EOF must not promote a
+	// truncated terminal event into a successful protocol completion.
+	s.wire.Reset()
+	s.data = nil
+	s.event = ""
 	if !s.terminal {
 		return nil, fmt.Errorf("Responses stream ended without a terminal response")
 	}
-	return frames, nil
+	return nil, nil
 }
 
 var _ execv1.Decoder = (*Decoder)(nil)

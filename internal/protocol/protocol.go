@@ -127,9 +127,13 @@ type streamDecoder struct {
 	raw     bool
 	finish  bool
 	done    bool
+	chat    chatSSEEvent
 }
 
 func (s *streamDecoder) DecodeLine(line []byte) ([]execv1.Frame, error) {
+	if s.raw {
+		return s.decodeChatLine(line)
+	}
 	data := strings.TrimSpace(string(line))
 	if strings.HasPrefix(data, "data:") {
 		data = strings.TrimSpace(strings.TrimPrefix(data, "data:"))
@@ -151,12 +155,6 @@ func (s *streamDecoder) DecodeLine(line []byte) ([]execv1.Frame, error) {
 			s.done = true
 		}
 	}
-	if s.raw {
-		if hasFinishReason(line) {
-			s.finish = true
-		}
-		return []execv1.Frame{{Data: append(append([]byte(nil), line...), '\n'), Usage: usageFromLine(line)}}, nil
-	}
 	lines, err := ConvertStreamLine(s.decoder.a, line, s.session, &s.decoder.target)
 	if err != nil {
 		return nil, err
@@ -174,6 +172,12 @@ func (s *streamDecoder) DecodeLine(line []byte) ([]execv1.Frame, error) {
 	return frames, nil
 }
 func (s *streamDecoder) End() ([]execv1.Frame, error) {
+	if s.raw {
+		if !s.finish || !s.done || len(s.chat.raw) != 0 {
+			return nil, fmt.Errorf("missing stream terminal state")
+		}
+		return []execv1.Frame{{Data: s.chat.terminal}}, nil
+	}
 	if !s.finish || ((s.raw || s.name == "anthropic") && !s.done) {
 		return nil, fmt.Errorf("missing stream terminal state")
 	}

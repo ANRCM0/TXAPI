@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"bytes"
 	"encoding/json"
 	"strings"
 )
@@ -11,26 +10,30 @@ func responsesCompletionText(stream bool, body []byte) string {
 		return responsesOutputText(body)
 	}
 	var deltas strings.Builder
-	for _, line := range bytes.Split(body, []byte{'\n'}) {
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
+	var final string
+	visitSSEData(body, func(data []byte) bool {
 		var event struct {
 			Type     string          `json:"type"`
 			Delta    string          `json:"delta"`
 			Response json.RawMessage `json:"response"`
 		}
-		if json.Unmarshal(bytes.TrimSpace(line[5:]), &event) != nil {
-			continue
+		if json.Unmarshal(data, &event) != nil {
+			return true
 		}
-		if len(event.Response) != 0 {
+		terminal := event.Type == "response.completed" || event.Type == "response.incomplete" || event.Type == "response.failed" || event.Type == "response.cancelled"
+		if terminal && len(event.Response) != 0 {
 			if text := responsesOutputText(event.Response); text != "" {
-				return text
+				final = text
+				return false
 			}
 		}
 		if event.Type == "response.output_text.delta" || event.Type == "response.function_call_arguments.delta" {
 			deltas.WriteString(event.Delta)
 		}
+		return !terminal && event.Type != "error"
+	})
+	if final != "" {
+		return final
 	}
 	return deltas.String()
 }
