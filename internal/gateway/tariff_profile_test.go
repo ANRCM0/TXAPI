@@ -46,6 +46,8 @@ func TestTariffAdmissionRefusesDriftBeforeNetworkAndPreservesEarlierUnknown(t *t
 		{"new credential", "", "provider_credential_unproven"},
 		{"prepared auth differs", "Authorization", "provider_credential_unproven"},
 		{"prepared project differs", "OpenAI-Project", "provider_credential_unproven"},
+		{"prepared idempotency marker", "Idempotency-Key", "provider_credential_unproven"},
+		{"prepared alternate idempotency marker", "X-Idempotency-Key", "provider_credential_unproven"},
 	} {
 		for _, unknown := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/earlier_unknown=%v", tc.name, unknown), func(t *testing.T) {

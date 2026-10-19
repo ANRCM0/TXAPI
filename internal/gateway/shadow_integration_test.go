@@ -587,12 +587,9 @@ func TestShadowIntegrationRealStrictBillingAndWireParity(t *testing.T) {
 				var sent [][]byte
 				transport := client.Transport
 				client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-					body, err := r.GetBody()
-					if err != nil {
-						return nil, err
-					}
-					defer body.Close()
-					wire, err := io.ReadAll(body)
+					wire, err := io.ReadAll(r.Body)
+					r.Body.Close()
+					r.Body = io.NopCloser(bytes.NewReader(wire))
 					if err != nil {
 						return nil, err
 					}
