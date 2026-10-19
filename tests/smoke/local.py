@@ -87,7 +87,7 @@ def service(command, log_path, env=None):
                     process.wait(timeout=5)
 
 
-def control_workflow(base, upstream_url, routing_env=None):
+def control_workflow(base, upstream_url, routing_env=None, quotation_enabled=False):
     """Exercise the actual console APIs without using the legacy admin key."""
     assert request(base + "/v1/responses")[0] == 404, "Disabled native WS exposed an upgrade route"
     def api(path, session=None, payload=None, method=None, expected=200):
@@ -106,9 +106,8 @@ def control_workflow(base, upstream_url, routing_env=None):
         "username": "smoke-admin", "password": "smoke-admin-password-only"
     })["session_token"]
     current_quote = api("/api/admin/quotations/current", admin)["data"]
-    assert current_quote["enabled"] and current_quote["currency"] == "ACCOUNT_UNIT"
-    version = current_quote["version"]
-    assert len(version) == 64 and current_quote["unit_scale"] == "1000000000"
+    assert current_quote["enabled"] == quotation_enabled
+    version = current_quote["version"] or "0" * 64
     quote_input = {
         "price_version": version, "model": "mapped-model", "group": "default",
         "usage": {"input_tokens": "10", "output_tokens": "6", "total_tokens": "16",
@@ -116,12 +115,18 @@ def control_workflow(base, upstream_url, routing_env=None):
                   "reasoning_output_tokens": "4", "completeness": "complete",
                   "source": "provider_reported", "profile": "responses_native_tokens_v2"},
     }
-    quote = api("/api/admin/quotations/calculate", admin, quote_input)["data"]
-    assert quote["known"] and quote["amount_units"] == "28" and quote["price_version"] == version
-    unknown_quote = json.loads(json.dumps(quote_input))
-    unknown_quote["usage"]["cached_input_tokens"] = None
-    unknown = api("/api/admin/quotations/calculate", admin, unknown_quote)["data"]
-    assert not unknown["known"] and unknown["amount_units"] == "" and unknown["reason"] == "usage_unknown"
+    if quotation_enabled:
+        assert current_quote["currency"] == "ACCOUNT_UNIT"
+        assert len(version) == 64 and current_quote["unit_scale"] == "1000000000"
+        quote = api("/api/admin/quotations/calculate", admin, quote_input)["data"]
+        assert quote["known"] and quote["amount_units"] == "28" and quote["price_version"] == version
+        unknown_quote = json.loads(json.dumps(quote_input))
+        unknown_quote["usage"]["cached_input_tokens"] = None
+        unknown = api("/api/admin/quotations/calculate", admin, unknown_quote)["data"]
+        assert not unknown["known"] and unknown["amount_units"] == "" and unknown["reason"] == "usage_unknown"
+    else:
+        assert all(value == "" for name, value in current_quote.items() if name != "enabled")
+        api("/api/admin/quotations/calculate", admin, quote_input, expected=503)
     initial = api("/api/admin/config-status", admin)["data"]
     for name in ["console-user", "console-other"]:
         api("/api/admin/users", admin, {
@@ -422,7 +427,7 @@ def main():
                 assert text == "你好，这是流式响应。", text
                 assert any(choice.get("finish_reason") == "stop" for choice in choices)
                 assert any(chunk.get("usage", {}).get("total_tokens") == 18 for chunk in chunks)
-                control_workflow(base, f"http://127.0.0.1:{upstream_port}", clean_env)
+                control_workflow(base, f"http://127.0.0.1:{upstream_port}", clean_env, quotation_enabled=True)
                 if args.preview:
                     print(f"PASS: all smoke checks; isolated console preview at {base}", flush=True)
                     print("Test login: smoke-admin / smoke-admin-password-only. Ctrl+C stops and removes test data.", flush=True)

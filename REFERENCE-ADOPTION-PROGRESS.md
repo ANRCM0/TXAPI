@@ -622,7 +622,7 @@ The new quotation/v1 is candidate, not frozen; full R05a/R05b/R00-R07 remain ope
 
 2026-10-19, Windows PowerShell, Go1.26.3, GOARCH=amd64, CGO_ENABLED=0.
 The 25 changed/new non-Markdown source manifest has LF-normalized digest
-`ec9fa3a16841f6844ba0bdf3e69ae947ab3efab6d4e0e78659594165c680b2bf`.
+`f0fa3dea1edff934aa5c442fb0a2092531fff71ca67fe16b780e97a4e8cc1d36`.
 Logs/manifests are external in D:\my-project\TXAPI-references\validation-r05a2.
 
 | Actual Command / Check | Final Result |
@@ -633,6 +633,7 @@ Logs/manifests are external in D:\my-project\TXAPI-references\validation-r05a2.
 | architecture/visibility/public signatures and HTTP contracts | PASS in complete suite; all 23 previous packages and all 102 previous operations/schemas remain exact; one candidate contract and two operations appended |
 | touched-Go gofmt; git diff --check; batch Markdown links | PASS; only batch Go files formatted, all referenced local targets resolve |
 | final python -B tests/smoke/local.py --go go | PASS, including actual quotation main composition, admin/owner permissions, exact amount28/unknown, existing strict/encryption/rotation and forced-kill/background recovery |
+| default-disabled actual-main shared console workflow | PASS after the fixture correction; empty quotation metadata, calculation503, owner403 and original console path |
 | independent real-main HTTP probe | 30 rounds of full-body owner POST403, owner GET403 and administrator quote28 PASS; no retries |
 | frontend syntax/API/browser | Reuse accepted d12123d/R06b: web assets, browser scripts, API tests and all pre-existing HTTP operations are exact; final actual-main smoke rerun |
 
@@ -656,6 +657,18 @@ was followed by the final passing complete smoke; Go sources remain those of
 the passing complete suite. Linux race/container delivery and final-head merge
 are still the existing CI gates, not local claims. A final independent read-only
 backend review found no actionable issue; it did not run additional tests.
+
+The first pushed head f770c56 exposed a shared smoke-fixture error: both delivery
+jobs in push39201155517/PR39201190081 expected enabled selling quotations in the
+default-disabled container install. Full race passed, but those heads are not
+accepted. `control_workflow` now takes an explicit default-false expectation:
+the enabled local-main fixture checks amount28/unknown, and the ordinary delivery
+fixture checks disabled metadata and calculation503. Neither fixture changes
+production defaults. The corrected complete enabled smoke and an independent
+default-disabled actual-main console workflow both passed. All Go/module/API
+source hashes remain exact to the passing full suite; only the Python consumer
+changed. This correction requires the new final head's full automatic CI,
+including Linux race and container delivery, before merge.
 
 ## 后续批次
 
