@@ -102,6 +102,9 @@ func (s *streamDecoder) dispatchConvertedEvent() ([]execv1.Frame, error) {
 		frames = append(frames, execv1.Frame{Data: append(ln, '\n', '\n'), Usage: usageFromLine(ln)})
 	}
 	if s.name == "anthropic" && envelope.Type == "message_stop" {
+		if !s.finish {
+			return nil, errors.New("native stream terminal without finish")
+		}
 		s.done = true
 		frames = append(frames, execv1.Frame{Complete: true})
 	}

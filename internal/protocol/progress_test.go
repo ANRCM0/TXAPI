@@ -146,3 +146,14 @@ func TestStreamProgressSIWCObservedWrappers(t *testing.T) {
 		t.Fatalf("SIWC observed stream lost facts: %+v", got)
 	}
 }
+
+func TestStreamProgressRejectsUnfinishedNativeTerminal(t *testing.T) {
+	s := NewDecoder(&anthropic.Adaptor{}, &meta.Meta{}).NewStream()
+	if _, err := s.DecodeLine([]byte(`data: {"type":"message_stop"}`)); err != nil {
+		t.Fatal(err)
+	}
+	frames, err := s.DecodeLine(nil)
+	if err == nil || len(frames) != 0 || streamProgress(t, s) != (v4.Progress{}) {
+		t.Fatalf("unfinished native terminal advanced completion: frames=%+v progress=%+v error=%v", frames, streamProgress(t, s), err)
+	}
+}
