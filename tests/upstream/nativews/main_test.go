@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,20 @@ func TestIsolatedFixtureTLSAndProxy(t *testing.T) {
 		}}
 	t.Cleanup(transport.CloseIdleConnections)
 	client := &http.Client{Transport: transport}
+	requestHTTP, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/responses",
+		strings.NewReader(`{"model":"m","input":"HTTP root string","store":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestHTTP.Header.Set("Authorization", "Bearer "+upstreamKey)
+	response, err := client.Do(requestHTTP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatal("fixture rejected a legal HTTP root string", response.StatusCode)
+	}
 	connection, _, err := websocket.Dial(ctx, "wss://api.openai.com/v1/responses", &websocket.DialOptions{HTTPClient: client,
 		HTTPHeader: http.Header{"Authorization": {"Bearer " + upstreamKey}}})
 	if err != nil {
@@ -106,7 +121,7 @@ func TestIsolatedFixtureTLSAndProxy(t *testing.T) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.requests) != 2 || len(f.errors) != 0 {
+	if len(f.requests) != 3 || len(f.errors) != 0 || f.requests[0].InputKind != "string" || f.requests[1].InputKind != "array" {
 		t.Fatal("fixture observations did not match controlled requests", f.errors)
 	}
 }

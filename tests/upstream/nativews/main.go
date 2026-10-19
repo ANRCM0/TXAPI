@@ -39,6 +39,7 @@ const upstreamKey = "nativews-deployment-provider-fixture-only"
 type observation struct {
 	Transport string          `json:"transport"`
 	Input     json.RawMessage `json:"input"`
+	InputKind string          `json:"input_kind"`
 	Model     string          `json:"model"`
 	Previous  string          `json:"previous"`
 	Store     bool            `json:"store"`
@@ -79,8 +80,22 @@ func (f *fixture) observe(raw []byte, transport string) (map[string]any, string,
 	previous, _ := body["previous_response_id"].(string)
 	stored, ok := body["store"].(bool)
 	items, array := body["input"].([]any)
-	if model != "m" || !ok || stored || previous != "" || !array || len(items) == 0 || len(items) > 1024 {
-		return nil, "", errors.New("mapped complete context and store=false required")
+	if model != "m" || !ok || stored || previous != "" {
+		return nil, "", errors.New("mapped model, local parent and store=false required")
+	}
+	kind := "array"
+	if !array {
+		text, valid := body["input"].(string)
+		if transport != "http" || !valid || text == "" {
+			return nil, "", errors.New("self-contained input string or complete item array required")
+		}
+		// A root HTTP request can legally retain its string representation.
+		// Normalize only the observation, retaining the original wire kind.
+		kind = "string"
+		items = []any{map[string]any{"type": "message", "role": "user", "content": text}}
+	}
+	if len(items) == 0 || len(items) > 1024 {
+		return nil, "", errors.New("complete context item capacity")
 	}
 	if transport == "ws" && (body["type"] != "response.create" || body["stream_id"] != "main") {
 		return nil, "", errors.New("invalid native round envelope")
@@ -96,9 +111,9 @@ func (f *fixture) observe(raw []byte, transport string) (map[string]any, string,
 	if len(f.requests) >= 64 {
 		return nil, "", errors.New("fixture request capacity exhausted")
 	}
-	input, _ := json.Marshal(body["input"])
+	input, _ := json.Marshal(items)
 	tools, _ := json.Marshal(body["tools"])
-	f.requests = append(f.requests, observation{Transport: transport, Input: input, Model: model, Previous: previous, Store: stored, Tools: tools})
+	f.requests = append(f.requests, observation{Transport: transport, Input: input, InputKind: kind, Model: model, Previous: previous, Store: stored, Tools: tools})
 	return body, text, nil
 }
 
@@ -126,7 +141,7 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 			_, _, err = f.observe(raw, "http")
 		}
 		if err != nil {
-			f.reject("HTTP complete-context request")
+			f.reject("HTTP fixture: " + err.Error())
 			http.Error(w, "fixture request", 400)
 			return
 		}
@@ -159,7 +174,11 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 		}
 		body, text, err := f.observe(raw, "ws")
 		if err != nil || typ != websocket.MessageText {
-			f.reject("WS complete-context request")
+			if err != nil {
+				f.reject("WS fixture: " + err.Error())
+			} else {
+				f.reject("WS fixture requires text frame")
+			}
 			return
 		}
 		id := fmt.Sprintf("native_%d", f.serial.Add(1))

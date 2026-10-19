@@ -229,12 +229,16 @@ class Installation:
                 assert db.execute(f"SELECT COUNT(*) FROM {table} WHERE used_quota != 0").fetchone() == (0,)
             for table in ("billing_reservations", "billing_attempts"):
                 assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
+            assert db.execute("SELECT COUNT(*) FROM billing_balances WHERE used_units != 0 OR reserved_units != 0").fetchone() == (0,)
         logs = run(["docker", "logs", self.gateway], capture=True).stdout
-        assert not any(secret in logs for secret in [CLIENT_KEY, PROVIDER_KEY, *self.key_material]), "credential appeared in gateway log"
+        secrets = [CLIENT_KEY, PROVIDER_KEY, ADMIN["password"], self.settings["admin_key"], *self.key_material]
+        assert not any(secret in logs for secret in secrets), "credential appeared in gateway log"
 
     def cleanup(self):
         for name in reversed(self.containers):
-            run(["docker", "rm", "-f", name], check=False)
+            # The shipped image declares /app/data as a VOLUME. The helper
+            # container also inherits it, so remove its anonymous volume too.
+            run(["docker", "rm", "-f", "-v", name], check=False)
         if self.created_volume:
             run(["docker", "volume", "rm", self.volume])
         if self.created_network:
@@ -274,6 +278,7 @@ def exercise(installation):
     assert not state["errors"] and state["proxy_upgrades"] >= 5
     requests = state["requests"]
     assert [row["transport"] for row in requests] == ["http", "ws", "http", "ws", "ws", "ws"]
+    assert [row["input_kind"] for row in requests] == ["string", "array", "array", "array", "array", "array"]
     assert [len(row["input"]) for row in requests] == [1, 3, 5, 7, 9, 9]
     assert all(row["model"] == "m" and not row["store"] and not row["previous"] for row in requests)
     function = requests[2]["input"]
@@ -316,7 +321,7 @@ def main():
                 result = run(["docker", "inspect", "--format", "{{json .State}}", name], capture=True, check=False)
                 print(name, result.stdout.strip(), flush=True)
                 logs = run(["docker", "logs", "--tail", "30", name], capture=True, check=False).stdout
-                for secret in [CLIENT_KEY, PROVIDER_KEY, ADMIN["password"], *installation.key_material]:
+                for secret in [CLIENT_KEY, PROVIDER_KEY, ADMIN["password"], installation.settings["admin_key"], *installation.key_material]:
                     logs = logs.replace(secret, "[fixture-secret]")
                 print(logs, flush=True)
             raise
