@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
+	v3 "minigateway/internal/foundation/contracts/execution/v3"
 	jsonvalue "minigateway/internal/foundation/contracts/json/v1"
 	"minigateway/internal/protocol/responses"
 )
@@ -214,7 +215,7 @@ func validateInput(raw json.RawMessage) error {
 
 type Decoder struct {
 	model    string
-	stream   v2.StreamDecoder
+	stream   v3.StreamDecoder
 	terminal bool
 	started  bool
 }
@@ -256,11 +257,17 @@ func IsTerminal(frame v2.Frame) bool {
 }
 
 func NewDecoder(model string) *Decoder {
-	return &Decoder{model: model, stream: responses.NewDecoder().NewEnvelopeStream()}
+	return &Decoder{model: model, stream: responses.NewDecoder().NewUsageEnvelopeStream()}
 }
 
 func (d *Decoder) Decode(frame v2.Frame) (v2.Envelope, error) {
-	var empty v2.Envelope
+	out, err := d.DecodeUsage(frame)
+	return out.Execution, err
+}
+
+// DecodeUsage preserves native usage dimensions through the existing Responses parser.
+func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
+	var empty v3.Envelope
 	if d.terminal || frame.Type != 1 || len(frame.Data) > 256<<10 || jsonvalue.Validate(frame.Data) != nil {
 		return empty, errors.New("invalid native WS event")
 	}
@@ -346,14 +353,14 @@ func (d *Decoder) Decode(frame v2.Frame) (v2.Envelope, error) {
 			return empty, err
 		}
 	}
-	var envelopes []v2.Envelope
+	var envelopes []v3.Envelope
 	// Decode one complete message through the existing native facts parser.
 	// JSON messages may contain whitespace/newlines, so compact before framing.
 	var compact bytes.Buffer
 	_ = json.Compact(&compact, frame.Data)
 	lines := [][]byte{append([]byte("data: "), compact.Bytes()...), {}}
 	for _, line := range lines {
-		out, err := d.stream.DecodeEnvelopes(line)
+		out, err := d.stream.DecodeUsageEnvelopes(line)
 		if err != nil {
 			return empty, err
 		}
@@ -363,20 +370,20 @@ func (d *Decoder) Decode(frame v2.Frame) (v2.Envelope, error) {
 		return empty, errors.New("native WS event did not produce one envelope")
 	}
 	out := envelopes[0]
-	d.terminal = out.ProtocolTerminal
+	d.terminal = out.Execution.ProtocolTerminal
 	d.started = true
 	// Strip only the SSE representation; non-error WS events keep exact bytes.
 	if event.Type == "error" {
-		out.Data = []byte("{\"type\":\"error\",\"error\":{\"code\":\"upstream_error\",\"message\":\"Upstream generation failed.\"}}")
+		out.Execution.Data = []byte("{\"type\":\"error\",\"error\":{\"code\":\"upstream_error\",\"message\":\"Upstream generation failed.\"}}")
 	} else {
-		out.Data = bytes.Clone(frame.Data)
+		out.Execution.Data = bytes.Clone(frame.Data)
 		if raw := root["response"]; len(raw) > 0 {
 			var response map[string]json.RawMessage
 			_ = json.Unmarshal(raw, &response)
 			if detail, ok := response["error"]; ok && string(detail) != "null" {
 				response["error"] = json.RawMessage("{\"code\":\"upstream_error\",\"message\":\"Upstream generation failed.\"}")
 				root["response"], _ = json.Marshal(response)
-				out.Data, _ = json.Marshal(root)
+				out.Execution.Data, _ = json.Marshal(root)
 			}
 		}
 	}

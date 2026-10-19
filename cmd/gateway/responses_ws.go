@@ -15,6 +15,7 @@ import (
 	bridge "minigateway/internal/compat/websocket"
 	"minigateway/internal/config"
 	execution "minigateway/internal/foundation/contracts/execution/v2"
+	usage "minigateway/internal/foundation/contracts/execution/v3"
 	contract "minigateway/internal/foundation/contracts/responsesws/v1"
 	identity "minigateway/internal/foundation/identity"
 	"minigateway/internal/gateway"
@@ -60,6 +61,9 @@ func startResponsesWSRuntimeWithFactory(cfg config.ResponsesWSConfig, st *store.
 			return gateway.NativeWSCreate{Model: request.Model, PreviousID: request.PreviousID, PromptText: request.PromptText, Initial: request.Initial}, err
 		},
 		Encode: codec.MapModel, Decoder: func(model string) execution.FrameDecoder { return codec.NewDecoder(model).Decode },
+		UsageDecoder: func(model string) func(execution.Frame) (usage.Envelope, error) {
+			return codec.NewDecoder(model).DecodeUsage
+		},
 	})
 	if err != nil {
 		cancel()

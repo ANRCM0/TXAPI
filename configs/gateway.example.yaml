@@ -111,7 +111,7 @@ responses_ws:
 # Optional durable generation runtime. This does not expose a background API.
 # Secret bytes belong in a separately mounted JSON file, never in this YAML.
 # The runtime requires configured strict fee/provider ceilings and contracts.
-# Durable foreground usage metadata is opt-in and requires billing.mode: disabled.
+# Durable foreground HTTP and native WS-round usage metadata is opt-in and requires billing.mode: disabled.
 # It does not record native WS/background or grant financial/replay permission.
 # See docs/PLAN.md, 路由与用量, for retention, admission and failure policy.
 usage_history:

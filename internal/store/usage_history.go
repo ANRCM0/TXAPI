@@ -59,6 +59,11 @@ func usageDigest(v any) string {
 }
 
 func usageHostValid(h history.HostFacts) bool {
+	switch h.ProtocolStatus {
+	case "", "queued", "in_progress", "completed", "failed", "incomplete", "cancelled":
+	default:
+		return false
+	}
 	if h.BytesWritten < 0 {
 		return false
 	}
@@ -151,6 +156,17 @@ func (r *usageRecorder) write(ctx context.Context, id string, fn func(*gorm.DB, 
 }
 
 func (r *usageRecorder) Begin(ctx context.Context, in history.Start) error {
+	transport := in.Transport
+	switch transport {
+	case "", "http":
+		transport, in.Transport = "http", ""
+	case "websocket":
+		if in.Operation != execution.Responses || !in.Stream || in.MaxAttempts != 1 {
+			return history.ErrInvalid
+		}
+	default:
+		return history.ErrInvalid
+	}
 	if !usageLimitsValid(r.limits) || !usageID(in.ID) || !usageText(in.RequestID, 64, true) || !usageText(in.Model, 256, false) || !usageText(string(in.Operation), 32, false) || in.MaxAttempts < 1 || in.MaxAttempts > 11 || in.QuotationVersion != "" && !quotationVersionID(in.QuotationVersion) {
 		return history.ErrInvalid
 	}
@@ -202,7 +218,7 @@ func (r *usageRecorder) Begin(ctx context.Context, in history.Start) error {
 			}
 		}
 		now := time.Now().UnixMilli()
-		return tx.Create(&model.UsageInvocation{ID: in.ID, UserID: p.UserID, TokenID: p.TokenID, RequestID: in.RequestID, Operation: string(in.Operation), Model: in.Model, Stream: in.Stream, QuotationVersion: in.QuotationVersion, MaxAttempts: in.MaxAttempts, State: "open", CreatedAt: now, ExpiresAt: now + int64(r.limits.RetentionSeconds)*1000, Host: history.HostFacts{Phase: execution.NotDispatched}, StartFingerprint: fingerprint}).Error
+		return tx.Create(&model.UsageInvocation{Transport: transport, ID: in.ID, UserID: p.UserID, TokenID: p.TokenID, RequestID: in.RequestID, Operation: string(in.Operation), Model: in.Model, Stream: in.Stream, QuotationVersion: in.QuotationVersion, MaxAttempts: in.MaxAttempts, State: "open", CreatedAt: now, ExpiresAt: now + int64(r.limits.RetentionSeconds)*1000, Host: history.HostFacts{Phase: execution.NotDispatched}, StartFingerprint: fingerprint}).Error
 	})
 	if err != nil {
 		return err

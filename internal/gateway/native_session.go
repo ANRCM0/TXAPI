@@ -10,6 +10,7 @@ import (
 	"minigateway/internal/access"
 	admission "minigateway/internal/foundation/contracts/admission/v1"
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
+	v3 "minigateway/internal/foundation/contracts/execution/v3"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 	contract "minigateway/internal/foundation/contracts/responsesws/v1"
 	"minigateway/internal/model"
@@ -26,14 +27,15 @@ type NativeWSResource interface {
 	Close(context.Context) error
 }
 type NativeWSOptions struct {
-	Authority identity.Authority
-	Gate      admission.RequestGate
-	Models    []string
-	Limits    contract.Limits
-	Prepare   func(context.Context) (NativeWSResource, error)
-	Parse     func(v2.Frame) (NativeWSCreate, error)
-	Decoder   func(string) v2.FrameDecoder
-	Encode    func(v2.Frame, string) (v2.Frame, error)
+	Authority    identity.Authority
+	Gate         admission.RequestGate
+	Models       []string
+	Limits       contract.Limits
+	Prepare      func(context.Context) (NativeWSResource, error)
+	Parse        func(v2.Frame) (NativeWSCreate, error)
+	Decoder      func(string) v2.FrameDecoder
+	UsageDecoder func(string) func(v2.Frame) (v3.Envelope, error)
+	Encode       func(v2.Frame, string) (v2.Frame, error)
 }
 
 type NativeWebSocketService struct {

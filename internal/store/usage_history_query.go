@@ -34,7 +34,7 @@ func usageSession(tx *gorm.DB, a history.Access) (model.User, error) {
 }
 
 func usageSummary(row model.UsageInvocation, admin bool) history.Summary {
-	out := history.Summary{ID: row.ID, UserID: row.UserID, TokenID: row.TokenID, RequestID: row.RequestID, Operation: execution.Operation(row.Operation), Model: row.Model, Stream: row.Stream, State: row.State, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt, ExpiresAt: row.ExpiresAt, AttemptCount: row.AttemptCount, Host: row.Host}
+	out := history.Summary{Transport: row.Transport, ID: row.ID, UserID: row.UserID, TokenID: row.TokenID, RequestID: row.RequestID, Operation: execution.Operation(row.Operation), Model: row.Model, Stream: row.Stream, State: row.State, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt, ExpiresAt: row.ExpiresAt, AttemptCount: row.AttemptCount, Host: row.Host}
 	if admin {
 		out.QuotationVersion = row.QuotationVersion
 	}

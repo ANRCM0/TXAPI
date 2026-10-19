@@ -4,14 +4,29 @@ import (
 	"context"
 	"errors"
 
+	"minigateway/internal/core"
 	corews "minigateway/internal/core/websocket"
 	v1 "minigateway/internal/foundation/contracts/execution/v1"
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
+	v3 "minigateway/internal/foundation/contracts/execution/v3"
 )
 
 type WebSocketExchangeExecutor struct{}
 
+// Accepted protocol observations survive a panicking caller without inventing
+// the mechanical terminal result that was never returned by the executor.
+type websocketExchangeObservation struct {
+	usage  v3.UsageObservation
+	native v1.NativeCompletion
+}
+
 func (WebSocketExchangeExecutor) ExecuteExchange(ctx context.Context, in v2.Exchange) v2.ExchangeResult {
+	observed := websocketExchangeObservation{}
+	return executeWebSocketExchange(ctx, in, nil, &observed)
+}
+
+func executeWebSocketExchange(ctx context.Context, in v2.Exchange, decodeUsage func(v2.Frame) (v3.Envelope, error), observed *websocketExchangeObservation) v2.ExchangeResult {
+	observed.usage = unknownDetailedUsageFact()
 	r := v2.ExchangeResult{Dispatch: v2.NotDispatched, Termination: v2.Failed, Usage: unknownUsageFact()}
 	if ctx == nil || nilInterface(in.Upstream) || in.Decode == nil || in.Deliver == nil {
 		r.Err = errors.New("invalid websocket exchange")
@@ -32,17 +47,44 @@ func (WebSocketExchangeExecutor) ExecuteExchange(ctx context.Context, in v2.Exch
 	}
 	defer activeWebSocketRounds.Delete(id)
 	facts := protocolFacts{usage: unknownUsageFact()}
+	detailed := usageFacts{usage: unknownDetailedUsageFact()}
 	out := corews.ExecuteExchange(ctx, corews.Exchange{
 		Upstream: connectionAdapter{in.Upstream}, Deadline: in.Deadline,
 		Initial: corews.Frame{Type: in.Initial.Type, Data: append([]byte(nil), in.Initial.Data...)},
 		Decode: func(_ context.Context, frame corews.Frame) ([]corews.Frame, bool, error) {
-			envelope, err := in.Decode(v2.Frame{Type: frame.Type, Data: append([]byte(nil), frame.Data...)})
+			input := v2.Frame{Type: frame.Type, Data: append([]byte(nil), frame.Data...)}
+			var envelope v2.Envelope
+			var rich v3.Envelope
+			var err error
+			if decodeUsage != nil {
+				rich, err = decodeUsage(input)
+				envelope = rich.Execution
+			} else {
+				envelope, err = in.Decode(input)
+				rich.Execution = envelope
+				if envelope.Usage != nil {
+					base := envelope.Usage
+					rich.Usage = &v3.UsageObservation{Counts: base.Counts, Completeness: base.Completeness, Source: base.Source, Profile: base.Profile}
+				}
+			}
 			if err != nil {
 				return nil, false, err
 			}
-			output, err := facts.accept(envelope)
+			var output core.Frame
+			if decodeUsage != nil {
+				output, err = detailed.accept(&facts, rich)
+				observed.usage = cloneDetailedUsageFact(detailed.usage)
+			} else {
+				output, err = facts.accept(envelope)
+				if err == nil && rich.Usage != nil {
+					observed.usage = cloneDetailedUsageFact(*rich.Usage)
+				}
+			}
 			if err != nil {
 				return nil, false, err
+			}
+			if envelope.Native != nil {
+				observed.native = *envelope.Native
 			}
 			var frames []corews.Frame
 			if len(output.Data) != 0 {

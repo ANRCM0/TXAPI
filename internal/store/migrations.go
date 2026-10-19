@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 19
+const latestMigrationVersion = 20
 
 type dataMigration struct {
 	Version int
@@ -99,6 +99,20 @@ var dataMigrations = []dataMigration{
 				return fmt.Errorf("invalid managed credential during eligibility migration")
 			}
 			if err := createEligibility(tx, c); err != nil {
+				return err
+			}
+		}
+		return nil
+	}},
+	{Version: 20, Apply: func(tx *gorm.DB) error {
+		// All previously retained invocations were foreground HTTP. Do not infer
+		// WebSocket rounds, usage, content or monetary facts from old logs.
+		for _, statement := range []string{
+			"UPDATE usage_invocations SET transport = 'http' WHERE transport IS NULL OR transport = ''",
+			"UPDATE usage_invocations SET host_protocol_status = '' WHERE host_protocol_status IS NULL",
+			"UPDATE usage_attempt_receipts SET host_protocol_status = '' WHERE host_protocol_status IS NULL",
+		} {
+			if err := tx.Exec(statement).Error; err != nil {
 				return err
 			}
 		}

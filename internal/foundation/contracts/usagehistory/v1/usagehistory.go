@@ -23,6 +23,8 @@ var (
 )
 
 type Start struct {
+	// Empty and http share the original HTTP fingerprint for replay compatibility.
+	Transport        string `json:",omitempty"`
 	ID               string
 	RequestID        string
 	Model            string
@@ -44,6 +46,8 @@ type Target struct {
 
 // HostFacts describes the attempt/coordination result, not client consumption.
 type HostFacts struct {
+	// ProtocolStatus is a native snapshot, independent of mechanical termination.
+	ProtocolStatus    string                `json:"protocol_status,omitempty"`
 	Phase             execution.Phase       `json:"phase"`
 	Status            int                   `json:"status"`
 	UpstreamStatus    int                   `json:"upstream_status"`
@@ -89,6 +93,7 @@ type Query struct {
 }
 
 type Summary struct {
+	Transport        string              `json:"transport"`
 	ID               string              `json:"id"`
 	UserID           uint                `json:"user_id"`
 	TokenID          uint                `json:"token_id"`

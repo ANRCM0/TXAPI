@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.13.2",
-    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported. FC-P1-001 adds opt-in disabled-billing single SIWC account/owner/key/model Responses text streaming. Managed bindings use real persisted credentials and CAS revisions. No real-account acceptance is implied. FC-P3-001 adds persisted, version-fenced eligibility feedback and administrator CAS resume for the single managed binding. Unknown resets require manual review; credentials are retained. Schema19 requires a matching stopped-write backup for rollback."
+    "version": "0.13.3",
+    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported. FC-P1-001 adds opt-in disabled-billing single SIWC account/owner/key/model Responses text streaming. Managed bindings use real persisted credentials and CAS revisions. No real-account acceptance is implied. FC-P3-001 adds persisted, version-fenced eligibility feedback and administrator CAS resume for the single managed binding. Unknown resets require manual review; credentials are retained. FC-P7-WS-USAGE-001 adds opt-in disabled native WS-round usage observations to the existing metadata query, with transport and native protocol status distinct from mechanical termination. It does not authorize WS billing. Schema20 requires a matching stopped-write backup for rollback."
   },
   "servers": [
     {
@@ -14231,6 +14231,18 @@
             "type": "string",
             "pattern": "^(0|[1-9][0-9]{0,18})$",
             "description": "Nonnegative int64 accepted-output bytes, never proof of client consumption."
+          },
+          "protocol_status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed",
+              "failed",
+              "incomplete",
+              "cancelled"
+            ],
+            "description": "Optional native WS protocol snapshot, independent of mechanical termination; empty historical/HTTP snapshots are omitted."
           }
         },
         "description": "Distinct host facts; zero/empty status/termination may be unknown. Invocation bytes include its coordination output, attempt bytes describe the attempt output."
@@ -14238,6 +14250,7 @@
       "UsageHistorySummary": {
         "type": "object",
         "required": [
+          "transport",
           "id",
           "user_id",
           "token_id",
@@ -14317,6 +14330,14 @@
           },
           "host": {
             "$ref": "#/components/schemas/UsageHistoryHost"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "http",
+              "websocket"
+            ],
+            "description": "Invocation transport. websocket means one disabled native Responses round; HTTP status fields remain zero."
           }
         },
         "description": "Metadata sealed means saved, not successful generation, complete usage, known Provider spend or financial settlement. Owner views omit quotation_version."
