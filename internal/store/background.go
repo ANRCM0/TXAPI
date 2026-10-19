@@ -152,7 +152,7 @@ func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Lim
 		in.Stage != string(bg.StageQueued) || in.Revision != 1 || in.CreatedAt <= 0 || in.CreatedAt > now || in.Deadline <= now || in.Deadline-in.CreatedAt > int64(5*time.Minute/time.Millisecond) ||
 		in.ContentExpiresAt < in.Deadline || in.ContentExpiresAt-in.CreatedAt > int64(time.Hour/time.Millisecond) || in.ExpiresAt < in.ContentExpiresAt || in.ExpiresAt-in.CreatedAt > int64(7*24*time.Hour/time.Millisecond) ||
 		len(in.Ciphertext) < 30 || len(in.Ciphertext) > bs.MaxInput+256 || len(in.Snapshot) != 0 || in.ReservedBytes < int64(len(in.Ciphertext)) || in.ReservedBytes > bs.MaxInput+bs.MaxContent+512 ||
-		in.ClaimEpoch != 0 || in.ClaimHash != "" || in.ClaimUntil != 0 || in.CancelRequested || in.Deleted || in.ReplayPending || in.DueAt != 0 || in.LastSequence != -1 || in.StoredBytes != 0 || in.EventCount != 0 || !validBackgroundLimits(limits) {
+		in.ClaimEpoch != 0 || in.ClaimHash != "" || in.ClaimUntil != 0 || in.CancelRequested || in.Deleted || in.ReplayPending || in.DueAt != 0 || in.LastSequence != -1 || in.StoredBytes != 0 || in.EventCount != 0 || in.UsageMetadata.NativeState != "" || in.UsageMetadata.Usage != nil || !validBackgroundLimits(limits) {
 		return out, bg.ErrConflict
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -451,6 +451,14 @@ func (s *Store) UpdateBackground(ctx context.Context, c bs.Claim, revision uint6
 		}
 		if in.ReplayPending && len(in.Snapshot) < 30 {
 			return bg.ErrConflict
+		}
+		if in.UsageMetadata != nil {
+			if len(in.Snapshot) < 30 {
+				return bg.ErrConflict
+			}
+			if e := applyBackgroundUsage(&row, *in.UsageMetadata, in.Stage); e != nil {
+				return e
+			}
 		}
 		for _, event := range in.Events {
 			if !row.Stream || event.TaskID != row.ID || event.Sequence < 0 || len(event.Ciphertext) < 30 || len(event.Ciphertext) > (64<<10)+256 {

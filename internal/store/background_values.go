@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	bg "minigateway/internal/foundation/contracts/background/v1"
 	bs "minigateway/internal/generation/backgroundstate"
 	"minigateway/internal/model"
 )
@@ -39,6 +40,7 @@ func backgroundSnapshot(in model.BackgroundJob) bs.Record {
 		EventCount:       in.EventCount,
 		Deleted:          in.Deleted,
 		ReplayPending:    in.ReplayPending,
+		UsageMetadata:    bs.UsageMetadata{NativeState: bg.RemoteState(in.NativeState), Usage: backgroundUsage(in.Usage)},
 	}
 }
 
@@ -75,5 +77,7 @@ func backgroundRow(in bs.Record) model.BackgroundJob {
 		EventCount:       in.EventCount,
 		Deleted:          in.Deleted,
 		ReplayPending:    in.ReplayPending,
+		NativeState:      string(in.UsageMetadata.NativeState),
+		Usage:            backgroundUsageRow(in.UsageMetadata.Usage),
 	}
 }

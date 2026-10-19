@@ -7,6 +7,7 @@ import (
 	"time"
 
 	bg "minigateway/internal/foundation/contracts/background/v1"
+	usage "minigateway/internal/foundation/contracts/execution/v3"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 )
 
@@ -48,6 +49,7 @@ type Record struct {
 	EventCount       int64
 	Deleted          bool
 	ReplayPending    bool
+	UsageMetadata    UsageMetadata
 }
 type Event struct {
 	TaskID     string
@@ -66,6 +68,14 @@ type Update struct {
 	Events        []Event
 	DueAt         int64
 	ReplayPending bool
+	UsageMetadata *UsageMetadata
+}
+
+// UsageMetadata is bounded task metadata, atomically saved with the snapshot.
+// Nil Usage means no retained terminal usage observation, not a zero count.
+type UsageMetadata struct {
+	NativeState bg.RemoteState
+	Usage       *usage.UsageObservation
 }
 type Repository interface {
 	InitializeBackground(context.Context, string, string) ([]Record, error)

@@ -15,6 +15,7 @@ import (
 	"minigateway/internal/billing"
 	"minigateway/internal/core"
 	bg "minigateway/internal/foundation/contracts/background/v1"
+	bgv2 "minigateway/internal/foundation/contracts/background/v2"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
 	bs "minigateway/internal/generation/backgroundstate"
 	"minigateway/internal/model"
@@ -336,12 +337,25 @@ func (o *backgroundOutput) Commit(ctx context.Context, _ core.ResponseMetadata) 
 func (o *backgroundOutput) State() core.OutputState         { return core.OutputState{Committed: o.committed} }
 func (o *backgroundOutput) Flush(ctx context.Context) error { return ctx.Err() }
 func (o *backgroundOutput) Write(ctx context.Context, b []byte) (int, error) {
-	observation := o.observer.Drain()
+	var observation bg.Observation
+	var observe func(context.Context) error
+	if source, ok := o.observer.(bgv2.Observer); ok {
+		detailed := source.DrainUsage()
+		observation = detailed.Observation
+		if sink, ok := o.progress.(bs.UsageProgress); ok {
+			observe = func(ctx context.Context) error { return sink.ObserveUsage(ctx, detailed) }
+		}
+	} else {
+		observation = o.observer.Drain()
+	}
+	if observe == nil {
+		observe = func(ctx context.Context) error { return o.progress.Observe(ctx, observation) }
+	}
 	if observation.RemoteID == "" {
 		o.persistError = errors.New("missing native background observation")
 		return 0, o.persistError
 	}
-	if e := o.progress.Observe(ctx, observation); e != nil {
+	if e := observe(ctx); e != nil {
 		o.persistError = e
 		return 0, e
 	}
