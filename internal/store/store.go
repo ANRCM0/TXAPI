@@ -122,6 +122,8 @@ func (s *Store) AutoMigrate() error {
 		&model.BillingReservation{},
 		&model.BillingAttempt{},
 		&model.BillingResolution{},
+		&model.UsageInvocation{},
+		&model.UsageAttemptReceipt{},
 		&model.GenerationRecord{},
 		&model.GenerationSegment{},
 		&model.GenerationIntent{},

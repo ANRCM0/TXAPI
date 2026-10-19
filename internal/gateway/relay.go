@@ -16,6 +16,7 @@ import (
 	execution "minigateway/internal/foundation/contracts/execution/v1"
 	executionv2 "minigateway/internal/foundation/contracts/execution/v2"
 	executionv3 "minigateway/internal/foundation/contracts/execution/v3"
+	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/scheduler"
 )
@@ -218,6 +219,10 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 			responseCommitted = attemptResult.Committed
 			break
 		}
+		if c.usageRecording != nil && c.usageRecording.failed {
+			responseCommitted = attemptResult.Committed
+			break
+		}
 		if attemptResult.Committed {
 			// SSE headers/body are already visible; never append an error JSON or retry
 			// after the client may have consumed part of this response.
@@ -274,6 +279,9 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	facts := &protocolFacts{usage: unknownUsageFact()}
 	usage := &usageFacts{usage: unknownDetailedUsageFact()}
 	dispatched, returned := false, false
+	preparedRecording := false
+	rejectedRecording := false
+	startedWritten := c.output.written
 	defer func() {
 		dispatch := execution.Phase(result.Phase)
 		if dispatched && !returned {
@@ -286,11 +294,42 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 			ProtocolComplete: result.ProtocolComplete, DeliveryCommitted: result.Committed, BytesWritten: result.BytesWritten,
 			Usage: cloneUsageFact(facts.usage), Native: facts.native})
 		c.result.usageFacts = append(c.result.usageFacts, executionv3.AttemptUsage{Number: number, Usage: cloneDetailedUsageFact(usage.usage)})
+		if preparedRecording {
+			observed := result
+			observed.Phase = core.Phase(dispatch)
+			if !returned {
+				observed.BytesWritten = c.output.written - startedWritten
+				func() {
+					defer func() {
+						if recover() != nil {
+							c.usageRecording.failed = true
+						}
+					}()
+					state := c.output.State()
+					observed.Committed, observed.HTTPStatus = state.Committed, state.HTTPStatus
+				}()
+			}
+			// Until relay returns, its request result may contain defaults or a previous attempt.
+			host := recordingHost(observed)
+			c.usageRecording.interruptedHost = &host
+			g.observeUsageRecording(c, number, observed, usage.usage)
+		}
 	}()
 	if g.operations[req.Operation()].OpaqueErrors {
 		defer func() {
-			result = sanitizeOperationFailure(result, g.operations[req.Operation()].Errors, c.result.nativeFailed)
+			if !rejectedRecording {
+				result = sanitizeOperationFailure(result, g.operations[req.Operation()].Errors, c.result.nativeFailed)
+			}
 		}()
+	}
+	if c.usageRecording != nil {
+		target := usagehistory.Target{ID: c.usageRecording.id, Number: number, ActualModel: m.ActualModel, Group: c.result.ChannelGroup,
+			Protocol: m.ChannelType, ChannelID: uint(m.ChannelID), CredentialID: m.CredentialIDValue}
+		if !g.prepareUsageRecording(c, target) {
+			rejectedRecording = true
+			return usageRecordingFailure()
+		}
+		preparedRecording = true
 	}
 	a, ok := g.reg.getAdaptor(m.ChannelType)
 	if !ok {
@@ -371,6 +410,10 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		}
 	}
 	// If an injected executor/transport panics, non-execution is not established.
+	if !g.markUsageDispatch(c, number) {
+		rejectedRecording = true
+		return usageRecordingFailure()
+	}
 	c.result.Phase = core.Dispatching
 	dispatched = true
 	result = g.executor.ExecuteTo(c.ctx, c.output, input)

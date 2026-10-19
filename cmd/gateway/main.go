@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log/slog"
 	"minigateway/internal/controlplane"
+	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	authentication "minigateway/internal/foundation/identity"
 	"minigateway/internal/foundation/persistence"
 	"minigateway/internal/management"
@@ -53,6 +54,7 @@ import (
 	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
 	"minigateway/internal/taskconsole"
+	"minigateway/internal/usageconsole"
 )
 
 // EnvLogCleanupInterval 覆盖日志清理间隔（Go duration，如 "1h"）。
@@ -152,6 +154,23 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	usageContext, finishUsageStartup := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := st.InterruptUsageHistory(usageContext); err != nil {
+		finishUsageStartup()
+		slog.Error("usage metadata startup recovery failed", "err", err)
+		os.Exit(1)
+	}
+	_, usageCleanupErr := st.CleanupUsageHistory(usageContext, 1000)
+	finishUsageStartup()
+	if usageCleanupErr != nil {
+		slog.Error("usage metadata startup cleanup failed", "err", usageCleanupErr)
+		os.Exit(1)
+	}
+	var usageRecorder usagehistory.Recorder
+	if cfg.UsageHistory.Enabled {
+		usageRecorder = st.UsageRecorder(model.UsageHistoryLimits{InstanceRecords: cfg.UsageHistory.InstanceRecords,
+			OwnerRecords: cfg.UsageHistory.OwnerRecords, RetentionSeconds: cfg.UsageHistory.RetentionSeconds})
+	}
 	slog.Info("billing mode selected", "mode", cfg.Billing.Mode)
 	if cfg.Billing.Mode == string(billing.ModeLegacy) {
 		marker, err := st.GetSetting(billing.StrictEnabledSetting)
@@ -217,6 +236,8 @@ func main() {
 	})
 	defer health.Close()
 	gw, err = gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(),
+		UsageHistory:     usageRecorder,
+		UsageQuotation:   quotationBook,
 		RouteDiagnostics: cfg.Server.RouteDiagnostics,
 		Admission:        gateway.CapacityAdmission{Capacity: capacity},
 		Channels:         st.Channels(), RetryTimes: cfg.Server.RetryTimes,
@@ -369,6 +390,7 @@ func main() {
 		Tasks:         taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
 		Routes:        routeconsole.New(gw.Diagnostics(), controlplane.New(persistence.Control(st)), limiter),
 		Quotation:     quoteconsole.New(quotationBook, controlplane.New(persistence.Control(st)), limiter),
+		UsageHistory:  usageconsole.New(st.UsageHistory(cfg.UsageHistory.Enabled, cfg.UsageHistory.RetentionSeconds), controlplane.New(persistence.Control(st)), limiter),
 		Configuration: configurationService,
 		Ledger:        engine,
 		Metrics:       gw.Metrics(),

@@ -15,6 +15,7 @@ import (
 	quotation "minigateway/internal/foundation/contracts/quotation/v1"
 	routes "minigateway/internal/foundation/contracts/routes/v1"
 	task "minigateway/internal/foundation/contracts/taskcontrol/v1"
+	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,7 @@ type Deps struct {
 	Tasks         task.Service
 	Routes        routes.Service
 	Quotation     quotation.Service
+	UsageHistory  usagehistory.Service
 	Metrics       Metrics
 	Responses     http.Handler
 	ResponsesWS   http.Handler
@@ -188,7 +190,7 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。
-	apiHandler := api.New(api.Dependencies{Control: deps.Control, Ledger: deps.Ledger, Configuration: deps.Configuration, Tasks: deps.Tasks, Routes: deps.Routes, Quotation: deps.Quotation})
+	apiHandler := api.New(api.Dependencies{Control: deps.Control, Ledger: deps.Ledger, Configuration: deps.Configuration, Tasks: deps.Tasks, Routes: deps.Routes, Quotation: deps.Quotation, UsageHistory: deps.UsageHistory})
 	apiHandler.Register(engine.Group(""), deps.AdminAuth)
 	apiHandler.RegisterAccess(engine.Group(""))
 

@@ -17,6 +17,7 @@ type executionOutput struct {
 	metadata     map[string]string
 	capture      bytes.Buffer
 	captureLimit int
+	written      int64
 }
 
 func (o *executionOutput) setMetadata(name, value string) {
@@ -46,6 +47,7 @@ func (o *executionOutput) Write(ctx context.Context, data []byte) (int, error) {
 	if n < 0 || n > len(data) {
 		return 0, errors.New("output returned an invalid write count")
 	}
+	o.written += int64(n)
 	if room := o.captureLimit - o.capture.Len(); room > 0 {
 		if room > n {
 			room = n
