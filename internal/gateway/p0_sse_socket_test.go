@@ -30,14 +30,22 @@ type p0SocketGateway struct {
 }
 
 func newP0SocketGateway(t *testing.T, upstream string, operation protocol.Operation) *p0SocketGateway {
+	return newP0SocketGatewayWithOptions(t, upstream, operation, nil)
+}
+
+func newP0SocketGatewayWithOptions(t *testing.T, upstream string, operation protocol.Operation, configure func(*Options)) *p0SocketGateway {
 	t.Helper()
 	fixture := &p0SocketGateway{results: make(chan RequestResult, 1)}
-	g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, Channels: lifecycleChannels(upstream), RetryTimes: 2, TotalTimeout: 10 * time.Second,
+	opts := Options{BillingMode: billing.ModeDisabled, Channels: lifecycleChannels(upstream), RetryTimes: 2, TotalTimeout: 10 * time.Second,
 		Admission: admissionFunc(func(context.Context, AdmissionScope) (func(), error) {
 			fixture.admitted.Add(1)
 			return func() { fixture.released.Add(1) }, nil
 		}),
-	})
+	}
+	if configure != nil {
+		configure(&opts)
+	}
+	g, err := newRegisteredGateway(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
