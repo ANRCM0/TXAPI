@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 20
+const latestMigrationVersion = 21
 
 type dataMigration struct {
 	Version int
@@ -116,6 +116,11 @@ var dataMigrations = []dataMigration{
 				return err
 			}
 		}
+		return nil
+	}},
+	{Version: 21, Apply: func(tx *gorm.DB) error {
+		// Retained ciphertext is not scanned to invent usage metadata. Existing
+		// background rows keep empty native state and nullable unknown quantities.
 		return nil
 	}},
 }

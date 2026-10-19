@@ -4,6 +4,8 @@ package taskcontrol
 import (
 	"context"
 	"errors"
+
+	history "minigateway/internal/foundation/contracts/usagehistory/v1"
 )
 
 const Version = "1"
@@ -29,23 +31,25 @@ type Query struct {
 	Limit, Offset    int
 }
 type Task struct {
-	ID                string `json:"id"`
-	UserID            uint   `json:"user_id"`
-	TokenID           uint   `json:"token_id"`
-	Model             string `json:"model"`
-	Stage             string `json:"stage"`
-	Revision          uint64 `json:"revision,string"`
-	CreatedAt         int64  `json:"created_at"`
-	Deadline          int64  `json:"deadline"`
-	ContentExpiresAt  int64  `json:"content_expires_at"`
-	MetadataExpiresAt int64  `json:"metadata_expires_at"`
-	CancelRequested   bool   `json:"cancel_requested"`
-	ContentAvailable  bool   `json:"content_available"`
-	Deleted           bool   `json:"deleted"`
-	ReplayPending     bool   `json:"replay_pending"`
-	EventCount        int64  `json:"event_count"`
-	LastSequence      *int64 `json:"last_sequence"`
-	CanCancel         bool   `json:"can_cancel"`
+	ProtocolStatus    string             `json:"protocol_status"`
+	Usage             *history.UsageView `json:"usage"`
+	ID                string             `json:"id"`
+	UserID            uint               `json:"user_id"`
+	TokenID           uint               `json:"token_id"`
+	Model             string             `json:"model"`
+	Stage             string             `json:"stage"`
+	Revision          uint64             `json:"revision,string"`
+	CreatedAt         int64              `json:"created_at"`
+	Deadline          int64              `json:"deadline"`
+	ContentExpiresAt  int64              `json:"content_expires_at"`
+	MetadataExpiresAt int64              `json:"metadata_expires_at"`
+	CancelRequested   bool               `json:"cancel_requested"`
+	ContentAvailable  bool               `json:"content_available"`
+	Deleted           bool               `json:"deleted"`
+	ReplayPending     bool               `json:"replay_pending"`
+	EventCount        int64              `json:"event_count"`
+	LastSequence      *int64             `json:"last_sequence"`
+	CanCancel         bool               `json:"can_cancel"`
 }
 type Page struct {
 	Data    []Task `json:"data"`

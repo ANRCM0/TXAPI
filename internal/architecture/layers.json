@@ -87,6 +87,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/background/v2": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "2"
+  },
   "minigateway/internal/foundation/contracts/configuration/v1": {
     "layer": "L1",
     "owner": "foundation",

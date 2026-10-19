@@ -23,7 +23,9 @@ def background_workflow(gateway, work, env, service, ready, request):
 
     def document(remote_id, status):
         return {"id": remote_id, "object": "response", "status": status, "output": [],
-                "usage": {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3}}
+                "usage": {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3,
+                          "input_tokens_details": {"cached_tokens": 1},
+                          "output_tokens_details": {"reasoning_tokens": 0}}}
 
     def event(seq, remote_id, status):
         kind = "response.completed" if status == "completed" else "response.created"
@@ -177,6 +179,17 @@ def background_workflow(gateway, work, env, service, ready, request):
             assert request(base + "/api/me/background", token)[0] == 401
             status, body = request(base + "/api/admin/background", session)
             assert status == 200 and len(json.loads(body)["data"]) == 2
+            tasks = {item["id"]: item for item in json.loads(body)["data"]}
+            assert tasks[public_id]["protocol_status"] == "completed"
+            assert tasks[cancel_id]["protocol_status"] == "cancelled" and tasks[cancel_id]["deleted"]
+            for item in tasks.values():
+                usage = item["usage"]
+                assert usage == {"input_tokens": "2", "output_tokens": "1", "total_tokens": "3",
+                                 "cached_input_tokens": "1", "cache_write_input_tokens": None,
+                                 "reasoning_output_tokens": "0", "completeness": "complete",
+                                 "source": "provider_reported", "profile": "responses_native_tokens_v2"}, usage
+            status, detail_body = request(base + "/api/me/background/" + public_id, session)
+            assert status == 200 and json.loads(detail_body)["data"]["usage"] == tasks[public_id]["usage"]
             for secret in (credential, "private-background-smoke-input", "resp_native_"):
                 assert secret.encode() not in body, "Task metadata exposed private content"
             status, body = request(base + "/v1/responses", token, dict(payload, stream=False))
@@ -231,5 +244,6 @@ def background_workflow(gateway, work, env, service, ready, request):
                 assert db.execute("SELECT COUNT(*) FROM background_events").fetchone() == (0,)
                 assert db.execute("SELECT SUM(length(ciphertext)+length(snapshot)+reserved_bytes+replay_pending) FROM background_jobs").fetchone() == (0,)
                 assert db.execute("SELECT COUNT(*) FROM credentials WHERE api_key<>'' OR length(key_ciphertext)=0").fetchone() == (0,)
+                assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE usage_total_tokens=3 AND usage_cached_input_tokens=1 AND usage_reasoning_output_tokens=0").fetchone() == (3,), "Content cleanup erased usage metadata"
         assert state["posts"] == 3, "Feature-off cleanup resubmitted a remote task"
-    print("PASS: actual main native background/SSE disconnect, SIGKILL restart/cursor, cancel/delete, charged refusal and feature-off TTL", flush=True)
+    print("PASS: actual main native background/SSE disconnect, SIGKILL restart/cursor, cancel/delete, exact task usage queries, charged refusal and feature-off TTL", flush=True)

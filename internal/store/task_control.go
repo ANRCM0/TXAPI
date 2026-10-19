@@ -18,7 +18,7 @@ type taskControl struct{ store *Store }
 
 func (s *Store) TaskControl() task.Repository { return &taskControl{s} }
 
-const taskColumns = "id,public_id,user_id,token_id,model,stage,revision,created_at,deadline,content_expires_at,expires_at,cancel_requested,deleted,replay_pending,event_count,last_sequence"
+const taskColumns = "id,public_id,user_id,token_id,model,stage,revision,created_at,deadline,content_expires_at,expires_at,cancel_requested,deleted,replay_pending,event_count,last_sequence,native_state,usage_input_tokens,usage_output_tokens,usage_total_tokens,usage_cached_input_tokens,usage_cache_write_input_tokens,usage_reasoning_output_tokens,usage_completeness,usage_source,usage_profile"
 
 var (
 	errSessionUnauthorized = errors.New("current login session required")
@@ -61,6 +61,7 @@ func taskSession(tx *gorm.DB, a task.Access) (model.User, error) {
 
 func taskProjection(row model.BackgroundJob, admin bool) task.Task {
 	out := task.Task{ID: row.PublicID, UserID: row.UserID, TokenID: row.TokenID, Model: row.Model, Stage: row.Stage, Revision: row.Revision, CreatedAt: row.CreatedAt, Deadline: row.Deadline, ContentExpiresAt: row.ContentExpiresAt, MetadataExpiresAt: row.ExpiresAt, CancelRequested: row.CancelRequested, Deleted: row.Deleted, ReplayPending: row.ReplayPending, EventCount: row.EventCount, ContentAvailable: !row.Deleted && row.ContentExpiresAt > time.Now().UnixMilli()}
+	out.ProtocolStatus, out.Usage = backgroundProtocolStatus(bg.RemoteState(row.NativeState)), backgroundUsageView(row.Usage)
 	if row.LastSequence >= 0 {
 		n := row.LastSequence
 		out.LastSequence = &n
