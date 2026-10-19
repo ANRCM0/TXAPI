@@ -1,6 +1,9 @@
 # S6 compatibility and consumer inventory
 
-Source baseline: `758ad04` (fetched `origin/master` on 2026-10-18).
+Historical S6 source baseline: `758ad04` (fetched `origin/master` on 2026-10-18).
+Current integrated main bdcb307 has OpenAPI 0.11.0 / 111 operations and schema 16;
+see [current program status](reference-adoption-status.md). This inventory
+retains the S6-specific source and acceptance scope.
 Scope: S6-00 through S6-06 from [the active plan](../PLAN.md).
 The accepted S6 OpenAPI baseline is 0.2.3, with 79 operations. This inventory maps
 source and declared contracts; it does not replace behavior acceptance.
@@ -26,7 +29,7 @@ It has its own encrypted snapshot/CAS/target consumers; no historical S6/A01 CI
 is substituted for A02 verification. Exact head `2084bcd` and merged master
 passed their own complete push/PR/master CI; M2 is accepted.
 
-FC-001 FND-01/02/03 have separately passed their exact-head and merged-master gates. FND-04 has migrated the remaining application/HTTP consumers; its local evidence and pending final CI are recorded in [FC-001 history](../history/implementation-fc001.md). Public candidates remain unfrozen until FND-05.
+FC-001 FND-01 through FND-05 passed their independent exact-head and merged-master gates; L0/L1/L2 v1 are frozen. The [FC-001 history](../history/implementation-fc001.md) retains the original pending checkpoints and final acceptance. Subsequent FC-002/R03 background/WS consumers and candidate additions have their own scope; they do not change this historical S6 acceptance.
 
 ## Responsibilities and actual consumers
 

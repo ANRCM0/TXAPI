@@ -2,6 +2,8 @@
 
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
+2026-10-19 核对已合并基线 `master/bdcb307`：当前 OpenAPI `0.11.0` / 111 个操作、schema v16。A01/A02、FC-002 disabled 后台、R03 disabled 原生 WS 和后续用量/管理子批均已独立验收；完整收费与真实 Provider/客户端门槛仍开放。下文按功能记录运行约定，具名阶段版本/命令只对应其原时点，当前范围见 [状态矩阵](reference/reference-adoption-status.md)。
+
 [FC-001 地基收口](proposals/FC-001-foundation-contracts-v1.md) 已按用户批准顺序完成，代码基线 master/889ecbd 的最终头及合并后完整 CI 均通过，L0/L1/L2 v1 现为 frozen。后续按 [Agent 工作协议](../AGENTS.md#地基分层与-agent-工作协议) 声明六项边界，沿用 [公开入口/接入样例与快照流程](reference/foundation-integration-v1.md)；新增地基接口或签名/行为/权限/寿命变化仍先具名提案确认。纯说明文档只检查差异、链接与一致性，代码/契约按实际影响集中验证，保留现有完整 CI 和自动触发规则。
 
 S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确源码/命令/结果统一见 [PLAN](PLAN.md) 和 [S6 批次记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29`（PR #6）及其 [完整验证](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。A3/S6 原验收未新增公开任务/会话/原生 WS 产品 API；当前 A02 另行交付了会话/历史 API，完整 S5 和 S7 继续独立验收。
@@ -53,7 +55,7 @@ A03-01/02/03 已依次独立验收。A03-03 功能头 `501507d` 经 PR #22 合�
 的 check/delivery 均成功，未失败步骤；含 Linux 全量 race、主程序冒烟和 v15 容器交付。
 本地最终 1207 项/30 包、6 个预期 helper SKIP、真实主程序强杀/重启/SSE/取消/TTL 通过。
 
-当前 OpenAPI 0.5.0 / 92 操作；两个追加入口 background/v1 与 responses/v2 已按
+FC-002 当时的 OpenAPI 基线为 0.5.0 / 92 操作；两个追加入口 background/v1 与 responses/v2 已按
 [七项 DoD](reference/foundation-integration-v1.md#fc-002-追加公开入口冻结) 和真实 L3/L2 消费者证明冻结，
 原十四组 v1 与 L0 未改。默认关闭、仅 disabled、自包含文本/函数工具；
 store=false 仍临时加密保留，原生 JSON 终态与持久终态事件是不同事实，未知请求绝不盲重发。
@@ -65,7 +67,7 @@ store=false 仍临时加密保留，原生 JSON 终态与持久终态事件是�
 
 ### S7-A02 历史与会话（已验收合并）
 
-PR #12 从 `master/04fbfa6` 扩展 A01 并合并为 `master/765501a`，新增 11 个 API Key 鉴权的历史/Conversations/items 操作及本地完整上下文续链。schema v12 新增加密快照，不从旧回执/缓存回填历史；已验收 OpenAPI 0.4.0 / 91 操作。默认 `history_seconds: 86400`、history 实例/owner 预留 64/16 MiB，单快照 2 MiB；存储型展开请求上限 256 KiB / 1024 items，读取/修改另限每 owner 每分钟 120 次。仍默认关闭 Responses、必须实际凭据加密和挂载内容密钥，strict 全拒绝；后台/WS 未接入。
+PR #12 从 `master/04fbfa6` 扩展 A01 并合并为 `master/765501a`，新增 11 个 API Key 鉴权的历史/Conversations/items 操作及本地完整上下文续链。schema v12 新增加密快照，不从旧回执/缓存回填历史；已验收 OpenAPI 0.4.0 / 91 操作。默认 `history_seconds: 86400`、history 实例/owner 预留 64/16 MiB，单快照 2 MiB；存储型展开请求上限 256 KiB / 1024 items，读取/修改另限每 owner 每分钟 120 次。仍默认关闭 Responses、必须实际凭据加密和挂载内容密钥，strict 全拒绝；本 A02 历史功能不与后台/WS 混用，后两者的独立 disabled 子集见前文运行约定。
 
 用户/创建 Key/当前模型范围、完整上下文与原渠道/凭据/映射约束、ETag/CAS、TTL/删除和未知执行均由业务/存储层负责。GET/修改不走生成计费；`store:false` 不建历史且不能引用会话。具体使用和限制见 [历史契约](reference/responses-history.md)，实际验证和未运行项见 [A02 记录](history/implementation-s7-a02.md)。功能头 `2084bcd` 的 push `39092263704`、PR `39092266694` 与合并后 master `39092604090` 均为 check + delivery SUCCESS，含 Linux 全量 race、主程序冒烟及 v12 容器安装/升级/停止备份恢复；A02 与 M2 已完成，真实提供商/SDK/Codex、A03-A06 和 S5-03 仍单独验收。
 
@@ -75,7 +77,7 @@ PR #12 从 `master/04fbfa6` 扩展 A01 并合并为 `master/765501a`，新增 11
 
 默认限制：请求正文 1 MiB，幂等元数据保留 24 小时、私有重放 1 小时，编码后归档容量每条 256 KiB、总段数最多 8192（元数据/终态占段）；重放保留期须覆盖总超时及额外 5 秒收尾，按受理时间计时。实例/owner 回执上限 1024/128，在途请求上限 32/4。schema v11 只新增无正文幂等回执，不推断历史请求；已知终态按 TTL 清理，未知结果即使过期也不删除或自动重发，容量满时保守拒绝。升级前按既有约定停写备份；旧二进制不能直接打开 schema v11。
 
-`store` 省略保持提供商原生默认 true；true 时额外保存加密私有短期重放，false 不存请求/输出正文，完成后重试返回 409，不重新执行。幂等作用域隔离 owner/Key，重试重新校验当前权限，但不重复计费/准入；它不是 A02 历史或通用恢复接口。strict 在预留/发送前拒绝 Responses；A01 原验收不含 GET/续链/会话；这些已在上文 A02 独立验收合并，background 和原生 WS 仍未实现。
+`store` 省略保持提供商原生默认 true；true 时额外保存加密私有短期重放，false 不存请求/输出正文，完成后重试返回 409，不重新执行。幂等作用域隔离 owner/Key，重试重新校验当前权限，但不重复计费/准入；它不是 A02 历史或通用恢复接口。strict 在预留/发送前拒绝 Responses；A01 原验收不含 GET/续链/会话；这些已在上文 A02 独立验收合并，disabled background 与原生 WS 已由 FC-002/R03 独立交付，运行范围见各自契约。
 
 配置、支持矩阵和恢复细节以 [Responses HTTP 运行约定](reference/responses-http.md) 为准。集中验证和提交/CI/合并事实统一记在 [S7-A01 批次](history/implementation-s7-a01.md)；A01 已完成独立验收，不把 S6 历史 CI 作为本批通过证据，A02/M2 已由独立验收收口，A03+ 仍未完成。
 
@@ -278,7 +280,7 @@ schema v5 增加 `billing_price_versions`、`billing_balances`、`billing_reserv
 
 ### 管理员账本与最终决策
 
-控制台管理员菜单的 **Billing ledger** 默认列出 pending；支持状态/用户筛选及分页，详情展示逐次执行、售价快照、独立上游包络/契约快照、双预算占用和最终决策。金额使用十进制整数字符串传输，`unit_scale="1000000000"`；浏览器使用 BigInt 展示，不把未知成本显示为免费。字段和错误封装以当前 OpenAPI 为准；当前已验收版本为 0.4.0 / 91 个操作（A02，PR #12），S6 验收基线为 0.2.3 / 79 个操作。
+控制台管理员菜单的 **Billing ledger** 默认列出 pending；支持状态/用户筛选及分页，详情展示逐次执行、售价快照、独立上游包络/契约快照、双预算占用和最终决策。金额使用十进制整数字符串传输，`unit_scale="1000000000"`；浏览器使用 BigInt 展示，不把未知成本显示为免费。字段和错误封装以当前 OpenAPI 为准；当前主线为 0.11.0 / 111 个操作；A02 的 0.4.0 / 91 与 S6 的 0.2.3 / 79 是历史验收基线。
 
 | 方法与路径 | 行为 |
 |---|---|

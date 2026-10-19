@@ -1,14 +1,12 @@
 # 架构设计：中转内核、业务层与统一兼容层
 
-FC-002 的 A03-01/02/03 已依次独立验收；最终头 `501507d`、PR #22 与合并后 `master/a44d4d1` 的完整 CI 均通过。两组新增入口 `background/v1` / `responses/v2` 按已验收的 disabled、自包含文本/函数工具范围冻结，原十四组冻结入口和 L0 不变。原生序号先事务提交再公开，任务终态与事件尾部完成分离；收费双 hold/成本、背景父链、原生 WS 与完整 A03/M3 不因此完成。资源/限制见 [后台运行约定](reference/responses-background.md)，七项 DoD 与独立上层证据见 [追加入口冻结](reference/foundation-integration-v1.md#fc-002-追加公开入口冻结)。
+核对日期：2026-10-19，已合并代码基线 `master/bdcb307`。A1–A4、S6/M1、A01/A02/M2 和 FC-001 已独立验收；L0/L1/L2 v1 已冻结。FC-002 的 disabled 原生后台、R03 的 disabled 原生 WS 及后续路由/用量/管理子批已经交付。当前 HTTP 契约为 [OpenAPI 0.11.0 / 111 操作](openapi.json)，主线 schema v16。
 
-2026-10-18，用户批准的 L0 内核、L1 基础框架、L2 兼容层、L3 功能层约束已按 [FC-001](proposals/FC-001-foundation-contracts-v1.md) 的 FND-01 至 FND-05 完成。代码基线 `master/889ecbd` 经最终功能头与合并后完整 CI 验收，L0/L1/L2 v1 已冻结；全部包归属、公开入口、资源规则、独立接入与 DoD 见 [v1 接入清单](reference/foundation-integration-v1.md)。下文三层表保留产品职责视角，生产编译依赖以四层规则为准；状态与下一批以 [PLAN](PLAN.md#地基符合性收口fc-001) 为准。
+三层表描述产品职责，生产编译依赖遵守 L0 内核、L1 基础框架、L2 兼容适配、L3 功能的四层规则。公开入口、版本、资源归属和 DoD 见 [地基接入清单](reference/foundation-integration-v1.md)。新增候选契约和功能不因既有冻结自动验收。
 
-状态：2026-10-18，S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确提交与验证记录见 [PLAN.md](PLAN.md) 和 [S6 记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29` 及其 [验收证据](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；完整 S5 和 S7-A 仍未完成。命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，本页不维护第二份活动计划。
+后台与 WS 的运行边界分别见 [后台](reference/responses-background.md) 和 [WS](reference/responses-websocket.md)。默认关闭、billing disabled 的已验收子集不代表收费、背景父链、持久重连或真实 Provider/SDK 全兼容。完整 S5、A03–A06 和 R00–R07 目标继续开放，当前状态与排期统一见 [PLAN](PLAN.md)；本页下面具名阶段记录保留其原时点和范围，不另维护第二份活动计划。
 
-2026-10-18，S7-A01 已完成独立验收：PR #10 将功能头 `3195d0923d957eb5f41dde5412912d10e72259f7`（基线 `bea97fa`）合并为 `master/a925140ab86fca780a71ef6956a45e0e6af38658`；push `39073160376`、PR `39073164111` 与合并后 master `39073532710` 均为 check + delivery 全部成功。精确修复、命令与范围见 [S7-A01 功能验收](history/implementation-s7-a01.md#2026-10-18-s7-a01-functional-acceptance)。默认关闭的前台 Responses 在 legacy/disabled 可用；尚无已证明的 strict 子集，全部 Responses 在计费前拒绝。该段保留 A01 原验收范围；A02 现已由 PR #12 独立验收合并为 `master/765501a`，M2 已完成。后台/原生 WS 与 S5 成本门槛继续独立验收。
-
-S0–S4 与 F0 已通过阶段验收；S5 已实现定点账本、管理员对账与强杀恢复批次，完整成本上界仍待闭环，尚未完成完整阶段。最新顺序为底层架构验收 → 功能补全，S5 的安全约束保留且计费证明单独验收：**S6 统一兼容与协调框架、S7-A01 原生 Responses HTTP/SSE 和 A02 持久会话均已独立验收合并，接下来推进后台任务和 WebSocket**。完整收费后台/原生 WS 仍是必须开发且尚未验收的目标；支付不在本轮范围。多团队协作与现有接口见 [COLLABORATION.md](COLLABORATION.md)，HTTP 契约见 [openapi.json](openapi.json)。
+命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，共享边界见 [COLLABORATION.md](COLLABORATION.md)，历史精确提交/CI 见 [批次索引](PLAN.md#批次与验收记录)。
 
 ## 设计总纲与当前差距
 
@@ -223,7 +221,7 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 
 ## 12. 首组状态型扩展：Responses 持久执行
 
-状态：2026-10-18，默认关闭的 S7-A01 前台原生 HTTP/SSE 已完成独立 CI/合并验收，见 [批次记录](history/implementation-s7-a01.md)。持久会话已通过 A02 独立 CI/合并验收；任务/原生 WS 仍是未实现的后续目标；批次与验收以 [PLAN.md](PLAN.md#s7-aresponses-持久执行主线) 为准。它是统一框架的首组状态型消费者，不定义整个项目的中心。持久会话、后台任务和 WebSocket 均必须交付，不能以现有亲和缓存或 HTTP 接口替代。首个完整组合使用标准 API Key 和经验证的原生 Responses 上游。
+状态：2026-10-18，默认关闭的 S7-A01 前台原生 HTTP/SSE 已完成独立 CI/合并验收，见 [批次记录](history/implementation-s7-a01.md)。持久会话已通过 A02 独立 CI/合并验收；FC-002/R03 已独立交付 disabled 后台/原生 WS 子集，完整收费与跨模式目标仍未完成；批次与验收以 [PLAN.md](PLAN.md#s7-aresponses-持久执行主线) 为准。它是统一框架的首组状态型消费者，不定义整个项目的中心。持久会话、后台任务和 WebSocket 均必须交付，不能以现有亲和缓存或 HTTP 接口替代。首个完整组合使用标准 API Key 和经验证的原生 Responses 上游。
 
 ### 12.1 分层与真实复用
 
@@ -237,7 +235,7 @@ core 先放 `internal/core`，在同仓稳定后再考虑公开 Go 包或独立�
 | gateway | 统一操作准备、授权、准入、调度、attempt、预算、生成收尾；消费执行与持久端口 | 直接依赖 responses 应用服务、store 或框架任务队列 |
 | protocol | Responses 请求/item/事件与能力、usage 解析 | 数据库、连接池、worker 和模型调用 |
 | core | 保留标准库单次 HTTP 执行，复用已有生命周期 | WS 库、会话/任务/用户逻辑 |
-| WS transport（A3-03 已有基础） | 纯 I/O、消息/容量边界、deadline、关闭；当前由测试应用调用，产品原生 WS 执行端口仍待接线 | 用户、账本、数据库、协议业务事件含义；不能绕过 gateway 执行 |
+| WS transport（A3-03 已有基础） | 纯 I/O、消息/容量边界、deadline、关闭；已由 R03 gateway exchange 与原生 WS 应用消费，运行子集见 WS 契约 | 用户、账本、数据库、协议业务事件含义；不能绕过 gateway 执行 |
 | store / billing 持久实现 | 会话/任务/事件与现有账本的一致性事务，版本/幂等约束 | 以访问日志恢复状态、向业务层暴露任意 GORM 事务 |
 | cmd/gateway | 实例组装、worker/WS 管理器启动与有序关闭 | 在包 init 中隐式启动服务 |
 
