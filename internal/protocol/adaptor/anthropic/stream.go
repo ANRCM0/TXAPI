@@ -128,6 +128,9 @@ func (t *translator) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, err
 // onMessageStart 处理 message_start：拿到 id/model/input_tokens，
 // 发出带 role 的首帧（OpenAI 约定首帧 delta.role="assistant"）。
 func (t *translator) onMessageStart(ev claudeStreamEvent) ([]*canonical.StreamChunk, error) {
+	if t.finished {
+		return nil, fmt.Errorf("message start after stream finish")
+	}
 	if ev.Message != nil {
 		t.id = ev.Message.ID
 		t.model = ev.Message.Model
@@ -282,7 +285,14 @@ func (t *translator) onMessageDelta(ev claudeStreamEvent) ([]*canonical.StreamCh
 	var delta struct {
 		StopReason string `json:"stop_reason"`
 	}
-	if err := json.Unmarshal(ev.Delta, &delta); err == nil && delta.StopReason != "" && !t.finished {
+	// A usage-only event may omit delta. A present malformed delta must fail
+	// before publishing usage or mutating the translator's completion state.
+	if len(ev.Delta) != 0 {
+		if err := json.Unmarshal(ev.Delta, &delta); err != nil {
+			return nil, err
+		}
+	}
+	if delta.StopReason != "" && !t.finished {
 		for index, block := range t.blocks {
 			if !block.closed {
 				return nil, fmt.Errorf("message ended before content block %d stopped", index)

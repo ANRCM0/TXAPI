@@ -134,7 +134,10 @@ func TestAnthropicInterleavedToolArgumentsAndTruncation(t *testing.T) {
 		}
 	}
 	decoder := NewDecoder(a, &meta.Meta{}).NewStream()
-	if _, err := decoder.DecodeLine([]byte(lines[3])); err == nil {
+	if frames, err := decoder.DecodeLine([]byte(lines[3])); err != nil || len(frames) != 0 {
+		t.Fatalf("partial tool event was observed: %+v %v", frames, err)
+	}
+	if _, err := decoder.DecodeLine(nil); err == nil {
 		t.Fatal("orphan tool delta accepted")
 	}
 }
