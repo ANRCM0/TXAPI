@@ -1,7 +1,7 @@
 """Optional OpenAI SDK parsing check; defaults match tests/configs/protocols.yaml.
 
 Start the local gateway and fake providers first. This is not a complete
-cross-protocol conformance test (see docs/history/acceptance-s0-s5.md, S0).
+cross-protocol conformance test (see docs/PLAN.md for acceptance boundaries).
 """
 import argparse
 import os
@@ -60,7 +60,7 @@ def main():
     try:
         from openai import OpenAI
     except ImportError:
-        parser.exit(2, "Install the optional 'openai' package in a virtual environment; see docs/DEVELOPMENT.md.\n")
+        parser.exit(2, "Install the optional 'openai' package in a virtual environment; see docs/PLAN.md.\n")
     results = []
     with OpenAI(api_key=args.api_key, base_url=args.base_url, max_retries=0, timeout=30) as client:
         for model in args.models:

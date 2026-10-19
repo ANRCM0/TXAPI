@@ -1,51 +1,105 @@
-# 当前开发计划：中转内核、业务层与统一兼容层
+# TXAPI 开发方案
 
-核对日期：2026-10-19。本文是唯一活动开发计划，只维护已验收范围、未完成目标与进入条件。产品分层见 [ARCHITECTURE.md](ARCHITECTURE.md)，运行命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，共享边界见 [COLLABORATION.md](COLLABORATION.md)。逐次命令、失败与 CI 证据保留在 history 和 [参考能力吸收记录](../REFERENCE-ADOPTION-PROGRESS.md)。
+核对日期：2026-10-19。本文统一保存当前状态、架构边界、开发路线和验收要求。后续直接更新本文，不再新增批次方案、进度日志或历史说明文件；旧文档和已批准方案保留在 Git 历史中，可用 `git show 7014654:<原路径>` 查阅。
 
-## 当前状态
+## 目标与当前状态
 
-R06c 账本展示与 R04a 本地账号工具已通过 PR #44 合并为 `master/03c4001`，基线为 `290ba5d`。最终整合头 `b30f4d2` 的 push/PR 完整 Verify `39244005306` / `39244013899` 及合并后主线 Verify `39245348032` 均成功；合并前后文件树相同。原分支取舍、恢复标签和清理结果见 [整合记录](history/branch-integration-20261019.md)。本批受控验收不代表完整 R04、真实账号或收费目标已完成。
+目标是以小型中转内核、统一业务协调和兼容适配构建可扩展的 AI 网关。产品职责分为中转、业务和兼容；生产代码遵守 L0–L3 四层依赖。保持 Go/Gin 模块化单体、单二进制、内嵌 ES Modules 控制台和单实例 SQLite。
 
-| 范围 | 已验收合并的行为 | 未完成或限制 |
+当前基线为 `master/7014654`；功能通过 PR #44 合并为 `03c4001`，最终功能头为 `b30f4d2`，两头文件树相同。功能头 push/PR Verify `39244005306` / `39244013899`、合并后主线 Verify `39245348032`、文档头 Verify `39246970577` 均完整成功。此证据仅覆盖各自提交；本次文档清理未据此宣称新提交 CI 成功。
+
+| 范围 | 已验收行为 | 未完成或限制 |
 |---|---|---|
-| 产品形态 | Go/Gin 模块化单体、单二进制、内嵌 ES Modules 控制台、单实例 SQLite | 没有分布式部署或已交付的外部 Runtime |
-| 公共架构 | A1–A4、S6/M1、FC-001 FND-01 至 FND-05 已验收；L0/L1/L2 v1 冻结 | 新候选契约不自动冻结，地基变更遵守提案流程 |
-| 基础推理 | models、Chat JSON/SSE、embeddings、文本/function tools 的已声明支持组合 | 能力按操作/目标/传输判断，不能推导所有厂商兼容 |
-| Responses / M2 | A01 前台 HTTP/SSE、幂等与私有回放；A02 加密历史、Conversations/items 和续链 | 默认关闭；legacy/disabled 可用，strict 全部拒绝 |
-| 原生后台 | FC-002 A03-01/02/03 的持久受理、原生提交/查询/取消、事件恢复及强杀矩阵 | 默认关闭，仅 disabled、自包含文本/函数工具；完整 A03/M3、收费及背景父链未完成 |
-| 原生 WS | R03a/b 的机械执行和原生产品子集；PR #39 已修复终态交接 | 默认关闭、disabled、单连接串行文本/函数轮次、连接内最新父 ID；收费/持久重连/任意多路复用未完成 |
-| 用量与管理 | 路由诊断和 shadow 对比、原生 Token 明细、不可变售价报价、持久前台 HTTP 用量、任务控制与个人账本读取 | shadow 不控制路由；报价/用量不等于入账；R05/R06 整体仍部分完成，R06c 原账本展示已按本次要求恢复集成，其他前端范围仍暂缓 |
-| S5 / R05b | 定点价格、双层 hold、幂等结算、对账、未知保护及崩溃恢复已合并 | S5-03 完整成本证明与原生 Responses/后台/WS 收费仍未完成 |
-| R04a 本地账号 | 授权/重新授权、加密元数据、单次刷新及停用命令已受控验收合并 | 候选 upstreamauth/v1 未冻结；真实账号、推理路由及完整账号池未验收 |
-| HTTP / 数据库 | [OpenAPI](openapi.json) `0.11.0` / 111 个操作；本批 schema v17 | 版本和路由数不表示完整官方 API 或生产收费验收 |
-| 真实兼容与发布 | 十项受控官方 Python SDK 场景和已有 CI 证据 | 假上游不代替真实 Provider/OAuth/SDK WS/Codex 验收；未确认发布、镜像或生产就绪 |
+| 公共架构 / M1 | A1–A4、S6、FC-001 地基；原 L0/L1/L2 v1 已冻结 | 后续候选接口仍需独立冻结 |
+| 基础推理 | models、Chat JSON/SSE、embeddings 和声明范围内的文本/function tools | 支持按操作、目标协议、传输和计费模式判断 |
+| Responses / M2 | HTTP/SSE、owner/Key 幂等、加密历史、Conversations/items 和续链 | 默认关闭；legacy/disabled 可用，strict 全部拒绝 |
+| 原生后台 | 持久受理、原生提交/查询/取消、事件恢复、fencing 与强杀恢复 | 默认关闭；仅 disabled、自包含文本/函数工具；完整 A03/M3、收费和背景父链未完成 |
+| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；收费、持久重连和任意多路复用未完成 |
+| R00–R02 | 路由观测/shadow、执行事实、原生资源代次发布/排空和失败清理 | shadow 不控制路由；不代表外部 Runtime |
+| R04a 账号 | operator-only 授权/重新授权、加密元数据、单次刷新和停用 | 受控验收；真实账号、推理路由、自动刷新和完整账号池未验收 |
+| R05a 用量 | 原生 Token 明细、不可变售价报价、持久前台 HTTP 用量 | 报价、用量、用户收费、Provider 成本与 hold 分开；后台/WS 明细未覆盖 |
+| S5 / R05b | 定点价格、双层 hold、幂等结算、对账、未知保护和崩溃恢复 | S5-03 完整成本证明与 Responses/后台/WS 收费未完成 |
+| R06 管理 | 任务控制、路由诊断、配置发布、个人财务读取及 R06c 账本展示 | 账号管理依赖 R04；更广泛页面仍暂缓 |
+| HTTP / 数据库 | [OpenAPI](openapi.json) `0.11.0` / 111 操作；schema v17 | 接口数和迁移版本不表示生产收费就绪 |
+| 真实兼容 / R07 | 已有十项受控官方 Python SDK 场景；扩展采用编译期注册 | 真实 Provider/OAuth/SDK WS/Codex 完整组合及外部 SDK/Runtime 未验收 |
 
-完整 R00–R07 的已验收子批、代码缺口和进入条件统一见 [能力状态矩阵](reference/reference-adoption-status.md)。不按代码行数、阶段数或 S5 的 5/6 换算项目完成百分比。
+标准 API Key 路线不依赖 OAuth 账号池。完整 S5、A03–A06/M3/M4 和 R04–R07 整体目标继续开放；不以子批通过、测试数量或阶段数换算完成百分比。本轮不自动新增支付/套餐、媒体、多实例、PostgreSQL/Redis、外部 Runtime 或更广泛账号池。
 
-## 地基符合性收口FC-001
+## 架构与契约
 
-FC-001 已按用户批准的 FND-01 → FND-05 完成并冻结 v1；功能头 `38a8cce`、PR #18 与 `master/889ecbd` 完整 CI 通过。L3 可按已登记公开入口与独立目录协作；共享入口、迁移和地基变更仍由集成协调。FC-002 的 `background/v1` 与 `responses/v2` 仅在已验收 disabled 范围追加冻结，不扩大计费许可。
+| 层级 | 责任与主要目录 | 依赖边界 |
+|---|---|---|
+| L0 | `internal/core` 及登记的机械执行：一次发送、读写、取消、背压和提交事实 | 不放用户、路由、账本、账号或会话策略；限制由架构测试执行 |
+| L1 | access、gateway、billing、generation、scheduler、store、secrets 等基础能力 | 持有唯一鉴权、准入、attempt、预留/结算、迁移和资源生命周期 |
+| L2 | protocol、compat、server、transport、web | 负责入站/上游编解码、错误/事件、HTTP/WS 和展示；通过公开入口调用能力 |
+| L3 | responses、responsesws、管理/查询用例及其他登记功能 | 仅消费登记的 L1/L2 公开契约；不直接依赖其他功能实现或 L0/私有框架包 |
+| 组装根 | `cmd/gateway` | 注入实现、注册和管理启动/关闭，不放功能规则 |
 
-公开入口、版本、最小接入、DoD 与限制见 [地基接入清单](reference/foundation-integration-v1.md)；精确记录见 [FC-001](history/implementation-fc001.md) 与 [FC-002](history/implementation-fc002.md)。历史开工边界移至 [整理前快照](history/plan-checkpoint-20261019.md#地基符合性收口fc-001)。
+包的精确层级/owner 以 [layers.json](../internal/architecture/layers.json) 为准，完整公开类型、字段、标签和签名以 [public-v1.json](../internal/architecture/public-v1.json) 为准；[契约源码](../internal/foundation/contracts) 定义实际接口。新包先登记，不放宽依赖或可见性检查，不用测试例外掩盖生产依赖。
+
+- FC-001 在 PR #18 / `master/889ecbd` 验收冻结：admission、configuration、control、execution、identity、json、ledger、lifecycle、observability、responses、state、text 的 v1 契约，以及 `foundation/httpoutput/v1`、`compat/responses/v1`。httpoutput 是 L2 输出门面，L3 接收输出端口，不持有 HTTP writer。
+- FC-002 在 PR #22 / `master/a44d4d1` 追加冻结 `background/v1` 与 `responses/v2`，仅限已验收的 disabled、自包含原生后台范围；不扩大计费许可。
+- 后续 execution/v2/v3、responsesws、routes、taskcontrol、ownerledger、quotation、usagehistory、upstreamauth 等新增入口按各批已批准范围消费。登记、导出和完整 CI 不等于所有候选契约已经冻结；需要新增或改变接口时先核对批准记录与实际消费者。
+- 每次生成重新检查可信身份、当前 Key/模型权限与准入；用户提交的 owner、余额或绑定值不构成认证。会话登录和调用 Key 分开，跨 owner/Key 查询不可枚举。
+- 保持单一授权、执行、迁移和账本权威。业务不自行发送 HTTP/WS、启动另一套迁移/刷新/结算流程；观察结果不控制资金或恢复事实。
+- 同协议保真，跨协议仅声明共同子集；无法表示的字段在发送前拒绝。Chat、embeddings、Responses 保留各自模型，不经 ChatRequest 有损中转。
+- 协议终态、操作终态、财务终态和输出提交事实分开。提交后不改目标重试，不伪造成功终态；未知执行不清零、不盲目重发。连接、生成、会话、后台任务与 Provider 状态分别管理寿命。
+- 配置先准备后发布，失败保留旧代次；资源退休后排空，worker/连接取消并 join 后才能关闭共享 gateway/store。正文、消息、事件、队列、连接、保留期与退休代次都必须有界。
 
 ## 后续开发路线
 
-用户已确认架构先行。公共架构和 M1/M2 已验收，S5 外部成本证明不阻塞无关架构工作，但新操作仍不能自动获得 strict 许可。本轮目标继续包含 S5、S6 与完整 S7-A；不新增支付，不自动启动完整账号池或外部 Runtime。
+原吸收方案的 R00 → R01 → R02 → R03a/b 已按选定子批验收；后续优先补完整用户链路，不重复抽取公共框架。R05 的成本研究可独立推进，共享契约、账本、迁移和组装修改仍统一协调。
 
-| 优先批次 | 目前工作与进入条件 | 独立退出条件 |
+| 批次 | 下一步 | 退出条件 |
 |---|---|---|
-| R04a 后续验收 | operator-only 命令、加密存储和受控回归已验收合并 | 真实账号验收、推理路由接入和完整账号池分别划定批次及进入条件 |
-| S5-C / R05b | 核实具体模型/操作、逐账户价格和失败收费；补齐确实未实现的计价/成本路径 | 完整成本边界、跨尝试与双预算验证通过后才开放适用 strict 范围 |
-| 完整 S7-A03/A04 | 在已验收 disabled 后台/WS 子集上补收费、父链、持久重连和明确的状态互操作 | 通过各自下方完整清单；子批绿灯不能关闭 M3/M4 |
-| S7-A05/A06 | 故障恢复、跨模式、指定真实客户端/Provider 与交付证据 | 完整主线必须有至少一个真实验收的完整组合 |
-| R06c 前端 | 原账本展示切片已恢复并验收合并，既有 API、精确金额/未知/零/权限及桌面手机回归通过 | 更广泛页面另行确认 |
-| R07 外部 SDK/Runtime | 至少两个真实、可独立安装/升级的消费者，且编译期注册不足 | 另行确认进程/权限/资源/升级契约；样例不能满足进入条件 |
+| R04 账号接入 | 在 R04a 受控工具上划定真实账号验收、最小推理凭据接入和后续生命周期批次 | 明确 Provider/账号来源；当前权限、发送边界、刷新/CAS/unknown 和静态 Key 回退成立；真实证据独立记录 |
+| S5-C / R05b | 选定模型/操作/账户，补输入、最高适用价格、失败收费和全部尝试成本边界 | 满足下方完整清单后才开放对应 strict 范围 |
+| S7-A03/A04 | 在 disabled 后台/WS 子集上补收费、父链、持久重连和跨模式语义 | 逐批通过完整清单，不能以 MVP 关闭 M3/M4 |
+| S7-A05/A06 | 故障矩阵、可操作性和指定真实客户端/Provider 组合 | 至少一个完整真实组合通过；原 API 无回归，最终头完整 CI 成功 |
+| R05a / R06 | 按具体操作补用量维度与稳定管理页面 | 先有真实消费者和后端契约；更广泛前端另行确认 |
+| R07 | 外部 SDK/Runtime 与独立分发 | 至少两个真实、可独立安装升级的消费者，且编译期注册不足，再确认进程/权限/资源/升级契约 |
 
-R04a 本地命令不等于完整 R04 账号池或推理接入。真实账号、完整账号池、收费和外部 Runtime 的进入条件继续独立保留。S7-B/S7-C、支付/套餐、媒体、多实例、PostgreSQL/Redis 和更广泛账号池均无新增验收或自动排期。
+## 严格计费边界
+
+strict 目前只允许已登记的官方 OpenAI 文本 Chat/embeddings 档案；Responses 全部拒绝，原生后台/WS 启动必须使用 disabled。Anthropic/Gemini、兼容代理、未知模型/维度不自动继承许可。legacy 为兼容模式，不具备 strict 的持久预算保证；disabled 只关闭计费，不关闭身份和准入。
+
+`StartPreparedAttempt` 检查最终真实 URL、正文、输出限制和鉴权头，是唯一可执行成本准入入口。无最终正文的旧 `StartCostedAttempt` 不能开启新尝试。输入缺证明返回 `provider_input_unproven`，费率缺证明返回 `provider_tariff_unproven`，凭据绑定不匹配返回 `provider_credential_unproven`，均不发送、不罚健康、不换凭据绕过。
+
+- `openai_embeddings_v1`：仅官方根 URL、openai/embeddings 和三个精确模型 `text-embedding-3-small`、`text-embedding-3-large`、`text-embedding-ada-002`。整请求输入包络至少 300000 Token，文本数组最多 2048 条；不接受 token ID 数组/混合输入，不拿单项上限或字符均值代替总输入边界。
+- `openai_chat_v1`：仅官方 URL、openai/chat 和 `gpt-4o-mini-2024-07-18`。配置输入包络至少 128000，最大输出至多 16384，字段为 `max_completion_tokens`，正文显式 `service_tier: "default"`，严格文本且 `n=1`；工具、媒体和未登记缓存/推理/等级扩展拒绝。
+- 上述接口数字为 2026-10-17 核对后登记的实现约束，不代表未来远端保证。具体检查和来源入口见 [输入档案源码](../internal/billing/input_profile.go)、[费用档案源码](../internal/billing/tariff_profile.go)。来源为 OpenAI 的 Create embeddings、GPT-4o Mini、Chat Completions、Priority processing 和 Pricing Standard 文档；变更适用范围时重新核对，不把模拟上游或旧快照当真实价格认证。
+- provider 成本、用户售价和实际账单独立。先核对不可变售价/目标倍率覆盖，再核对每次尝试和累计 provider 包络；缓存折扣不降低最坏预留，未知尝试继续占用。定点溢出或覆盖不足在发送前拒绝；异常实际用量保留 pending 和审计。
+- 失败/拒绝请求计价、逐凭据最高适用价格、税/附加项和未来改价假设尚未完整证明；目前没有已验收的完整生产成本契约或可靠通用 tokenizer。用户收费封顶不等于 Provider 成本绝对有界，S5-03 继续未完成。
+
+### 严格计费配置
+
+配置字段以 [gateway.example.yaml](../configs/gateway.example.yaml) 为准。现有费率档案 `openai_standard_usd_2026_10_17` 使用 USD 和显式 `credential_bindings`；其内置下限只约束已登记目标，不能证明账户最高适用价格。provider 金额精度为 `1e-9`，用户售价仍使用独立账户单位，不自动换汇或相互比较。
+
+凭据 ID 必须与完整上游 Key 的小写 SHA-256 摘要对应，并核对最终发送的 Bearer Header；换 Key/新增 ID 需重新核实并加载。实际配置、摘要清单和密钥不提交。可在本地用隐藏输入生成摘要：
+
+```bash
+python -c "import getpass,hashlib; print(hashlib.sha256(getpass.getpass('Upstream key: ').encode()).hexdigest())"
+```
+
+## 路由与用量
+
+- 路由先过滤授权、模型、能力、绑定和凭据资格，再在有效优先级池选择。扩展不能让不合格目标重新入选；选择、准入、发送与失败分别记录。
+- `route_diagnostics` 与 `shadow_route_scoring` 均默认关闭；shadow 只作有界前台 HTTP 观测比较，不改变优先级、权重、亲和、重试或真实路由。采样不代表 Provider 总负载，重启不保留比较历史。
+- `usage_history` 默认关闭且仅允许 disabled，记录前台 Chat/embeddings/Responses 的调用与 attempt 元数据；不包含 native WS、原生后台或 durable claimed 执行。容量、TTL、父子记录预留和失败拒绝由既有准入处理，不退化成可丢日志。
+- 新采集上限为 1..65536 个实例父记录，owner 上限不超过实例上限，保留期为 1..2592000 秒；零配置选择有限默认值。每个调用预留有限 retry 子槽，这不是磁盘/WAL 字节配额保证。
+- Token 明细允许未知、零和部分完整，不能默认补零或推导总量。用量、报价、最终收费、当前占用、历史预留和 provider 包络在读取与展示时保持分开；会话授权、精确金额和不可枚举边界继续适用。
+
+## 账号与持久状态
+
+R04a 通过 `-upstream-account authorize|reauthorize|list|refresh|disable` 提供本地命令；复用现有凭据 AEAD，输出仅元数据。真实 loopback 回调使用独立 state/nonce/S256 PKCE，验证签名身份与签发 client 绑定。刷新采用 claim → started → 单次网络交换 → revision/fence CAS；只有已证明未发出的尝试可退避重试，可能轮换但未存回的结果保持 uncertain，必须重新授权，不重用旧 refresh token。候选账号不自动成为推理凭据，没有自动刷新 worker。
+
+Responses 历史绑定当前 owner/创建 Key/模型权限，内容加密、有 TTL/容量和 CAS。`store=false` 不升级为永久历史；原生后台仍按明确策略临时保存恢复内容。观察连接断开不取消已受理后台任务，WS 前台断开则按当前轮次取消/未知事实收尾。持久序号先提交再公开，不用进程内缓存替代跨进程历史。
+
+迁移统一追加版本，现为 schema17；不修改已发布步骤。升级前停写并一致备份，旧 schema16 二进制拒绝打开 v17；回退须恢复匹配的停写备份，不删账号或改写账本/迁移“修复”。凭据和内容密钥、旧备份/WAL、内存与公网 TLS 的边界仍需独立维护，管理掩码不构成加密。
 
 ## S5 剩余验收
 
-原始批次与完整验证证据见 [S5 历史记录](history/acceptance-s0-s5.md#s5-可选预算与结算)。以下阶段清单原样保留，未新增完成勾选：
+以下保留原阶段与完整验收清单，不新增完成勾选；已验收子集不等于整个阶段完成。
 
 - [x] S5-01 明确“不计费”和“严格预算”运行模式；严格模式缺少必需组件则拒绝新调用。
 - [x] S5-02 价格采用整数/定点，保存价格版本；无价格默认拒绝严格计费请求。
@@ -62,7 +116,7 @@ S5-03 已实现双层事务与收取费用上限，但尚不据此宣称允许�
 
 负责范围：`internal/billing`、`internal/gateway`、相关 `internal/store`，必要的协议计量元数据；模型、迁移、入口、配置、OpenAPI 与页面变更由集成负责人协调。复用现有价格版本、双预算事务、attempt 事实、pending 和管理员审计。
 
-已合并切片包括请求/转换限制、独立成本契约与累计预算、发送前售价覆盖、登记输入/费率/凭据门槛及诊断。运行行为见 [S5 约定](DEVELOPMENT.md#s5-定点价格与严格结算首批)，具体实现与验证见 [批次记录](history/implementation-s5-a3.md)。它们不替代逐账户最高适用价格、失败收费及未来价格假设的完整证明；以下完整任务保持未勾选。
+已合并切片包括请求/转换限制、独立成本契约与累计预算、发送前售价覆盖、登记输入/费率/凭据门槛及诊断。当前行为见本方案的严格计费边界与实际源码。它们不替代逐账户最高适用价格、失败收费及未来价格假设的完整证明；以下完整任务保持未勾选。
 
 - [ ] S5-C01 明确成本契约：分别定义用户收费上限、上游单次尝试成本上界及整次请求全部尝试的成本上界；上游价格与面向用户的售价不得混为同一份保证。写清支持的提供商、模型、操作、计价单位与保证假设。
 - [ ] S5-C02 在转发前验证输入与输出边界：采用可验证的保守 Token 上界、受约束的模型上下文/输出限制或可靠的计数方式，覆盖 embeddings 的批量总输入。字符数平均估算不能充当严格证明；无法建立边界的组合在 strict 下拒绝，不自动降级。
@@ -77,10 +131,9 @@ S5-03 已实现双层事务与收取费用上限，但尚不据此宣称允许�
 
 ### S6：统一兼容框架收口
 
-S6-A/B/C 与 S6-00 至 S6-06 已独立验收合并为 M1。既有消费者和共享执行链继续复用，实际命令/修复/CI 见 [S6 记录](history/implementation-s6.md)；历史实施排期见 [原计划快照](history/plan-checkpoint-20261019.md#s6-实施方案从现有底座到三层闭环)。以下保留原已验收清单。
+S6-A/B/C 与 S6-00 至 S6-06 已独立验收合并为 M1。继续复用既有消费者与共享执行链，以下保留已验收清单。
 
 #### S6-A：真实共用入口与操作能力
-
 
 - [x] 核对并收口已实现的非 Gin 类型化执行入口与 Chat/embeddings 共用协调链，保留 HTTP 适配的既有授权/准入边界、外部行为和同协议快速路径；只修补实际缺口，不重复提取已完成的入口。不通过伪造 Gin context 接 worker/WS，也不为未来消费者堆空接口。
 - [x] 区分通用执行信封与操作载荷：可信身份/作用域、模型与能力、截止时间/取消、结果/提交事实属于共用契约；Chat、embeddings、Responses 各有能保持语义的模型，不把所有功能塞入 ChatRequest。
@@ -108,20 +161,20 @@ S6-A/B/C 与 S6-00 至 S6-06 已独立验收合并为 M1。既有消费者和共
 
 ### S7-A：Responses 持久执行主线
 
-A01/A02 已独立验收合并，M2 完成；A03 disabled 子批和 R03 原生 WS 子批也已验收，但完整 A03–A06 与 M3/M4 仍开放。标准 API Key 路线不依赖 OAuth 账号池完成。技术/状态边界见 [架构](ARCHITECTURE.md#12-首组状态型扩展responses-持久执行)。
+A01/A02 已独立验收合并，M2 完成；A03 disabled 子批和 R03 原生 WS 子批也已验收，但完整 A03–A06 与 M3/M4 仍开放。标准 API Key 路线不依赖 OAuth 账号池完成。各模式保持本方案当前状态表中的限制。
 
 #### S7-A01：HTTP/SSE 接入统一框架
 
-已验收 PR #10 / `3195d09` → `master/a925140`；支持原生文本/函数工具 JSON/SSE、owner/Key 幂等与短期加密私有回放，strict 全部拒绝。运行见 [HTTP 契约](reference/responses-http.md)，证明见 [A01 记录](history/implementation-s7-a01.md)。
+已验收 PR #10 / `3195d09` → `master/a925140`；支持原生文本/函数工具 JSON/SSE、owner/Key 幂等与短期加密私有回放，strict 全部拒绝。
 
 - [x] Responses 使用独立请求、item 和事件模型，覆盖文本、function tools、instructions、输出限制、usage、完成/失败/incomplete；不经 ChatRequest 有损中转。
 - [x] 复用 S6 已验收的类型化生成入口接入 Responses HTTP；新增操作能力与 usage 映射，不旁路授权、准入、attempt、预留/结算或统一收尾。为后续持久/后台消费者评审最小原子端口，真实事务调用与故障回归在 S7-A03 交付。
 - [x] 设计内部生成 ID、外部 response ID、上游 response ID 与用户幂等键的边界；幂等键以可信用户/Key 作用域和规范请求摘要唯一约束，同键异参冲突，重试不新建账单。
-- [x] 完成 HTTP JSON/SSE 和现有 Chat/embeddings 回归；strict 仅开放已完成计量与成本证明的 Responses 文本/函数工具子集，其余模式不自动回退为 strict。
+- [x] 完成 legacy/disabled HTTP JSON/SSE 和现有 Chat/embeddings 回归；Responses 的 strict 子集尚未完成，全部在计费前拒绝。
 
 #### S7-A02：持久会话、检索与续链
 
-已验收 PR #12 / `2084bcd` → `master/765501a`；本地加密历史、Conversations、完整上下文、CAS/TTL 与当前授权已交付。运行见 [历史契约](reference/responses-history.md)，来源/修复/CI 见 [A02 记录](history/implementation-s7-a02.md)。
+已验收 PR #12 / `2084bcd` → `master/765501a`；本地加密历史、Conversations、完整上下文、CAS/TTL 与当前授权已交付。
 
 - [x] 实现 stored Responses 的获取/删除/input items，以及 Conversations 与 items 的创建、读取、修改/删除和分页；方法、DTO 和状态码以实施时核对的官方 schema 为准，同批更新 OpenAPI/消费者。
 - [x] `previous_response_id` 与 `conversation` 各自明确上下文来源与互斥校验；保存父子关系、实际输入/输出、模型/渠道/凭据绑定和价格版本，不把缓存命中当成历史持久化。
@@ -132,7 +185,7 @@ A01/A02 已独立验收合并，M2 完成；A03 disabled 子批和 R03 原生 WS
 
 #### S7-A03：持久后台任务与事件恢复
 
-已验收 FC-002 A03-01/02/03（PR #20–#22，最终 `501507d` → `master/a44d4d1`）：原生 JSON/SSE、查询/取消、持久序号、fencing 与强杀恢复；仅 billing disabled、自包含文本/函数工具，store=false 仍按声明临时保留内容。任务控制台已由 R06a 交付，PR #39 修正 null 读取。运行见 [后台契约](reference/responses-background.md)，证据见 [FC-002](history/implementation-fc002.md) 和 [后续修复](../REFERENCE-ADOPTION-PROGRESS.md)。
+已验收 FC-002 A03-01/02/03（PR #20–#22，最终 `501507d` → `master/a44d4d1`）：原生 JSON/SSE、查询/取消、持久序号、fencing 与强杀恢复；仅 billing disabled、自包含文本/函数工具，store=false 仍按声明临时保留内容。任务控制台已由 R06a 交付，PR #39 修正 null 读取。
 
 以下保留原完整 A03 范围；其中非收费行为已有上述子批证据，方框不代表这些行为没有代码。收费双 hold、账本终态与背景父链未全部收口，因此总清单与 M3 仍不勾选。
 
@@ -147,8 +200,7 @@ A01/A02 已独立验收合并，M2 完成；A03 disabled 子批和 R03 原生 WS
 
 #### S7-A04：原生 WebSocket 与逐轮计费
 
-R03a/b 已验收机械执行与默认关闭的 disabled 原生 MVP，PR #39 修正终态后的下一轮交接；支持 `GET /v1/responses` Upgrade、逐轮授权/准入和连接内续链。完整收费、持久重连及跨模式语义尚未完成，以下保留原完整清单。运行边界见 [WS 契约](reference/responses-websocket.md)，精确头和 CI 见 [吸收记录](../REFERENCE-ADOPTION-PROGRESS.md)。
-
+R03a/b 已验收机械执行与默认关闭的 disabled 原生 MVP，PR #39 修正终态后的下一轮交接；支持 `GET /v1/responses` Upgrade、逐轮授权/准入和连接内续链。完整收费、持久重连及跨模式语义尚未完成，以下保留原完整清单。
 
 - [ ] 交付 `GET /v1/responses` Upgrade，第一版同时接通客户端 WS 和所选上游原生 Responses WS；HTTP 桥接仅可作为另外声明的能力，不能冒充已交付原生 WS。
 - [ ] 握手鉴权与每个生成轮次鉴权分开；每个 `response.create` 重新检查用户/Key、模型、限流、并发和预算。空闲连接仅占连接配额，不预留无限生成费用；同连接多轮各自有 attempt/账单。
@@ -162,7 +214,6 @@ R03a/b 已验收机械执行与默认关闭的 disabled 原生 MVP，PR #39 修�
 
 已有子批故障与十项受控 SDK 场景证明继续保留；未验收的跨模式、真实 Provider/客户端与收费范围仍按下列完整要求交付。
 
-
 - [ ] 强杀覆盖任务已接收未发送、上游已接收未保存 ID、上游已完成未结算、事件已提交未送达、取消/完成竞争；重复恢复不重发未知生成、不重复追加会话、不重复扣费。
 - [ ] 覆盖 HTTP→WS、WS→HTTP 续链、WS 重连、慢读背压、密钥撤销、TTL 清理、内容密钥缺失、数据库写失败及 worker 关停。终止连接后仍能区分已完成、已取消和未知执行。
 - [ ] 控制台显示本人会话/任务与错误、后台状态/取消、存储期限和账本关联；管理员可查看必要诊断和处理 pending，敏感正文读取需独立明确授权，不默认展示全体用户内容。
@@ -172,50 +223,329 @@ R03a/b 已验收机械执行与默认关闭的 disabled 原生 MVP，PR #39 修�
 
 完成标准：S7-A01 至 A06 均有独立通过记录，持久会话重启可续、后台断开可查询/取消和恢复、WS 多轮及成本成立，且原有接口无回归。不要求所有提供商支持全部能力，但必须至少有一个真实验收的完整组合；不支持组合显式拒绝，不能以该拒绝代替主线功能完成。
 
-### 参考项目与借鉴方式
+## 开发规则
 
-以下为兼容框架完成后的候选方向；三个项目的固定阅读提交与文件见 [上游参考快照](reference/upstream-snapshots.md)。已有研究记录保留，新的功能吸收/移植在 M1 验收后进行。每批先明确要兼容的 API、客户端行为、配置导入或页面功能，再对照现有实现选择可借鉴部分、通过本项目的业务和兼容契约接入，并验证实际行为。实际采用时登记文件/代码范围、核对协议和来源；参考资料不代替功能正确性证据。
+本方案同时作为团队与自动化代理的执行约束；用户在当前任务中的明确指示优先。开始前核对当前源码、阶段状态和精确提交证据，优先复用已验收公共基线，不因文档或导出符号存在就宣称业务完成。
 
-| TXAPI 功能 | 优先参考 | 阅读入口与借鉴内容 | 不直接照搬 |
+1. 每批说明六项边界：所属层级/写入目录、依赖公开接口及版本/冻结状态、是否触碰地基、接口契约与兼容/迁移、测试验收、对其他模块的影响。一次只划定可独立验收的功能批次。
+2. 地基公开接口新增或签名、语义、权限、生命周期变化，先提出原因、影响、消费者、迁移、兼容/回退和验证的具体变更请求，经用户明确确认后实施；已确认范围内的例行实现不重复请示。L0 变更须解释现有扩展点为何不足及上层影响。
+3. 冻结需要文档/版本、契约测试、最小运行样例、扩展说明、基础约定、限制清单与独立上层接入证明。旧 CI 只证明对应源码与范围；快照生成不构成变更批准，不把临时桥接固化为永久 API。
+4. 共享 main、注册点、数据库模型、迁移版本、配置、OpenAPI 和 CI 统一协调；其余批次使用独立目录与稳定端口。前后端 API 变更同批更新 OpenAPI、消费者和适用回归。
+5. 组装根可注入多层实现但不放业务逻辑；禁止复制内核/框架、散落平台特判、无类型逃逸或新增私有依赖/临时豁免。测试跨层不能替生产代码豁免。
+6. 保留现有测试，只格式化本次修改的 Go 文件。不覆盖用户/其他任务改动，不提交真实密钥、个人配置、数据库、日志、二进制或临时分析文件。
+7. 开发说明只维护本文件；批次细节、命令、失败/修复与精确 CI 证据写入 PR/提交记录。仅在实际验收后更新阶段状态，不再新增 IMPLEMENTATION、PROGRESS、history 或重复指南。
+
+## 开发与验证节奏
+
+统一按 **批量开发 → 集中验证 → 集中修复 → 合并** 推进。
+
+- 批次内先实现，按需编译；权限隔离、迁移、并发/资源释放和缺陷复现可提前定向测试。不因每次编辑、汇报或小提交重跑全量测试。
+- 批次稳定后集中执行适用完整检查和行为回归；统一修复后先复验失败项及影响范围。接口、依赖、环境或跨模块行为变化、影响不确定时重跑相关完整检查，不把整个阶段积压到最后。
+- 同一代码、基线、环境已有有效通过记录则注明提交/CI、范围与理由复用；不把旧提交绿灯推断为新提交成功，不无理由重复测试或细碎推送触发 CI。
+- 功能合并前在最新集成基线上通过现有完整 CI：依赖/公开契约、build、vet、格式、Linux 全量 race、冒烟和适用交付检查。保留测试、workflow 触发和合并门槛，不手动重复 dispatch。
+- 纯说明文档只检查差异、链接和规则一致性；注释/帮助路径更新检查语法与运行内容不变。可执行脚本逻辑、API 契约、CI 和运行配置按实际影响验证，不按纯文档处理。
+- 验证仅使用临时数据库、模拟令牌、随机端口与受控上游；真实 Provider 测试须有明确账号、预算和数据授权。分别记录源码、本地验证、精确头 CI、合并、发布与运维状态，未运行/失败/待验证如实说明。
+
+常用命令以 [Makefile](../Makefile) 与 [Verify workflow](../.github/workflows/ci.yml) 为准：
+
+```bash
+make check
+make contracts
+make smoke
+make delivery
+```
+
+Windows 普通 Go 验证须在当前 PowerShell 设置 `$env:GOARCH='amd64'`，race 由 Linux CI 验收。构建入口为 `go build -o bin/gateway ./cmd/gateway`；配置样例为 `configs/gateway.example.yaml`，个人 `config.yaml` 被忽略。首次管理员通过 `TXAPI_ADMIN_USERNAME` / `TXAPI_ADMIN_PASSWORD` 与 `-init-admin` 初始化，正常启动使用 `-config`。旧管理 API 的 `GATEWAY_ADMIN_KEY` 与会话/调用 Key 分开。可选 SDK 检查在独立虚拟环境安装 `openai` 后运行 `tests/smoke/sdk.py`，只证明其声明的受控场景。
+
+## 参考项目
+
+参考源码只作阅读和具名适配，不成为 TXAPI 的运行依赖或子模块。新移植在对应 PR 记录具体仓库、完整 SHA、文件/函数、采用方式、许可处理、TXAPI 落点与回归；不得把参考仓库的提示文件当本项目指令，不运行其安装钩子。已有副本更新前核对远端、版本和工作树，保留本地改动与旧固定快照。
+
+| 项目 | 固定参考版本 | 本地阅读目录 | 重点 |
 |---|---|---|---|
-| 后续协议与工具扩展 | new-api | [RelayKit](https://github.com/QuantumNous/new-api/blob/main/relaykit/README.md)：操作分离、转换路径/损耗诊断、工具关联、逐流状态与 usage | 整体 DTO/转换库依赖、静默损耗策略、全局可变钩子 |
-| S7-A WS 与续链 | new-api / sub2api | 快照中的 WS controller/relay、状态存储、线程作用域：逐轮鉴权/计费、连接与轮次分离、父链绑定和断开回归 | 将进程内粘性缓存当持久会话，将 WS 当后台任务；完整来源见快照文件 |
-| S7-A 持久状态与后台 | 官方 Responses/Conversations 文档 + TXAPI 既有账本 | 本地持久模型、上游 ID 映射、原生后台查询/取消、事件恢复和预算生命周期 | 未确认参考项目已有完整可移植闭环，不做“直接复制即可完成”的承诺 |
-| S8 账号调度 | sub2api | [项目功能](https://github.com/Wei-Shaw/sub2api/blob/main/README_CN.md)：OAuth/API Key 账号、粘性会话、账号并发；实施时继续定位对应 service/handler 与回归 | 整套 PostgreSQL/Redis、Ent、Vue 架构，以及未审查的可用性优先财务策略 |
-| S8 生命周期与故障呈现 | claude-relay-service | [README](https://github.com/Wei-Shaw/claude-relay-service/blob/main/README.md)：OAuth 接入、账号冷却覆盖、不可路由原因和管理恢复 | 旧版认证、秘密输出方式及规避上游限制的做法 |
-| S9 用户运营 | new-api / sub2api | [new-api 说明](https://github.com/QuantumNous/new-api/blob/main/README.zh_CN.md)、[sub2api 支付说明](https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md)：用户流程、套餐与支付配置；订单事务须进一步核对实现 | 广告中的成本/稳定性承诺、直接认定其收费正确、重新建立第二套账本 |
+| QuantumNous/new-api | `25372e30b1f94255b1f818aeaaf006f042572580` | `.local/references/new-api` | RelayKit、转换/损耗、Responses/WS、工具事件与管理流程 |
+| zyycn/codex-proxy-rs | `60570883007febebe732597a9881397098d724f5` | `.local/references/codex-proxy-rs` | 执行事实与原始协议、续链作用域、资源代次、账号刷新 |
+| Wei-Shaw/sub2api | `b0a02a3304a0a78cdd003ddda1dd23ba02c03084` | `D:/my-project/TXAPI-references/sub2api` | 账号运营、资格/亲和、作用域隔离、多维计量 |
+| Wei-Shaw/claude-relay-service | `cf95ecc5e0ba846faaf1b11de574367de89fd00c` | `.local/references/claude-relay-service` | 工具转换、断流与失败处理 |
 
-代码复用采用以下规则，具体批次记录随相应实现提交维护：
+以上是固定阅读版本，不声称未来远端始终相同。new-api 的原阅读版本 `45fbb149f0c89ff48d805335f22419be392d0350` 保存在副本的 `reference/txapi-pre-update-20261019` 标签。原 ANRCM0/codex-proxy-rs `591f95cc18ce95eb6fc87cf46a3526c5b3ecba36` 独立保留在 `D:/my-project/TXAPI-references/codex-proxy-rs`，既有适配继续绑定该来源，不改写为新仓库版本。阅读目录不随 Git/worktree 分发，缺目录不是应用依赖缺失。
 
-1. 开工先检查 TXAPI 已有实现，列出相同功能与缺口；先参考状态机、接口语义、失败案例和操作流程，再决定是否复用代码。纯协议行为以对应版本官方文档和独立样本为准。
-2. 记录项目 URL、上游提交 SHA、具体文件/代码范围、参考目的、采用方式（设计参考/代码移植/新增依赖）、TXAPI 落点及测试。计划中的 main 链接仅为阅读入口，不能作为最终复用溯源。
-3. 当前资料显示：new-api 及 RelayKit 使用 [AGPLv3](https://github.com/QuantumNous/new-api/blob/main/LICENSE)，另有 [NOTICE](https://github.com/QuantumNous/new-api/blob/main/NOTICE)；sub2api 的 [LICENSE](https://github.com/Wei-Shaw/sub2api/blob/main/LICENSE) 为 LGPLv3，README 另有使用/商业运营声明；CRS 的 [LICENSE](https://github.com/Wei-Shaw/claude-relay-service/blob/main/LICENSE) 为 MIT。实际采用前逐文件核对当时许可、第三方来源及适用要求；不得把复制/改写的受许可代码直接标成 TXAPI 的 MIT 原创。
-4. 需要复制、改写或链接受许可代码时，先明确发布方式、署名/通知/源码等义务与项目许可策略。若会改变现有许可、Go 版本、依赖或部署承诺，先单独评审并取得维护者确认；本方案不授权自动引入 RelayKit 或整体移植任何项目。测试、样本和前端资产同样检查来源。
-5. 直接复用范围核对上游安全修复，并在 TXAPI 中补与实际风险对应的回归。CRS 当前 README 对 v1.1.248 及以下有管理员认证绕过警告，不能选择这些旧版本的管理认证作为模板；这不等于确认新版无漏洞。
-6. 只保留符合本项目边界的方案：严格预算/鉴权失败继续拒绝新请求，普通访问日志仍可有界降级；不得借鉴财务 fail-open、响应提交后重试、客户端取消后无限后台执行或重复资源释放。历史[调研笔记](reference/newapi-omniroute-research.md)仅作线索，发生冲突以当前架构、协作规则和验收行为为准。
+实际复制/改写前逐文件核对许可和第三方来源，保留适用通知，不自动改变 TXAPI 的许可、Go 基线或部署承诺；既有适配范围见 [第三方来源声明](#第三方来源与许可)。不把参考项目的进程内缓存当持久历史、不把配额结算替代双 hold、不把后台参数当完整任务系统，也不因参考项目存在就预建支付或外部插件平台。
 
-## 每个阶段的交付约定
+## 第三方来源与许可
 
-每批按 [Agent 六项工作协议](../AGENTS.md#地基分层与-agent-工作协议) 声明所属层级/目录、公开接口/版本、地基影响、契约、验证及并行影响。共享注册、main、模型/迁移与 CI 单点协调；不复制授权、账本、迁移或资源生命周期。
+原有来源声明和许可证原文合并于本附录，不再单独维护文件。适用范围限于下列已登记的适配代码。
 
-遵守 [开发与验证节奏](DEVELOPMENT.md#开发与验证节奏)：批量开发 → 集中验证 → 集中修复 → 合并。保留回归，关键风险可提前定向验证，最终头在最新集成基线上通过现有完整 CI。纯说明文档只检查差异、链接和规则一致性，不重复 Go 全量或手动触发 CI。
+<details>
+<summary>适配来源与修改说明</summary>
 
-交付记录注明实际命令/结果、精确提交/基线、环境、复用证据与限制。功能源码、本地检查、最终头 CI、合并、合并后 CI、发布与生产状态分别记录；只有达到实际验收门槛才更新清单。不提交真实密钥、个人配置、数据库、二进制或日志，不覆盖其他工作树改动。
+### Third-Party Source Notices
 
-## 批次与验收记录
+#### codex-proxy-rs
 
-| 记录 | 内容 |
-|---|---|
-| [S0–S5](history/acceptance-s0-s5.md) / [S5–A3](history/implementation-s5-a3.md) | 较早阶段、成本/架构切片与精确 CI |
-| [S6/M1](history/implementation-s6.md) / [A01](history/implementation-s7-a01.md) / [A02/M2](history/implementation-s7-a02.md) | 已验收兼容框架、前台 Responses 与持久会话 |
-| [FC-001](history/implementation-fc001.md) / [FC-002](history/implementation-fc002.md) | 四层冻结与 disabled 原生后台追加入口 |
-| [R00–R07 状态](reference/reference-adoption-status.md) / [追加记录](../REFERENCE-ADOPTION-PROGRESS.md) | 吸收批次、修复、SDK 受控证据与未完成范围 |
-| [整理前计划快照](history/plan-checkpoint-20261019.md) | bdcb307 中原完整计划、逐批边界、勾选与历史时点 |
-| [保留分支整合](history/branch-integration-20261019.md) | 逐分支取舍、R04a/R06c 源码、恢复点和集中验收 |
-| [本地与远端整理记录](history/repository-cleanup-20261019.md) | 本次分支归档、保留工作树与文档验证范围 |
+Source: https://github.com/ANRCM0/codex-proxy-rs
+Fixed revision: 591f95cc18ce95eb6fc87cf46a3526c5b3ecba36.
+Original file: backend/crates/gateway-protocol/src/openai/events.rs.
+Original functions: billable_usage_is_complete, number_field and nested_number_field.
 
-本页不继续堆叠已完成批次的开工日志。历史方案中的旧版本号和“尚未实现”限定其原时点，当前能力以本页及对应运行契约为准。
+The checked token-bound arithmetic in
+internal/foundation/contracts/execution/v3/validation.go is adapted from that
+function under Apache License 2.0. The included
+[license copy](#apache-license-20) reproduces the upstream
+license. The referenced source has no file-specific copyright or SPDX notice;
+the fixed upstream root contains no NOTICE file.
 
-## 保留分支整合批次
+Modifications: Rust-to-Go adaptation, optional nonnegative int64 counts instead
+of default-zero u64 values, explicit provenance/completeness validation, unknown
+totals preserved, no inferred totals, reasoning-output parent bounds and known
+child lower bounds for partial totals. This
+notice applies to the identified adaptation; it does not license all TXAPI code
+or imply endorsement by the upstream project.
 
-2026-10-19 用户要求检查并整合保留分支到主线，恢复 R06c 账本展示批次的集成；R04a 按已具名的候选契约范围收口。旧 S5、报价和早期路由与当前主线逐项对比，已吸收或被替代部分不回退。源码、运行边界与逐项实际验证见 [整合记录](history/branch-integration-20261019.md)。本批不扩大完整 S5/R04/后台/WS 收费许可，最终头 CI、合并与合并后结果分别记录。
+The optional integer field lookup in nestedNativeCount in
+internal/protocol/responses/usage_envelope.go adapts number_field and
+nested_number_field under the same Apache License 2.0. Changes: Go JSON raw
+messages and exact native field lookup, optional int64 rather than default-zero
+u64, strict rejection of invalid known field types, and missing/null preserved
+as unknown. Existing SSE framing and other protocol functions are TXAPI code;
+this adaptation does not change their licensing.
+
+sub2api's explicit-zero field precedence informed a regression scenario only.
+No sub2api implementation or additional dependency is copied by this batch.
+
+#### codex-proxy-rs Account Authorization Mechanics
+
+The R04a operator account tool also adapts selected mechanics from the same
+fixed revision 591f95cc18ce95eb6fc87cf46a3526c5b3ecba36 (Apache License 2.0):
+
+- `backend/crates/providers/openai/src/credential/oauth.rs`: random secrets,
+  S256 challenge derivation, callback parameter uniqueness and constant-time
+  state comparison, adapted in `internal/protocol/openaiauth/provider.go`.
+- `backend/crates/providers/openai/src/credential/token_client.rs`: bounded
+  form token exchange and fixed failure categories, adapted across the pure
+  provider and the existing core-backed HTTP caller.
+- `backend/crates/gateway-core/src/provider_ports/refresh.rs`: stable jitter
+  and bounded backoff, adapted in `internal/store/upstream_accounts.go` only
+  for proved not-dispatched refreshes.
+
+Repository/refresh ownership in the reference informed the claim/CAS design;
+TXAPI uses its existing SQLite runner and credential AEAD vault instead of
+the reference's database stack. The implementation uses the current documented
+dynamic registration and issued-client binding, verifies OIDC signatures and
+identity, and never logs token material or retries ambiguous rotating-token
+refreshes. This is an operator authorization tool, not an inference adapter.
+The included license copy remains applicable; the fixed reference has no root
+NOTICE. Other TXAPI code retains its existing licensing.
+
+</details>
+
+<details>
+<summary>Apache License 2.0 原文</summary>
+
+### Apache License 2.0
+
+```text
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+```
+
+</details>

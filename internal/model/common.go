@@ -1,6 +1,6 @@
 // Package model defines persistent entities and neutral storage-port data.
 // Authorization, scheduling, execution, and billing behavior belong to their
-// respective modules. Model boundaries are in docs/ARCHITECTURE.md, section 3.
+// respective modules. Model boundaries are in docs/PLAN.md.
 // Channels and upstream credentials are separate entities, joined by channel_id.
 package model
 

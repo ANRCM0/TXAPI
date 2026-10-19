@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-// Source and assumptions are recorded in docs/reference/input-bound-profiles.md.
+// Source and assumptions are recorded under strict billing in docs/PLAN.md.
 const OpenAIEmbeddingsV1 = "openai_embeddings_v1"
 const OpenAIChatV1 = "openai_chat_v1"
 

@@ -12,7 +12,7 @@ server:
   # Opt-in metadata only: up to 512 completed HTTP routing traces for 15 minutes.
   route_diagnostics: false
   # Recommendation comparison only; requires route_diagnostics, never steers traffic.
-  # Bounded host HTTP load/error observations: docs/reference/shadow-routing.md.
+  # Bounded host HTTP load/error observations: docs/PLAN.md, 路由与用量.
   shadow_route_scoring: false
   # IP 级限流的每分钟请求数上限，0 表示不限。
   # 自用（本机/内网访问）保持 0；暴露到公网时务必配上，比如 120。
@@ -79,12 +79,12 @@ billing:
   # "openai_embeddings_v1"；仅适用于官方 base URL
   # https://api.openai.com、embeddings 操作和登记的 embedding 模型。
   # 该档案的 input_token_ceiling 至少 300000，不是单输入的 8192。
-  # 输出字段/上限为空/0，输出价为 "0"；详见 docs/reference/input-bound-profiles.md。
+  # 输出字段/上限为空/0，输出价为 "0"；详见 docs/PLAN.md 的严格计费边界。
   # Chat 使用 "openai_chat_v1"，仅官方 gpt-4o-mini-2024-07-18；
   # input_token_ceiling >= 128000，max_completion_tokens <= 16384，
   # 请求必须显式 service_tier: "default"。还须有登记费率档案、USD 币种及
   # ID -> Key 摘要绑定；标准费率下限不足拒绝启动，缺档案/换 Key 在发送前拒绝。
-  # 摘要获取与适用范围见 docs/reference/provider-tariff-profiles.md。
+  # 摘要获取与适用范围见 docs/PLAN.md 的严格计费配置。
   # 上述数值仅展示语法，不是任何真实模型保证！必须核实全批输入、
   # reasoning/cache/错误请求的总可计费范围及每个绑定凭据的最高适用价格；
   # 已登记标准费率下限不替代失败收费/附加费证明或未来价格变更核查。
@@ -103,7 +103,7 @@ responses_ws:
 # The runtime requires configured strict fee/provider ceilings and contracts.
 # Durable foreground usage metadata is opt-in and requires billing.mode: disabled.
 # It does not record native WS/background or grant financial/replay permission.
-# See docs/reference/usage-history.md for retention, admission and failure policy.
+# See docs/PLAN.md, 路由与用量, for retention, admission and failure policy.
 usage_history:
   enabled: false
   instance_records: 4096

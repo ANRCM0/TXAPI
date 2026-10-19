@@ -2,7 +2,7 @@
 // Checked token-bound arithmetic adapted from codex-proxy-rs, events.rs,
 // billable_usage_is_complete, commit 591f95cc18ce95eb6fc87cf46a3526c5b3ecba36.
 // Modified for optional nonnegative int64 counts, explicit provenance and
-// completeness, unknown totals, and reasoning-output bounds. See THIRD_PARTY_NOTICES.md.
+// completeness, unknown totals, and reasoning-output bounds. See docs/PLAN.md for source notices.
 package execution
 
 import (

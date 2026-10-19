@@ -42,7 +42,7 @@ func enrichedUsageObservation(usage *usageWire, base *v2.UsageObservation) (*v3.
 
 // Optional field lookup adapted from codex-proxy-rs events.rs number_field and
 // nested_number_field at 591f95cc18ce95eb6fc87cf46a3526c5b3ecba36, Apache-2.0.
-// Preserve unknowns and exact native names, reject non-int64 values; see THIRD_PARTY_NOTICES.md.
+// Preserve unknowns and exact native names, reject non-int64 values; see docs/PLAN.md for source notices.
 func nestedNativeCount(details json.RawMessage, name string) (*int64, error) {
 	if !present(details) {
 		return nil, nil
