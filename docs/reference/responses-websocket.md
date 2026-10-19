@@ -1,5 +1,22 @@
 # Native Responses WebSocket
 
+## Terminal Delivery Boundary
+
+After a validated native terminal frame starts its downstream write, one next
+input frame may wait for the previous Execute's local cleanup. It cannot execute
+until that call returns. This covers peers that read the terminal and reply
+before the server's Write returns. Further input while that boundary slot is
+occupied, and input overlapping a nonterminal generation, remainsbusy.
+
+Failed/short delivery, failed cleanup, cancellation or Session completion drops
+that frame without a new upstream execution. The L2 codec classifies terminal
+wire; the L3 client retains one reader, one sequential worker and one bounded
+input slot. Current authorization/target/continuation checks still run on the
+next round. This does not enable multi-stream, reconnect or paid execution.
+The [correction decision](../../REFERENCE-WS-TERMINAL-BOUNDARY-IMPLEMENTATION.md)
+and [exact evidence](../../REFERENCE-ADOPTION-PROGRESS.md) distinguish the old
+CI failures from final-source acceptance.
+
 R03b-2 adds a default-off product consumer. This document describes the
 implemented subset, not provider or official SDK certification. Exact local
 and CI evidence belongs to [the batch record](../../REFERENCE-ADOPTION-PROGRESS.md).

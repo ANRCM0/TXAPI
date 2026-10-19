@@ -219,6 +219,42 @@ type Decoder struct {
 	started  bool
 }
 
+// IsTerminal classifies an already delivered event without retaining decoder state.
+func IsTerminal(frame v2.Frame) bool {
+	if frame.Type != 1 || len(frame.Data) > 256<<10 || jsonvalue.Validate(frame.Data) != nil {
+		return false
+	}
+	var event struct {
+		Type     string
+		Response json.RawMessage
+		Error    map[string]json.RawMessage
+	}
+	if json.Unmarshal(frame.Data, &event) != nil {
+		return false
+	}
+	model := ""
+	switch event.Type {
+	case "response.completed", "response.incomplete", "response.failed", "response.cancelled":
+		var response struct{ Model string }
+		if json.Unmarshal(event.Response, &response) != nil || response.Model == "" {
+			return false
+		}
+		model = response.Model
+	case "error":
+		code, codeOK := text(event.Error["code"])
+		message, messageOK := text(event.Error["message"])
+		if !codeOK || code == "" || !messageOK || message == "" {
+			return false
+		}
+	default:
+		return false
+	}
+	decoder := NewDecoder(model)
+	decoder.started = true
+	envelope, err := decoder.Decode(frame)
+	return err == nil && envelope.ProtocolTerminal
+}
+
 func NewDecoder(model string) *Decoder {
 	return &Decoder{model: model, stream: responses.NewDecoder().NewEnvelopeStream()}
 }

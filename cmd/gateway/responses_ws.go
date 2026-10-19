@@ -88,7 +88,7 @@ func startResponsesWSRuntimeWithFactory(cfg config.ResponsesWSConfig, st *store.
 	if err != nil {
 		return fail(err)
 	}
-	handler, err := presentation.New(root, service, application.NewClient(limits.IdleTimeout), authority, downstream)
+	handler, err := presentation.New(root, service, application.NewClientWithTerminal(limits.IdleTimeout, codec.IsTerminal), authority, downstream)
 	if err != nil {
 		cleanup, stop := context.WithTimeout(context.Background(), 130*time.Second)
 		_ = downstream.Close(cleanup)

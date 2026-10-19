@@ -842,3 +842,75 @@ are outside Git in validation-background-null. Independent read-only review
 found no actionable regression in this correction. It preserves the old
 no-document status fallback and leaves unrelated status-mapping decisions out.
 Final automatic head/merge/postmerge checks remain pending at this checkpoint.
+
+
+### Full CI Found An Immediate-Next-Round WS Boundary Defect
+
+Correction headf8a139f31082b0be1507af431b3b804401e9b0f0,
+treebb245170cf72b5cc29e7d122aa7ffd498ced52b0, was pushed as PR #39. Complete
+push39212734118 and PR39212774462 both failed Linux full race in existing WS
+main integration tests. Both delivery jobs succeeded; architecture/API/build/vet
+and formatting steps passed. No CI rerun or merge bypass accepts this head.
+
+Push failed TestResponsesWSPublicationRetainsOldStreamAndRejectsOldSessionBoundary
+at responses_ws_lifecycle_test.go:72 withbusy instead of continuation_invalid.
+PR failed TestResponsesWSProductRoundAndContinuation at its immediate next
+request withbusy. Original failed logs and job JSON are retained in
+validation-background-null/ci-push-failed.log and ci-pr-failed.log. This is a
+second concrete ordering defect, not evidence that the null regression failed.
+
+The L3 reader rejects new input until Session.Execute returns. However, the
+terminal native frame can already be read by the client while that Execute is
+still doing local cleanup. The [preimplementation WS boundary decision](REFERENCE-WS-TERMINAL-BOUNDARY-IMPLEMENTATION.md)
+therefore keeps one reader/sequential worker and frozen contracts, with an
+L2-classified terminal boundary allowing exactly one next frame to wait for
+cleanup. Midstream overlap and extra frames remainbusy; delivery/cleanup failure
+or cancellation discards that boundary frame without starting a new generation.
+Final combined correction source must repeat full local and automatic CI gates.
+Earlierf8 local success remains tied to its source and is not reused for the new
+client/codec/main behavior. Official SDK fixed probe waits for that accepted head.
+
+
+The WS correction now implements a pure L2 IsTerminal(frame) predicate through
+the existing decoder and injects NewClientWithTerminal from main. Old NewClient
+and every registered contract declaration remain exact. The client state is
+idle/running/finishing/pending, with a single bounded boundary slot. Terminal
+classification happens before Write, because a peer may already receive its
+bytes before Write returns. The worker waits for prior Execute return; CAS
+cleanup cannot erase a reader's pending reservation. Midstream and excess input
+remainbusy, and failure/cancellation discards the pending input.
+
+A deterministic old-source proof uses an external Go overlay of f8a139f's
+unchanged client implementation plus a constructor-only shim forwarding the
+new factory to old NewClient. The test expectations remain unchanged. Both
+cleanup and terminal-write windows fail immediately withbusy (package0.863s,
+exit1); this is retained in terminal-boundary-old-probe/old-code-failure.log.
+The shim changes only test compilation and grants no terminal awareness.
+
+Owner command summaries: complete client/codec packages pass1.024s/1.065s.
+The actual-main ProductRoundAndContinuation, PublicationRetainsOldStream,
+RevocationAndForeignContinuation and DisconnectCancelsActiveGeneration groups
+each pass10 repetitions, combined10.503s. Exact command and raw output are in
+validation-background-null/terminal-boundary-main-directed.log. Independent
+read-only review finds no actionable issue across the five WS Go files and
+its tests. The original four background files are unchanged from testedf8.
+Final combined full checks run again in validation-response-boundaries-final;
+no earlierf8 pass is used to accept the newly changed client/codec/main source.
+
+
+Final combined correction is exactly9 Go files with LF-normalized digest
+51989daacf14e9ef697b837f77a075ddd5f477bdf6e00e9f4a37c7567a8adc75 on
+unchanged latest master/ef7a1da. Windows Go1.26.3 GOARCH=amd64 CGO_ENABLED=0:
+module tidy/content diff, dependency boundary, go build ./..., go vet ./...,
+full go test -json -count=1 ./... all pass. The final suite passed1613 tests/
+subtests across40 packages in92.230s (7 expected process helpers skip;37 no-test
+packages), followed by full actual-main smoke PASS57.343s. This repeats all
+checks for the combined source rather than borrowingf8's old pass.
+
+Nine changed Go files have no gofmt output. Committed old public declarations,
+OpenAPI0.10.0/108 operations, schema16, core, modules and frontend sources remain
+exact. Diff/doc links pass. Raw final logs, commands and source manifest are in
+validation-response-boundaries-final; originalf8 CI failures remain separate.
+Normal automatic final-head Linux race/container delivery and merge/main checks
+still gate acceptance. No manual workflow rerun, reduced regression or approval
+bypass is used. The optional fixed SDK probe will use that accepted binary.

@@ -10,11 +10,26 @@ import (
 	contract "minigateway/internal/foundation/contracts/responsesws/v1"
 )
 
-type client struct{ idle time.Duration }
+type client struct {
+	idle     time.Duration
+	terminal func(execution.Frame) bool
+}
 
 func NewClient(idle time.Duration) contract.Client { return &client{idle: idle} }
 
-// Run owns one reader and one synchronous worker, with no pending generation.
+// NewClientWithTerminal accepts a presentation-owned classifier for delivered frames.
+func NewClientWithTerminal(idle time.Duration, terminal func(execution.Frame) bool) contract.Client {
+	return &client{idle: idle, terminal: terminal}
+}
+
+const (
+	clientIdle int32 = iota
+	clientRunning
+	clientFinishing
+	clientPending
+)
+
+// Run owns one reader and one synchronous worker, with at most one boundary frame.
 // Every reported problem goes through notify exactly once; the return value is
 // for the adapter's internal observation, not a second wire delivery.
 func (c *client) Run(parent context.Context, session contract.Session, connection execution.Connection, notify contract.ProblemDelivery) *contract.Problem {
@@ -25,7 +40,23 @@ func (c *client) Run(parent context.Context, session contract.Session, connectio
 	requests := make(chan execution.Frame, 1)
 	fatal := make(chan *contract.Problem, 1)
 	readerDone := make(chan struct{})
-	var active atomic.Bool
+	var phase atomic.Int32
+	reserve := func() bool {
+		for {
+			switch current := phase.Load(); current {
+			case clientIdle:
+				if phase.CompareAndSwap(current, clientRunning) {
+					return true
+				}
+			case clientFinishing:
+				if phase.CompareAndSwap(current, clientPending) {
+					return true
+				}
+			default:
+				return false
+			}
+		}
+	}
 	report := func(p contract.Problem) {
 		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer stop()
@@ -46,7 +77,7 @@ func (c *client) Run(parent context.Context, session contract.Session, connectio
 				cancel()
 				return
 			}
-			if !active.CompareAndSwap(false, true) {
+			if !reserve() {
 				if err := notify(ctx, contract.Problem{Code: "busy"}); err != nil {
 					cancel()
 					return
@@ -84,14 +115,35 @@ func (c *client) Run(parent context.Context, session contract.Session, connectio
 			report(*p)
 			return p
 		case frame := <-requests:
+			if ctx.Err() != nil {
+				return nil
+			}
+			select {
+			case <-session.Done():
+				p := session.Problem()
+				if p == nil {
+					p = &contract.Problem{Code: "session_expired", CloseCode: 1000}
+				}
+				report(*p)
+				return p
+			default:
+			}
+			phase.CompareAndSwap(clientPending, clientRunning)
 			if !idle.Stop() {
 				select {
 				case <-idle.C:
 				default:
 				}
 			}
+			deliveryFailed := false
 			result := session.Execute(ctx, contract.Create{JSON: frame.Data}, func(writeContext context.Context, output execution.Frame) (int, error) {
-				return connection.Write(writeContext, output)
+				if c.terminal != nil && c.terminal(output) {
+					// A peer can observe the terminal frame before Write returns.
+					phase.CompareAndSwap(clientRunning, clientFinishing)
+				}
+				n, err := connection.Write(writeContext, output)
+				deliveryFailed = deliveryFailed || err != nil || n != len(output.Data)
+				return n, err
 			})
 			select {
 			case p := <-fatal:
@@ -102,10 +154,12 @@ func (c *client) Run(parent context.Context, session contract.Session, connectio
 				report(*result.Problem)
 				return result.Problem
 			}
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || deliveryFailed {
 				return nil
 			}
-			active.Store(false)
+			// Preserve a reader's reserved boundary frame until this worker takes it.
+			phase.CompareAndSwap(clientRunning, clientIdle)
+			phase.CompareAndSwap(clientFinishing, clientIdle)
 			idle.Reset(c.idle)
 		}
 	}
