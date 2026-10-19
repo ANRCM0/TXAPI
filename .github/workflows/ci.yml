@@ -93,6 +93,10 @@ jobs:
           set -o pipefail
           go test ./internal/core -run '^$' -bench BenchmarkExecutor -benchtime=100x -benchmem | tee benchmark.txt
 
+      - name: 基线资源采样回归
+        timeout-minutes: 1
+        run: python3 tests/smoke/process_resources_test.py
+
       - name: 完整网关真实 socket 流基线（正确性检查，性能仅报告）
         timeout-minutes: 4
         run: |
@@ -105,6 +109,14 @@ jobs:
         run: |
           python3 tests/smoke/capacity_baseline.py --workers 4 --requests-per-worker 5 --rounds 2 --output "$RUNNER_TEMP/capacity-baseline.json"
           python3 -c "import json,os,pathlib; r=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'capacity-baseline.json').read_text()); print(json.dumps({k:r[k] for k in ('source','environment','configuration','summary','resources','planned_measurement_requests','started_measurement_requests','unpaired_distribution_differences_ns')},sort_keys=True)); print(json.dumps([{'held':x['observed_held_requests'],'rejected_status':x['rejected']['http_status'],'rejected_attempts':x['rejected']['upstream_attempts'],'recovery_ns':x['recovery_observed_ns'],'active_after':x['active_after_recovery']} for x in r['overload']]))"
+
+  windows-resource-query:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Windows只读进程资源采样与句柄释放
+        run: python tests/smoke/process_resources_test.py
 
   delivery:
     runs-on: ubuntu-latest

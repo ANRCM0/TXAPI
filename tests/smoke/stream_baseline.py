@@ -20,6 +20,7 @@ import time
 import uuid
 
 from local import ROOT, ports, ready, service
+from process_resources import RESOURCE_SCOPE, Resources
 
 CLIENT_KEY = "sk-baseline-client-only"
 UPSTREAM_KEY = "sk-baseline-upstream-only"
@@ -115,53 +116,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
             record["error"] = type(error).__name__
         finally:
             record["finished"] = True
-
-
-def resource(pid):
-    if platform.system() != "Linux":
-        return {"status": "unsupported", "platform": platform.system()}
-    try:
-        proc = Path("/proc") / str(pid)
-        # comm may contain spaces or parentheses; fields start after its last ).
-        fields = (proc / "stat").read_text().rsplit(")", 1)[1].split()
-        status = dict(line.split(":", 1) for line in (proc / "status").read_text().splitlines())
-        return {"status": "available", "cpu_seconds": (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK"),
-                "rss_bytes": int(status["VmRSS"].split()[0]) * 1024,
-                "process_lifetime_peak_rss_bytes": int(status["VmHWM"].split()[0]) * 1024,
-                "threads": int(status["Threads"]), "fd_count": len(list((proc / "fd").iterdir()))}
-    except (OSError, KeyError, ValueError):
-        return {"status": "unavailable"}
-
-
-class Resources:
-    def __init__(self, gateway_pid):
-        self.pids = {"gateway": gateway_pid, "harness_and_fixture": os.getpid()}
-        self.before = {k: resource(v) for k, v in self.pids.items()}
-        self.peaks = {k: dict(v) for k, v in self.before.items()}
-        self.stop = threading.Event()
-        self.thread = threading.Thread(target=self.sample, daemon=True)
-        self.thread.start()
-
-    def sample(self):
-        while not self.stop.wait(.05):
-            for name, pid in self.pids.items():
-                value = resource(pid)
-                if value["status"] == "available":
-                    for key in ("rss_bytes", "threads", "fd_count"):
-                        self.peaks[name][key] = max(self.peaks[name].get(key, 0), value[key])
-
-    def finish(self):
-        self.stop.set()
-        self.thread.join(1)
-        after = {k: resource(v) for k, v in self.pids.items()}
-        result = {"before": self.before, "sampled_peaks": self.peaks, "after_drain": after,
-                  "sampling_interval_ms": 50, "cpu_delta_seconds": {}}
-        for name in self.pids:
-            if self.before[name]["status"] == after[name]["status"] == "available":
-                result["cpu_delta_seconds"][name] = after[name]["cpu_seconds"] - self.before[name]["cpu_seconds"]
-            else:
-                result["cpu_delta_seconds"][name] = "unsupported"
-        return result
 
 
 def call(connection, key, fixture, deadline_seconds, mode="normal"):
@@ -343,8 +297,9 @@ def main():
     fixture = Fixture(args.event_delay_ms / 1000)
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
-    report = {"schema": 1, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
-                                     "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()},
+    report = {"schema": 2, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
+                                     "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                                     "resources_harness_sha256": hashlib.sha256((ROOT / "tests/smoke/process_resources.py").read_bytes()).hexdigest()},
               "environment": {"platform": platform.platform(), "python": platform.python_version(), "logical_cpus": os.cpu_count(),
                               "go": subprocess.check_output([args.go, "version"], env=clean, text=True).strip(), "goarch": "amd64"},
               "configuration": {"samples": args.samples, "warmup": args.warmup, "event_delay_ms": args.event_delay_ms,
@@ -352,7 +307,7 @@ def main():
                                 "connection_policy": "persistent per target; close on failure", "billing": "disabled",
                                 "auth": "production API Key middleware", "request_logging": "production defaults",
                                 "fixture_events": len(events()), "fixture_payload_bytes": sum(map(len, events())),
-                                "resource_scope": "fixture threads and client share harness PID; sampled peaks are lower bounds; after_drain retains idle HTTP connections",
+                                "resource_scope": RESOURCE_SCOPE + "; serial phase combines direct/gateway and retains idle HTTP connections",
                                 "event_latency_scope": "complete-event observation latency includes client scheduling and reading waits; lower/upper bounds use upstream write/flush interval"},
               "samples": [], "self_check": [], "drain_failures": []}
     try:
