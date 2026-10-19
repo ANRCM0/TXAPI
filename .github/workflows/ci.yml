@@ -131,3 +131,6 @@ jobs:
           cache: true
       - name: 容器安装、升级、备份恢复与正常退出
         run: python3 tests/smoke/delivery.py --go go
+      - name: 实际镜像原生 WS TLS、反代、持久续链与强杀恢复
+        timeout-minutes: 6
+        run: python3 tests/smoke/native_ws_delivery.py --go go
