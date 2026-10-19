@@ -31,6 +31,8 @@ type ServerConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds"`
 	// TotalTimeoutSeconds bounds the entire request, including all retries.
 	TotalTimeoutSeconds int `yaml:"total_timeout_seconds"`
+	// HTTPStageTimeouts applies only to foreground HTTP attempts; zero disables each stage.
+	HTTPStageTimeouts HTTPStageTimeoutsConfig `yaml:"http_stage_timeouts"`
 	// SessionAffinity is an opt-in optimization. Keep it disabled until an
 	// operator has measured a real upstream cache/latency benefit.
 	SessionAffinity bool `yaml:"session_affinity"`
@@ -51,6 +53,14 @@ type ServerConfig struct {
 	// 一定要配上（比如 120，即平均每秒 2 次）。
 	IPRPMLimit  int               `yaml:"ip_rpm_limit"`
 	Concurrency ConcurrencyConfig `yaml:"concurrency"`
+}
+
+// HTTPStageTimeoutsConfig keeps stage budgets separate from the total request budget.
+type HTTPStageTimeoutsConfig struct {
+	HeadersSeconds              int `yaml:"headers_seconds"`
+	FirstEffectiveOutputSeconds int `yaml:"first_effective_output_seconds"`
+	StreamIdleSeconds           int `yaml:"stream_idle_seconds"`
+	DownstreamWriteSeconds      int `yaml:"downstream_write_seconds"`
 }
 
 // ConcurrencyConfig sets per-process ceilings; zero selects finite defaults.
@@ -446,6 +456,17 @@ func (c *Config) validate() error {
 	}
 	if c.Server.TotalTimeoutSeconds < 1 || c.Server.TotalTimeoutSeconds > 600 {
 		return fmt.Errorf("server.total_timeout_seconds must be between 1 and 600")
+	}
+	stages := c.Server.HTTPStageTimeouts
+	for name, seconds := range map[string]int{
+		"headers_seconds":                stages.HeadersSeconds,
+		"first_effective_output_seconds": stages.FirstEffectiveOutputSeconds,
+		"stream_idle_seconds":            stages.StreamIdleSeconds,
+		"downstream_write_seconds":       stages.DownstreamWriteSeconds,
+	} {
+		if seconds < 0 || seconds > 3600 {
+			return fmt.Errorf("server.http_stage_timeouts.%s must be between 0 and 3600", name)
+		}
 	}
 	if c.Server.IPRPMLimit < 0 {
 		return fmt.Errorf("server.ip_rpm_limit 不能为负数（收到 %d）", c.Server.IPRPMLimit)

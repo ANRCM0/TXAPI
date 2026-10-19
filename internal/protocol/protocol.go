@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	execv4 "minigateway/internal/foundation/contracts/execution/v4"
 	"minigateway/internal/protocol/adaptor"
 	"minigateway/internal/protocol/adaptor/anthropic"
 	"minigateway/internal/protocol/adaptor/gemini"
@@ -128,7 +129,10 @@ type streamDecoder struct {
 	done      bool
 	chat      chatSSEEvent
 	converted convertedSSEEvent
+	progress  execv4.Progress
 }
+
+func (s *streamDecoder) Progress() execv4.Progress { return s.progress }
 
 func (s *streamDecoder) DecodeLine(line []byte) ([]execv1.Frame, error) {
 	if s.raw {

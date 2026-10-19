@@ -159,7 +159,7 @@ func (m *managedInference) observeHTTP(issued authv3.FailureWrite, status int, b
 }
 
 func (g *Gateway) observeManagedResult(c *executionScope, observation *managedWireObservation, decoder any, result core.Result) {
-	if c.managedIssued == nil || result.Termination == core.Canceled || result.Termination == core.Deadline || result.Termination == core.ClientWriteError {
+	if c.managedIssued == nil || result.TimeoutStage != "" || result.Termination == core.Canceled || result.Termination == core.Deadline || result.Termination == core.ClientWriteError {
 		return
 	}
 	if observation.status != 200 {

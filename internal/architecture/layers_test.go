@@ -196,6 +196,9 @@ func TestEveryProductionPackageHasFourLayerOwnership(t *testing.T) {
 		if path == module+"internal/foundation/contracts/execution/v3" || path == module+"internal/foundation/contracts/upstreamauth/v3" {
 			version = "3"
 		}
+		if path == module+"internal/foundation/contracts/execution/v4" {
+			version = "4"
+		}
 		if r.Public && (r.Version != version || !strings.HasSuffix(path, "/v"+version)) {
 			t.Errorf("public package requires versioned registration: %s", path)
 		}

@@ -26,6 +26,7 @@ func sanitizeOperationFailure(result core.Result, messages execution.FailureMess
 		}
 	}
 	result.Error = &core.Error{StatusCode: result.StatusCode, Error: core.ErrorDetail{Message: message, Type: kind}}
+	attachHTTPTimeoutCode(&result)
 	return result
 }
 

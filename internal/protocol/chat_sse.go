@@ -69,12 +69,19 @@ func (s *streamDecoder) dispatchChatEvent() ([]execv1.Frame, error) {
 		return nil, errors.New("upstream reported stream error")
 	}
 	if !hasData {
+		if len(raw) > 1 {
+			s.progress.CompleteEvents++
+		}
 		return []execv1.Frame{{Data: raw}}, nil
 	}
 	data = data[:len(data)-1] // SSE joins data fields with LF, excluding the last LF.
 	// Retain the previous Chat decoder's acceptance of whitespace around the
 	// terminal marker while forwarding the original event fields unchanged.
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		if !s.finish {
+			return nil, errors.New("stream terminal without finish")
+		}
+		s.progress.CompleteEvents++
 		s.done = true
 		e.terminal = raw // End releases the actual terminal only after finish validation.
 		return []execv1.Frame{{Complete: true}}, nil
@@ -85,6 +92,19 @@ func (s *streamDecoder) dispatchChatEvent() ([]execv1.Frame, error) {
 		Usage   *execv1.Usage    `json:"usage"`
 		Choices []struct {
 			FinishReason string `json:"finish_reason"`
+			Delta        struct {
+				Content      string `json:"content"`
+				FunctionCall *struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function_call"`
+				ToolCalls []struct {
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"delta"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
@@ -94,9 +114,16 @@ func (s *streamDecoder) dispatchChatEvent() ([]execv1.Frame, error) {
 		return nil, errors.New("upstream reported stream error")
 	}
 	for _, choice := range envelope.Choices {
+		delta := choice.Delta
+		effective := delta.Content != "" || delta.FunctionCall != nil && (delta.FunctionCall.Name != "" || delta.FunctionCall.Arguments != "")
+		for _, tool := range delta.ToolCalls {
+			effective = effective || tool.Function.Name != "" || tool.Function.Arguments != ""
+		}
+		s.progress.EffectiveOutput = s.progress.EffectiveOutput || effective
 		if choice.FinishReason != "" {
 			s.finish = true
 		}
 	}
+	s.progress.CompleteEvents++
 	return []execv1.Frame{{Data: raw, Usage: envelope.Usage}}, nil
 }

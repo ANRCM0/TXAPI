@@ -270,7 +270,13 @@ func main() {
 		Channels:           st.Channels(), RetryTimes: cfg.Server.RetryTimes,
 		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
 		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
-		Billing:        engine, StrictBilling: engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
+		HTTPStageTimeouts: gateway.HTTPStageTimeouts{
+			Headers:              time.Duration(cfg.Server.HTTPStageTimeouts.HeadersSeconds) * time.Second,
+			FirstEffectiveOutput: time.Duration(cfg.Server.HTTPStageTimeouts.FirstEffectiveOutputSeconds) * time.Second,
+			StreamIdle:           time.Duration(cfg.Server.HTTPStageTimeouts.StreamIdleSeconds) * time.Second,
+			DownstreamWrite:      time.Duration(cfg.Server.HTTPStageTimeouts.DownstreamWriteSeconds) * time.Second,
+		},
+		Billing: engine, StrictBilling: engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
 		BillingMode: billing.Mode(cfg.Billing.Mode),
 		Picker: func(creds []model.Credential, exclude map[uint]bool, sessionID string, now time.Time) (*model.Credential, bool) {
 			if cfg.Server.SessionAffinity {
