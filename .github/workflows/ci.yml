@@ -95,6 +95,16 @@ jobs:
           "$RUNNER_TEMP/txapi-ws-sdk-venv/bin/python" -m pip install -r tests/smoke/requirements-ws-sdk.txt
           "$RUNNER_TEMP/txapi-ws-sdk-venv/bin/python" tests/smoke/ws_sdk_conformance.py --go go
 
+      - name: 固定 Codex CLI 的本地 Responses 兼容回归
+        timeout-minutes: 5
+        run: |
+          codex_dir="$RUNNER_TEMP/txapi-codex-0.163.0"
+          mkdir -p "$codex_dir"
+          curl --fail --location --retry 2 --output "$codex_dir/codex.tar.gz" https://github.com/openai/codex/releases/download/rust-v0.163.0/codex-x86_64-unknown-linux-musl.tar.gz
+          echo "beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4  $codex_dir/codex.tar.gz" | sha256sum --check
+          tar -xzf "$codex_dir/codex.tar.gz" -C "$codex_dir"
+          python3 tests/smoke/codex_conformance.py --go go --codex "$codex_dir/codex-x86_64-unknown-linux-musl"
+
       - name: 转发性能基线（仅报告）
         run: |
           set -o pipefail

@@ -3,7 +3,7 @@ PYTHON ?= python3
 NODE ?= node
 CONFIG ?= config.yaml
 
-.PHONY: init prepare build run test vet check smoke delivery compatibility sdk-conformance ws-sdk-conformance contracts web-check clean
+.PHONY: init prepare build run test vet check smoke delivery compatibility sdk-conformance ws-sdk-conformance codex-conformance contracts web-check clean
 
 prepare:
 	mkdir -p bin .local/data
@@ -54,6 +54,10 @@ sdk-conformance:
 # Install requirements-ws-sdk.txt in a separate environment from the HTTP SDK.
 ws-sdk-conformance:
 	$(PYTHON) tests/smoke/ws_sdk_conformance.py --go "$(GO)"
+
+# Supply an official Codex 0.163.0 binary; CI checks the release archive digest.
+codex-conformance:
+	$(PYTHON) tests/smoke/codex_conformance.py --go "$(GO)" --codex "$(CODEX)"
 
 # Requires Playwright and a local Chromium executable, like the browser checks.
 compatibility:
