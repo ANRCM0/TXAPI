@@ -170,13 +170,16 @@ func TestNativeUsageCancellationDeadlineAndFailedDeliveryRemainUnknown(t *testin
 			if mode == "cancel" || mode == "deadline" {
 				f.block = make(chan struct{})
 			}
-			if mode == "deadline" {
-				f.service.options.Limits.RoundTimeout = 30 * time.Millisecond
-			}
 			f.publish(t)
 			s := f.open(t, "interrupted-usage")
 			ctx, cancel := context.WithCancel(f.trusted)
 			defer cancel()
+			var deadline *nativeUsageDeadlineContext
+			if mode == "deadline" {
+				deadline = &nativeUsageDeadlineContext{Context: ctx, done: make(chan struct{})}
+				defer deadline.expire()
+				ctx = deadline
+			}
 			deliver := nativeDiscard
 			if mode == "write" {
 				deliver = func(context.Context, v2.Frame) (int, error) { return 0, errors.New("client closed") }
@@ -186,11 +189,15 @@ func TestNativeUsageCancellationDeadlineAndFailedDeliveryRemainUnknown(t *testin
 			}
 			result := make(chan contract.Result, 1)
 			go func() { result <- s.Execute(ctx, nativeCreate(""), deliver) }()
-			if mode == "cancel" {
+			if mode == "cancel" || mode == "deadline" {
 				select {
 				case <-f.resources[0].conn.entered:
-					cancel()
-				case <-time.After(time.Second):
+					if deadline != nil {
+						deadline.expire()
+					} else {
+						cancel()
+					}
+				case <-time.After(3 * time.Second):
 					t.Fatal("round not entered")
 				}
 			}
@@ -219,6 +226,26 @@ func TestNativeUsageCancellationDeadlineAndFailedDeliveryRemainUnknown(t *testin
 				t.Fatal("panic did not interrupt recording")
 			}
 		})
+	}
+}
+
+// Drive a deadline cause only after the upstream write/read boundary. This
+// checks saved failure attribution independently of slow SQLite/race setup.
+// The ordinary round-timeout tests continue to verify the actual timer.
+type nativeUsageDeadlineContext struct {
+	context.Context
+	done chan struct{}
+	once sync.Once
+}
+
+func (c *nativeUsageDeadlineContext) expire()               { c.once.Do(func() { close(c.done) }) }
+func (c *nativeUsageDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c *nativeUsageDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
 	}
 }
 

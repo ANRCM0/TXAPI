@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/2f52459e6a0db47868060d5108b4fe2793f59fa8`，合并后Verify `39306451362` 已成功，包含反代TLS/HTTP2、资源采样及此前受控能力。取消恢复PR #59 精确头 `a96d04962d43d15ea32842ab18e1f1bd5d4db4b8` 的PR/push Verify `39306773967` / `39306768091` 均成功，已合并至 `41935c8e35b51f6c952111cf8b21b989e9749b00`；该合并后Verify `39308700414` 已成功。WS与后台用量切片的最终精确头CI另行验证。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/41935c8e35b51f6c952111cf8b21b989e9749b00`，合并后Verify `39308700414` 已成功，包含反代TLS/HTTP2、资源采样、同时取消与名额恢复及此前受控能力。WS与后台用量切片已整合该主线，最终精确头CI另行验证。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -184,7 +184,7 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 
 本地GOARCH=amd64定向32组合通过，受影响gateway包vet与完整回归通过；整合主线 `94f3ca6` 的请求重放修复后，所有TestP0网关真实socket回归再次通过；精确头Verify另记PR。所有组合均校验真实协议，没有HTTP2回落或skip。仅标准库反代与网关测试夹具，不声称真实部署/生产鉴权/持久Responses/收费/性能验收。
 
-本轮 P0 生产主进程同时取消与恢复切片（精确头 CI 通过并合并，合并后 CI 待验证）：
+本轮 P0 生产主进程同时取消与恢复切片（精确头及合并后 CI 均通过）：
 
 1. **层级/目录：**仅 `tests/smoke/stream_baseline.py`、`capacity_baseline.py`、Verify与本方案；复用Windows/Linux资源采样，Go生产实现不变。
 2. **公开依赖：**通过现有生产HTTP API Key鉴权、Chat SSE、容量/路由/executor/SQLite及进程生命周期；受控上游与测试客户端共用harness PID，不添加产品观察端口或执行者。
@@ -459,7 +459,7 @@ P5 当前门槛评估（2026-10-20）：唯一 active SIWC grant 的候选池恒
 5. **验证：**定向覆盖同连接多轮/续链、不同连接与 owner/Key、精确/零/部分/未知/细分、失败/incomplete/写失败/取消/deadline；Begin/Prepare/MayDispatch 失败及 panic 均不发送，Observe/Finish 失败不伪造成功用量。验证实时 SQLite 查询、容量、停用后只收尾、关闭 join、schema19→20 保留指纹/历史/账本并两次重开；架构/公开快照/OpenAPI与现有 HTTP/strict/原生WS回归同批集中验收，完整精确头CI后合并。
 6. **协作与范围：**HTTP 默认行为和已有 Header不变，不向原生 WS 帧注入私有字段。Result 的usage ID只对宿主可见，终端用户通过现有列表读取；transport区分请求来源。原生后台、durable claimed、WS 收费/成本许可、持久续链、真实 Provider 与商业页面保持原边界；本子批不关闭 P7/P8 或S5-03。
 
-2026-10-20 本地受控证据：双端真实 socket 同连接文本/函数两轮后，通过登录 SessionBearer 列表/详情读到各轮独立记录；调用 Key 不可作 Session、跨 owner 返回404、私有目标与密钥不泄漏。服务定向覆盖完整/零/部分/未知和细分、failed/incomplete独立快照、取消/deadline/写失败/panic、各持久步骤失败、Key停用后收尾、关闭join和满额禁发。schema19→20 两次重开保留旧Start/Observe/Finish指纹与重放，历史HTTP来源回填；既有升级回归继续核对账本/加密内容与已发布迁移时间。Windows GOARCH=amd64 build/vet通过；全量Go回归初轮仅旧Responses历史测试的最新版本写死19，补20后完整store包复验通过，其余包初轮已通过。生产主进程local.py与12项控制台行为通过；Linux race/容器交付按最终精确头CI验收。所有上游/账号仍为夹具，未执行真实Provider/OAuth，不声明收费或生产容量。
+2026-10-20 本地受控证据：双端真实 socket 同连接文本/函数两轮后，通过登录 SessionBearer 列表/详情读到各轮独立记录；调用 Key 不可作 Session、跨 owner 返回404、私有目标与密钥不泄漏。服务定向覆盖完整/零/部分/未知和细分、failed/incomplete独立快照、取消/deadline/写失败/panic、各持久步骤失败、Key停用后收尾、关闭join和满额禁发。schema19→20 两次重开保留旧Start/Observe/Finish指纹与重放，历史HTTP来源回填；既有升级回归继续核对账本/加密内容与已发布迁移时间。Windows GOARCH=amd64 build/vet通过；全量Go回归初轮仅旧Responses历史测试的最新版本写死19，补20后完整store包复验通过，其余包初轮已通过。生产主进程local.py与12项控制台行为通过；Linux race/容器交付按最终精确头CI验收。所有上游/账号仍为夹具，未执行真实Provider/OAuth，不声明收费或生产容量。 Linux 首轮同提交的 PR race 暴露 deadline 归因用例把30ms轮次时限用于SQLite准备后必发送的假设，push race 同头通过。已用发送/读入门闩后触发的受控 deadline 原因测试持久归因，保留独立真实超时计时器回归；本地定向复验通过，生产代码不变，新精确头完整CI重新验收。
 
 </details>
 
