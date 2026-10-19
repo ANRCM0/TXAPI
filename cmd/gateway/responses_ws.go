@@ -16,9 +16,11 @@ import (
 	"minigateway/internal/config"
 	execution "minigateway/internal/foundation/contracts/execution/v2"
 	usage "minigateway/internal/foundation/contracts/execution/v3"
+	history "minigateway/internal/foundation/contracts/responsehistory/v1"
 	contract "minigateway/internal/foundation/contracts/responsesws/v1"
 	identity "minigateway/internal/foundation/identity"
 	"minigateway/internal/gateway"
+	"minigateway/internal/generation"
 	"minigateway/internal/model"
 	application "minigateway/internal/responsesws"
 	"minigateway/internal/store"
@@ -32,24 +34,38 @@ type responsesWSRuntime struct {
 }
 type nativeResourceFactory func(context.Context, contract.Limits) (gateway.NativeWSResource, error)
 
-func startResponsesWSRuntime(cfg config.ResponsesWSConfig, st *store.Store, gw *gateway.Gateway, limiter access.Limiter) (*responsesWSRuntime, error) {
-	return startResponsesWSRuntimeWithFactory(cfg, st, gw, limiter, newOfficialNativeResource)
+func startResponsesWSRuntime(cfg config.ResponsesWSConfig, st *store.Store, gw *gateway.Gateway, limiter access.Limiter, histories ...history.Repository) (*responsesWSRuntime, error) {
+	return startResponsesWSRuntimeWithFactory(cfg, st, gw, limiter, newOfficialNativeResource, histories...)
 }
 
 // Only assembly tests substitute a resource factory; configuration cannot
 // redirect the production native endpoint or weaken its TLS/proxy policy.
-func startResponsesWSRuntimeWithFactory(cfg config.ResponsesWSConfig, st *store.Store, gw *gateway.Gateway, limiter access.Limiter, factory nativeResourceFactory) (*responsesWSRuntime, error) {
+func startResponsesWSRuntimeWithFactory(cfg config.ResponsesWSConfig, st *store.Store, gw *gateway.Gateway, limiter access.Limiter, factory nativeResourceFactory, histories ...history.Repository) (*responsesWSRuntime, error) {
+	if cfg.PersistentHistory && !cfg.Enabled {
+		return nil, errors.New("stored websocket history requires enabled websocket runtime")
+	}
 	if !cfg.Enabled {
 		return nil, nil
 	}
 	if st == nil || gw == nil || limiter == nil || factory == nil || gw.BillingMode() != "disabled" || !st.CredentialEncryptionReady(context.Background()) {
 		return nil, errors.New("native websocket requires disabled billing and activated credential encryption")
 	}
+	var storedHistory history.StoredRounds
+	if cfg.PersistentHistory {
+		if len(histories) != 1 {
+			return nil, errors.New("stored websocket history requires the Responses history owner")
+		}
+		var err error
+		storedHistory, err = generation.NewStoredResponseRounds(histories[0], codec.StoredCodec{})
+		if err != nil {
+			return nil, err
+		}
+	}
 	root, cancel := context.WithCancel(context.Background())
 	runtime := &responsesWSRuntime{cancel: cancel}
 	limits := contract.Limits{MaxMessageBytes: 256 << 10, IdleTimeout: 60 * time.Second, RoundTimeout: 120 * time.Second, MaxLifetime: 55 * time.Minute}
 	authority := identity.New(st.ResolvePrincipal)
-	service, err := gateway.NewNativeWebSocketService(root, gw, gateway.NativeWSOptions{Authority: authority, Gate: access.NewRateGate(limiter), Models: cfg.Models, Limits: limits,
+	service, err := gateway.NewNativeWebSocketService(root, gw, gateway.NativeWSOptions{Authority: authority, Gate: access.NewRateGate(limiter), Models: cfg.Models, Limits: limits, StoredHistory: storedHistory, EncodeStored: codec.MapStoredModel,
 		Prepare: func(preparing context.Context) (gateway.NativeWSResource, error) {
 			if err := preparing.Err(); err != nil {
 				return nil, err
@@ -57,8 +73,12 @@ func startResponsesWSRuntimeWithFactory(cfg config.ResponsesWSConfig, st *store.
 			return factory(root, limits)
 		},
 		Parse: func(frame execution.Frame) (gateway.NativeWSCreate, error) {
-			request, err := codec.Parse(frame)
-			return gateway.NativeWSCreate{Model: request.Model, PreviousID: request.PreviousID, PromptText: request.PromptText, Initial: request.Initial}, err
+			parse := codec.Parse
+			if cfg.PersistentHistory {
+				parse = codec.ParseStored
+			}
+			request, err := parse(frame)
+			return gateway.NativeWSCreate{Model: request.Model, PreviousID: request.PreviousID, PromptText: request.PromptText, Store: request.Store, Initial: request.Initial}, err
 		},
 		Encode: codec.MapModel, Decoder: func(model string) execution.FrameDecoder { return codec.NewDecoder(model).Decode },
 		UsageDecoder: func(model string) func(execution.Frame) (usage.Envelope, error) {

@@ -12,6 +12,7 @@ import (
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
 	v3 "minigateway/internal/foundation/contracts/execution/v3"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
+	history "minigateway/internal/foundation/contracts/responsehistory/v1"
 	contract "minigateway/internal/foundation/contracts/responsesws/v1"
 	"minigateway/internal/model"
 )
@@ -20,6 +21,7 @@ import (
 // composition root supplies codecs and transports; L3 sees contract.Service.
 type NativeWSCreate struct {
 	Model, PreviousID, PromptText string
+	Store                         bool
 	Initial                       v2.Frame
 }
 type NativeWSResource interface {
@@ -27,15 +29,17 @@ type NativeWSResource interface {
 	Close(context.Context) error
 }
 type NativeWSOptions struct {
-	Authority    identity.Authority
-	Gate         admission.RequestGate
-	Models       []string
-	Limits       contract.Limits
-	Prepare      func(context.Context) (NativeWSResource, error)
-	Parse        func(v2.Frame) (NativeWSCreate, error)
-	Decoder      func(string) v2.FrameDecoder
-	UsageDecoder func(string) func(v2.Frame) (v3.Envelope, error)
-	Encode       func(v2.Frame, string) (v2.Frame, error)
+	Authority     identity.Authority
+	Gate          admission.RequestGate
+	Models        []string
+	Limits        contract.Limits
+	Prepare       func(context.Context) (NativeWSResource, error)
+	Parse         func(v2.Frame) (NativeWSCreate, error)
+	Decoder       func(string) v2.FrameDecoder
+	UsageDecoder  func(string) func(v2.Frame) (v3.Envelope, error)
+	Encode        func(v2.Frame, string) (v2.Frame, error)
+	StoredHistory history.StoredRounds
+	EncodeStored  func(v2.Frame, string) (v2.Frame, error)
 }
 
 type NativeWebSocketService struct {
@@ -55,6 +59,9 @@ type NativeWebSocketService struct {
 func NewNativeWebSocketService(ctx context.Context, g *Gateway, opts NativeWSOptions) (*NativeWebSocketService, error) {
 	if ctx == nil || g == nil || g.BillingMode() != "disabled" || nilInterface(g.admission) || nilInterface(opts.Authority) || nilInterface(opts.Gate) || opts.Prepare == nil || opts.Parse == nil || opts.Decoder == nil || opts.Encode == nil {
 		return nil, errors.New("native websocket dependencies unavailable")
+	}
+	if !nilInterface(opts.StoredHistory) && opts.EncodeStored == nil {
+		return nil, errors.New("stored native websocket requires its registered encoder")
 	}
 	limits := opts.Limits
 	if limits.MaxMessageBytes < 1 || limits.MaxMessageBytes > 256<<10 || limits.IdleTimeout <= 0 || limits.IdleTimeout > 60*time.Second || limits.RoundTimeout <= 0 || limits.RoundTimeout > 120*time.Second || limits.MaxLifetime < limits.RoundTimeout || limits.MaxLifetime > 55*time.Minute {

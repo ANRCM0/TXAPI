@@ -164,8 +164,11 @@ func (s *NativeWebSocketService) nativeCandidates(generation *nativeGeneration, 
 	return out
 }
 
-func (n *nativeSession) targetForRound(ctx context.Context, name string) (*channel, *model.Credential, error) {
+func (n *nativeSession) targetForRound(ctx context.Context, name string, required *ResponseTarget) (*channel, *model.Credential, error) {
 	s := n.service
+	if required != nil && n.target.ChannelID != 0 && n.target != *required {
+		return nil, nil, errors.New("stored parent target differs from active connection")
+	}
 	if n.lease == nil {
 		lease, err := s.resources.acquire()
 		if err != nil {
@@ -186,6 +189,7 @@ func (n *nativeSession) targetForRound(ctx context.Context, name string) (*chann
 		}
 	}
 	candidates := s.nativeCandidates(n.generation, name)
+	candidates = s.gateway.responseChannels(candidates, name, required)
 	if n.target.ChannelID == 0 {
 		ch, cred := s.gateway.selectTargetContext(ctx, candidates, nil, string(n.id), time.Now())
 		if ch == nil || cred == nil {

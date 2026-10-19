@@ -378,7 +378,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer responsesRuntime.Close()
-	nativeResponsesRuntime, err := startResponsesWSRuntime(cfg.ResponsesWS, st, gw, limiter)
+	nativeResponsesRuntime, err := startResponsesWSRuntime(cfg.ResponsesWS, st, gw, limiter, responsesRuntime.History())
 	if err != nil {
 		slog.Error("native WebSocket initialization failed", "err", err)
 		os.Exit(1)

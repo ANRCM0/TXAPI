@@ -397,6 +397,9 @@ func (c *Config) validate() error {
 	if c.ResponsesWS.Enabled && (c.Billing.Mode != "disabled" || strings.TrimSpace(c.Database.CredentialKeysFile) == "") {
 		return fmt.Errorf("responses_ws.enabled requires billing.mode disabled and database.credential_keys_file")
 	}
+	if c.ResponsesWS.PersistentHistory && !c.Responses.Enabled {
+		return fmt.Errorf("responses_ws.persistent_history requires responses.enabled")
+	}
 	if c.Responses.Background.Enabled && c.Billing.Mode != "disabled" {
 		return fmt.Errorf("responses.background.enabled requires billing.mode disabled")
 	}

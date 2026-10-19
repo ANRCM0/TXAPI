@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -39,6 +41,7 @@ type wsAssemblyObservation struct {
 	Connection                  int64
 	Previous, Model, Input, Key string
 	PrivateHeaders              bool
+	JSON                        json.RawMessage
 }
 type wsAssemblyResource struct {
 	manager     *transport.Manager
@@ -78,6 +81,9 @@ type wsAssemblyFixture struct {
 	gw                                   *gateway.Gateway
 	capacity                             *access.Capacity
 	runtime                              *responsesWSRuntime
+	httpRuntime                          *responsesRuntime
+	persistentHistory                    bool
+	historyConfig                        config.ResponsesConfig
 	configuration                        *management.Configuration
 	front, upstream                      *httptest.Server
 	upstreamManager                      *transport.Manager
@@ -103,6 +109,35 @@ func wsAssemblyEvent(typ, id, status string, seq int, output any) []byte {
 func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Request) {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		f.httpCalls.Add(1)
+		if f.persistentHistory {
+			data, err := io.ReadAll(io.LimitReader(r.Body, 256<<10))
+			if err != nil {
+				w.WriteHeader(400)
+				return
+			}
+			f.attempts.Add(1)
+			f.observations <- wsAssemblyObservation{JSON: data}
+			var request struct {
+				Model    string
+				Stream   bool
+				Store    bool
+				Previous string `json:"previous_response_id"`
+			}
+			if json.Unmarshal(data, &request) != nil || request.Model != "m" || request.Store || request.Previous != "" {
+				w.WriteHeader(400)
+				return
+			}
+			output := []any{map[string]any{"type": "message", "id": fmt.Sprintf("msg_http_%d", f.httpCalls.Load()), "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": "HTTP-answer", "annotations": []any{}}}}}
+			doc := map[string]any{"id": fmt.Sprintf("resp_http_private_%d", f.httpCalls.Load()), "object": "response", "model": "m", "status": "completed", "output": output, "usage": map[string]int{"input_tokens": 2, "output_tokens": 1, "total_tokens": 3}}
+			w.Header().Set("Content-Type", "application/json")
+			if request.Stream {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: %s\n\n", wsAssemblyJSON(map[string]any{"type": "response.completed", "response": doc}))
+			} else {
+				_, _ = w.Write(wsAssemblyJSON(doc))
+			}
+			return
+		}
 		w.WriteHeader(500)
 		return
 	}
@@ -147,9 +182,23 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 		previous, _ := request["previous_response_id"].(string)
 		model, _ := request["model"].(string)
 		input, _ := request["input"].(string)
+		if f.persistentHistory && input == "" {
+			if items, ok := request["input"].([]any); ok && len(items) > 0 {
+				if item, ok := items[len(items)-1].(map[string]any); ok {
+					if value, ok := item["content"].(string); ok {
+						input = value
+					}
+					if parts, ok := item["content"].([]any); ok && len(parts) > 0 {
+						if part, ok := parts[len(parts)-1].(map[string]any); ok {
+							input, _ = part["text"].(string)
+						}
+					}
+				}
+			}
+		}
 		f.attempts.Add(1)
 		round++
-		f.observations <- wsAssemblyObservation{Connection: id, Previous: previous, Model: model, Input: input, Key: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), PrivateHeaders: r.Header.Get("Cookie") == "" && r.Header.Get("X-Forwarded-For") == "" && r.Header.Get("Proxy-Authorization") == ""}
+		f.observations <- wsAssemblyObservation{Connection: id, Previous: previous, Model: model, Input: input, Key: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), PrivateHeaders: r.Header.Get("Cookie") == "" && r.Header.Get("X-Forwarded-For") == "" && r.Header.Get("Proxy-Authorization") == "", JSON: append([]byte(nil), data...)}
 		if request["type"] != "response.create" || request["store"] != false || request["stream_id"] != "main" || model != "m" {
 			return
 		}
@@ -187,8 +236,15 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 			if connection.Write(ctx, transport.Text, wsAssemblyJSON(map[string]any{"type": "response.output_text.delta", "stream_id": "main", "sequence_number": 1, "delta": "hello"})) != nil {
 				return
 			}
+			if f.persistentHistory {
+				output = []any{map[string]any{"id": fmt.Sprintf("msg_%d_%d", id, round), "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": "hello", "annotations": []any{}}}}}
+			}
 		}
-		if connection.Write(ctx, transport.Text, wsAssemblyEvent("response.completed", responseID, "completed", 5, output)) != nil {
+		status := "completed"
+		if f.persistentHistory && (input == "failed" || input == "incomplete" || input == "cancelled") {
+			status = input
+		}
+		if connection.Write(ctx, transport.Text, wsAssemblyEvent("response."+status, responseID, status, 5, output)) != nil {
 			return
 		}
 	}
@@ -198,11 +254,15 @@ func newWSAssemblyFixture(t *testing.T) *wsAssemblyFixture {
 }
 
 func newWSAssemblyFixtureWithUsage(t *testing.T, recordUsage bool) *wsAssemblyFixture {
+	return newWSAssemblyFixtureWithHistory(t, recordUsage, false)
+}
+
+func newWSAssemblyFixtureWithHistory(t *testing.T, recordUsage, persistentHistory bool) *wsAssemblyFixture {
 	t.Helper()
 	dir := t.TempDir()
 	credentialKeys := runtimeKeyFile(t, "native-credentials", 21, 25)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	f := &wsAssemblyFixture{t: t, ctx: ctx, cancel: cancel, observations: make(chan wsAssemblyObservation, 16), blocked: make(chan struct{}, 4), release: make(chan struct{})}
+	f := &wsAssemblyFixture{t: t, ctx: ctx, cancel: cancel, observations: make(chan wsAssemblyObservation, 16), blocked: make(chan struct{}, 4), release: make(chan struct{}), persistentHistory: persistentHistory}
 	t.Cleanup(f.close)
 	var err error
 	f.st, err = store.Open(config.DatabaseConfig{Path: filepath.Join(dir, "native-ws.db"), CredentialKeysFile: credentialKeys})
@@ -234,6 +294,24 @@ func newWSAssemblyFixtureWithUsage(t *testing.T, recordUsage bool) *wsAssemblyFi
 	}
 	limiter := access.NewMemoryLimiter()
 	gatewayOptions := gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: f.st.Channels(), BillingMode: billing.ModeDisabled, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: f.capacity}}
+	if persistentHistory {
+		localHTTP := http.DefaultTransport.(*http.Transport).Clone()
+		t.Cleanup(localHTTP.CloseIdleConnections)
+		gatewayOptions.Client = &http.Client{Transport: generationTransport(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Scheme != "https" || r.URL.Host != "api.openai.com" || r.URL.Path != "/v1/responses" {
+				return nil, errors.New("fixture forbids external inference")
+			}
+			u, err := url.Parse(f.upstream.URL)
+			if err != nil {
+				return nil, err
+			}
+			copy := r.Clone(r.Context())
+			endpoint := *r.URL
+			endpoint.Scheme, endpoint.Host = u.Scheme, u.Host
+			copy.URL, copy.Host = &endpoint, u.Host
+			return localHTTP.RoundTrip(copy)
+		})}
+	}
 	if recordUsage {
 		gatewayOptions.UsageHistory = f.st.UsageRecorder(model.UsageHistoryLimits{InstanceRecords: 8, OwnerRecords: 8, RetentionSeconds: 3600})
 	}
@@ -246,7 +324,23 @@ func newWSAssemblyFixtureWithUsage(t *testing.T, recordUsage bool) *wsAssemblyFi
 		t.Fatal(err)
 	}
 	f.upstream = httptest.NewServer(http.HandlerFunc(f.upstreamHandler))
-	f.runtime, err = startResponsesWSRuntimeWithFactory(config.ResponsesWSConfig{Enabled: true, Models: []string{"m"}}, f.st, f.gw, limiter, func(root context.Context, limits contract.Limits) (gateway.NativeWSResource, error) {
+	if persistentHistory {
+		f.historyConfig = responsesRuntimeConfig(runtimeKeyFile(t, "stored-history", 51, 52))
+	}
+	f.startPublicRuntimes(t, limiter, recordUsage)
+	return f
+}
+
+func (f *wsAssemblyFixture) startPublicRuntimes(t *testing.T, limiter access.Limiter, recordUsage bool) {
+	t.Helper()
+	var err error
+	if f.persistentHistory {
+		f.httpRuntime, err = startResponsesRuntime(f.historyConfig, f.st, f.gw)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.runtime, err = startResponsesWSRuntimeWithFactory(config.ResponsesWSConfig{Enabled: true, PersistentHistory: f.persistentHistory, Models: []string{"m"}}, f.st, f.gw, limiter, func(root context.Context, limits contract.Limits) (gateway.NativeWSResource, error) {
 		if f.failPrepare.Load() {
 			return nil, errors.New("fixture prepare failure")
 		}
@@ -257,7 +351,7 @@ func newWSAssemblyFixtureWithUsage(t *testing.T, recordUsage bool) *wsAssemblyFi
 		resource := &wsAssemblyResource{manager: manager, endpoint: "ws" + strings.TrimPrefix(f.upstream.URL, "http"), prefix: len(f.resources) + 1, closed: make(chan struct{})}
 		f.resources = append(f.resources, resource)
 		return resource, nil
-	})
+	}, f.httpRuntime.History())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,9 +362,8 @@ func newWSAssemblyFixtureWithUsage(t *testing.T, recordUsage bool) *wsAssemblyFi
 		}
 		return f.runtime.Publish(channels)
 	}, nil)
-	engine := server.NewEngine(server.Deps{Generation: gateway.NewHTTPExecutor(f.gw), TokenAuth: identity.NewTokenAuthenticator(f.st), Control: controlplane.New(persistence.Control(f.st)), Configuration: f.configuration, Metrics: f.gw.Metrics(), UsageHistory: usageconsole.New(f.st.UsageHistory(recordUsage, 3600), controlplane.New(persistence.Control(f.st)), limiter), ResponsesWS: f.runtime.Handler(), AdminAuth: middleware.AdminAuth("assembly-admin-fixture"), RateLimiter: limiter, RateGate: access.NewRateGate(limiter)})
+	engine := server.NewEngine(server.Deps{Generation: gateway.NewHTTPExecutor(f.gw), TokenAuth: identity.NewTokenAuthenticator(f.st), Control: controlplane.New(persistence.Control(f.st)), Configuration: f.configuration, Metrics: f.gw.Metrics(), UsageHistory: usageconsole.New(f.st.UsageHistory(recordUsage, 3600), controlplane.New(persistence.Control(f.st)), limiter), Responses: f.httpRuntime.Handler(), ResponsesWS: f.runtime.Handler(), AdminAuth: middleware.AdminAuth("assembly-admin-fixture"), RateLimiter: limiter, RateGate: access.NewRateGate(limiter)})
 	f.front = httptest.NewServer(engine)
-	return f
 }
 func (f *wsAssemblyFixture) close() {
 	if f.runtime != nil {
@@ -284,6 +377,9 @@ func (f *wsAssemblyFixture) close() {
 	}
 	if f.front != nil {
 		f.front.Close()
+	}
+	if f.httpRuntime != nil {
+		f.httpRuntime.Close()
 	}
 	f.cancel()
 	if f.upstreamManager != nil {
