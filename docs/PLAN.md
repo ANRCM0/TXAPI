@@ -44,6 +44,13 @@ Pricing, durable records and new charging permission remain later R05 batches.
 R06c frontend work is preserved locally on feat/reference-r06-ledger/28fc3ec
 for later integration; future frontend work should prioritize codex-proxy-rs.
 
+R05a-1 final head a440a4d passed complete push/PR CI and merged through PR #35
+as master/5998e43 with an equal tree. Independent main39197079265 failed an
+existing archive handoff cancellation regression while delivery passed. The
+[independent shutdown correction](../REFERENCE-ARCHIVE-SHUTDOWN-IMPLEMENTATION.md)
+takes priority before the next backend batch. R05a-2 quote source is checkpointed
+only locally at feat/reference-r05a-quotation/2c42b11 and is not accepted or merged.
+
 ## R03b-2 当前实施批次
 
 2026-10-19：默认关闭的原生 Responses WS disabled 子批已经 PR #30 合并为 master/a5c7a5f，功能头 81d2afe 的 push/PR 完整 CI 均通过；合并后 39165344718 也已 check/delivery SUCCESS。范围为 billing disabled、显式实际模型、官方 OpenAI endpoint、单连接串行文本/函数轮次与连接内最新 response ID 续接；不支持持久重连、后台、OAuth 或收费。运行边界见 [WS 指南](reference/responses-websocket.md)，六项工作协议见 [实施决策](../REFERENCE-R03B2-IMPLEMENTATION.md)，精确验证见 [吸收记录](../REFERENCE-ADOPTION-PROGRESS.md)。S5-03、完整 A03/A04 和 R00-R07 总目标仍未完成；下文历史时点不扩大本批验收。

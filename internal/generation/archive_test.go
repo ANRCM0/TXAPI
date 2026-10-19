@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -318,9 +319,13 @@ func TestArchiveStorageFailureAndFinalizerPanicNeverReplayOrKillWorker(t *testin
 type blockedArchiveCreate struct {
 	ArchiveStore
 	started, release chan struct{}
+	observed         chan context.Context
 }
 
 func (s blockedArchiveCreate) CreateGenerationRecord(ctx context.Context, r state.GenerationRecord, limits model.GenerationArchiveLimits) error {
+	if s.observed != nil {
+		s.observed <- ctx
+	}
 	close(s.started)
 	<-s.release
 	return s.ArchiveStore.CreateGenerationRecord(ctx, r, limits)
@@ -330,13 +335,15 @@ func TestArchiveHandoffDoesNotHoldShutdownLockAndCloseJoinsStorage(t *testing.T)
 	st, binding, _ := fixture(t)
 	opts := archiveOptions(st)
 	started, release := make(chan struct{}), make(chan struct{})
-	opts.Store = blockedArchiveCreate{ArchiveStore: persistence.Archive(st), started: started, release: release}
+	observed := make(chan context.Context, 1)
+	opts.Store = blockedArchiveCreate{ArchiveStore: persistence.Archive(st), started: started, release: release, observed: observed}
 	r := recordingRunner(t, st, testArchive(t, opts), func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
 		panic("closed handoff executed")
 	})
 	submitted := make(chan error, 1)
 	go func() { _, _, err := r.SubmitRecorded(context.Background(), binding, execution()); submitted <- err }()
 	signal(t, started)
+	storageContext := <-observed
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	closed := make(chan error, 1)
@@ -345,6 +352,9 @@ func TestArchiveHandoffDoesNotHoldShutdownLockAndCloseJoinsStorage(t *testing.T)
 	case err := <-closed:
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("close pretended storage was joined: %v", err)
+		}
+		if storageContext.Err() != context.Canceled {
+			t.Errorf("Close returned before canceling its admitted storage preparation: %v", storageContext.Err())
 		}
 	case <-time.After(time.Second):
 		close(release)
@@ -359,6 +369,231 @@ func TestArchiveHandoffDoesNotHoldShutdownLockAndCloseJoinsStorage(t *testing.T)
 	st.DB().Model(&model.GenerationRecord{}).Count(&count)
 	if count != 0 {
 		t.Fatalf("canceled storage operation committed: %d", count)
+	}
+}
+
+type preparationStore struct {
+	ArchiveStore
+	entered chan context.Context
+	release <-chan struct{}
+	failure string
+}
+
+func (s preparationStore) CreateGenerationRecord(ctx context.Context, record state.GenerationRecord, limits model.GenerationArchiveLimits) error {
+	if s.entered != nil {
+		s.entered <- ctx
+	}
+	if s.release != nil {
+		<-s.release
+	}
+	switch s.failure {
+	case "error":
+		return errors.New("preparation fixture failure")
+	case "panic":
+		panic("preparation fixture panic")
+	}
+	return s.ArchiveStore.CreateGenerationRecord(ctx, record, limits)
+}
+
+func TestArchiveShutdownCancelsAllPreparationsAndConcurrentCloseJoins(t *testing.T) {
+	for _, parentShutdown := range []bool{false, true} {
+		t.Run(map[bool]string{false: "concurrent-close", true: "parent-cancel"}[parentShutdown], func(t *testing.T) {
+			st, binding, _ := fixture(t)
+			opts := archiveOptions(st)
+			entered, release := make(chan context.Context, 2), make(chan struct{})
+			opts.Store = preparationStore{ArchiveStore: persistence.Archive(st), entered: entered, release: release}
+			parent, cancelParent := context.WithCancel(context.Background())
+			defer cancelParent()
+			r, err := New(parent, Options{Parser: protocol.BuiltinParser{}, Workers: 1, QueueCapacity: 2, MaxRequestBytes: 4096, MaxDuration: 5 * time.Second, Resolve: st.ResolvePrincipal, Archive: testArchive(t, opts), Execute: func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
+				panic("closed preparation executed")
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			t.Cleanup(func() { unblock(); closeRunner(t, r) })
+			submitted := make(chan error, 2)
+			for range 2 {
+				go func() { _, _, err := r.SubmitRecorded(context.Background(), binding, execution()); submitted <- err }()
+			}
+			contexts := make([]context.Context, 2)
+			for i := range contexts {
+				select {
+				case contexts[i] = <-entered:
+				case <-time.After(time.Second):
+					t.Fatal("preparation did not enter storage")
+				}
+			}
+			if parentShutdown {
+				cancelParent()
+				// Parent cancellation schedules the owner watcher. Observe its stop,
+				// then acquire its mutex before claiming cancellation is synchronous.
+				select {
+				case _, ok := <-r.jobs:
+					if ok {
+						t.Fatal("unexpected queued job")
+					}
+				case <-time.After(time.Second):
+					t.Fatal("parent shutdown did not stop owner")
+				}
+				r.mu.Lock()
+				r.mu.Unlock()
+			}
+			wait, cancelWait := context.WithCancel(context.Background())
+			cancelWait()
+			closed := make(chan error, 8)
+			for range 8 {
+				go func() { closed <- r.Close(wait) }()
+			}
+			for range 8 {
+				select {
+				case err := <-closed:
+					if !errors.Is(err, context.Canceled) {
+						t.Error("Close claimed to join blocked storage", err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("Close held shutdown mutex on storage")
+				}
+				for _, ctx := range contexts {
+					if ctx.Err() != context.Canceled {
+						t.Error("Close returned before canceling all registered preparations", ctx.Err())
+					}
+				}
+			}
+			if _, _, err := r.SubmitRecorded(context.Background(), binding, execution()); !errors.Is(err, ErrClosed) {
+				t.Fatal("closed owner admitted storage", err)
+			}
+			select {
+			case <-entered:
+				t.Fatal("closed submission reached storage")
+			default:
+			}
+			unblock()
+			for range 2 {
+				if err := <-submitted; err == nil {
+					t.Error("closed handoff accepted")
+				}
+			}
+			closeRunner(t, r)
+			r.mu.Lock()
+			pending, registered := r.pending, len(r.preparations)
+			r.mu.Unlock()
+			if pending != 0 || registered != 0 {
+				t.Fatal("joined preparations retained ownership", pending, registered)
+			}
+			var rows int64
+			if err := st.DB().Model(&model.GenerationRecord{}).Count(&rows).Error; err != nil || rows != 0 {
+				t.Fatal("canceled preparation committed", rows, err)
+			}
+		})
+	}
+}
+
+type preparationParser struct{ failure string }
+
+func (p *preparationParser) ParseRequest(operation execv1.Operation, body []byte) (execv1.Request, error) {
+	if p.failure == "parse-panic" {
+		panic("parser fixture panic")
+	}
+	if p.failure == "parse-error" {
+		return nil, errors.New("parser fixture failure")
+	}
+	r, err := (protocol.BuiltinParser{}).ParseRequest(operation, body)
+	if p.failure == "model-panic" && err == nil {
+		return preparationRequest{Request: r}, nil
+	}
+	return r, err
+}
+
+type preparationRequest struct{ execv1.Request }
+
+func (preparationRequest) Model() string { panic("model fixture panic") }
+
+func TestArchivePreparationFailuresAndPanicsReleaseAdmission(t *testing.T) {
+	for _, failure := range []string{"parse-error", "parse-panic", "model-panic", "store-error", "store-panic"} {
+		t.Run(failure, func(t *testing.T) {
+			st, binding, _ := fixture(t)
+			opts := archiveOptions(st)
+			if kind, ok := strings.CutPrefix(failure, "store-"); ok {
+				opts.Store = preparationStore{ArchiveStore: persistence.Archive(st), failure: kind}
+			}
+			parser := &preparationParser{failure: failure}
+			r, err := New(context.Background(), Options{Parser: parser, Workers: 1, QueueCapacity: 1, MaxRequestBytes: 4096, MaxDuration: 5 * time.Second, Resolve: st.ResolvePrincipal, Archive: testArchive(t, opts), Execute: func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome { return execv1.Outcome{} }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { closeRunner(t, r) })
+			var panicValue any
+			func() {
+				defer func() { panicValue = recover() }()
+				_, _, err = r.SubmitRecorded(context.Background(), binding, execution())
+			}()
+			wantPanic := failure == "parse-panic" || failure == "model-panic"
+			if (panicValue != nil) != wantPanic || !wantPanic && err == nil {
+				t.Fatal("unexpected preparation failure", panicValue, err)
+			}
+			r.mu.Lock()
+			pending, registered := r.pending, len(r.preparations)
+			r.mu.Unlock()
+			if pending != 0 || registered != 0 {
+				t.Fatal("failed preparation retained capacity/cancellation", pending, registered)
+			}
+			// Reuse the only admission slot, proving a failed preparation cannot
+			// permanently fill the runner even when the parser panicked.
+			future, err := r.Submit(context.Background(), binding, &memoryOutput{}, execution())
+			if err != nil {
+				t.Fatal("failure leaked admission", err)
+			}
+			if _, err := wait(t, future); err != nil {
+				t.Fatal(err)
+			}
+			closeRunner(t, r)
+		})
+	}
+}
+
+func TestArchiveCanceledBeforeAdmissionNeverStartsPreparation(t *testing.T) {
+	st, binding, _ := fixture(t)
+	for _, canceledParent := range []bool{false, true} {
+		opts := archiveOptions(st)
+		entered := make(chan context.Context, 1)
+		opts.Store = preparationStore{ArchiveStore: persistence.Archive(st), entered: entered}
+		parent, cancelParent := context.WithCancel(context.Background())
+		observer, cancelObserver := context.WithCancel(context.Background())
+		if canceledParent {
+			cancelParent()
+		} else {
+			cancelObserver()
+		}
+		r, err := New(parent, Options{Parser: &preparationParser{failure: "parse-panic"}, Workers: 1, QueueCapacity: 1, MaxRequestBytes: 4096, MaxDuration: 5 * time.Second, Resolve: st.ResolvePrincipal, Archive: testArchive(t, opts), Execute: func(context.Context, execv1.Output, execv1.Invocation) execv1.Outcome {
+			panic("canceled admission executed")
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = r.SubmitRecorded(observer, binding, execution())
+		want := error(context.Canceled)
+		if canceledParent {
+			want = ErrClosed
+		}
+		if !errors.Is(err, want) {
+			t.Errorf("canceled admission: %v, want %v", err, want)
+		}
+		cancelObserver()
+		cancelParent()
+		closeRunner(t, r)
+		select {
+		case <-entered:
+			t.Fatal("canceled admission reached storage")
+		default:
+		}
+		r.mu.Lock()
+		pending, registered := r.pending, len(r.preparations)
+		r.mu.Unlock()
+		if pending != 0 || registered != 0 {
+			t.Fatal("canceled admission retained owner state", pending, registered)
+		}
 	}
 }
 
