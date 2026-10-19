@@ -79,6 +79,43 @@ def wave(target, port, fixture, workers, requests, deadline):
             "summary": summarize(samples), "worker_errors": errors, "samples": samples}
 
 
+def cancel_wave(fixture, port, workers, deadline, results):
+    """Cancel only after every worker has observed a valid business event."""
+    barrier = threading.Barrier(workers)
+    result = {"planned": workers, "samples": [], "worker_errors": []}
+    results.append(result)
+
+    def worker():
+        connection = http.client.HTTPConnection("127.0.0.1", port)
+        try:
+            return call(connection, CLIENT_KEY, fixture, deadline, "cancel", barrier)
+        finally:
+            connection.close()
+
+    started = clock()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        jobs = [pool.submit(worker) for _ in range(workers)]
+        for job in jobs:
+            try:
+                result["samples"].append(job.result())
+            except Exception as error:
+                result["worker_errors"].append(type(error).__name__ + ": " + str(error)[:160])
+    result["elapsed_including_drain_ns"] = clock() - started
+    result["observed_cancellations"] = sum(
+        not s["success"] and s["failure"] == "client_cancel" and s["http_status"] == 200
+        and s["first_effective_text_ns"] is not None and s.get("cancel_requested_ns") is not None
+        and s["upstream_attempts"] == 1 and s["upstream_cancellation_observed"] and not s["drain_failure"]
+        and not s["cancel_protocol_observation"]["finish"] and s["cancel_protocol_observation"]["done"] == 0
+        and s["cancel_protocol_observation"]["usage"] is None for s in result["samples"])
+    times = [s["cancel_requested_ns"] for s in result["samples"] if "cancel_requested_ns" in s]
+    result["cancel_request_spread_ns"] = max(times) - min(times) if times else None
+    result["active_after_cancel"] = active(fixture)
+    if (result["worker_errors"] or len(result["samples"]) != workers
+            or result["observed_cancellations"] != workers or result["active_after_cancel"] != 0):
+        raise RuntimeError("not every worker canceled one accepted stream and drained its upstream")
+    return result
+
+
 def overload(fixture, port, limit, deadline, results):
     """Fill the Key's slots, prove no-send 429, release and probe recovery."""
     fixture.release_held.clear()
@@ -189,9 +226,10 @@ def main():
                   "auth": "production API Key", "billing": "disabled", "retries": 0,
                   "connection_policy": "persistent per worker/phase; close on failure and at phase end",
                   "fixture_backlog": 64, "fixture_events": len(events()),
-                  "resource_scope": RESOURCE_SCOPE + "; overload/direct/gateway phase intervals are separate",
+                  "resource_scope": RESOURCE_SCOPE + "; cancel/overload/direct/gateway phase intervals are separate",
+                  "cancellation_policy": "one wave per round; all workers observe first text before barrier/socket shutdown; intentional cancellations reported separately",
                   "limits": "bounded closed-loop workload, not maximum capacity, long-duration soak, TLS/H2 or Provider acceptance"},
-              "waves": [], "overload": [], "resources": [], "correctness_failures": []}
+              "waves": [], "cancellations": [], "overload": [], "resources": [], "correctness_failures": []}
     fixture = CapacityFixture(args.event_delay_ms / 1000)
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
@@ -222,11 +260,15 @@ def main():
             with service(command, work / "gateway.log", clean) as process:
                 ready(process, port)
                 for round_index in range(args.rounds):
-                    for target in ("overload",) + (("direct", "gateway") if round_index % 2 == 0 else ("gateway", "direct")):
+                    for target in ("cancel", "overload") + (("direct", "gateway") if round_index % 2 == 0 else ("gateway", "direct")):
                         resources = Resources(process.pid)
                         before_connections = fixture.connections
-                        if target == "overload":
-                            overload(fixture, port, args.workers, args.deadline_seconds, report["overload"])
+                        if target == "cancel":
+                            value = cancel_wave(fixture, port, args.workers, args.deadline_seconds, report["cancellations"])
+                            value["round"] = round_index
+                        elif target == "overload":
+                            value = overload(fixture, port, args.workers, args.deadline_seconds, report["overload"])
+                            value["round"] = round_index
                         else:
                             value = wave(target, fixture.server_port if target == "direct" else port, fixture,
                                          args.workers, args.requests_per_worker, args.deadline_seconds)
@@ -247,7 +289,11 @@ def main():
         report["fatal_error"] = type(error).__name__ + ": " + str(error)[:500]
     finally:
         if resources is not None:
-            report["resources"].append(resources.finish())
+            value = resources.finish()
+            value.update(round=round_index, phase=target,
+                         fixture_connections_opened=fixture.connections - before_connections,
+                         fixture_active_after_drain=active(fixture))
+            report["resources"].append(value)
         fixture.release_held.set()
         fixture.stop_event.set()
         fixture.shutdown()
@@ -257,6 +303,8 @@ def main():
                          for target in ("direct", "gateway")}
     report["started_measurement_requests"] = sum(s["started"] for s in report["summary"].values())
     report["planned_measurement_requests"] = 2 * args.workers * args.requests_per_worker * args.rounds
+    report["planned_cancellations"] = args.workers * args.rounds
+    report["observed_cancellations"] = sum(x.get("observed_cancellations", 0) for x in report["cancellations"])
     report["unpaired_distribution_differences_ns"] = {
         key: {q: report["summary"]["gateway"]["successful_latency_ns"][key][q] -
               report["summary"]["direct"]["successful_latency_ns"][key][q] for q in ("p50", "p95")}
@@ -265,9 +313,11 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"output": str(args.output.resolve()), "summary": report["summary"],
-                      "overload_rounds": len(report["overload"]), "fatal_error": report.get("fatal_error")}, ensure_ascii=False))
+                      "overload_rounds": len(report["overload"]), "canceled": report["observed_cancellations"],
+                      "fatal_error": report.get("fatal_error")}, ensure_ascii=False))
     if (report.get("fatal_error") or report["correctness_failures"]
-            or report["started_measurement_requests"] != report["planned_measurement_requests"]):
+            or report["started_measurement_requests"] != report["planned_measurement_requests"]
+            or report["observed_cancellations"] != report["planned_cancellations"]):
         raise SystemExit(1)
 
 
