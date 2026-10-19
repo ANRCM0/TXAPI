@@ -68,7 +68,7 @@ func inputText(v any) string {
 // CompletionTextFromResponse 从上游响应里抽出回答文本。
 //
 // 兼容两种形态：非流式 JSON（choices[].message.content）和流式 SSE
-// （data: 行里 choices[].delta.content 拼接）。网关对外的响应
+// （完整 data 事件里 choices[].delta.content 拼接）。网关对外的响应
 // 永远是 OpenAI 形态（协议枢纽的输出），所以两种就够。
 // anthropic/gemini 渠道的响应在 relay 里已经被转成 OpenAI 格式，
 // 这里拿到的就是转换后的客户端视角字节。
@@ -102,18 +102,12 @@ func completionFromJSON(resp []byte) string {
 }
 
 // completionFromSSE 拼接流式响应里所有 delta.content。
-// 逐行解析而非整段 json.Unmarshal：SSE 是多条独立 JSON 事件，
-// 整体解析本来就不是合法 JSON。
+// SSE 的多行 data 合成一个 JSON 事件；未完成的尾事件不参与估算。
 func completionFromSSE(resp []byte) string {
 	var sb strings.Builder
-	for _, line := range strings.Split(string(resp), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
-			continue
+	visitSSEData(resp, func(data []byte) bool {
+		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+			return false
 		}
 		var chunk struct {
 			Choices []struct {
@@ -122,14 +116,45 @@ func completionFromSSE(resp []byte) string {
 				} `json:"delta"`
 			} `json:"choices"`
 		}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			return true
 		}
 		for i := range chunk.Choices {
 			sb.WriteString(chunk.Choices[i].Delta.Content)
 		}
-	}
+		return true
+	})
 	return sb.String()
+}
+
+// visitSSEData reads the already bounded downstream capture. It follows the
+// same LF/CRLF event boundaries as the execution decoders and never dispatches
+// a partial tail. Returning false stops observation at the protocol terminal.
+func visitSSEData(body []byte, visit func([]byte) bool) {
+	body = bytes.TrimPrefix(body, []byte{0xef, 0xbb, 0xbf})
+	var data []byte
+	hasData := false
+	for len(body) > 0 {
+		line, rest, hasNewline := bytes.Cut(body, []byte{'\n'})
+		if !hasNewline {
+			return
+		}
+		body = rest
+		line = bytes.TrimSuffix(line, []byte{'\r'})
+		if len(line) == 0 {
+			if hasData && !visit(data[:len(data)-1]) {
+				return
+			}
+			data, hasData = data[:0], false
+			continue
+		}
+		field, value, _ := bytes.Cut(line, []byte{':'})
+		if bytes.Equal(field, []byte("data")) {
+			data = append(data, bytes.TrimPrefix(value, []byte{' '})...)
+			data = append(data, '\n')
+			hasData = true
+		}
+	}
 }
 
 // looksLikeSSE 粗判一段响应是不是 SSE：出现 "data:" 行即认为是。
