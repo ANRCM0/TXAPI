@@ -183,8 +183,27 @@ continuation estimation and no refund of uncertain dispatch. A temporary test
 edit duplicated helper declarations; it was consolidated before the final
 build/vet/full run. The ordinary smoke and controlled WS assembly are separate
 evidence; neither proves the real OpenAI endpoint or official SDK.
-Linux race, container delivery, exact functional-head CI and merge remain
-pending at this source commit.
+
+### Exact Head CI And Merge
+
+Functional head: `81d2afe6cc31531665a63f4cf09dbd0662b3c330`, based on
+master/b74ef4a. PR #30 merged to `master/a5c7a5f5286175976cb37fd762d94d02810cc794`.
+Remote merged tree and functional-head tree are identical:
+`38c2624664c572cfefbdd4be2bee68f102b2788f`.
+
+| Exact source | Automatic run | Result |
+|---|---|---|
+| Functional push / 81d2afe | 39164752515 | check/delivery SUCCESS |
+| PR #30 / 81d2afe | 39164788204 | check/delivery SUCCESS |
+| Merged master / a5c7a5f | 39165344718 | check/delivery SUCCESS |
+
+All three accepted runs include Linux full race, coverage report,
+main recovery smoke and container install/upgrade/backup/restore. The container
+workflow also exercises the disabled WS 404 through the shared console fixture.
+The controlled native WS assembly is covered by Go race tests; real Provider
+and official SDK compatibility remain unverified. No workflow was manually
+redispatched, disabled or weakened. New responsesws/v1 remains a candidate;
+this is not a full A04 or foundation-wide new freeze.
 
 No real Provider or official SDK test, release, tag, OAuth, billing, persistent
 reconnection or multiplexing is claimed. Full A03/A04 and R00-R07 stay open.

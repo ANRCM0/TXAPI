@@ -1,6 +1,5 @@
 # 开发指南
 
-
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
 [FC-001 地基收口](proposals/FC-001-foundation-contracts-v1.md) 已按用户批准顺序完成，代码基线 master/889ecbd 的最终头及合并后完整 CI 均通过，L0/L1/L2 v1 现为 frozen。后续按 [Agent 工作协议](../AGENTS.md#地基分层与-agent-工作协议) 声明六项边界，沿用 [公开入口/接入样例与快照流程](reference/foundation-integration-v1.md)；新增地基接口或签名/行为/权限/寿命变化仍先具名提案确认。纯说明文档只检查差异、链接与一致性，代码/契约按实际影响集中验证，保留现有完整 CI 和自动触发规则。
@@ -9,9 +8,9 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 
 ## 工具与工作目录
 
-### R03b-2 原生 WS 产品接线（待最终 CI 验收）
+### R03b-2 原生 WS 产品接线（disabled 子批已验收合并）
 
-2026-10-19，新增默认关闭的 `responses_ws`，独立于 HTTP Responses 开关。
+2026-10-19，PR #30 / master/a5c7a5f 已合并，功能头 81d2afe 的 push/PR 完整 CI 成功；合并后 39165344718 也已 check/delivery SUCCESS。新增默认关闭的 `responses_ws`，独立于 HTTP Responses 开关。
 `GET /v1/responses` 使用原生客户端和上游 WS，限 billing disabled、显式实际模型与
 已启用凭据加密；逐轮刷新权限和准入，同连接续链只接受最后完成的 response ID。
 配置、协议、容量和回退见 [WS 运行约定](reference/responses-websocket.md)，

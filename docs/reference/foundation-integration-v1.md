@@ -1,5 +1,15 @@
 # Foundation v1：接入、归属与 DoD
 
+## Reference Adoption Additions
+
+The R01/R03 batches append execution/v2 and native WS mechanisms without
+changing the original frozen declarations. R03b-2 registers responsesws/v1 as
+a candidate public application port, consumed by the real L3 client and L2
+HTTP adapter; it is not a new foundation freeze. See the [runtime contract](responses-websocket.md)
+and [exact acceptance record](../../REFERENCE-ADOPTION-PROGRESS.md). Historical
+package and entry counts below describe their original freeze checkpoints;
+the architecture inventory and signature tests verify the current source.
+
 状态：2026-10-18 **v1 / frozen**；代码基线 master/889ecbd（PR #18，功能头 38a8cce）。
 L0/L1/L2 DoD、独立样例、最终头与合并后完整 CI 均通过；冻结记录合并后按本页公开契约开放 L3 并行。
 批准范围见 [FC-001](../proposals/FC-001-foundation-contracts-v1.md)，唯一排期见
