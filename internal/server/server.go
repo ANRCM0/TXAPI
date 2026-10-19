@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	admission "minigateway/internal/foundation/contracts/admission/v1"
 	configuration "minigateway/internal/foundation/contracts/configuration/v1"
+	managed "minigateway/internal/foundation/contracts/configuration/v2"
 	control "minigateway/internal/foundation/contracts/control/v1"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 	ledger "minigateway/internal/foundation/contracts/ledger/v1"
@@ -35,23 +36,24 @@ import (
 // 具名字段让调用处自解释。
 type Metrics interface{ Render(io.Writer) error }
 type Deps struct {
-	OwnerLedger   ownerledger.Service
-	Generation    generationhttp.Service
-	TokenAuth     identity.Authenticator
-	Control       control.Service
-	Configuration configuration.Service
-	Ledger        ledger.Service
-	Tasks         task.Service
-	Routes        routes.Service
-	Quotation     quotation.Service
-	UsageHistory  usagehistory.Service
-	Metrics       Metrics
-	Responses     http.Handler
-	ResponsesWS   http.Handler
-	AdminAuth     gin.HandlerFunc
-	RateGate      admission.RequestGate
-	RateLimiter   admission.Limiter
-	IPRPMLimit    int
+	OwnerLedger          ownerledger.Service
+	Generation           generationhttp.Service
+	TokenAuth            identity.Authenticator
+	Control              control.Service
+	Configuration        configuration.Service
+	ManagedConfiguration managed.Service
+	Ledger               ledger.Service
+	Tasks                task.Service
+	Routes               routes.Service
+	Quotation            quotation.Service
+	UsageHistory         usagehistory.Service
+	Metrics              Metrics
+	Responses            http.Handler
+	ResponsesWS          http.Handler
+	AdminAuth            gin.HandlerFunc
+	RateGate             admission.RequestGate
+	RateLimiter          admission.Limiter
+	IPRPMLimit           int
 }
 
 // NewEngine 组装中间件链和路由。
@@ -192,7 +194,7 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	// 管理 API：渠道/令牌/日志/统计/价格 CRUD。
 	// 挂载在这里而不是 engine 上，是为了让 AdminAuth 能统一作用到整个 /api 前缀。
-	apiHandler := api.New(api.Dependencies{OwnerLedger: deps.OwnerLedger, Control: deps.Control, Ledger: deps.Ledger, Configuration: deps.Configuration, Tasks: deps.Tasks, Routes: deps.Routes, Quotation: deps.Quotation, UsageHistory: deps.UsageHistory})
+	apiHandler := api.New(api.Dependencies{OwnerLedger: deps.OwnerLedger, Control: deps.Control, Ledger: deps.Ledger, Configuration: deps.Configuration, ManagedConfiguration: deps.ManagedConfiguration, Tasks: deps.Tasks, Routes: deps.Routes, Quotation: deps.Quotation, UsageHistory: deps.UsageHistory})
 	apiHandler.Register(engine.Group(""), deps.AdminAuth)
 	apiHandler.RegisterAccess(engine.Group(""))
 

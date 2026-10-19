@@ -8,6 +8,7 @@ import (
 	"time"
 
 	cfg "minigateway/internal/foundation/contracts/configuration/v1"
+	managed "minigateway/internal/foundation/contracts/configuration/v2"
 )
 
 // ConfigurationStore is the persistence consumed by configuration use cases.
@@ -63,6 +64,7 @@ func (p *publication) snapshot() PublicationStatus {
 type Configuration struct {
 	mu       sync.Mutex
 	store    ConfigurationStore
+	managed  managed.Repository
 	epoch    string
 	channels publication
 	prices   publication

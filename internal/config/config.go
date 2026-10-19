@@ -158,16 +158,17 @@ type Config struct {
 	// （见 store.PurgeExpiredLogs）。
 	// 0 表示关闭自动清理（比如想自己导出归档后再删），负数非法。
 	// 环境变量 GATEWAY_LOG_RETENTION_DAYS 优先。
-	LogRetentionDays int                `yaml:"log_retention_days"`
-	Database         DatabaseConfig     `yaml:"database"`
-	Billing          BillingConfig      `yaml:"billing"`
-	Quotation        QuotationConfig    `yaml:"quotation"`
-	UsageHistory     UsageHistoryConfig `yaml:"usage_history"`
-	Generation       GenerationConfig   `yaml:"generation"`
-	Responses        ResponsesConfig    `yaml:"responses"`
-	ResponsesWS      ResponsesWSConfig  `yaml:"responses_ws"`
-	Channels         []ChannelConfig    `yaml:"channels"`
-	Tokens           []TokenConfig      `yaml:"tokens"`
+	LogRetentionDays int                    `yaml:"log_retention_days"`
+	Database         DatabaseConfig         `yaml:"database"`
+	Billing          BillingConfig          `yaml:"billing"`
+	Quotation        QuotationConfig        `yaml:"quotation"`
+	UsageHistory     UsageHistoryConfig     `yaml:"usage_history"`
+	Generation       GenerationConfig       `yaml:"generation"`
+	Responses        ResponsesConfig        `yaml:"responses"`
+	ResponsesWS      ResponsesWSConfig      `yaml:"responses_ws"`
+	UpstreamAccounts UpstreamAccountsConfig `yaml:"upstream_accounts"`
+	Channels         []ChannelConfig        `yaml:"channels"`
+	Tokens           []TokenConfig          `yaml:"tokens"`
 }
 
 // EnvAdminKey 是管理密钥的环境变量名。
@@ -365,6 +366,9 @@ func (c *Config) applyDefaults() {
 // 所以缺密钥时拒绝启动——宁可起不来，也不要一个「以为有鉴权其实
 // 没有」的网关。报错信息里直接给出两种配法，运维不用翻文档。
 func (c *Config) validate() error {
+	if c.UpstreamAccounts.Inference.Enabled && (c.Billing.Mode != "disabled" || strings.TrimSpace(c.Database.CredentialKeysFile) == "" || !c.Responses.Enabled) {
+		return fmt.Errorf("upstream_accounts.inference.enabled requires billing.mode disabled, database.credential_keys_file and responses.enabled")
+	}
 	if err := c.UsageHistory.validate(c.Billing.Mode); err != nil {
 		return err
 	}

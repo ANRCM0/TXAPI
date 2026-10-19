@@ -65,7 +65,7 @@ func (c *channel) supports(modelName string) bool {
 // 当成没有可用渠道。
 func hasUsableCredential(creds []model.Credential, now time.Time) bool {
 	for i := range creds {
-		if creds[i].IsUsable(now) && creds[i].APIKey != "" {
+		if availableCredential(&creds[i], now) {
 			return true
 		}
 	}
@@ -80,6 +80,9 @@ type registry struct {
 	mu       sync.RWMutex
 	channels map[int]*channel
 	adaptors map[string]execution.Adapter
+	// Keep grants even when their channel is disabled, so a bound request
+	// cannot silently fall through to an unrelated static credential.
+	managedGrants []model.Credential
 	// modelIndex 是「模型名 → 渠道 ID 列表」的内存索引，
 	// 与渠道池同生命周期（Init/Reload 时一起重建）。
 	//
@@ -146,11 +149,13 @@ func (g *Gateway) Reload(channels []model.Channel) error {
 	nextIndex := make(map[string][]int)
 	saved := g.reg.channels
 	savedIndex := g.reg.modelIndex
+	savedGrants := g.reg.managedGrants
 	g.reg.channels = next
 	g.reg.modelIndex = nextIndex
 	if err := g.reg.applyLocked(channels); err != nil {
 		g.reg.channels = saved // 失败回滚，别把好数据换成坏数据
 		g.reg.modelIndex = savedIndex
+		g.reg.managedGrants = savedGrants
 		return err
 	}
 
@@ -161,7 +166,7 @@ func (g *Gateway) Reload(channels []model.Channel) error {
 		}
 		for i, incoming := range next.credentials {
 			for _, local := range old.credentials {
-				if local.ID == incoming.ID && local.HealthGeneration == incoming.HealthGeneration && local.APIKey == incoming.APIKey && local.HealthObservedAt > incoming.HealthObservedAt {
+				if isStatic(&local) && isStatic(&incoming) && local.ID == incoming.ID && local.HealthGeneration == incoming.HealthGeneration && local.APIKey == incoming.APIKey && local.HealthObservedAt > incoming.HealthObservedAt {
 					next.credentials[i] = local
 				}
 			}
@@ -184,7 +189,25 @@ func (r *registry) apply(channels []model.Channel) error {
 // 而 Init 直接装载即可。两者都要用同一套转换逻辑，不能抄两份。
 func (r *registry) applyLocked(channels []model.Channel) error {
 	skipped := 0
+	managedEnabled := 0
+	r.managedGrants = nil
 	for _, ch := range channels {
+		if err := validateCredentialSources(ch); err != nil {
+			return err
+		}
+		for _, cred := range ch.Credentials {
+			if isManaged(&cred) {
+				r.managedGrants = append(r.managedGrants, cred)
+			}
+		}
+		for _, cred := range ch.Credentials {
+			if isManaged(&cred) && cred.Status != model.CredentialDisabled {
+				managedEnabled++
+				if managedEnabled > 1 {
+					return configurationError("only one managed binding may be enabled")
+				}
+			}
+		}
 		if !ch.IsEnabled() {
 			skipped++
 			continue

@@ -149,8 +149,11 @@ func (s *NativeWebSocketService) nativeCandidates(generation *nativeGeneration, 
 		copied := *snapshot
 		copied.credentials = nil
 		for _, pinned := range snapshot.credentials {
+			if !isStatic(&pinned) {
+				continue
+			}
 			for _, current := range live.credentials {
-				if current.ID == pinned.ID && current.HealthGeneration == pinned.HealthGeneration && current.APIKey == pinned.APIKey && current.CreatedAt.Equal(pinned.CreatedAt) {
+				if isStatic(&current) && current.ID == pinned.ID && current.HealthGeneration == pinned.HealthGeneration && current.APIKey == pinned.APIKey && current.CreatedAt.Equal(pinned.CreatedAt) {
 					copied.credentials = append(copied.credentials, current)
 					break
 				}

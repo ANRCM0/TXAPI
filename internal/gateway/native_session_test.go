@@ -82,6 +82,7 @@ func (c *nativeFixtureConnection) count() int {
 }
 
 type nativeFixtureResource struct {
+	dials  atomic.Int64
 	conn   *nativeFixtureConnection
 	closed chan struct{}
 	once   sync.Once
@@ -89,6 +90,7 @@ type nativeFixtureResource struct {
 }
 
 func (r *nativeFixtureResource) Dial(_ context.Context, key string) (v2.Connection, error) {
+	r.dials.Add(1)
 	if key != r.key {
 		return nil, errors.New("wrong credential binding")
 	}
@@ -183,6 +185,48 @@ func nativeCreate(previous string) contract.Create {
 	return contract.Create{JSON: b}
 }
 func nativeDiscard(_ context.Context, f v2.Frame) (int, error) { return len(f.Data), nil }
+
+func TestNativeSessionManagedGrantRejectsBeforeDialAndKeepsOtherKeysIndependent(t *testing.T) {
+	for _, state := range []string{"active", "disabled channel", "disabled credential"} {
+		t.Run(state, func(t *testing.T) {
+			f := newNativeServiceFixture(t)
+			managed := managedTestChannels()[1]
+			managed.Models = model.StringList{"alias"}
+			managed.Credentials[0].BindingOwnerID = f.binding.UserID
+			managed.Credentials[0].BindingTokenID = f.binding.TokenID
+			managed.Credentials[0].BindingModel = "alias"
+			if state == "disabled channel" {
+				managed.Status = model.StatusDisabled
+			}
+			if state == "disabled credential" {
+				managed.Credentials[0].Status = model.CredentialDisabled
+			}
+			f.channels = append(f.channels, managed)
+			f.publish(t)
+			s := f.open(t, "managed-bound")
+			result := s.Execute(f.trusted, nativeCreate(""), nativeDiscard)
+			if result.Problem == nil || result.Facts.UpstreamWriteStarted || result.Facts.Dispatch != v2.NotDispatched || f.resources[0].dials.Load() != 0 || f.resources[0].conn.count() != 0 {
+				t.Fatalf("managed grant used static WS transport: %+v dials=%d", result, f.resources[0].dials.Load())
+			}
+			key, err := f.store.IssueToken(f.binding.UserID, &store.TokenInput{ModelMode: identity.All})
+			if err != nil {
+				t.Fatal(err)
+			}
+			trusted, _, ok := authority.NewTokenAuthenticator(f.store).Authenticate(context.Background(), key.Key)
+			if !ok {
+				t.Fatal("independent key authentication failed")
+			}
+			other, problem := f.service.Open(trusted, contract.Open{Binding: identity.Binding{UserID: f.binding.UserID, TokenID: key.ID}, ConnectionID: "static-independent"})
+			if problem != nil {
+				t.Fatalf("independent key open: %s", problem.Code)
+			}
+			result = other.Execute(trusted, nativeCreate(""), nativeDiscard)
+			if result.Problem != nil || result.Facts.Termination != v2.Success || f.resources[0].dials.Load() != 1 || f.resources[0].conn.count() != 1 {
+				t.Fatalf("managed grant disturbed independent static WS: %+v", result)
+			}
+		})
+	}
+}
 
 func TestNativeSessionContinuationPinsOneConnectionAndCurrentIdentity(t *testing.T) {
 	f := newNativeServiceFixture(t)

@@ -62,6 +62,9 @@ func (g *Gateway) Models(ctx context.Context) []execution.Model {
 	}
 	seen := make(map[string]bool)
 	for _, ch := range g.reg.allChannels() {
+		if !g.modelGrantVisible(ch, p.UserID, p.TokenID) {
+			continue
+		}
 		models := append([]string(nil), ch.models...)
 		if ch.supports("*") {
 			models = append(models, p.Policy.Models...)

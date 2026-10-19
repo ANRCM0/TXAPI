@@ -17,10 +17,12 @@ const (
 // P2 只用到 active/disabled，cooldown/banned 由 P3 的调度器驱动，
 // 常量先定义好，避免后续阶段改数据库语义。
 const (
-	CredentialActive   = "active"
-	CredentialCooldown = "cooldown"
-	CredentialBanned   = "banned"
-	CredentialDisabled = "disabled"
+	CredentialSourceStatic  = "static_api_key"
+	CredentialSourceManaged = "managed_account"
+	CredentialActive        = "active"
+	CredentialCooldown      = "cooldown"
+	CredentialBanned        = "banned"
+	CredentialDisabled      = "disabled"
 )
 
 // Channel 是「上游服务商配置」，不是「一个 Key」。
@@ -65,9 +67,17 @@ func (c *Channel) IsEnabled() bool { return c.Status == StatusEnabled }
 // P2 阶段转发链路只用「挑一个可用的 Key」；P3 会在这个表上做加权随机、
 // 失败指数退避冷却、连续失败拉黑、会话亲和。
 type Credential struct {
-	ID        uint   `gorm:"primaryKey" json:"id"`
-	ChannelID uint   `gorm:"index;not null" json:"channel_id"`
-	Name      string `gorm:"size:128;not null;default:''" json:"name"`
+	Source             string `gorm:"not null;default:static_api_key;size:32" json:"source"`
+	AccountID          string `gorm:"not null;default:'';size:35" json:"account_id,omitempty"`
+	BindingOwnerID     uint   `gorm:"not null;default:0" json:"binding_owner_id,omitempty"`
+	BindingTokenID     uint   `gorm:"not null;default:0" json:"binding_token_id,omitempty"`
+	BindingModel       string `gorm:"not null;default:'';size:128" json:"binding_model,omitempty"`
+	BindingRevision    int64  `gorm:"not null;default:0" json:"binding_revision,string,omitempty"`
+	AccountRevision    int64  `gorm:"-" json:"-"`
+	CredentialRevision int64  `gorm:"-" json:"-"`
+	ID                 uint   `gorm:"primaryKey" json:"id"`
+	ChannelID          uint   `gorm:"index;not null" json:"channel_id"`
+	Name               string `gorm:"size:128;not null;default:''" json:"name"`
 	// APIKey 是上游渠道的 key，注意与 tokens 表的客户端 key 完全不同。
 	APIKey string `gorm:"size:512;not null" json:"api_key"`
 	// Encrypted deployments leave the legacy column empty. Only the store

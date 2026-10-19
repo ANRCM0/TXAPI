@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	cfgv2 "minigateway/internal/foundation/contracts/configuration/v2"
 	"minigateway/internal/model"
 )
 
@@ -115,6 +116,9 @@ func (in *ChannelInput) toModel() *model.Channel {
 // 为什么要包在一个事务里：渠道、凭据、能力表三者必须一致。
 // 半途失败留下「有渠道没凭据」的数据，转发时表现为莫名其妙的 401。
 func (s *Store) CreateChannel(in *ChannelInput) (*model.Channel, error) {
+	if in.Type == managedChannelProtocol {
+		return nil, cfgv2.ErrConflict
+	}
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
@@ -157,6 +161,9 @@ func (s *Store) CreateChannel(in *ChannelInput) (*model.Channel, error) {
 // 做法是先按 channel_id 删光旧条目再重建，而不是逐条 diff——
 // 一个渠道的能力条目最多几十条，全删重建比维护 diff 逻辑简单且不易错。
 func (s *Store) UpdateChannel(id uint, in *ChannelInput) (*model.Channel, error) {
+	if in.Type == managedChannelProtocol {
+		return nil, cfgv2.ErrConflict
+	}
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
@@ -168,6 +175,9 @@ func (s *Store) UpdateChannel(id uint, in *ChannelInput) (*model.Channel, error)
 	ch := in.toModel()
 	ch.ID = id
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := staticChannelOnly(tx, id); err != nil {
+			return err
+		}
 		// 用 Updates + map 而不是 Save：Save 会把零值字段也写进去，
 		// 导致「只想改 weight」的请求把 priority 冲成 0。
 		updates := map[string]any{
@@ -221,6 +231,9 @@ func (s *Store) UpdateChannel(id uint, in *ChannelInput) (*model.Channel, error)
 // 路由表里还留着这个渠道 ID，选渠道时拿到一个已删除的渠道，转发必然失败。
 func (s *Store) DeleteChannel(id uint) error {
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := staticChannelOnly(tx, id); err != nil {
+			return err
+		}
 		if err := tx.Where("channel_id = ?", id).Delete(&model.Credential{}).Error; err != nil {
 			return fmt.Errorf("删除渠道凭据失败: %w", err)
 		}
@@ -272,7 +285,7 @@ func (s *Store) ChannelSnapshot() ([]model.Channel, error) {
 		}).Order("priority DESC, id ASC").Find(&channels).Error; err != nil {
 			return err
 		}
-		return s.openChannels(channels)
+		return s.openChannelsDB(tx, channels)
 	})
 	if err == nil {
 		s.mu.Lock()

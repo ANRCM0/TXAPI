@@ -37,6 +37,9 @@ func Protocols(overrides map[string]adaptor.Adaptor) []execution.ProtocolRegistr
 	for _, id := range []string{"openai", "anthropic", "gemini"} {
 		adaptors[id], _ = Resolve(id)
 	}
+	// SIWC uses the existing native Responses codec, while the gateway owns
+	// its distinct source, authorization and fixed-target policy.
+	adaptors["openai_siwc"], _ = Resolve("openai")
 	for id, implementation := range overrides {
 		adaptors[id] = implementation
 	}
@@ -45,10 +48,35 @@ func Protocols(overrides map[string]adaptor.Adaptor) []execution.ProtocolRegistr
 		var port execution.Adapter
 		if !absentAdaptor(implementation) {
 			port = &adapterPort{implementation}
+			if id == "openai_siwc" {
+				port = &siwcAdapterPort{adapterPort: &adapterPort{implementation}}
+			}
 		}
 		registrations = append(registrations, execution.ProtocolRegistration{ID: id, Version: execution.Version, Adapter: port})
 	}
 	return registrations
+}
+
+type siwcAdapterPort struct{ *adapterPort }
+
+func (p *siwcAdapterPort) Supports(r execution.Request) bool {
+	return r.Operation() == execution.Responses && r.Stream() && r.Requirements().Transport == execution.HTTP && !r.Requirements().Tools && p.adapterPort.Supports(r)
+}
+
+func (p *siwcAdapterPort) Prepare(r execution.Request, t execution.Target) (execution.Input, *execution.Error) {
+	if !p.Supports(r) || t.ChannelType != "openai_siwc" || t.BaseURL != "https://api.openai.com/v1" || t.APIKey != "" || t.ActualModel != r.Model() {
+		return execution.Input{}, unsupportedOperation()
+	}
+	// Existing OpenAI codec appends /v1/responses to its root. This dedicated
+	// adapter fixes the official root without accepting configurable destinations.
+	t.BaseURL = "https://api.openai.com"
+	in, failure := p.adapterPort.Prepare(r, t)
+	if failure == nil {
+		// The managed grant forbids model mapping. Preserve the exact request
+		// bytes so its owner can verify that preparation changed no field.
+		in.Body = append([]byte(nil), r.Body()...)
+	}
+	return in, failure
 }
 
 func absentAdaptor(implementation adaptor.Adaptor) bool {

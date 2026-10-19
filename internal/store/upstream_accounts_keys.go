@@ -14,6 +14,8 @@ import (
 )
 
 type upstreamTokenEnvelope struct {
+	AuthSource   string   `json:"auth_source,omitempty"`
+	Resource     string   `json:"resource,omitempty"`
 	Format       int      `json:"format"`
 	AccountID    string   `json:"account_id"`
 	Provider     string   `json:"provider"`
@@ -57,7 +59,7 @@ func (s *Store) sealUpstreamAccount(tx *gorm.DB, row model.ManagedUpstreamAccoun
 	if !upstreamTokensValid(tokens) {
 		return nil, auth.ErrInvalid
 	}
-	envelope := upstreamTokenEnvelope{Format: 1, AccountID: row.ID, Provider: row.Provider, Issuer: row.Issuer, Subject: row.Subject,
+	envelope := upstreamTokenEnvelope{AuthSource: row.AuthSource, Resource: row.Resource, Format: 1, AccountID: row.ID, Provider: row.Provider, Issuer: row.Issuer, Subject: row.Subject,
 		ClientID: row.ClientID, ExpiresAt: tokens.ExpiresAt.UnixMilli(), AccessToken: tokens.AccessToken.Value(),
 		RefreshToken: tokens.RefreshToken.Value(), IDToken: tokens.IDToken.Value(), Nonce: tokens.Nonce.Value()}
 	envelope.ScopesKnown, envelope.Scopes = tokens.ScopesKnown, slices.Clone(tokens.Scopes)
@@ -90,6 +92,7 @@ func (s *Store) openUpstreamAccount(tx *gorm.DB, row model.ManagedUpstreamAccoun
 	decoder := json.NewDecoder(bytes.NewReader(plain))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&envelope) != nil || decoder.Decode(&struct{}{}) != io.EOF || envelope.Format != 1 ||
+		envelope.AuthSource != row.AuthSource || envelope.Resource != row.Resource ||
 		envelope.AccountID != row.ID || envelope.Provider != row.Provider || envelope.ClientID != row.ClientID ||
 		envelope.Issuer != row.Issuer || envelope.Subject != row.Subject || envelope.ExpiresAt != row.ExpiresAt.UnixMilli() ||
 		(envelope.RefreshToken != "") != row.HasRefresh || envelope.ScopesKnown != row.ScopesKnown {

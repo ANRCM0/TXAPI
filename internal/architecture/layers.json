@@ -93,6 +93,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/configuration/v2": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "2"
+  },
   "minigateway/internal/foundation/contracts/control/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -216,6 +222,12 @@
     "owner": "foundation",
     "public": true,
     "version": "1"
+  },
+  "minigateway/internal/foundation/contracts/upstreamauth/v2": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "2"
   },
   "minigateway/internal/foundation/httpoutput/v1": {
     "layer": "L1",

@@ -70,12 +70,25 @@ func filterUsable(creds []dbmodel.Credential, exclude map[uint]bool, now time.Ti
 	out := make([]dbmodel.Credential, 0, len(creds))
 	for i := range creds {
 		c := &creds[i]
-		if exclude[c.ID] || !c.IsUsable(now) || c.APIKey == "" {
+		if exclude[c.ID] || !c.IsUsable(now) || !hasCredentialSource(c) {
 			continue
 		}
 		out = append(out, *c)
 	}
 	return out
+}
+
+// Selection carries only persistent binding metadata for managed credentials.
+// The gateway alone issues access material after trusted grant checks.
+func hasCredentialSource(c *dbmodel.Credential) bool {
+	switch c.Source {
+	case "", dbmodel.CredentialSourceStatic:
+		return c.APIKey != ""
+	case dbmodel.CredentialSourceManaged:
+		return c.APIKey == "" && c.ID != 0 && c.AccountID != "" && c.BindingRevision > 0 && c.BindingOwnerID != 0 && c.BindingTokenID != 0 && c.BindingModel != "" && c.AccountRevision > 0 && c.CredentialRevision > 0
+	default:
+		return false
+	}
 }
 
 // weightedFrom 在已过滤的凭据里按权重随机挑一个。

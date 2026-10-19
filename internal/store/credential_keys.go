@@ -111,6 +111,12 @@ func (s *Store) initializeCredentialVault() error {
 			}
 			for _, row := range rows {
 				after = row.ID
+				if row.Source == model.CredentialSourceManaged {
+					if err := s.openCredential(&row); err != nil {
+						return err
+					}
+					continue
+				}
 				original := row
 				if enabled {
 					if err := s.openCredential(&row); err != nil {
@@ -163,6 +169,15 @@ func (s *Store) checkCredentialMode(tx *gorm.DB) error {
 }
 
 func (s *Store) openCredential(credential *model.Credential) error {
+	if credential.Source == model.CredentialSourceManaged {
+		if s.vault == nil || credential.APIKey != "" || len(credential.KeyCiphertext) != 0 || credential.KeyHash != "" || !managedCredentialValid(*credential) {
+			return ErrCredentialEncryption
+		}
+		return nil
+	}
+	if credential.Source != "" && credential.Source != model.CredentialSourceStatic {
+		return ErrCredentialEncryption
+	}
 	if s.vault == nil {
 		if len(credential.KeyCiphertext) != 0 || credential.KeyHash != "" {
 			return ErrCredentialEncryption
@@ -186,6 +201,10 @@ func (s *Store) openCredential(credential *model.Credential) error {
 }
 
 func (s *Store) openChannels(channels []model.Channel) error {
+	return s.openChannelsDB(s.db, channels)
+}
+
+func (s *Store) openChannelsDB(db *gorm.DB, channels []model.Channel) error {
 	for i := range channels {
 		for j := range channels[i].Credentials {
 			if channels[i].Credentials[j].ChannelID != channels[i].ID {
@@ -193,6 +212,15 @@ func (s *Store) openChannels(channels []model.Channel) error {
 			}
 			if err := s.openCredential(&channels[i].Credentials[j]); err != nil {
 				return err
+			}
+			cred := &channels[i].Credentials[j]
+			if cred.Source == model.CredentialSourceManaged {
+				var account model.ManagedUpstreamAccount
+				if err := db.Select("row_revision", "credential_revision").Where("id = ?", cred.AccountID).First(&account).Error; err == nil {
+					cred.AccountRevision, cred.CredentialRevision = account.RowRevision, account.CredentialRevision
+				} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
 			}
 		}
 	}

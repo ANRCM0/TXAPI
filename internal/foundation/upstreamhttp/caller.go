@@ -65,6 +65,7 @@ func (c *Caller) Close() {
 }
 
 func validRequest(request auth.Request) bool {
+	models := request.Method == http.MethodGet && request.URL == "https://api.openai.com/v1/models"
 	switch request.Method {
 	case http.MethodPost:
 		if request.URL != "https://auth.openai.com/api/accounts/oauth/token" ||
@@ -72,17 +73,29 @@ func validRequest(request auth.Request) bool {
 			return false
 		}
 	case http.MethodGet:
-		if request.URL != "https://auth.openai.com/.well-known/jwks.json" || request.Body.Value() != "" {
+		if (!models && request.URL != "https://auth.openai.com/.well-known/jwks.json") || request.Body.Value() != "" {
 			return false
 		}
 	default:
 		return false
 	}
+	if models && !strings.HasPrefix(request.Header.Get("Authorization"), "Bearer ") {
+		return false
+	}
 	for key, values := range request.Header {
-		if len(values) != 1 || !auth.ValidWireText(values[0], 128) {
+		if len(values) != 1 {
+			return false
+		}
+		// Bearer has one required separator; validate the token separately so
+		// the general no-whitespace header check does not reject that space.
+		if key != "Authorization" && !auth.ValidWireText(values[0], 128) {
 			return false
 		}
 		switch strings.ToLower(key) {
+		case "authorization":
+			if !models || !strings.HasPrefix(values[0], "Bearer ") || !auth.ValidWireText(strings.TrimPrefix(values[0], "Bearer "), auth.MaxTokenBytes) {
+				return false
+			}
 		case "accept":
 			if values[0] != "application/json" {
 				return false

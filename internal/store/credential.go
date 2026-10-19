@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	cfgv2 "minigateway/internal/foundation/contracts/configuration/v2"
 	"minigateway/internal/model"
 )
 
@@ -77,6 +78,9 @@ func (s *Store) UpdateCredential(id uint, in *CredentialInput) (*model.Credentia
 			}
 			return err
 		}
+		if existing.Source == model.CredentialSourceManaged {
+			return cfgv2.ErrConflict
+		}
 		if err := s.openCredential(&existing); err != nil {
 			return err
 		}
@@ -124,6 +128,9 @@ func (s *Store) DeleteCredential(id uint) error {
 			}
 			return err
 		}
+		if cred.Source == model.CredentialSourceManaged {
+			return cfgv2.ErrConflict
+		}
 		var count int64
 		if err := tx.Model(&model.Credential{}).Where("channel_id=?", cred.ChannelID).Count(&count).Error; err != nil {
 			return err
@@ -146,6 +153,16 @@ func (s *Store) DeleteCredential(id uint) error {
 // active 却仍被 IsUsable 判为冷却中——「解封了但没用」是最难排查的
 // 一类故障。反过来设 banned 时保留这些字段，方便事后复盘失败历史。
 func (s *Store) SetCredentialStatus(id uint, status string) (*model.Credential, error) {
+	var current model.Credential
+	if err := s.db.First(&current, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if current.Source == model.CredentialSourceManaged {
+		return nil, cfgv2.ErrConflict
+	}
 	switch status {
 	case model.CredentialActive, model.CredentialCooldown, model.CredentialBanned, model.CredentialDisabled:
 	default:
@@ -250,7 +267,7 @@ func (s *Store) UpdateCredentialHealth(u HealthUpdate) error {
 	if u.LastUsedAt > 0 {
 		updates["last_used_at"] = u.LastUsedAt
 	}
-	query := s.db.Model(&model.Credential{}).Where("id = ? AND health_generation = ? AND status IN ?", u.CredentialID, u.ExpectedGeneration, []string{model.CredentialActive, model.CredentialCooldown})
+	query := s.db.Model(&model.Credential{}).Where("source = ?", model.CredentialSourceStatic).Where("id = ? AND health_generation = ? AND status IN ?", u.CredentialID, u.ExpectedGeneration, []string{model.CredentialActive, model.CredentialCooldown})
 	if u.ObservedAt > 0 {
 		query = query.Where("health_observed_at < ?", u.ObservedAt)
 	}
@@ -288,7 +305,7 @@ func (s *Store) UpdateCredentialHealth(u HealthUpdate) error {
 func (s *Store) RecoverCooledDownCredentials() (int, error) {
 	now := time.Now().Unix()
 	res := s.db.Model(&model.Credential{}).
-		Where("status = ? AND cooldown_until > 0 AND cooldown_until <= ?", model.CredentialCooldown, now).
+		Where("source = ?", model.CredentialSourceStatic).Where("status = ? AND cooldown_until > 0 AND cooldown_until <= ?", model.CredentialCooldown, now).
 		Updates(map[string]any{
 			"status":         model.CredentialActive,
 			"cooldown_until": 0,
@@ -319,6 +336,9 @@ func (s *Store) validateCredentialInput(channelID uint, in *CredentialInput, exc
 }
 
 func (s *Store) validateCredentialInputDB(db *gorm.DB, channelID uint, in *CredentialInput, excludeID uint) error {
+	if err := staticChannelOnly(db, channelID); err != nil {
+		return err
+	}
 	var n int64
 	if err := db.Model(&model.Channel{}).Where("id = ?", channelID).Count(&n).Error; err != nil {
 		return fmt.Errorf("检查渠道 %d 是否存在失败: %w", channelID, err)

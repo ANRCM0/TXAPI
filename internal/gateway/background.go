@@ -95,7 +95,14 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 		if !ok || !p.Policy.Allows(call.Model) {
 			return bg.ErrUnauthorized
 		}
+		if g.hasManagedGrant(p.UserID, p.TokenID, call.Model) {
+			return bg.ErrUnsupportedCapability
+		}
 		for _, ch := range g.pickChannels(call.Model, nil) {
+			ch = staticBackgroundChannel(ch)
+			if len(ch.credentials) == 0 {
+				continue
+			}
 			registration, ok := r.registrations[r.channels[uint(ch.id)]]
 			if !ok || registration.Operation != call.Operation {
 				continue
@@ -137,6 +144,7 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 		target = *buildMeta(ch, cred, req, call.PublicID)
 	} else {
 		for _, v := range candidates {
+			v = staticBackgroundChannel(v)
 			if _, ok := r.registrations[r.channels[uint(v.id)]]; !ok {
 				continue
 			}
@@ -236,6 +244,17 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 		return bg.ErrUnavailable
 	}
 	return nil
+}
+
+func staticBackgroundChannel(ch *channel) *channel {
+	copy := *ch
+	copy.credentials = nil
+	for _, cred := range ch.credentials {
+		if isStatic(&cred) {
+			copy.credentials = append(copy.credentials, cred)
+		}
+	}
+	return &copy
 }
 
 func backgroundWireBound(in execution.Input, target execution.Target, allowQuery ...bool) bool {

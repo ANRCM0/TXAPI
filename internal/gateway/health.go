@@ -10,6 +10,9 @@ import (
 // failed credential is excluded by the very next request even if the bounded
 // persistence worker is delayed or its queue is full.
 func (g *Gateway) observeHealth(from *dbmodel.Credential, status int, message string) *dbmodel.Credential {
+	if from == nil || isManaged(from) {
+		return nil
+	}
 	if status != 200 && !scheduler.ShouldPenalizeCredential(status) {
 		return from
 	}

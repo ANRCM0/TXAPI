@@ -13,9 +13,11 @@ import (
 	"minigateway/internal/billing"
 	bg "minigateway/internal/foundation/contracts/background/v1"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
+	authority "minigateway/internal/foundation/identity"
 	bs "minigateway/internal/generation/backgroundstate"
 	"minigateway/internal/model"
 	native "minigateway/internal/protocol/responses"
+	"minigateway/internal/store"
 )
 
 type backgroundProgressFixture struct {
@@ -35,6 +37,58 @@ func (p *backgroundProgressFixture) Observe(context.Context, bg.Observation) err
 		return errors.New("fixture disk failure")
 	}
 	return nil
+}
+
+func TestBackgroundManagedGrantRejectsBeforeWireAndKeepsOtherKeysIndependent(t *testing.T) {
+	for _, state := range []string{"active", "disabled channel", "disabled credential"} {
+		t.Run(state, func(t *testing.T) {
+			f := newNativeServiceFixture(t)
+			var hits atomic.Int64
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"resp_provider","object":"response","status":"queued","output":[]}`)
+			}))
+			defer upstream.Close()
+			channels := managedTestChannels()
+			channels[0].BaseURL = upstream.URL
+			channels[1].Credentials[0].BindingOwnerID = f.binding.UserID
+			channels[1].Credentials[0].BindingTokenID = f.binding.TokenID
+			if state == "disabled channel" {
+				channels[1].Status = model.StatusDisabled
+			}
+			if state == "disabled credential" {
+				channels[1].Credentials[0].Status = model.CredentialDisabled
+			}
+			g := f.service.gateway
+			if err := g.Publish(channels); err != nil {
+				t.Fatal(err)
+			}
+			registration := native.BackgroundRegistration()
+			remote, err := NewBackgroundRemote(g, BackgroundRemoteOptions{Registrations: []bg.Registration{registration}, Channels: map[uint]string{1: registration.ID}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			call := bs.RemoteCall{Action: bg.RemoteSubmit, Operation: execution.Responses, Model: "m", PublicID: "resp_local", Body: []byte(`{"model":"m","background":true,"input":"hello"}`)}
+			progress := &backgroundProgressFixture{}
+			err = remote.Execute(f.trusted, call, progress)
+			if !errors.Is(err, bg.ErrUnsupportedCapability) || hits.Load() != 0 || progress.dispatched.Load() || progress.observed.Load() != 0 {
+				t.Fatalf("managed grant used static background transport: err=%v hits=%d dispatched=%v", err, hits.Load(), progress.dispatched.Load())
+			}
+			key, err := f.store.IssueToken(f.binding.UserID, &store.TokenInput{ModelMode: access.All})
+			if err != nil {
+				t.Fatal(err)
+			}
+			trusted, _, ok := authority.NewTokenAuthenticator(f.store).Authenticate(context.Background(), key.Key)
+			if !ok {
+				t.Fatal("independent key authentication failed")
+			}
+			err = remote.Execute(trusted, call, progress)
+			if err != nil || hits.Load() != 1 || !progress.dispatched.Load() || progress.observed.Load() != 1 {
+				t.Fatalf("managed grant disturbed independent static background: err=%v hits=%d", err, hits.Load())
+			}
+		})
+	}
 }
 
 type alteredBackgroundCodec struct {

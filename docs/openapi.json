@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.11.0",
-    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported."
+    "version": "0.12.0",
+    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported. FC-P1-001 adds opt-in disabled-billing single SIWC account/owner/key/model Responses text streaming. Managed bindings use real persisted credentials and CAS revisions. No real-account acceptance is implied."
   },
   "servers": [
     {
@@ -159,7 +159,7 @@
       "post": {
         "operationId": "post_v1_chat_completions",
         "summary": "Chat completion or SSE stream",
-        "description": "Native OpenAI Chat SSE forwards complete LF/CRLF events, preserving field order, comments, unknown fields and multiline data; CRLF is normalized to LF. Bare CR framing is unsupported. Per-event wire and data-observation buffers together are limited to 1 MiB. Success requires a finish reason and a blank-line-delimited DONE event; truncated or failed streams never fabricate DONE. Anthropic/Gemini conversion also waits for complete blank-line-delimited events, joins multiline data, handles an initial BOM and counts wire/data buffers together within 1 MiB; malformed/error events and unterminated EOF tails never fabricate DONE. Anthropic requires a finish reason and native message_stop; Gemini retains finish plus EOF or explicit DONE, including usage-only events after finish. These paths preserve the existing operation-specific conversion and strict-billing limits.",
+        "description": " Strict billing reserves the configured full user-fee ceiling before execution. Missing/invalid usage or actual cost above this ceiling retains the hold as pending; it never silently treats the call as free or supplements the budget beyond its hold. Unsupported or unpriced billing dimensions return 400 before forwarding. Strict JSON must be UTF-8, contain no repeated object keys and use explicit text message content and typed stream options. The prepared upstream request must preserve the explicit output limit and a single candidate before any durable network attempt starts. max_completion_tokens is supported only on the existing OpenAI-compatible path; cross-protocol conversion is rejected rather than substituted with max_tokens or a default. This check is not a complete input-token or provider-spend bound. Strict execution also requires an exact channel/base URL/protocol/actual-model/operation provider cost contract and independent request budget. The entire conservative attempt bound is durably occupied before sending; failed or unknown attempts do not restore retry capacity. Before every strict attempt, the pinned selling-price and target group-rate snapshot must price the entire contracted input envelope plus the explicit output cap within the durable user-fee reservation. Uncovered or overflowing bounds return 400 billing_fee_limit without starting that attempt; unknown earlier execution remains pending. Before recording an attempt, the final converted JSON body must also satisfy the strict text-only billing allowlist. Unknown fields, tools/media, explicit cache/thinking/non-default service-tier configuration and duplicate keys are rejected with unsupported_billing_dimension. This validation does not prove implicit model behavior or real input-token ceilings. Native OpenAI fields remain on the fast path. Cross-protocol requests reject unrepresentable options with 400 instead of log-only field loss; function tools are currently routed to OpenAI or Anthropic, not Gemini. Strict tools remain unsupported. Strict execution requires a registered input_bound_profile; missing profiles return 503 provider_input_unproven before any upstream I/O or durable attempt, regardless of nonempty operator evidence. Unsupported targets and compatibility proxies cannot inherit an official profile. The final body output limit must exactly match the limit used for cost admission. The openai_chat_v1 profile binds the official gpt-4o-mini-2024-07-18 endpoint, input ceiling >= 128000, max_completion_tokens <= 16384 and an explicit service_tier=default on the actual request. The gateway never silently substitutes a service tier; this input profile does not certify operator tariffs or rejected-request charging. Strict execution also requires tariff_profile=openai_standard_usd_2026_10_17, currency=USD, rates at or above registered standard floors and explicit credential ID/key SHA-256 bindings. Missing tariff profiles return 503 provider_tariff_unproven; new/rotated credentials or mismatched final authentication headers return 503 provider_credential_unproven. Both refuse before I/O, do not retry or penalize health, and retain holds for earlier unknown execution. A registered standard floor is not certification of credential-specific maximum rates, surcharges, future pricing or rejected-request charging.",
         "tags": [
           "model-calls"
         ],
@@ -301,8 +301,7 @@
               "type": "string"
             }
           }
-        ],
-        "description": " Strict billing reserves the configured full user-fee ceiling before execution. Missing/invalid usage or actual cost above this ceiling retains the hold as pending; it never silently treats the call as free or supplements the budget beyond its hold. Unsupported or unpriced billing dimensions return 400 before forwarding. Strict JSON must be UTF-8, contain no repeated object keys and use explicit text message content and typed stream options. The prepared upstream request must preserve the explicit output limit and a single candidate before any durable network attempt starts. max_completion_tokens is supported only on the existing OpenAI-compatible path; cross-protocol conversion is rejected rather than substituted with max_tokens or a default. This check is not a complete input-token or provider-spend bound. Strict execution also requires an exact channel/base URL/protocol/actual-model/operation provider cost contract and independent request budget. The entire conservative attempt bound is durably occupied before sending; failed or unknown attempts do not restore retry capacity. Before every strict attempt, the pinned selling-price and target group-rate snapshot must price the entire contracted input envelope plus the explicit output cap within the durable user-fee reservation. Uncovered or overflowing bounds return 400 billing_fee_limit without starting that attempt; unknown earlier execution remains pending. Before recording an attempt, the final converted JSON body must also satisfy the strict text-only billing allowlist. Unknown fields, tools/media, explicit cache/thinking/non-default service-tier configuration and duplicate keys are rejected with unsupported_billing_dimension. This validation does not prove implicit model behavior or real input-token ceilings. Native OpenAI fields remain on the fast path. Cross-protocol requests reject unrepresentable options with 400 instead of log-only field loss; function tools are currently routed to OpenAI or Anthropic, not Gemini. Strict tools remain unsupported. Strict execution requires a registered input_bound_profile; missing profiles return 503 provider_input_unproven before any upstream I/O or durable attempt, regardless of nonempty operator evidence. Unsupported targets and compatibility proxies cannot inherit an official profile. The final body output limit must exactly match the limit used for cost admission. The openai_chat_v1 profile binds the official gpt-4o-mini-2024-07-18 endpoint, input ceiling >= 128000, max_completion_tokens <= 16384 and an explicit service_tier=default on the actual request. The gateway never silently substitutes a service tier; this input profile does not certify operator tariffs or rejected-request charging. Strict execution also requires tariff_profile=openai_standard_usd_2026_10_17, currency=USD, rates at or above registered standard floors and explicit credential ID/key SHA-256 bindings. Missing tariff profiles return 503 provider_tariff_unproven; new/rotated credentials or mismatched final authentication headers return 503 provider_credential_unproven. Both refuse before I/O, do not retry or penalize health, and retain holds for earlier unknown execution. A registered standard floor is not certification of credential-specific maximum rates, surcharges, future pricing or rejected-request charging."
+        ]
       }
     },
     "/v1/embeddings": {
@@ -10787,6 +10786,243 @@
           }
         }
       }
+    },
+    "/api/admin/managed-channels": {
+      "post": {
+        "operationId": "create_managed_channel",
+        "summary": "Create managed channel",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Persisted managed configuration; publication headers report desired/applied state on mutations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ManagedChannel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Invalid fields (400), missing session (401), current non-admin (403), missing credential (404), revision/source/single-binding conflict (409), saved refresh failure (500) or disabled capability (503). A saved mutation is never automatically replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedChannelInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/managed-credentials/{id}": {
+      "get": {
+        "operationId": "get_managed_credential",
+        "summary": "Get managed credential",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted managed configuration; publication headers report desired/applied state on mutations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ManagedCredential"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Invalid fields (400), missing session (401), current non-admin (403), missing credential (404), revision/source/single-binding conflict (409), saved refresh failure (500) or disabled capability (503). A saved mutation is never automatically replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "update_managed_credential",
+        "summary": "Update managed credential",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted managed configuration; publication headers report desired/applied state on mutations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ManagedCredential"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Invalid fields (400), missing session (401), current non-admin (403), missing credential (404), revision/source/single-binding conflict (409), saved refresh failure (500) or disabled capability (503). A saved mutation is never automatically replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedCredentialUpdate"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/managed-credentials/{id}/disable": {
+      "post": {
+        "operationId": "disable_managed_credential",
+        "summary": "Disable managed credential",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted managed configuration; publication headers report desired/applied state on mutations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ManagedCredential"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Invalid fields (400), missing session (401), current non-admin (403), missing credential (404), revision/source/single-binding conflict (409), saved refresh failure (500) or disabled capability (503). A saved mutation is never automatically replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedCredentialDisable"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -14116,6 +14352,197 @@
           }
         },
         "additionalProperties": false
+      },
+      "ManagedBindingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "owner_id",
+          "token_id",
+          "model"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "token_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "ManagedChannelFields": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "openai_siwc"
+            ]
+          },
+          "base_url": {
+            "type": "string",
+            "enum": [
+              "https://api.openai.com/v1"
+            ]
+          },
+          "models": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "model_mapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 0
+          },
+          "group_name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "base_url",
+          "models"
+        ],
+        "additionalProperties": false,
+        "description": "One SIWC managed channel. Models must equal the binding slug. Model mapping and static api_key are forbidden."
+      },
+      "ManagedChannelInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "channel",
+          "binding"
+        ],
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ManagedChannelFields"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/ManagedBindingInput"
+          }
+        }
+      },
+      "ManagedCredential": {
+        "type": "object",
+        "required": [
+          "channel_id",
+          "credential_id",
+          "source",
+          "binding",
+          "revision",
+          "enabled"
+        ],
+        "properties": {
+          "channel_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "credential_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "managed_account"
+            ]
+          },
+          "binding": {
+            "$ref": "#/components/schemas/ManagedBindingInput"
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal int64 revision"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ManagedChannel": {
+        "type": "object",
+        "required": [
+          "channel",
+          "credential"
+        ],
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/ManagedCredential"
+          }
+        }
+      },
+      "ManagedCredentialUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expected_revision",
+          "binding"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal int64 revision"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/ManagedBindingInput"
+          }
+        }
+      },
+      "ManagedCredentialDisable": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Positive decimal int64 revision"
+          }
+        }
       }
     }
   }
