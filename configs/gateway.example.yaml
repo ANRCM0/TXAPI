@@ -9,6 +9,8 @@ server:
   total_timeout_seconds: 120
   # 可选会话亲和。默认关闭；确认上游缓存/延迟有实际收益后再开启。
   session_affinity: false
+  # Opt-in metadata only: up to 512 completed HTTP routing traces for 15 minutes.
+  route_diagnostics: false
   # IP 级限流的每分钟请求数上限，0 表示不限。
   # 自用（本机/内网访问）保持 0；暴露到公网时务必配上，比如 120。
   ip_rpm_limit: 0

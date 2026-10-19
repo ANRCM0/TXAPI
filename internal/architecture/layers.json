@@ -155,6 +155,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/routes/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
   "minigateway/internal/foundation/contracts/state/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -266,6 +272,10 @@
   "minigateway/internal/responsesws": {
     "layer": "L3",
     "owner": "responsesws"
+  },
+  "minigateway/internal/routeconsole": {
+    "layer": "L3",
+    "owner": "routeconsole"
   },
   "minigateway/internal/scheduler": {
     "layer": "L1",

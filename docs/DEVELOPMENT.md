@@ -9,10 +9,21 @@ S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的
 ## R06a Task Console Increment
 
 OpenAPI 0.7.0 adds five session-protected task metadata/control operations;
-old 93 operations/schemas and schema v15 are unchanged. R06a is implemented,
-not yet accepted by final CI/merge. Permissions, filters, string revisions,
+old 93 operations/schemas and schema v15 are unchanged. R06a final head 8edb499
+passed full push/PR CI and merged as master/3d55065 (PR #32); the matching
+merge tree and post-merge run are recorded separately. Permissions, filters, string revisions,
 privacy and cancellation semantics: [task console guide](reference/background-console.md).
 Existing stage records below retain their original checkpoint scope.
+
+## R06b Routing Diagnostics Increment
+
+OpenAPI 0.8.0 adds four session-protected read operations for recent HTTP
+routing observations. Enable `server.route_diagnostics` at startup; it defaults
+false. Retention, owner/admin projections, Request ID filters, scope coverage
+and rollback are defined in [routing diagnostics](reference/routing-diagnostics.md).
+The buffer is bounded process memory and cannot serve as a ledger or recovery
+source. Exact local and CI evidence belongs in the
+[batch log](../REFERENCE-ADOPTION-PROGRESS.md).
 
 ## 工具与工作目录
 

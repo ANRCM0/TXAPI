@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported."
   },
   "servers": [
@@ -8953,6 +8953,480 @@
           }
         }
       }
+    },
+    "/api/me/routing": {
+      "get": {
+        "operationId": "get_me_routing",
+        "summary": "Read ephemeral HTTP routing observations; target IDs are administrator-scope only",
+        "description": "Opt-in, bounded, completed-scope metadata. No bodies, provider handles or raw errors. Restart, TTL or capacity eviction may remove it. Equal Request IDs never share an invocation. Selection does not prove dispatch; protocol completion does not prove settlement or client consumption. Authentication failures, native background controls and native WS are outside this slice.",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current retained observation; owner scope redacts all target IDs and actual models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid login session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current administrator role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not retained in current scope; no execution state can be inferred",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Routing console rate limit; Retry-After: 60",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Diagnostics unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/routing/{id}": {
+      "get": {
+        "operationId": "get_me_routing_id",
+        "summary": "Read ephemeral HTTP routing observations; target IDs are administrator-scope only",
+        "description": "Opt-in, bounded, completed-scope metadata. No bodies, provider handles or raw errors. Restart, TTL or capacity eviction may remove it. Equal Request IDs never share an invocation. Selection does not prove dispatch; protocol completion does not prove settlement or client consumption. Authentication failures, native background controls and native WS are outside this slice.",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^rt_[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current retained observation; owner scope redacts all target IDs and actual models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RoutingTrace"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid login session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current administrator role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not retained in current scope; no execution state can be inferred",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Routing console rate limit; Retry-After: 60",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Diagnostics unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/routing": {
+      "get": {
+        "operationId": "get_admin_routing",
+        "summary": "Read ephemeral HTTP routing observations; target IDs are administrator-scope only",
+        "description": "Opt-in, bounded, completed-scope metadata. No bodies, provider handles or raw errors. Restart, TTL or capacity eviction may remove it. Equal Request IDs never share an invocation. Selection does not prove dispatch; protocol completion does not prove settlement or client consumption. Authentication failures, native background controls and native WS are outside this slice.",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000,
+              "default": 0
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current retained observation; owner scope redacts all target IDs and actual models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid login session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current administrator role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not retained in current scope; no execution state can be inferred",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Routing console rate limit; Retry-After: 60",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Diagnostics unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/routing/{id}": {
+      "get": {
+        "operationId": "get_admin_routing_id",
+        "summary": "Read ephemeral HTTP routing observations; target IDs are administrator-scope only",
+        "description": "Opt-in, bounded, completed-scope metadata. No bodies, provider handles or raw errors. Restart, TTL or capacity eviction may remove it. Equal Request IDs never share an invocation. Selection does not prove dispatch; protocol completion does not prove settlement or client consumption. Authentication failures, native background controls and native WS are outside this slice.",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^rt_[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current retained observation; owner scope redacts all target IDs and actual models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RoutingTrace"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid login session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current administrator role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not retained in current scope; no execution state can be inferred",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Routing console rate limit; Retry-After: 60",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Diagnostics unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -11284,6 +11758,317 @@
             "type": "string",
             "pattern": "^[1-9][0-9]*$",
             "description": "Exact decimal revision, never convert to a JavaScript Number."
+          }
+        }
+      },
+      "RoutingSelection": {
+        "type": "object",
+        "required": [
+          "outcome",
+          "picker",
+          "candidate_channels",
+          "eligible_channels",
+          "selection_pool_channels",
+          "total_credentials",
+          "tried_credentials",
+          "unavailable_credentials",
+          "eligible_credentials",
+          "priority_fallback",
+          "duration_micros"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "no_candidates",
+              "no_usable_credentials",
+              "credential_selection_failed",
+              "selected",
+              "continuation_unavailable",
+              "capability_unavailable",
+              "model_unavailable"
+            ]
+          },
+          "picker": {
+            "type": "string",
+            "enum": [
+              "none",
+              "weighted",
+              "weighted_fallback",
+              "extension"
+            ]
+          },
+          "candidate_channels": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "eligible_channels": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "selection_pool_channels": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_credentials": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "tried_credentials": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unavailable_credentials": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "eligible_credentials": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "priority_fallback": {
+            "type": "boolean"
+          },
+          "duration_micros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "channel_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "credential_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "RoutingAttempt": {
+        "type": "object",
+        "required": [
+          "number",
+          "status",
+          "http_status",
+          "phase",
+          "termination",
+          "committed",
+          "protocol_complete"
+        ],
+        "properties": {
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 11
+          },
+          "status": {
+            "type": "integer"
+          },
+          "http_status": {
+            "type": "integer"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "not_dispatched",
+              "dispatching",
+              "response_received",
+              "unknown"
+            ]
+          },
+          "termination": {
+            "type": "string",
+            "enum": [
+              "success",
+              "upstream_error",
+              "client_write_error",
+              "canceled",
+              "deadline",
+              "unknown"
+            ]
+          },
+          "committed": {
+            "type": "boolean"
+          },
+          "protocol_complete": {
+            "type": "boolean"
+          },
+          "channel_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "credential_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "actual_model": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      },
+      "RoutingTrace": {
+        "type": "object",
+        "required": [
+          "id",
+          "request_id",
+          "user_id",
+          "token_id",
+          "operation",
+          "model",
+          "started_at",
+          "finished_at",
+          "status",
+          "http_status",
+          "reason",
+          "phase",
+          "termination",
+          "committed",
+          "protocol_complete",
+          "interrupted",
+          "truncated",
+          "selections",
+          "attempts"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^rt_[a-f0-9]{32}$"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "user_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "token_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "operation": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "started_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "finished_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "http_status": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "scope_interrupted",
+              "delivery_failed",
+              "canceled",
+              "deadline",
+              "upstream_failed",
+              "target_unavailable",
+              "request_rejected",
+              "permission_denied",
+              "quota_exceeded",
+              "billing_refused",
+              "admission_refused",
+              "completed",
+              "failed"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "not_dispatched",
+              "dispatching",
+              "response_received",
+              "unknown"
+            ]
+          },
+          "termination": {
+            "type": "string",
+            "enum": [
+              "success",
+              "upstream_error",
+              "client_write_error",
+              "canceled",
+              "deadline",
+              "unknown"
+            ]
+          },
+          "committed": {
+            "type": "boolean"
+          },
+          "protocol_complete": {
+            "type": "boolean"
+          },
+          "interrupted": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "selections": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/RoutingSelection"
+            }
+          },
+          "attempts": {
+            "type": "array",
+            "maxItems": 11,
+            "items": {
+              "$ref": "#/components/schemas/RoutingAttempt"
+            }
+          }
+        }
+      },
+      "RoutingPage": {
+        "type": "object",
+        "required": [
+          "data",
+          "has_more",
+          "enabled",
+          "capacity",
+          "retention_seconds"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/RoutingTrace"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "capacity": {
+            "type": "integer",
+            "enum": [
+              512
+            ]
+          },
+          "retention_seconds": {
+            "type": "integer",
+            "enum": [
+              900
+            ]
           }
         }
       }

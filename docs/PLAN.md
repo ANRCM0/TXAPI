@@ -5,12 +5,21 @@
 ## R06a: Background Task Console
 
 2026-10-19: session-authorized owner metadata/list/detail and CAS cancellation,
-plus read-only administrator diagnostics, are implemented locally. Final-head
-CI and merge are pending. See [scope/ports](../REFERENCE-R06A-IMPLEMENTATION.md),
+plus read-only administrator diagnostics, are merged through PR #32 as
+master/3d55065. Final head 8edb499 passed complete push/PR CI and matches the
+merged tree; post-merge run 39188756506 also passed check/delivery. See
+[scope/ports](../REFERENCE-R06A-IMPLEMENTATION.md),
 [operating contract](reference/background-console.md) and
 [exact evidence](../REFERENCE-ADOPTION-PROGRESS.md). No content authority,
 new worker, billing permission, OAuth or Runtime gate is opened. Full R06 and
 R00-R07 are not complete.
+
+## R06b: Recent HTTP Routing Diagnostics
+
+2026-10-19: next independent batch on master/3d55065. The opt-in bounded
+in-memory query consumer and its exact boundaries are recorded before source
+changes in [R06b decision](../REFERENCE-R06B-IMPLEMENTATION.md). No completion
+or acceptance is claimed before its own behavior checks and complete CI.
 
 ## R03b-2 当前实施批次
 

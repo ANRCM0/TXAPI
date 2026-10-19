@@ -49,6 +49,20 @@ func (g *Gateway) recordRouteDecision(ctx context.Context, decision routeDecisio
 	}
 }
 
+func (g *Gateway) recordScopeRouteDecision(c *executionScope, decision routeDecision, duration time.Duration) {
+	g.recordRouteDecision(c.ctx, decision, duration)
+	if c.routeCapture != nil {
+		c.routeCapture.selectTarget(decision, duration)
+	}
+}
+
+func (g *Gateway) selectTargetScope(c *executionScope, candidates []*channel, tried map[uint]bool, session string, now time.Time) (*channel, *model.Credential) {
+	started := time.Now()
+	ch, credential, decision := g.chooseTarget(candidates, tried, session, now)
+	g.recordScopeRouteDecision(c, decision, time.Since(started))
+	return ch, credential
+}
+
 func (g *Gateway) chooseTarget(candidates []*channel, tried map[uint]bool, session string, now time.Time) (*channel, *model.Credential, routeDecision) {
 	d := routeDecision{outcome: "no_candidates", picker: "none", candidateChannels: len(candidates)}
 	if len(candidates) == 0 {
