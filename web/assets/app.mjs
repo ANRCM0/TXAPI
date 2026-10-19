@@ -226,6 +226,7 @@ function signOut(message = "") {
 const pages = [
   ["overview", "Overview", "01"], ["keys", "My API keys", "02"], ["models", "Models", "03"],
   ["playground", "Try a request", "04"], ["logs", "Request logs", "05"], ["tasks", "Background tasks", "10"],
+  ["routing", "Routing diagnostics", "11"],
 ];
 const adminPages = [["users", "Users", "06"], ["channels", "Channels", "07"], ["settings", "Settings", "08"], ["billing", "Billing ledger", "09"]];
 function shell() {
@@ -282,7 +283,7 @@ async function navigate({ refreshIdentity = true, recoverForbidden = true } = {}
   const view = document.querySelector("#view");
   view.replaceChildren(text("p", "Loading live data...", "empty"));
   try {
-    const content = await ({ overview, keys, models: modelPage, playground, logs, users, channels, settings, tasks: backgroundTasks, billing: billingLedger })[page]();
+    const content = await ({ overview, keys, models: modelPage, playground, logs, users, channels, settings, tasks: backgroundTasks, routing: routingDiagnostics, billing: billingLedger })[page]();
     if (epoch === generation && user) view.replaceChildren(content);
   } catch (error) {
     if (error.status === 403 && recoverForbidden && epoch === generation && user) {
@@ -728,6 +729,95 @@ function priceDialog(value = {}) {
 
 window.addEventListener("hashchange", () => run(navigate));
 login();
+
+async function routingDiagnostics() {
+  const epoch = generation;
+  let disposed = false, offset = 0, hasMore = false, version = 0, detailVersion = 0;
+  let controller, detailController;
+  const current = () => !disposed && epoch === generation && user;
+  disposeView = () => { disposed = true; controller?.abort(); detailController?.abort(); };
+  const host = el("div"), detail = el("div", { class: "routing-detail" });
+  const error = el("p", { role: "alert", class: "form-error" }), state = text("p", "", "muted"), count = text("span", "", "muted");
+  const scope = el("select", { "aria-label": "Routing scope" }, el("option", { value: "me" }, "My requests"),
+    user.role === "admin" ? el("option", { value: "admin" }, "All users (admin)") : null);
+  const requestID = el("input", { maxlength: 64, "aria-label": "Exact Request ID", placeholder: "Exact Request ID" });
+  const owner = el("input", { type: "number", min: 1, "aria-label": "Routing owner ID", placeholder: "Owner ID (admin)", disabled: true });
+  const key = el("input", { type: "number", min: 1, "aria-label": "Routing Key ID", placeholder: "Key ID" });
+  const filter = el("form", { class: "filter-bar" }, scope, requestID, owner, key, el("button", { class: "button secondary" }, "Refresh routes"));
+  const previous = button("Previous", () => load(Math.max(0, offset - 50))), next = button("Next", () => load(offset + 50));
+  const base = () => "/api/" + scope.value + "/routing";
+  const date = value => value ? new Date(value).toLocaleString() : "Not observed";
+  const target = row => row.channel_id ? "Channel " + row.channel_id + " / Key " + row.credential_id : "Not selected";
+  async function load(targetOffset = offset) {
+    const ownVersion = ++version;
+    ++detailVersion; detailController?.abort(); detail.replaceChildren();
+    controller?.abort(); controller = new AbortController();
+    previous.disabled = next.disabled = true; error.textContent = ""; state.textContent = "Loading retained observations...";
+    host.replaceChildren();
+    const query = new URLSearchParams({ limit: "50", offset: String(targetOffset) });
+    if (requestID.value) query.set("request_id", requestID.value);
+    if (key.value) query.set("token_id", key.value);
+    if (scope.value === "admin" && owner.value) query.set("user_id", owner.value);
+    try {
+      const response = await api.request(base() + "?" + query, { signal: controller.signal });
+      if (!current() || ownVersion !== version) return;
+      offset = targetOffset; hasMore = response.has_more === true;
+      state.textContent = response.enabled ?
+        "Recording enabled. Up to " + response.capacity + " completed HTTP scopes for " + response.retention_seconds / 60 + " minutes; restart or capacity eviction may remove earlier rows." :
+        "Recording is disabled. Enable server.route_diagnostics and restart to retain recent HTTP routing facts.";
+      const rows = list(response.data);
+      host.replaceChildren(rows.length ? table(["Request / finished", "Owner / Key", "Model / operation", "Result / observations", "Actions"], rows, row => [
+        el("div", {}, text("code", row.request_id || "Request ID not retained", "block"), date(row.finished_at)),
+        "User " + row.user_id + " / Key " + row.token_id, el("div", {}, row.model || "Not parsed", text("span", row.operation, "block")),
+        el("div", {}, row.reason.replaceAll("_", " "), text("span", list(row.selections).length + " choices / " + list(row.attempts).length + " attempts", "block")),
+        button("Inspect routing", () => inspect(row.id), "quiet"),
+      ]) : empty("No matching retained observations. Missing data does not prove that a request never ran."));
+      count.textContent = "Rows " + (rows.length ? offset + 1 : 0) + "-" + (offset + rows.length);
+    } catch (failure) {
+      if (current() && ownVersion === version && failure.name !== "AbortError") { error.textContent = failure.message; state.textContent = "Unable to load observations."; }
+    } finally { if (current() && ownVersion === version) { previous.disabled = offset === 0; next.disabled = !hasMore || offset >= 10000; } }
+  }
+  async function inspect(id) {
+    const ownVersion = ++detailVersion, admin = scope.value === "admin", requestBase = base();
+    detailController?.abort(); detailController = new AbortController();
+    error.textContent = ""; detail.replaceChildren();
+    try {
+      const response = await api.request(requestBase + "/" + encodeURIComponent(id), { signal: detailController.signal });
+      if (!current() || ownVersion !== detailVersion) return;
+      const row = response.data;
+      detail.replaceChildren(heading("Routing facts", row.id),
+        text("p", "Read-only observations. Selecting a target is not proof of dispatch; protocol completion is not proof of client consumption or settlement.", "muted"),
+        el("dl", { class: "facts" },
+          text("dt", "Request ID"), text("dd", row.request_id || "Not retained"),
+          text("dt", "Started / finished"), text("dd", date(row.started_at) + " / " + date(row.finished_at)),
+          text("dt", "Gateway result"), text("dd", String(row.status) + " / " + row.reason.replaceAll("_", " ")),
+          text("dt", "Client HTTP"), text("dd", row.committed ? "Committed / " + row.http_status : "Not committed"),
+          text("dt", "Dispatch observation"), text("dd", row.phase),
+          text("dt", "Protocol complete"), text("dd", String(row.protocol_complete)),
+          text("dt", "Scope interrupted"), text("dd", String(row.interrupted)),
+          text("dt", "Metadata truncated"), text("dd", String(row.truncated))),
+        heading("Selections", "Existing eligibility and picker facts; a choice may still be rejected before any attempt."),
+        list(row.selections).length ? table(["Outcome / picker", "Eligible / candidates", "Credential counts", "Priority / duration", ...(admin ? ["Target (admin)"] : [])], list(row.selections), choice => [
+          choice.outcome + " / " + choice.picker, choice.eligible_channels + " / " + choice.candidate_channels + " (" + choice.selection_pool_channels + " in priority pool)",
+          choice.eligible_credentials + " usable / " + choice.total_credentials + " total; " + choice.tried_credentials + " tried / " + choice.unavailable_credentials + " unavailable",
+          (choice.priority_fallback ? "Priority fallback" : "Current priority pool") + " / " + choice.duration_micros + " us",
+          ...(admin ? [target(choice)] : []),
+        ]) : empty("No target selection was observed in this scope."),
+        heading("Upstream attempts", "Observed attempts and commit facts. No raw upstream errors, request content or credentials are retained."),
+        list(row.attempts).length ? table(["Attempt / result", "Dispatch / termination", "Delivery / protocol", ...(admin ? ["Target / model (admin)"] : [])], list(row.attempts), attempt => [
+          "#" + attempt.number + " / " + attempt.status, attempt.phase + " / " + attempt.termination,
+          (attempt.committed ? "Committed / " + attempt.http_status : "Not committed") + "; protocol complete: " + attempt.protocol_complete,
+          ...(admin ? [el("div", {}, target(attempt), text("span", attempt.actual_model || "Not observed", "block"))] : []),
+        ]) : empty("No upstream attempt was observed in this scope."));
+    } catch (failure) { if (current() && ownVersion === detailVersion && failure.name !== "AbortError") error.textContent = failure.message; }
+  }
+  filter.addEventListener("submit", event => { event.preventDefault(); load(0); });
+  scope.addEventListener("change", () => { owner.disabled = scope.value !== "admin"; offset = 0; hasMore = false; load(0); });
+  await load(0);
+  return el("div", {}, pageHeader("Routing diagnostics", "Recent completed HTTP scopes, linked by Request ID. Each invocation remains separate."),
+    panel(text("p", "Ephemeral diagnostics are not a request ledger or recovery log. Active scopes, authentication failures, native background controls and WebSocket turns are outside this view.", "muted"),
+      filter, state, error, host, actions(previous, count, next)), panel(detail));
+}
 
 async function backgroundTasks() {
   const epoch = generation;

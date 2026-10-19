@@ -46,6 +46,7 @@ import (
 	"minigateway/internal/logging"
 	"minigateway/internal/metrics"
 	"minigateway/internal/model"
+	"minigateway/internal/routeconsole"
 	"minigateway/internal/scheduler"
 	"minigateway/internal/server"
 	"minigateway/internal/server/middleware"
@@ -202,8 +203,9 @@ func main() {
 	})
 	defer health.Close()
 	gw, err = gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(),
-		Admission: gateway.CapacityAdmission{Capacity: capacity},
-		Channels:  st.Channels(), RetryTimes: cfg.Server.RetryTimes,
+		RouteDiagnostics: cfg.Server.RouteDiagnostics,
+		Admission:        gateway.CapacityAdmission{Capacity: capacity},
+		Channels:         st.Channels(), RetryTimes: cfg.Server.RetryTimes,
 		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
 		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
 		Billing:        engine, StrictBilling: engine, Limiter: limiter, Metrics: metrics.Default, LogRecorder: st.WriteLog,
@@ -351,6 +353,7 @@ func main() {
 		TokenAuth:     authentication.NewTokenAuthenticator(st),
 		Control:       controlplane.New(persistence.Control(st)),
 		Tasks:         taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
+		Routes:        routeconsole.New(gw.Diagnostics(), controlplane.New(persistence.Control(st)), limiter),
 		Configuration: configurationService,
 		Ledger:        engine,
 		Metrics:       gw.Metrics(),

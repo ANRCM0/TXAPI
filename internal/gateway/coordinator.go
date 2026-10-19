@@ -69,7 +69,13 @@ func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Executio
 		writeError(c, http.StatusUnauthorized, "a verified generation identity is required", "unauthorized")
 		return *result
 	}
+	returned := false
+	if httpAdmission {
+		finishRoutes := g.beginRouteCapture(c)
+		defer func() { finishRoutes(returned) }()
+	}
 	g.execute(c, in)
+	returned = true
 	return *result
 }
 
@@ -106,6 +112,7 @@ func (g *Gateway) execute(c *executionScope, in Execution) {
 }
 
 type executionScope struct {
+	routeCapture    *routeCapture
 	ctx             context.Context
 	output          *executionOutput
 	result          *RequestResult

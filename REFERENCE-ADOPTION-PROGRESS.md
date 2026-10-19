@@ -307,9 +307,72 @@ and actual-main browser/recovery workflow passed; mock browser/API sources
 remain unchanged and retain their earlier evidence.
 The final automatic push/PR CI still has to accept the corrected head.
 
-Exact-head automatic Linux race/container CI and merge remain pending.
+### R06a Integration
+
+Final head 8edb499df2c0c781c691bd31435aff87dc4623ec passed complete automatic
+push 39188152830 and PR 39188155828 (check/delivery SUCCESS). This includes
+Linux full race, the corrected actual-main smoke and container installation,
+upgrade/recovery and shutdown. No workflow was manually redispatched.
+PR #32 merged as master/3d55065d9fcf63265aa0b7576c22c118d9964371, tree
+2fdefaa9eedba9a5b6aab5dc37d4c0cbca16ae38, exactly matching the tested head.
+Independent merged-main run 39188756506 also passed check/delivery SUCCESS.
+R06a's exact-head, merge-tree and post-merge gates are complete.
+
 No real Provider, official SDK, billing expansion, OAuth, external Runtime, tag
 or release is claimed. R06's other pages and the full R00-R07 goal stay open.
+
+## R06b: Recent HTTP Routing Diagnostics
+
+Started on the tree-verified merged R06a baseline master/3d55065. Scope,
+specific query interfaces, authority, bounded observation, compatibility and
+rollback are recorded before implementation in
+[R06b decision](REFERENCE-R06B-IMPLEMENTATION.md). This is a separate functional
+batch and carries the verified R06a integration record without repeating
+unchanged Go checks merely for documentation. Its new sources require their
+own concentrated local verification and exact-head full CI before merge.
+
+### R06b Local Verification
+
+2026-10-19, Windows/PowerShell, Go 1.26.3, GOARCH=amd64, CGO_ENABLED=0.
+Base remains master/3d55065. The 28 changed/new non-Markdown source files have
+LF-normalized manifest digest
+`88c854dabfae415122a24830e9a97908e73cb77406f458518e31ebb73b420e46`.
+Raw logs, manifest and screenshots are outside Git in
+`D:\my-project\TXAPI-references\validation-r06b`.
+
+| Actual Command / Check | Result |
+|---|---|
+| go build ./...; go vet ./... | PASS |
+| go test -json -count=1 ./... | 1369 tests/subtests and 37 test packages PASS; six expected helper SKIP |
+| go mod tidy; module cleanliness; core/protocol dependency filter | PASS |
+| architecture, public signature and HTTP contract tests | PASS in full suite; all 21 old public package declarations and all 98 old HTTP operations/schemas remain exact |
+| gofmt -l on 19 touched Go files; git diff --check | PASS; unrelated Go files untouched |
+| seven Node syntax checks; node --test web/assets/api.test.mjs | PASS; 10/10 API cases |
+| node tests/browser/routing.cjs | PASS, desktop/mobile owner/admin projections, failed-page retry, disabled state and delayed detail disposal |
+| additional external browser probes | PASS at 1440/390/320px, bounded HTML-like/long metadata, ordinary-user scope and delayed administrator list/detail after switching to owner |
+| python -B tests/smoke/local.py --go go with TXAPI_ROUTING_BROWSER=1 | PASS, actual-main owner/admin routing console desktop/mobile plus existing strict, encryption, forced-kill and native background recovery |
+| Python AST, existing OpenAPI equality and batch Markdown links | PASS |
+
+Directed behavior includes concurrent equal Request IDs without shared scope,
+TTL/eviction/copies, no recording for non-HTTP or nested consumers, preflight/
+admission/budget rejection without dispatch, retries, partial SSE failure and
+cleanup panic preserving committed facts. Real SQLite authority tests reject
+logout, current demotion, disabled and soft-deleted users; creation-Key deletion
+does not erase authorized historical metadata. A read-only subagent backend
+review found no actionable issues. The frontend subagent strengthened the
+delayed-response regression to require an actual held request before navigation.
+
+The initial live browser fixture logged in once per role and viewport, exceeding
+the existing five-login/minute gate after the API setup logins. It now logs in
+once per role and reuses that real session across both viewports, with an explicit
+login status assertion. The gate and product behavior are unchanged. Final live
+smoke passed in smoke-live-final.log. Full Go/build/vet evidence remains applicable
+because only the two browser regression scripts changed afterwards; their syntax
+and final mock/live behavior were revalidated. Screenshots were visually inspected.
+
+Local Linux race, Docker delivery, real Provider and official SDK checks were not
+run. Automatic exact-head CI and merge are still pending; this local evidence
+does not mark full R06 or the R00-R07 objective complete.
 
 ## 后续批次
 

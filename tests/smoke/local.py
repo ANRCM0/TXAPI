@@ -87,7 +87,7 @@ def service(command, log_path, env=None):
                     process.wait(timeout=5)
 
 
-def control_workflow(base, upstream_url):
+def control_workflow(base, upstream_url, routing_env=None):
     """Exercise the actual console APIs without using the legacy admin key."""
     assert request(base + "/v1/responses")[0] == 404, "Disabled native WS exposed an upgrade route"
     def api(path, session=None, payload=None, method=None, expected=200):
@@ -143,6 +143,33 @@ def control_workflow(base, upstream_url):
     assert api("/api/me/logs", other)["data"] in [None, []]
     own_logs = api("/api/me/logs", session)["data"]
     assert len(own_logs[0]["price_version"]) == 64, "Request lost its immutable price version"
+    if routing_env is None:
+        diagnostics = api("/api/me/routing", session)
+        assert diagnostics["enabled"] is False and diagnostics["data"] == [], "Default recording was enabled"
+    else:
+        request_id = own_logs[0]["request_id"]
+        deadline = time.monotonic() + 5
+        while True:
+            diagnostics = api("/api/me/routing?request_id=" + request_id, session)
+            if diagnostics["data"]:
+                break
+            assert time.monotonic() < deadline, "Completed HTTP scope was not observed"
+            time.sleep(0.1)
+        assert diagnostics["enabled"] and diagnostics["capacity"] == 512 and diagnostics["retention_seconds"] == 900
+        assert len(diagnostics["data"]) == 1
+        trace = diagnostics["data"][0]
+        assert trace["token_id"] == key["id"] and trace["status"] == 200 and len(trace["attempts"]) == 1
+        assert "channel_id" not in trace["selections"][0] and "credential_id" not in trace["attempts"][0]
+        assert "actual_model" not in trace["attempts"][0]
+        api("/api/me/routing/" + trace["id"], other, expected=404)
+        detail = api("/api/admin/routing/" + trace["id"], admin)["data"]
+        assert detail["attempts"][0]["channel_id"] == channel["id"] and detail["attempts"][0]["actual_model"] == "mapped-model"
+        for private in ("test-upstream-console-only", "Authorization", upstream_url):
+            assert private not in json.dumps(detail), "Routing observation exposed private source material"
+        if routing_env.get("TXAPI_ROUTING_BROWSER"):
+            browser_env = dict(routing_env, TXAPI_BASE_URL=base, TXAPI_ROUTING_TRACE_ID=trace["id"], TXAPI_ROUTING_REQUEST_ID=request_id)
+            subprocess.run([routing_env.get("TXAPI_ROUTING_BROWSER_NODE", "node"), str(ROOT / "tests" / "browser" / "routing-live.cjs")],
+                           env=browser_env, check=True, timeout=90)
     # Credential metadata edits preserve the existing upstream secret.
     credential = channel["credentials"][0]
     api(f"/api/admin/credentials/{credential['id']}", admin,
@@ -311,7 +338,7 @@ def main():
         # without it, and this check asserts the binary really starts.
         admin_key = "sk-local-smoke-admin"
         config = {
-            "server": {"addr": f"127.0.0.1:{gateway_port}", "retry_times": 1, "timeout_seconds": 10},
+            "server": {"addr": f"127.0.0.1:{gateway_port}", "retry_times": 1, "timeout_seconds": 10, "route_diagnostics": True},
             "admin_key": admin_key,
             "database": {"driver": "sqlite", "path": str(work / "gateway.db")},
             "channels": [{"name": "local", "type": "openai", "base_url": f"http://127.0.0.1:{upstream_port}",
@@ -370,7 +397,7 @@ def main():
                 assert text == "你好，这是流式响应。", text
                 assert any(choice.get("finish_reason") == "stop" for choice in choices)
                 assert any(chunk.get("usage", {}).get("total_tokens") == 18 for chunk in chunks)
-                control_workflow(base, f"http://127.0.0.1:{upstream_port}")
+                control_workflow(base, f"http://127.0.0.1:{upstream_port}", clean_env)
                 if args.preview:
                     print(f"PASS: all smoke checks; isolated console preview at {base}", flush=True)
                     print("Test login: smoke-admin / smoke-admin-password-only. Ctrl+C stops and removes test data.", flush=True)

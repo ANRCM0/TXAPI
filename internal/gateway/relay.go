@@ -72,13 +72,13 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 	// 1. 筛选出能服务这个模型的渠道
 	candidates := g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget)
 	if c.responseTarget != nil && len(candidates) == 0 {
-		g.recordRouteDecision(ctx, routeDecision{outcome: "continuation_unavailable", picker: "none"}, 0)
+		g.recordScopeRouteDecision(c, routeDecision{outcome: "continuation_unavailable", picker: "none"}, 0)
 		writeError(c, http.StatusConflict, "the original Responses target is no longer available", "continuation_target_unavailable")
 		return
 	}
 	if len(candidates) == 0 {
 		if len(g.pickChannels(req.Model(), allowedModels)) > 0 {
-			g.recordRouteDecision(ctx, routeDecision{outcome: "capability_unavailable", picker: "none"}, 0)
+			g.recordScopeRouteDecision(c, routeDecision{outcome: "capability_unavailable", picker: "none"}, 0)
 			if g.billingMode == billing.ModeStrict {
 				rejected := g.rejectUnpricedAttempt(c, result.reservation)
 				result.Result = rejected
@@ -90,7 +90,7 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 		}
 		// 记账先行：这个提前返回的分支最容易漏掉状态码记录，
 		// 漏了就会把一次彻底失败的请求记成 status=200，账本失去意义
-		g.recordRouteDecision(ctx, routeDecision{outcome: "model_unavailable", picker: "none"}, 0)
+		g.recordScopeRouteDecision(c, routeDecision{outcome: "model_unavailable", picker: "none"}, 0)
 		c.result.StatusCode = http.StatusServiceUnavailable
 		c.result.ErrorMessage = fmt.Sprintf("没有可用渠道能服务模型 %q", req.Model())
 		writeError(c, http.StatusServiceUnavailable,
@@ -133,7 +133,7 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 			result.Termination = term
 			break
 		}
-		ch, cred := g.selectTargetContext(ctx, g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget), triedCred, sessionID, time.Now())
+		ch, cred := g.selectTargetScope(c, g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget), triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}

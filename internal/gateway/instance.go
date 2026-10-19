@@ -29,16 +29,18 @@ type Options struct {
 	Billing        LegacyBilling
 	// StrictBilling can be supplied independently. For existing callers, Billing
 	// is also used when it implements StrictBilling. Strict never uses legacy fees.
-	StrictBilling  StrictBilling
-	BillingMode    billing.Mode
-	Limiter        access.Limiter
-	Metrics        *metrics.Registry
-	LogRecorder    func(*dbmodel.RequestLog)
-	Picker         func([]dbmodel.Credential, map[uint]bool, string, time.Time) (*dbmodel.Credential, bool)
-	HealthReporter func(*dbmodel.Credential, int, string)
+	StrictBilling    StrictBilling
+	BillingMode      billing.Mode
+	Limiter          access.Limiter
+	Metrics          *metrics.Registry
+	LogRecorder      func(*dbmodel.RequestLog)
+	RouteDiagnostics bool
+	Picker           func([]dbmodel.Credential, map[uint]bool, string, time.Time) (*dbmodel.Credential, bool)
+	HealthReporter   func(*dbmodel.Credential, int, string)
 }
 
 type Gateway struct {
+	routeHistory   *routeHistory
 	admission      Admission
 	adaptors       map[string]execution.Adapter
 	operations     map[execution.Operation]execution.OperationRegistration
@@ -123,6 +125,9 @@ func New(opts Options) (*Gateway, error) {
 	if err := g.initRegistry(opts.Channels); err != nil {
 		g.Close()
 		return nil, err
+	}
+	if opts.RouteDiagnostics {
+		g.routeHistory = &routeHistory{now: time.Now}
 	}
 	return g, nil
 }

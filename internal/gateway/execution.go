@@ -21,6 +21,9 @@ const captureLimit = 64 * 1024
 
 func (g *Gateway) executeScope(c *executionScope, req execution.Request) {
 	body := req.Body()
+	if c.routeCapture != nil {
+		c.routeCapture.model = req.Model()
+	}
 
 	result := c.result
 

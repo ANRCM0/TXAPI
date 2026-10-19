@@ -34,6 +34,8 @@ type ServerConfig struct {
 	// SessionAffinity is an opt-in optimization. Keep it disabled until an
 	// operator has measured a real upstream cache/latency benefit.
 	SessionAffinity bool `yaml:"session_affinity"`
+	// RouteDiagnostics keeps bounded recent HTTP routing metadata in memory.
+	RouteDiagnostics bool `yaml:"route_diagnostics"`
 	// IPRPMLimit 是 IP 级限流的每分钟请求数上限，0 表示不限。
 	//
 	// 为什么和令牌级限流分开：令牌级限流挂在鉴权之后，管得住
