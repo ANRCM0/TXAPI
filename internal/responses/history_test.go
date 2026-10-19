@@ -90,7 +90,11 @@ func historyService(t *testing.T, f *responseFixture, e app.Executor, active str
 	if err != nil {
 		t.Fatal(err)
 	}
-	history, err := app.NewHistory(app.HistoryOptions{Store: persistence.History(f.st), Protector: protector, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 64, OwnerRecords: 32, InstanceBytes: 32 << 20, OwnerBytes: 16 << 20}})
+	historyRepository, err := generation.NewResponseHistory(generation.ResponseHistoryOptions{Store: persistence.History(f.st), Protector: protector, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 64, OwnerRecords: 32, InstanceBytes: 32 << 20, OwnerBytes: 16 << 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := app.NewHistory(historyRepository)
 	if err != nil {
 		t.Fatal(err)
 	}

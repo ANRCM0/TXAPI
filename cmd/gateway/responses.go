@@ -94,8 +94,12 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	if err != nil {
 		return nil, err
 	}
-	history, err := responses.NewHistory(responses.HistoryOptions{Store: persistence.History(st), Protector: protector, Retention: time.Duration(cfg.HistorySeconds) * time.Second,
+	historyRepository, err := generation.NewResponseHistory(generation.ResponseHistoryOptions{Store: persistence.History(st), Protector: protector, Retention: time.Duration(cfg.HistorySeconds) * time.Second,
 		Limits: model.HistoryLimits{InstanceRecords: cfg.InstanceRecords, OwnerRecords: cfg.OwnerRecords, InstanceBytes: cfg.HistoryInstanceBytes, OwnerBytes: cfg.HistoryOwnerBytes}})
+	if err != nil {
+		return nil, err
+	}
+	history, err := responses.NewHistory(historyRepository)
 	if err != nil {
 		return nil, err
 	}

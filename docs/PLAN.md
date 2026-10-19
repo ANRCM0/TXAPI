@@ -438,6 +438,22 @@ P5 当前门槛评估（2026-10-20）：唯一 active SIWC grant 的候选池恒
 - **验收：**跨 Key/账号拒绝、父 ID 失效、双下游同会话不误复用、握手/凭据变化、唯一 reader/Ping、有界慢读、建连风暴、取消/关闭 drain；覆盖 Origin、帧/消息限制、握手/读写/空闲/总 deadline，拒绝 URL 明文 Key，WS body 的 background 不冒充 HTTP 后台；未知生成不重发，连接丢失不假续接，持久恢复不重复追加历史。
 - **协作影响：**保持现有 disabled 限制；HTTP/WS/后台的上下文恢复分别验收，资源代次所有者不分叉，收费在 P7/P8 按操作扩展。
 
+<details>
+<summary>FC-P6-HISTORY-001：共用加密历史 owner 与现有 HTTP 消费迁移（源码与本地受控验证完成）</summary>
+
+日期：2026-10-20。按本任务已获授权的同类契约变更记录后实施。本批先迁移已有运行消费者，持久 WS/跨模式接线另批验收。
+
+1. **层级/目录：**L1 `generation` 持有历史内容解封、封装、保留期/容量配置和既有持久端口调用；L3 `responses` 保留 HTTP 命令、上下文重建和 prepare/finish 用例，通过共用公开端口访问内容；`cmd/gateway` 构造注入。L0、网关发送、WS reader/轮次和后台均不变。
+2. **公开依赖：**新增候选 `responsehistory/v1`：固定 `Content`（沿用现有加密 JSON 字段）、`Repository` 的 `Read(ctx,binding,id)`、`Seal(row,content)`、`Fresh(id,kind,model,binding)`、`Apply(ctx,binding,changes,guards...)`；复用已冻结 state/identity/execution v1 值。Seal 仅编码加密，不写盘；Apply 仍由唯一 HistoryStore 执行当前权限、CAS、guards 和容量事务；端口仅供可信内部消费者，不是外部任意写入接口。登记不宣称冻结。
+3. **地基/兼容与回退：**不改冻结 state/v1、持久历史行、schema、AES-GCM AAD `TXAPI/response-history/v1/` 或 JSON 标签。已有密文继续读写，未知执行保留原有封锁。移除 L3 对加密实现的持有；原 `responses.NewHistory` 改接候选 Repository，仅影响组装和现有历史/后台/服务器测试的四个调用点。无新开关/端点/用户可见字段，OpenAPI 无需升版；可回退旧二进制且仍须遵守已存在 schema20/21 边界。
+4. **行为：**迁移既有 read/seal/fresh/apply，不改变完整上下文规则、目标 fingerprint、owner/创建 Key/当前模型权限、请求幂等、读限流、TTL、配额、删除和 unknown 不重放。原 JSON 字段及 omitempty 保留，明文临时缓冲继续 clear；不新增缓存、副本、历史扫描、worker 或密钥文件。
+5. **验证：**独立旧格式密文夹具→新 owner 读取→新写回→旧格式解封的双向兼容；AAD 篡改、容量及未激活密钥配置拒绝；现有 HTTP JSON/SSE/工具/续链/会话、跨 owner/Key、CAS/并发、删除、未知执行和重启/轮换回归；架构注册与公开签名快照、适用全量 Go/生产 smoke 与精确头 CI。
+6. **影响/退出：**现有 HTTP 历史必须真正消费新端口，不交空抽象；WS 持久父链仍未接入、不宣称跨连接/跨模式完成。后续消费者复用同一 owner/表/密钥与容量域，不将 HTTP L3 导入 L1，也不创建第二个历史权威。保持 disabled/strict、真实账号和费用授权边界。
+
+2026-10-20 本地受控验证：Windows GOARCH=amd64 build、vet、全量 Go 回归全部通过（架构47.158s、generation79.843s、Responses18.436s、store80.604s）；生产主进程 local.py 通过。旧格式 literal JSON/AAD 密文由新 owner 读取，新写回通过旧格式解封，并覆盖内容/目标 pin 保留、密钥轮换、Key 身份篡改与超长内容拒绝；现有 HTTP JSON/SSE、会话 CAS/未知恢复与服务器双端回归仍通过。公开快照仅新增候选 responsehistory/v1，精确头完整 CI 待验收。本批未接入 WS 持久续链，无真实 Provider 调用。
+
+</details>
+
 ### P7：后台/WS 用量与收费
 
 - **层级/目录：**L1 `internal/billing`、`gateway`、`generation`、`store` 及对应 `foundation/contracts`；L2 `internal/protocol`/`compat` 提取 usage；L3 既有查询/管理消费者。

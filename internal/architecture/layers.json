@@ -175,6 +175,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/responsehistory/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
   "minigateway/internal/foundation/contracts/responses/v1": {
     "layer": "L1",
     "owner": "foundation",
