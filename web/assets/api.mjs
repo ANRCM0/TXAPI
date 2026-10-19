@@ -57,6 +57,19 @@ export function ledgerMoney(value) {
   return `${units / 1000000000n}${fraction ? `.${fraction}` : ""}`;
 }
 
+export function ledgerAmounts(row) {
+  const amount = value => typeof value === "string" && /^\d+$/.test(value) ? ledgerMoney(value) : "Unknown";
+  const retained = ["reserved", "active", "pending"].includes(row.state);
+  const settled = row.state === "settled";
+  return {
+    originalReservation: amount(row.reserved_units),
+    retainedBudget: settled ? "0" : retained ? amount(row.reserved_units) : "Unknown",
+    finalCharge: settled ? amount(row.charge_units) : retained ? "Not finalized" : "Unknown",
+    providerEnvelope: amount(row.provider_held_units),
+    providerBudget: amount(row.provider_budget_units),
+  };
+}
+
 export function resolutionInput(values, id) {
   if (values.confirmation !== id) throw new Error("Enter the full billing ID to confirm this decision.");
   if (!["settle_usage", "cap_usage", "waive"].includes(values.action)) throw new Error("Choose a resolution action.");

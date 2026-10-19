@@ -1,6 +1,8 @@
 # Reference Adoption Status
 
-Verified on 2026-10-19 against master/bdcb307e18b029119f56f2cd4c8989318e60e51d (PR #42).
+Integration baseline verified on 2026-10-19: master/290ba5d (PR #43).
+The current R04a/R06c source integration is recorded separately in the
+[branch integration log](../history/branch-integration-20261019.md).
 This is a status and evidence index for the complete
 [R00-R07 design](../../REFERENCE-ADOPTION-DESIGN.md), not a replacement scope.
 The overall objective is incomplete. Accepted sub-batches do not complete
@@ -11,14 +13,17 @@ broader R05/R06, S5 or A03-A06 programs.
 Remote master bdcb307 was checked online during repository/document cleanup.
 Its complete Verify `39228308923` passed both check and delivery, including Linux
 race, contract/build/vet/format checks, main smoke and container recovery.
-OpenAPI is 0.11.0 with 111 operations; accepted main schema is 16.
+That baseline had OpenAPI 0.11.0 with 111 operations and schema 16.
+Its successor master/290ba5d passed independent Verify39240068432.
+The current integration keeps that HTTP contract and appends schema17.
 This is baseline evidence, not CI for later uncommitted R04a or documentation.
 
 The source evidence below retains PR #41's exact original head/tree and local
-validation. R04a account authorization source is now in a separate uncommitted
-worktree based on bdcb307, under its own concrete implementation decision.
-It is not integrated or accepted, does not route accounts for inference, and
-does not open real-account, charging or external Runtime gates.
+validation. The user requested consolidation of the preserved branches, resuming the
+existing R06c ledger presentation and integrating R04a operator-only account
+source under its concrete decision. Controlled command tests cross the real
+callback, signed identity, encrypted store, refresh and uncertain recovery.
+This does not open real-account, inference, charging or external Runtime gates.
 
 PR #41 final head6dc08bd9363cd6434c5f889ebdc709f747fd1060 passed automatic
 push39223342711 and PR39223350698. Its merged master/8ac00c9 has the identical
@@ -47,10 +52,10 @@ Exact earlier heads, failed runs and correction evidence remain in the
 | R01 | Versioned execution facts, native optional token breakdown and real HTTP/SSE consumers are implemented and accepted. Compatible older contracts remain. | New operations/profiles require a concrete consumer and contract decision; candidate additions are not automatically frozen. |
 | R02 | Native long-lived resource ownership, preparation/publication, retirement, drain, failed cleanup recovery and management/main wiring are implemented. | This does not implement a generic external Runtime or freeze every candidate port. |
 | R03a/b | Bounded mechanical WS execution and a default-off disabled-billing native MVP are accepted; terminal handoff is corrected through PR #39. | Real Provider and broader client/SDK compatibility remain unproved. Paid WS, persistent reconnect and arbitrary multiplexing are outside the selected MVP. |
-| R04 | Existing static API Key operation remains available. | R04a authorization/refresh/encrypted-account source has started in a separate uncommitted worktree. Integration/acceptance, inference use and full management remain incomplete; real-account acceptance is separate. |
+| R04 | Existing static API Key operation remains available. | R04a operator authorization/refresh/encrypted-account source is integrated in the current batch; exact CI/merge evidence is separate. Inference use, full management and real-account acceptance remain incomplete. |
 | R05a | Selected HTTP/SSE cached/reasoning facts, immutable selling quotation history and durable foreground metadata/read APIs are accepted. | This is partial dimensional integration, not posted dimensional charging or all-transport capture. Further profiles require separate slices; frontend displays remain deferred. |
 | R05b | Existing strict ledger, dual holds, immutable price/Provider snapshots and durable intent primitives are reusable foundations. | Full operation/failed-charge cost proof and costed native Responses/background/WS code remain incomplete. Disabled mode is still required for native background/WS. |
-| R06 | Background owner/admin controls, recent routing reads, configuration status/apply, quotation/usage reads and personal financial reads exist. | Account management depends on R04. R06c and broader frontend/product work remain deferred; the whole program is partial. |
+| R06 | Background owner/admin controls, recent routing reads, configuration status/apply, quotation/usage reads and personal financial reads exist. | Account management depends on R04. The user resumed the existing R06c ledger presentation slice for this integration. Broader frontend/product work remains deferred; the whole program is partial. |
 | R07 | Compile-time registrations remain the current extension mechanism. | External SDK/Runtime host/distribution code remains unimplemented. Entry requires at least two actual independently installable/upgradable consumers and insufficient compile-time registration. Examples/tests do not satisfy it. |
 
 No additional missing behavior was identified inside the concrete selected
@@ -113,7 +118,7 @@ Keep the complete objective open. Select another implementation slice when
 its documented prerequisite becomes true. R04a may finish the authorized source/
 controlled-validation increment; real-account/Provider acceptance remains separate.
 Other gates are independent full cost/operation evidence for R05b, the
-user's frontend resumption for R06c, or two actual independent consumers for
+user's separate authorization for broader frontend work, or two actual independent consumers for
 R07. Do not fabricate Provider invoices, infer zero unknown cost, prebuild a
 generic OAuth/Runtime platform, or relabel simulations to satisfy those gates.
 No release, tag, image publication or production readiness is asserted here.

@@ -1,12 +1,14 @@
 # 架构设计：中转内核、业务层与统一兼容层
 
-核对日期：2026-10-19，已合并代码基线 `master/bdcb307`。A1–A4、S6/M1、A01/A02/M2 和 FC-001 已独立验收；L0/L1/L2 v1 已冻结。FC-002 的 disabled 原生后台、R03 的 disabled 原生 WS 及后续路由/用量/管理子批已经交付。当前 HTTP 契约为 [OpenAPI 0.11.0 / 111 操作](openapi.json)，主线 schema v16。
+核对日期：2026-10-19，本次整合代码基线 `master/290ba5d`。A1–A4、S6/M1、A01/A02/M2 和 FC-001 已独立验收；L0/L1/L2 v1 已冻结。FC-002 的 disabled 原生后台、R03 的 disabled 原生 WS 及后续路由/用量/管理子批已经交付。当前 HTTP 契约为 [OpenAPI 0.11.0 / 111 操作](openapi.json)，R04a 本批追加 schema v17。
 
 三层表描述产品职责，生产编译依赖遵守 L0 内核、L1 基础框架、L2 兼容适配、L3 功能的四层规则。公开入口、版本、资源归属和 DoD 见 [地基接入清单](reference/foundation-integration-v1.md)。新增候选契约和功能不因既有冻结自动验收。
 
 后台与 WS 的运行边界分别见 [后台](reference/responses-background.md) 和 [WS](reference/responses-websocket.md)。默认关闭、billing disabled 的已验收子集不代表收费、背景父链、持久重连或真实 Provider/SDK 全兼容。完整 S5、A03–A06 和 R00–R07 目标继续开放，当前状态与排期统一见 [PLAN](PLAN.md)；本页下面具名阶段记录保留其原时点和范围，不另维护第二份活动计划。
 
 命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，共享边界见 [COLLABORATION.md](COLLABORATION.md)，历史精确提交/CI 见 [批次索引](PLAN.md#批次与验收记录)。
+
+R04a 在已具名方案内追加 core 机械 raw HTTP 与候选 upstreamauth/v1，通过纯协议、loopback 回调、现有 SQLite/AEAD 和本地命令形成消费者；不改变已有冻结签名或推理权威。候选端口尚未冻结，账号不进入调度/计费。源码和整合验收见 [记录](history/branch-integration-20261019.md)，运行/回退见 [指南](reference/upstream-accounts.md)。
 
 ## 设计总纲与当前差距
 

@@ -19,6 +19,10 @@
     "layer": "L2",
     "owner": "compat"
   },
+  "minigateway/internal/compat/oauthloopback": {
+    "layer": "L2",
+    "owner": "upstreamauth"
+  },
   "minigateway/internal/compat/responses/v1": {
     "layer": "L2",
     "owner": "compat",
@@ -207,6 +211,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/upstreamauth/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
   "minigateway/internal/foundation/httpoutput/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -222,6 +232,10 @@
     "owner": "foundation"
   },
   "minigateway/internal/foundation/runtime": {
+    "layer": "L1",
+    "owner": "foundation"
+  },
+  "minigateway/internal/foundation/upstreamhttp": {
     "layer": "L1",
     "owner": "foundation"
   },
@@ -293,6 +307,10 @@
     "layer": "L2",
     "owner": "protocol"
   },
+  "minigateway/internal/protocol/openaiauth": {
+    "layer": "L2",
+    "owner": "protocol"
+  },
   "minigateway/internal/protocol/responses": {
     "layer": "L2",
     "owner": "protocol"
@@ -344,6 +362,10 @@
   "minigateway/internal/usageconsole": {
     "layer": "L3",
     "owner": "usageconsole"
+  },
+  "minigateway/internal/upstreamidentity": {
+    "layer": "L1",
+    "owner": "upstreamauth"
   },
   "minigateway/tests/upstream/anthropic": {
     "layer": "L2",

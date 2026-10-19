@@ -1161,3 +1161,50 @@ those four Markdown files; every non-Markdown source is identical to accepted
 master/8ac00c9. Saved merge/CI/SDK JSON consistency checks passed. The exact
 check command and result are external validation-doc-status/document-check.json;
 no new local executable test or manual CI was run for this documentation batch.
+
+
+## R06c: Ledger Amount Meaning And Reconciliation Visibility
+
+The following checkpoint is historical. The user resumed its integration on 2026-10-19 when requesting consolidation of preserved branches. Current validation and merge status is separate.
+
+
+Started on tree-verified master/252c379 after the R02 corrective gate. The
+six-part scope, exact display projection, compatibility and rollback were recorded
+before UI edits in [R06c decision](REFERENCE-R06C-IMPLEMENTATION.md). It consumes
+existing ledger/v1 and administrator APIs without changing financial authority.
+The [amount guide](docs/reference/billing-console.md) distinguishes final charge,
+current retention, original reservation and provider envelopes. This is a new
+independently verified UI batch; it does not open R05 pricing/cost permissions.
+
+The user explicitly keeps OAuth account sources/acceptance closed. Subsequent
+work continues on R06c and R05a without claiming an OAuth account consumer.
+The user also permits borrowing mature reference code to accelerate follow-on
+work; fixed provenance, compatible integration and required notices remain part
+of each actual adoption. R06c reuses TXAPI's existing exact BigInt formatter and
+ledger authority; targeted upstream usage-parser reuse is being evaluated for
+R05a, without running the reference projects.
+
+### R06c Local Checkpoint And Deferral
+
+The user subsequently directed backend completion first and deferred frontend
+work, with codex-proxy-rs as the preferred future frontend reference. Preserve
+this batch on local branch feat/reference-r06-ledger without pushing, creating
+a PR or claiming remote acceptance. No further page expansion is scheduled now.
+
+Local Windows amd64/Go 1.26.3 checks passed: build/vet/tidy/module/dependency
+checks; full Go suite 1376 tests/subtests and 37 packages, six expected helper
+skips; main strict/encryption/forced-kill/background recovery smoke; five Node
+syntax checks; 12 API/amount cases; desktop/mobile billing browser matrix and
+visual screenshot review. Existing confirmation/financial-command, unknown/zero,
+waiver, legacy/malformed/max-int64 amounts, filters and role cases remain.
+
+An independent review found the old configured-currency explanation conflated
+account units and provider contract currency. The final UI now separates them
+without inferring historical currency or conversion. Final browser assertions,
+screenshots, syntax and the embedded Go build passed after this wording fix.
+The earlier full Go/vet/smoke evidence remains applicable to identical Go/module/
+HTTP sources; only explanatory UI strings and their browser regression changed.
+Raw logs and screenshots are in D:\my-project\TXAPI-references\validation-r06c.
+The final source manifest there identifies four non-Markdown source files.
+No Go/API/schema/financial behavior changed. Remote CI/merge remain unperformed
+because frontend integration is explicitly deferred.

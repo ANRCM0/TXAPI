@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 16
+const latestMigrationVersion = 17
 
 type dataMigration struct {
 	Version int
@@ -74,6 +74,10 @@ var dataMigrations = []dataMigration{
 	{Version: 16, Apply: func(tx *gorm.DB) error {
 		// No durable usage facts can be inferred from old logs or financial rows.
 		return nil
+	}},
+	{Version: 17, Apply: func(tx *gorm.DB) error {
+		// Static API Keys never imply an OAuth account or authorization grant.
+		return tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_account_identity ON managed_upstream_accounts(provider, issuer, subject, client_id)").Error
 	}},
 }
 

@@ -2,11 +2,15 @@
 
 本页记录可执行命令、运行约定与开发验证节奏。目标设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段状态见 [PLAN.md](PLAN.md)。
 
-2026-10-19 核对已合并基线 `master/bdcb307`：当前 OpenAPI `0.11.0` / 111 个操作、schema v16。A01/A02、FC-002 disabled 后台、R03 disabled 原生 WS 和后续用量/管理子批均已独立验收；完整收费与真实 Provider/客户端门槛仍开放。下文按功能记录运行约定，具名阶段版本/命令只对应其原时点，当前范围见 [状态矩阵](reference/reference-adoption-status.md)。
+2026-10-19 保留分支整合基于已验收 `master/290ba5d`：OpenAPI 保持 `0.11.0` / 111 个操作，R04a 追加 schema v17。A01/A02、FC-002 disabled 后台、R03 disabled 原生 WS 和后续用量/管理子批均已独立验收；完整收费与真实 Provider/客户端门槛仍开放。下文按功能记录运行约定，具名阶段版本/命令只对应其原时点，当前范围见 [状态矩阵](reference/reference-adoption-status.md)。
 
 [FC-001 地基收口](proposals/FC-001-foundation-contracts-v1.md) 已按用户批准顺序完成，代码基线 master/889ecbd 的最终头及合并后完整 CI 均通过，L0/L1/L2 v1 现为 frozen。后续按 [Agent 工作协议](../AGENTS.md#地基分层与-agent-工作协议) 声明六项边界，沿用 [公开入口/接入样例与快照流程](reference/foundation-integration-v1.md)；新增地基接口或签名/行为/权限/寿命变化仍先具名提案确认。纯说明文档只检查差异、链接与一致性，代码/契约按实际影响集中验证，保留现有完整 CI 和自动触发规则。
 
 S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确源码/命令/结果统一见 [PLAN](PLAN.md) 和 [S6 批次记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29`（PR #6）及其 [完整验证](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。A3/S6 原验收未新增公开任务/会话/原生 WS 产品 API；当前 A02 另行交付了会话/历史 API，完整 S5 和 S7 继续独立验收。
+
+## 本地账号命令与账本展示
+
+R04a 提供独立加密的上游账号授权、重新授权、列表、单次刷新与停用命令，尚未进入推理路由；启动、回调、候选契约、密钥及 schema17 回退见 [账号指南](reference/upstream-accounts.md)。R06c 恢复原账本展示切片，明确最终收费、当前占用、历史预留与 provider 包络，见 [金额说明](reference/billing-console.md)。精确源码和本次验收见 [整合记录](history/branch-integration-20261019.md)，原阶段记录继续保持各自原时点。
 
 ## R06a Task Console Increment
 
@@ -33,6 +37,16 @@ and rollback are defined in [routing diagnostics](reference/routing-diagnostics.
 The buffer is bounded process memory and cannot serve as a ledger or recovery
 source. Exact local and CI evidence belongs in the
 [batch log](../REFERENCE-ADOPTION-PROGRESS.md).
+
+## R06c Ledger Presentation Increment
+
+The existing administrator ledger separates final user charge, current retained
+budget, original reservation and conservative provider envelopes. Its wire API,
+unit scale and server-owned resolution permission remain unchanged. See
+[billing amount semantics](reference/billing-console.md) and
+[batch acceptance](../REFERENCE-ADOPTION-PROGRESS.md). An unsettled zero charge
+does not represent a finalized free request; actual provider cost is not supplied
+by this ledger contract.
 
 ## 工具与工作目录
 
