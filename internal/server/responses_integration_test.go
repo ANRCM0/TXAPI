@@ -122,7 +122,11 @@ func TestResponsesHTTPNativeJSONSSEAndDurableIdempotency(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				history, err := responsesapp.NewHistory(responsesapp.HistoryOptions{Store: persistence.History(st), Protector: protector, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 32, OwnerRecords: 16, InstanceBytes: 16 << 20, OwnerBytes: 8 << 20}})
+				historyRepository, err := generation.NewResponseHistory(generation.ResponseHistoryOptions{Store: persistence.History(st), Protector: protector, Retention: time.Hour, Limits: model.HistoryLimits{InstanceRecords: 32, OwnerRecords: 16, InstanceBytes: 16 << 20, OwnerBytes: 8 << 20}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				history, err := responsesapp.NewHistory(historyRepository)
 				if err != nil {
 					t.Fatal(err)
 				}

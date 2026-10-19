@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/41935c8e35b51f6c952111cf8b21b989e9749b00`，合并后Verify `39308700414` 已成功。WS用量 PR #60 精确头 `6b01de7ff6876dba28d1007296d4ca8058632887` 的 PR/push Verify `39311430847` / `39311424870` 均成功，并于2026-10-20合并为 `f6f78f16e07ef080f96ba96395dc51ba880f1793`；合并源码树与该精确头一致，合并后 Verify `39313120738` 仍在运行。后台用量切片已整合该主线，最终精确头CI另行验证。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/f6f78f16e07ef080f96ba96395dc51ba880f1793`，合并后 Verify `39313120738` 已成功。后台用量 PR #61 的精确头 `4253075421f0d1f8cd7e5fb86d0068b8b9e8daea` 两次 Verify `39313589888` / `39313582973` 的六项检查全部成功，已合并为 `34c54806c33d30fba68a5acd6456ac1256c1ed21`；合并后 Verify `39315329679` 仍运行中。本次共享历史 owner 切片整合该主线，精确头 CI 另验。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -34,7 +34,7 @@
 | 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；持久重连、跨模式续链、收费和任意多路复用未完成 |
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；真实账号未验收 |
-| 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已本地受控验证，最终精确头CI待验收；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
+| 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/SDK WS/Codex 完整组合未验收；账号管理待后端能力 |
 
 本批源码的 [OpenAPI](openapi.json) 为 `0.13.4` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
@@ -440,6 +440,22 @@ P5 当前门槛评估（2026-10-20）：唯一 active SIWC grant 的候选池恒
 - **验收：**跨 Key/账号拒绝、父 ID 失效、双下游同会话不误复用、握手/凭据变化、唯一 reader/Ping、有界慢读、建连风暴、取消/关闭 drain；覆盖 Origin、帧/消息限制、握手/读写/空闲/总 deadline，拒绝 URL 明文 Key，WS body 的 background 不冒充 HTTP 后台；未知生成不重发，连接丢失不假续接，持久恢复不重复追加历史。
 - **协作影响：**保持现有 disabled 限制；HTTP/WS/后台的上下文恢复分别验收，资源代次所有者不分叉，收费在 P7/P8 按操作扩展。
 
+<details>
+<summary>FC-P6-HISTORY-001：共用加密历史 owner 与现有 HTTP 消费迁移（源码与本地受控验证完成）</summary>
+
+日期：2026-10-20。按本任务已获授权的同类契约变更记录后实施。本批先迁移已有运行消费者，持久 WS/跨模式接线另批验收。
+
+1. **层级/目录：**L1 `generation` 持有历史内容解封、封装、保留期/容量配置和既有持久端口调用；L3 `responses` 保留 HTTP 命令、上下文重建和 prepare/finish 用例，通过共用公开端口访问内容；`cmd/gateway` 构造注入。L0、网关发送、WS reader/轮次和后台均不变。
+2. **公开依赖：**新增候选 `responsehistory/v1`：固定 `Content`（沿用现有加密 JSON 字段）、`Repository` 的 `Read(ctx,binding,id)`、`Seal(row,content)`、`Fresh(id,kind,model,binding)`、`Apply(ctx,binding,changes,guards...)`；复用已冻结 state/identity/execution v1 值。Seal 仅编码加密，不写盘；Apply 仍由唯一 HistoryStore 执行当前权限、CAS、guards 和容量事务；端口仅供可信内部消费者，不是外部任意写入接口。登记不宣称冻结。
+3. **地基/兼容与回退：**不改冻结 state/v1、持久历史行、schema、AES-GCM AAD `TXAPI/response-history/v1/` 或 JSON 标签。已有密文继续读写，未知执行保留原有封锁。移除 L3 对加密实现的持有；原 `responses.NewHistory` 改接候选 Repository，仅影响组装和现有历史/后台/服务器测试的四个调用点。无新开关/端点/用户可见字段，OpenAPI 无需升版；可回退旧二进制且仍须遵守已存在 schema20/21 边界。
+4. **行为：**迁移既有 read/seal/fresh/apply，不改变完整上下文规则、目标 fingerprint、owner/创建 Key/当前模型权限、请求幂等、读限流、TTL、配额、删除和 unknown 不重放。原 JSON 字段及 omitempty 保留，明文临时缓冲继续 clear；不新增缓存、副本、历史扫描、worker 或密钥文件。
+5. **验证：**独立旧格式密文夹具→新 owner 读取→新写回→旧格式解封的双向兼容；AAD 篡改、容量及未激活密钥配置拒绝；现有 HTTP JSON/SSE/工具/续链/会话、跨 owner/Key、CAS/并发、删除、未知执行和重启/轮换回归；架构注册与公开签名快照、适用全量 Go/生产 smoke 与精确头 CI。
+6. **影响/退出：**现有 HTTP 历史必须真正消费新端口，不交空抽象；WS 持久父链仍未接入、不宣称跨连接/跨模式完成。后续消费者复用同一 owner/表/密钥与容量域，不将 HTTP L3 导入 L1，也不创建第二个历史权威。保持 disabled/strict、真实账号和费用授权边界。
+
+2026-10-20 本地受控验证：Windows GOARCH=amd64 build、vet、全量 Go 回归全部通过（架构47.158s、generation79.843s、Responses18.436s、store80.604s）；生产主进程 local.py 通过。旧格式 literal JSON/AAD 密文由新 owner 读取，新写回通过旧格式解封，并覆盖内容/目标 pin 保留、密钥轮换、Key 身份篡改与超长内容拒绝；现有 HTTP JSON/SSE、会话 CAS/未知恢复与服务器双端回归仍通过。整合后台用量主干后，架构/generation/Responses/server 完整包级复验全部通过。公开快照仅新增候选 responsehistory/v1，精确头完整 CI 待验收。本批未接入 WS 持久续链，无真实 Provider 调用。
+
+</details>
+
 ### P7：后台/WS 用量与收费
 
 - **层级/目录：**L1 `internal/billing`、`gateway`、`generation`、`store` 及对应 `foundation/contracts`；L2 `internal/protocol`/`compat` 提取 usage；L3 既有查询/管理消费者。
@@ -466,7 +482,7 @@ P5 当前门槛评估（2026-10-20）：唯一 active SIWC grant 的候选池恒
 </details>
 
 <details>
-<summary>FC-P7-BG-USAGE-001：disabled 原生后台任务的持久用量元数据（源码与本地受控验证完成，精确头CI待验收）</summary>
+<summary>FC-P7-BG-USAGE-001：disabled 原生后台任务的持久用量元数据（精确头 CI 已通过并合并）</summary>
 
 后台的单次生成跨越提交、查询、恢复事件和取消 RPC；本切片在已有任务行及同一 fenced CAS 事务保留观察，不为轮询创建 usage invocation 或第二个资金/恢复权威。
 

@@ -57,8 +57,12 @@ func TestBackgroundPersistedDispatchWithoutDocumentRetrievesQueuedObject(t *test
 		t.Errorf("absent persisted dispatch document became content: %q", read.Document)
 	}
 	unused := &backgroundNullForeground{}
-	history, err := responses.NewHistory(responses.HistoryOptions{Store: persistence.History(f.st), Protector: f.s.keys,
+	historyRepository, err := NewResponseHistory(ResponseHistoryOptions{Store: persistence.History(f.st), Protector: f.s.keys,
 		Retention: time.Hour, Limits: state.HistoryLimits{InstanceRecords: 8, OwnerRecords: 4, InstanceBytes: 8 << 20, OwnerBytes: 4 << 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := responses.NewHistory(historyRepository)
 	if err != nil {
 		t.Fatal(err)
 	}
