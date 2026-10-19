@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createClient, channelInput, keyInput, userInput, list, ledgerMoney, resolutionInput } from "./api.mjs";
+import { createClient, channelInput, keyInput, userInput, list, ledgerMoney, ledgerAmounts, resolutionInput } from "./api.mjs";
 
 test("nullable lists and full-update payloads preserve restrictions", () => {
   assert.deepEqual(list(null), []);
@@ -40,6 +40,44 @@ test("ledger amounts preserve precision and decisions require explicit confirmat
   assert.throws(() => resolutionInput({ ...values, action: "waive" }, id));
   assert.deepEqual(resolutionInput({ ...values, action: "waive", prompt_tokens: "", completion_tokens: "" }, id),
     { action: "waive", reason: "verified", evidence: "receipt" });
+});
+
+test("ledger projection separates current retention, final charges and independent historical envelopes", () => {
+  const recorded = Object.freeze({ reserved_units: "100000001", charge_units: "1650000",
+    provider_held_units: "5760000", provider_budget_units: "100000000" });
+  for (const [state, retainedBudget, finalCharge] of [
+    ["reserved", "0.100000001", "Not finalized"],
+    ["active", "0.100000001", "Not finalized"],
+    ["pending", "0.100000001", "Not finalized"],
+    ["settled", "0", "0.00165"],
+    ["future-state", "Unknown", "Unknown"],
+    [undefined, "Unknown", "Unknown"],
+  ]) {
+    const row = Object.freeze({ ...recorded, state });
+    assert.deepEqual(ledgerAmounts(row), { originalReservation: "0.100000001", retainedBudget, finalCharge,
+      providerEnvelope: "0.00576", providerBudget: "0.1" }, String(state));
+  }
+  assert.equal(ledgerAmounts({ ...recorded, state: "pending", charge_units: "0" }).finalCharge, "Not finalized");
+  assert.deepEqual(ledgerAmounts({ state: "settled", reserved_units: "9223372036854775807", charge_units: "0",
+    provider_held_units: "9223372036854775807", provider_budget_units: "9223372036854775807" }), {
+    originalReservation: "9223372036.854775807", retainedBudget: "0", finalCharge: "0",
+    providerEnvelope: "9223372036.854775807", providerBudget: "9223372036.854775807",
+  });
+});
+
+test("missing or invalid ledger amounts remain unknown rather than becoming zero", () => {
+  for (const invalid of [undefined, null, "", "unknown", "-1", "1.5", " 0 ", 0, 100000001, false, {}]) {
+    const row = { state: "settled", reserved_units: invalid, charge_units: invalid,
+      provider_held_units: invalid, provider_budget_units: invalid };
+    assert.deepEqual(ledgerAmounts(row), { originalReservation: "Unknown", retainedBudget: "0", finalCharge: "Unknown",
+      providerEnvelope: "Unknown", providerBudget: "Unknown" }, String(invalid));
+    assert.equal(ledgerAmounts({ ...row, state: "pending" }).retainedBudget, "Unknown");
+  }
+  assert.deepEqual(ledgerAmounts({}), { originalReservation: "Unknown", retainedBudget: "Unknown", finalCharge: "Unknown",
+    providerEnvelope: "Unknown", providerBudget: "Unknown" });
+  assert.deepEqual(ledgerAmounts({ state: "reserved", reserved_units: "1", provider_held_units: "0",
+    provider_budget_units: "1000000000" }), { originalReservation: "0.000000001", retainedBudget: "0.000000001",
+    finalCharge: "Not finalized", providerEnvelope: "0", providerBudget: "1" });
 });
 
 test("API client separates sessions from call keys and warns about saved/pending config", async () => {

@@ -434,6 +434,7 @@ the local correction is not a candidate-contract freeze or full-goal completion.
 ### R02 Cleanup Integration
 
 Final head 135e6578a3d98e7412254564fa1efc81cf5bd8ce passed complete automatic
+<<<<<<< HEAD
 push 39193105666 and PR 39193153559 check/delivery. PR #34 merged as
 master/252c3792de2786045500073f84a2161e6c911e54 with the exact accepted source
 tree. Independent post-merge 39193688299 also passed check/delivery.
@@ -805,6 +806,56 @@ Independent code review found persisted dispatch Document:null can be returned
 as200 JSONnull. A separate corrective worktree owns its deterministic regression
 and acceptance; no successful retry is used to hide that defect. External
 SDK evidence is sdk-validation-2026-10-19. No real Provider/OAuth was called.
+=======
+push 39193105666 and PR 39193153559 (check/delivery SUCCESS). PR #34 merged as
+master/252c3792de2786045500073f84a2161e6c911e54; tree
+c856f65f1a605784a57344401fbd3adf03f5951e exactly matches the accepted head.
+Independent merged-main run 39193688299 also passed check/delivery SUCCESS.
+No manual redispatch, real Provider/SDK, charging or public-contract freeze.
+
+## R06c: Ledger Amount Meaning And Reconciliation Visibility
+
+Started on tree-verified master/252c379 after the R02 corrective gate. The
+six-part scope, exact display projection, compatibility and rollback were recorded
+before UI edits in [R06c decision](REFERENCE-R06C-IMPLEMENTATION.md). It consumes
+existing ledger/v1 and administrator APIs without changing financial authority.
+The [amount guide](docs/reference/billing-console.md) distinguishes final charge,
+current retention, original reservation and provider envelopes. This is a new
+independently verified UI batch; it does not open R05 pricing/cost permissions.
+
+The user explicitly keeps OAuth account sources/acceptance closed. Subsequent
+work continues on R06c and R05a without claiming an OAuth account consumer.
+The user also permits borrowing mature reference code to accelerate follow-on
+work; fixed provenance, compatible integration and required notices remain part
+of each actual adoption. R06c reuses TXAPI's existing exact BigInt formatter and
+ledger authority; targeted upstream usage-parser reuse is being evaluated for
+R05a, without running the reference projects.
+
+### R06c Local Checkpoint And Deferral
+
+The user subsequently directed backend completion first and deferred frontend
+work, with codex-proxy-rs as the preferred future frontend reference. Preserve
+this batch on local branch feat/reference-r06-ledger without pushing, creating
+a PR or claiming remote acceptance. No further page expansion is scheduled now.
+
+Local Windows amd64/Go 1.26.3 checks passed: build/vet/tidy/module/dependency
+checks; full Go suite 1376 tests/subtests and 37 packages, six expected helper
+skips; main strict/encryption/forced-kill/background recovery smoke; five Node
+syntax checks; 12 API/amount cases; desktop/mobile billing browser matrix and
+visual screenshot review. Existing confirmation/financial-command, unknown/zero,
+waiver, legacy/malformed/max-int64 amounts, filters and role cases remain.
+
+An independent review found the old configured-currency explanation conflated
+account units and provider contract currency. The final UI now separates them
+without inferring historical currency or conversion. Final browser assertions,
+screenshots, syntax and the embedded Go build passed after this wording fix.
+The earlier full Go/vet/smoke evidence remains applicable to identical Go/module/
+HTTP sources; only explanatory UI strings and their browser regression changed.
+Raw logs and screenshots are in D:\my-project\TXAPI-references\validation-r06c.
+The final source manifest there identifies four non-Markdown source files.
+No Go/API/schema/financial behavior changed. Remote CI/merge remain unperformed
+because frontend integration is explicitly deferred.
+>>>>>>> 28fc3ec (wip(console): preserve verified ledger presentation for later integration)
 
 ## 后续批次
 

@@ -34,6 +34,16 @@ The buffer is bounded process memory and cannot serve as a ledger or recovery
 source. Exact local and CI evidence belongs in the
 [batch log](../REFERENCE-ADOPTION-PROGRESS.md).
 
+## R06c Ledger Presentation Increment
+
+The existing administrator ledger separates final user charge, current retained
+budget, original reservation and conservative provider envelopes. Its wire API,
+unit scale and server-owned resolution permission remain unchanged. See
+[billing amount semantics](reference/billing-console.md) and
+[batch acceptance](../REFERENCE-ADOPTION-PROGRESS.md). An unsettled zero charge
+does not represent a finalized free request; actual provider cost is not supplied
+by this ledger contract.
+
 ## 工具与工作目录
 
 ### R03b-2 原生 WS 产品接线（disabled 子批已验收合并）

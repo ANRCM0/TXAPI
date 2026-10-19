@@ -1,4 +1,4 @@
-import { createClient, list, policyInput, userInput, keyInput, channelInput, ledgerMoney, resolutionInput } from "./api.mjs";
+import { createClient, list, policyInput, userInput, keyInput, channelInput, ledgerMoney, ledgerAmounts, resolutionInput } from "./api.mjs";
 
 const root = document.querySelector("#app");
 let user = null;
@@ -470,29 +470,35 @@ async function billingLedger() {
     [["pending", "Pending reconciliation"], ["", "All states"], ["settled", "Settled"], ["active", "In flight"], ["reserved", "Reserved"]]
       .map(([value, label]) => el("option", { value }, label)));
   const owner = el("input", { "aria-label": "Billing user ID", placeholder: "User ID (optional)", inputmode: "numeric" });
+  const key = el("input", { "aria-label": "Billing Key ID", placeholder: "Key ID (optional)", inputmode: "numeric" });
   const count = text("span", "", "muted");
   const previous = button("Previous", () => run(() => load(Math.max(0, offset - limit))));
   const next = button("Next", () => run(() => load(offset + limit)));
-  const filter = el("form", { class: "filter-bar" }, state, owner, el("button", { class: "button secondary" }, "Refresh ledger"));
+  const filter = el("form", { class: "filter-bar" }, state, owner, key, el("button", { class: "button secondary" }, "Refresh ledger"));
   async function load(targetOffset = offset) {
     const epoch = generation;
     const version = ++loadVersion;
     previous.disabled = next.disabled = true;
     const query = new URLSearchParams({ state: state.value, limit, offset: targetOffset });
     if (owner.value.trim()) query.set("user_id", owner.value.trim());
+    if (key.value.trim()) query.set("token_id", key.value.trim());
     try {
       const response = await api.request(`/api/admin/billing/reservations?${query}`);
       if (epoch !== generation || version !== loadVersion) return;
       const rows = list(response.data);
       offset = targetOffset;
       rowCount = rows.length;
-      host.replaceChildren(rows.length ? table(["Reservation / owner", "Model / price version", "State", "Hold / charge", "Actions"], rows, row => [
-        el("div", {}, text("code", row.id), text("span", `User ${row.user_id} / Key ${row.token_id}`, "block")),
-        el("div", {}, row.origin_model, text("code", row.price_version, "block")),
-        el("div", {}, badge(row.state), text("span", row.reason, "block")),
-        el("div", {}, `Hold ${ledgerMoney(row.reserved_units)}`, text("span", `Charged ${ledgerMoney(row.charge_units)}`, "block")),
-        button("Inspect", () => run(() => inspectBilling(row.id)), "quiet"),
-      ]) : empty("No reservations match this filter. Pending charges remain held until verified or explicitly waived."));
+      host.replaceChildren(rows.length ? table(["Reservation / owner", "Model / price version", "State", "Final user charge", "User budget retained", "Provider envelope / budget", "Actions"], rows, row => {
+        const amounts = ledgerAmounts(row);
+        return [
+          el("div", {}, text("code", row.id), text("span", `User ${row.user_id} / Key ${row.token_id}`, "block")),
+          el("div", {}, row.origin_model, text("code", row.price_version, "block")),
+          el("div", {}, badge(row.state), text("span", row.reason, "block")),
+          amounts.finalCharge, amounts.retainedBudget,
+          el("div", {}, `Envelope ${amounts.providerEnvelope}`, text("span", `Budget ${amounts.providerBudget}`, "block")),
+          button("Inspect", () => run(() => inspectBilling(row.id)), "quiet"),
+        ];
+      }) : empty("No reservations match this filter. Pending charges remain held until verified or explicitly waived."));
       count.textContent = `Rows ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;
     } catch (error) {
       if (epoch === generation && version === loadVersion) throw error;
@@ -505,7 +511,7 @@ async function billingLedger() {
   filter.addEventListener("submit", event => { event.preventDefault(); run(() => load(0)); });
   await load();
   return el("div", {}, pageHeader("Billing ledger", "Durable reservations and audited decisions, independent of access-log retention."),
-    panel(text("p", "Amounts use the configured currency. Pending is not free. Only expired pending holds in strict mode can be resolved.", "muted"),
+    panel(text("p", "User charges and holds use the account pricing unit. Provider envelopes use their recorded contract currency; no currency conversion or comparison is implied. Pending is not free: its budget remains retained until reconciliation. Settled reservations have released their user hold. Actual provider cost is not recorded here. Only expired pending holds in strict mode can be resolved.", "muted"),
       filter, host, actions(previous, count, next)));
 }
 
@@ -514,15 +520,28 @@ async function inspectBilling(id) {
   const response = await api.request(`/api/admin/billing/reservations/${encodeURIComponent(id)}`);
   if (epoch !== generation || !user) return;
   const { reservation: row, attempts, resolution, price_snapshot: snapshot } = response.data;
+  const amounts = ledgerAmounts(row);
   const dialog = el("dialog", { class: "editor billing-detail", "aria-label": "Billing reservation" });
   dialog.addEventListener("close", () => dialog.remove());
   dialog.append(heading("Billing reservation", row.id, button("Close", () => dialog.close())),
     text("p", `${row.origin_model} / User ${row.user_id} / Key ${row.token_id}`),
-    text("p", `State: ${row.state}. Hold: ${ledgerMoney(row.reserved_units)}. Charged: ${ledgerMoney(row.charge_units)}.`, "muted"),
-    text("p", `Provider attempt envelopes: ${ledgerMoney(row.provider_held_units)} / ${ledgerMoney(row.provider_budget_units)}. Cumulative upper bounds, not actual provider invoices or user holds.`, "muted"),
+    text("p", `State: ${row.state}.`, "muted"),
+    heading("User charge and budget", "Amounts use the account pricing unit. Final charges and current retention are separate from the original reservation."),
+    el("dl", { class: "facts" },
+      text("dt", "Final user charge"), text("dd", amounts.finalCharge),
+      text("dt", "Current retained user budget"), text("dd", amounts.retainedBudget),
+      text("dt", "Original user reservation"), text("dd", amounts.originalReservation)),
+    text("p", row.state === "settled" ? "The original user reservation has been released. Its recorded amount remains in this history." :
+      row.state === "pending" ? "Pending reconciliation retains the user budget. Unknown execution or usage does not mean a free request." :
+      ["reserved", "active"].includes(row.state) ? "The user budget remains retained and the final charge is not yet known." : "The retention and finalization state is unknown.", "muted"),
+    heading("Provider budget observations", "Cumulative upper bounds in the recorded contract currency, without conversion to the account pricing unit. These are not actual provider invoices or user holds. Settlement does not clear these observations."),
+    el("dl", { class: "facts" },
+      text("dt", "Cumulative provider envelope"), text("dd", amounts.providerEnvelope),
+      text("dt", "Provider request budget"), text("dd", amounts.providerBudget),
+      text("dt", "Actual provider cost"), text("dd", "Not recorded")),
     text("p", `Lease deadline: ${new Date(row.lease_until).toLocaleString()}. ${row.reason}`, "fine"),
-    heading("Upstream attempts", "Receipt cost uses the selling-price snapshot; provider envelopes use independent contracts. Neither is an additional user charge."),
-    table(["Attempt / target", "Outcome", "Tokens", "Receipt cost", "Provider envelope"], list(attempts), attempt => [
+    heading("Upstream attempts", "Usage at selling tariff prices the received usage with the historical user tariff. Provider envelopes use independent contracts. Neither is an additional user charge or actual provider invoice."),
+    table(["Attempt / target", "Outcome", "Tokens", "Usage at selling tariff", "Provider envelope"], list(attempts), attempt => [
       el("div", {}, `#${attempt.number} / Channel ${attempt.channel_id}`, text("span", `Credential ${attempt.credential_id} / ${attempt.actual_model} / ${attempt.group}`, "block")),
       `${attempt.status} / ${attempt.termination || attempt.state}`, `${attempt.prompt_tokens} + ${attempt.output_tokens}`,
       attempt.cost_known ? ledgerMoney(attempt.cost_units) : "Unknown (not free)",
@@ -533,7 +552,8 @@ async function inspectBilling(id) {
   if (resolution) {
     dialog.append(heading("Final administrator decision", `${resolution.action} / Admin ${resolution.actor_id}`),
       text("p", resolution.reason), text("p", `Evidence: ${resolution.evidence}`, "fine"),
-      text("p", `Calculated: ${resolution.cost_known ? ledgerMoney(resolution.calculated_units) : "Unknown"}. Charged: ${ledgerMoney(resolution.charge_units)}.`, "muted"));
+      text("p", `Tariff-priced usage: ${resolution.cost_known ? ledgerMoney(resolution.calculated_units) : "Unknown"}. Final user charge: ${ledgerMoney(resolution.charge_units)}.`, "muted"),
+      resolution.action === "waive" ? text("p", "The user charge was waived. This does not establish that upstream execution was free.", "muted") : null);
   } else if (row.can_resolve) {
     dialog.append(actions(button("Resolve held charge", () => {
       dialog.close();
