@@ -210,7 +210,8 @@ func deliverBackground(ctx context.Context, delivery app.Delivery, r bg.Receipt)
 		return
 	}
 	body := bytes.Clone(r.Document)
-	if len(body) == 0 {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		status := "queued"
 		if r.Stage == bg.StageTerminal {
 			status = "failed"

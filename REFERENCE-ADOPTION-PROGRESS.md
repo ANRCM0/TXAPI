@@ -784,3 +784,133 @@ do not accept the corrected source; final local and automatic CI run again.
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。
 OAuth 真实账号证据、Provider 成本证明及外部扩展的独立发布需求各有进入条件；模拟通过不替代真实验收。
+
+## Background Dispatch Null Read Correction
+
+Accepted baseline is R05a-3 master/ef7a1da5660a661fd90067b757e54af15ec91c1a,
+identical to final906f6e4 tree7b505d1a2cd152503d829112409a554d1f318e80.
+Complete automatic push39207672342/PR39207678441 and independent
+main39208662187 check/delivery all passed. This integration is confirmed,
+not inferred from the earlierf406503 code.
+
+A frozen actual main and locked official Python SDK, against loopback fixtures
+with no automatic retries, passed nine bounded compatibility subsets. Optional
+background retrieve returned None once. Its HTTP body was not captured at the
+failure time; later successful probes cannot accept it as stable or directly
+prove the original cause. External evidence is sdk-validation-2026-10-19.
+
+An independent source review found a deterministic path: Prepare persists a
+snapshot with nil json.RawMessage Document encoded asnull. Unmarshalling the
+existing encrypted JSON makes it a nonempty slice containingnull; the receipt
+and HTTP renderer previously treated it as an actual document and returned200
+JSONnull. The new real SQLite/BackgroundService/HTTP regression on unchanged
+production code reproduced this in3.448s (exit1). Harness alias/digest/history
+setup errors before this valid reproduction are not behavioral evidence.
+
+Only four Go files change: generation snapshot decoding normalizes JSONnull
+to absent, responses rendering uses its established synthetic-object fallback
+for absent/null/whitespace, and two focused test files protect persisted
+legacy Document:null and unchanged actual object bytes. No public signature,
+L0, schema16, encryption format, target/identity scope, state transition,
+financial behavior or retry changes. No background generation is resent.
+
+Owner tool command summaries (not disk raw logs): the two new regression groups
+passed in generation3.633s/responses1.304s, and all matching TestBackground groups
+passed in generation17.176s/responses1.772s. Actual-body preservation and existing
+terminal fallback remain covered. Root complete local checks and automatic final
+CI/merge/postmerge remain pending. No real Provider/account/invoice was called;
+no paid background/WS or general SDK compatibility is claimed.
+
+Final local correction source is exactly four Go files, LF-normalized digest
+54d43e65627c3df51444bb2f496fd8783468a39089ac4ef151b79fd7ef43f503.
+Windows Go1.26.3, GOARCH=amd64, CGO_ENABLED=0: go mod tidy plus semantic Git
+module diff, core/protocol dependency guard, go build ./..., go vet ./... and
+go test -json -count=1 ./... all pass. The full suite passed1602 tests/subtests
+in40 packages (7 expected process-helper skips;37 no-test packages),93.977s.
+Actual main smoke passed50.053s, including strict refusal/settlement,
+credential/encryption restart, forced kill, background recovery/SSE/cancel/TTL
+and durable foreground metadata recovery. The four changed Go files have no
+gofmt output; diff/link checks pass. Exact old public signatures/OpenAPI/schema
+and web/module bytes remain unchanged. Prior frontend evidence is reused only
+for that unchanged source; automatic CI still runs its normal checks.
+
+One initial external validation helper incorrectly read Windows line-ending
+status after go mod tidy as a module content change. git diff was empty; the
+helper now checks semantic diff and the complete run passed. No module was
+changed. Raw full validation output, source manifest and command/test summaries
+are outside Git in validation-background-null. Independent read-only review
+found no actionable regression in this correction. It preserves the old
+no-document status fallback and leaves unrelated status-mapping decisions out.
+Final automatic head/merge/postmerge checks remain pending at this checkpoint.
+
+
+### Full CI Found An Immediate-Next-Round WS Boundary Defect
+
+Correction headf8a139f31082b0be1507af431b3b804401e9b0f0,
+treebb245170cf72b5cc29e7d122aa7ffd498ced52b0, was pushed as PR #39. Complete
+push39212734118 and PR39212774462 both failed Linux full race in existing WS
+main integration tests. Both delivery jobs succeeded; architecture/API/build/vet
+and formatting steps passed. No CI rerun or merge bypass accepts this head.
+
+Push failed TestResponsesWSPublicationRetainsOldStreamAndRejectsOldSessionBoundary
+at responses_ws_lifecycle_test.go:72 withbusy instead of continuation_invalid.
+PR failed TestResponsesWSProductRoundAndContinuation at its immediate next
+request withbusy. Original failed logs and job JSON are retained in
+validation-background-null/ci-push-failed.log and ci-pr-failed.log. This is a
+second concrete ordering defect, not evidence that the null regression failed.
+
+The L3 reader rejects new input until Session.Execute returns. However, the
+terminal native frame can already be read by the client while that Execute is
+still doing local cleanup. The [preimplementation WS boundary decision](REFERENCE-WS-TERMINAL-BOUNDARY-IMPLEMENTATION.md)
+therefore keeps one reader/sequential worker and frozen contracts, with an
+L2-classified terminal boundary allowing exactly one next frame to wait for
+cleanup. Midstream overlap and extra frames remainbusy; delivery/cleanup failure
+or cancellation discards that boundary frame without starting a new generation.
+Final combined correction source must repeat full local and automatic CI gates.
+Earlierf8 local success remains tied to its source and is not reused for the new
+client/codec/main behavior. Official SDK fixed probe waits for that accepted head.
+
+
+The WS correction now implements a pure L2 IsTerminal(frame) predicate through
+the existing decoder and injects NewClientWithTerminal from main. Old NewClient
+and every registered contract declaration remain exact. The client state is
+idle/running/finishing/pending, with a single bounded boundary slot. Terminal
+classification happens before Write, because a peer may already receive its
+bytes before Write returns. The worker waits for prior Execute return; CAS
+cleanup cannot erase a reader's pending reservation. Midstream and excess input
+remainbusy, and failure/cancellation discards the pending input.
+
+A deterministic old-source proof uses an external Go overlay of f8a139f's
+unchanged client implementation plus a constructor-only shim forwarding the
+new factory to old NewClient. The test expectations remain unchanged. Both
+cleanup and terminal-write windows fail immediately withbusy (package0.863s,
+exit1); this is retained in terminal-boundary-old-probe/old-code-failure.log.
+The shim changes only test compilation and grants no terminal awareness.
+
+Owner command summaries: complete client/codec packages pass1.024s/1.065s.
+The actual-main ProductRoundAndContinuation, PublicationRetainsOldStream,
+RevocationAndForeignContinuation and DisconnectCancelsActiveGeneration groups
+each pass10 repetitions, combined10.503s. Exact command and raw output are in
+validation-background-null/terminal-boundary-main-directed.log. Independent
+read-only review finds no actionable issue across the five WS Go files and
+its tests. The original four background files are unchanged from testedf8.
+Final combined full checks run again in validation-response-boundaries-final;
+no earlierf8 pass is used to accept the newly changed client/codec/main source.
+
+
+Final combined correction is exactly9 Go files with LF-normalized digest
+51989daacf14e9ef697b837f77a075ddd5f477bdf6e00e9f4a37c7567a8adc75 on
+unchanged latest master/ef7a1da. Windows Go1.26.3 GOARCH=amd64 CGO_ENABLED=0:
+module tidy/content diff, dependency boundary, go build ./..., go vet ./...,
+full go test -json -count=1 ./... all pass. The final suite passed1613 tests/
+subtests across40 packages in92.230s (7 expected process helpers skip;37 no-test
+packages), followed by full actual-main smoke PASS57.343s. This repeats all
+checks for the combined source rather than borrowingf8's old pass.
+
+Nine changed Go files have no gofmt output. Committed old public declarations,
+OpenAPI0.10.0/108 operations, schema16, core, modules and frontend sources remain
+exact. Diff/doc links pass. Raw final logs, commands and source manifest are in
+validation-response-boundaries-final; originalf8 CI failures remain separate.
+Normal automatic final-head Linux race/container delivery and merge/main checks
+still gate acceptance. No manual workflow rerun, reduced regression or approval
+bypass is used. The optional fixed SDK probe will use that accepted binary.
