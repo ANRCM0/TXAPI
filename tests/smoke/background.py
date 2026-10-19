@@ -171,6 +171,35 @@ def background_workflow(gateway, work, env, service, ready, request):
             assert request(base + "/v1/responses/" + cancel_id + "?stream=true", token)[0] == 409
             assert request(base + "/v1/responses/" + public_id + "?stream=true&starting_after=-1", token)[0] == 400
             assert request(base + "/v1/responses/" + cancel_id, token, method="DELETE")[0] == 200
+            status, body = request(base + "/api/auth/login", payload={"username": "bg-smoke-admin", "password": "bg-smoke-password-only"})
+            assert status == 200
+            session = json.loads(body)["session_token"]
+            assert request(base + "/api/me/background", token)[0] == 401
+            status, body = request(base + "/api/admin/background", session)
+            assert status == 200 and len(json.loads(body)["data"]) == 2
+            for secret in (credential, "private-background-smoke-input", "resp_native_"):
+                assert secret.encode() not in body, "Task metadata exposed private content"
+            status, body = request(base + "/v1/responses", token, dict(payload, stream=False))
+            assert status == 200
+            console_id = json.loads(body)["id"]
+            if env.get("TXAPI_TASK_BROWSER"):
+                browser_env = dict(env, TXAPI_BASE_URL=base, TXAPI_TEST_ADMIN_USERNAME="bg-smoke-admin",
+                                   TXAPI_TEST_ADMIN_PASSWORD="bg-smoke-password-only", TXAPI_TEST_TASK_ID=console_id)
+                subprocess.run([env.get("TXAPI_TASK_BROWSER_NODE", "node"), str(Path(__file__).resolve().parents[1] / "browser" / "tasks-live.cjs")], env=browser_env, check=True, timeout=90)
+            status, body = request(base + "/api/me/background/" + console_id, session)
+            assert status == 200
+            revision = json.loads(body)["data"]["revision"]
+            status, body = request(base + "/api/me/background/" + console_id + "/cancel", session, {"revision": revision})
+            assert status == 200 and json.loads(body)["data"]["cancel_requested"]
+            deadline = time.monotonic() + 10
+            while True:
+                status, body = request(base + "/v1/responses/" + console_id, token)
+                if status == 200 and json.loads(body)["status"] == "cancelled":
+                    break
+                assert time.monotonic() < deadline, (status, body)
+                time.sleep(0.1)
+            assert state["posts"] == 3, "Console cancellation dispatched another generation"
+
         for mode in ("legacy", "strict"):
             config["billing"]["mode"] = mode
             config_file.write_text(json.dumps(config))
@@ -189,5 +218,5 @@ def background_workflow(gateway, work, env, service, ready, request):
                 assert db.execute("SELECT COUNT(*) FROM background_events").fetchone() == (0,)
                 assert db.execute("SELECT SUM(length(ciphertext)+length(snapshot)+reserved_bytes+replay_pending) FROM background_jobs").fetchone() == (0,)
                 assert db.execute("SELECT COUNT(*) FROM credentials WHERE api_key<>'' OR length(key_ciphertext)=0").fetchone() == (0,)
-        assert state["posts"] == 2, "Feature-off cleanup resubmitted a remote task"
+        assert state["posts"] == 3, "Feature-off cleanup resubmitted a remote task"
     print("PASS: actual main native background/SSE disconnect, SIGKILL restart/cursor, cancel/delete, charged refusal and feature-off TTL", flush=True)

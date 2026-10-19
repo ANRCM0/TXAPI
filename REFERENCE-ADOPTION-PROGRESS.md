@@ -208,6 +208,86 @@ this is not a full A04 or foundation-wide new freeze.
 No real Provider or official SDK test, release, tag, OAuth, billing, persistent
 reconnection or multiplexing is claimed. Full A03/A04 and R00-R07 stay open.
 
+## R06a: Background Task Console
+
+Base: master/2a6d162decaed5343322c13ae688c89f73408dc5 (PR #31 documentation
+merged; master run 39181190626 SUCCESS). The original 5506 worktree is untouched.
+See [six-part decision](REFERENCE-R06A-IMPLEMENTATION.md) and
+[operating contract](docs/reference/background-console.md).
+
+- L3 taskconsole consumes new candidate taskcontrol/v1 plus existing session
+  and rate ports. L2 adds five session-protected metadata/control operations.
+  Store rechecks active session/user/admin role inside resource transactions.
+- Owner list/detail and revision-CAS cancellation; administrator scope is
+  read-only across owners. No content/decrypt/provider-handle/claim-secret API.
+  Creation-Key revocation does not prevent owner cleanup of already-bound work.
+- Cancellation reuses the existing locked mutation/worker. Queued tasks stop
+  before send; remote tasks use bound cancellation; uncertain stays uncertain.
+  No redispatch, financial refund, second worker or migration. Schema remains v15.
+- OpenAPI 0.7.0 / 68 paths / 98 operations: all 93 old operations and schemas
+  remain exact. Public snapshot only appends 14 taskcontrol/v1 declarations;
+  all old declarations remain exact. The new port is not frozen.
+- Console paging, filters, exact string revisions, CAS refresh, owner/admin
+  metadata and explicit cancellation preserve existing session navigation.
+
+### Final Local Evidence
+
+2026-10-19, Windows/PowerShell, Go 1.26.3, GOARCH=amd64, GOOS=windows,
+CGO_ENABLED=0. Twenty-two non-Markdown sources, LF-normalized SHA-256
+`202beb3dbcebe4687bff48ec3fd0a031ac1a5c756826502a646e728bf4534a8d`.
+Manifest/raw logs/screenshots: D:/my-project/TXAPI-references/validation-r06a.
+
+| Executed check | Result |
+|---|---|
+| go build ./...; go vet ./...; go mod tidy and unchanged modules | PASS |
+| go test -json -count=1 ./... | 1345 tests/subtests and 36 packages PASS; six expected helper SKIP |
+| architecture/public signatures/OpenAPI and dependency filter | PASS |
+| touched-Go gofmt and git diff --check | PASS; unrelated Go untouched |
+| seven Node syntax checks; node --test web/assets/api.test.mjs | PASS, 10/10 API cases; reused from the preceding manifest as described below |
+| browser tasks.cjs, navigation.cjs, billing.cjs | PASS on local Chromium, desktop/mobile; reused unchanged-source evidence |
+| python -B tests/smoke/local.py --go go with TXAPI_TASK_BROWSER=1 | PASS, including actual-main task console desktop/mobile cancellation, old HTTP/SSE/strict and forced-kill/background recovery |
+
+SQLite tests cover owner isolation, role demotion/logout/disable, explicit
+metadata SELECTs excluding content, pagination and concurrent CAS. A real
+background worker cancels queued/remote tasks after creation-Key deletion
+without another submit. Browser cases cover failed-page retry, revisions above
+2^53, stale conflicts without automatic POST retry, administrator read-only and
+late detail response disposal. The actual-main browser uses isolated credentials
+and loopback upstream only; screenshots were visually inspected outside Git.
+
+The first full run exposed a snapshot serialization mismatch, not a changed old
+declaration: Python JSON output differed from Go's byte-reviewed snapshot. The
+Go-emitted candidate was compared semantically against all old declarations,
+then copied byte-for-byte. Architecture and the final full suite passed. Initial
+UI regressions found a long-ID mobile overflow; scoped wrapping fixed it before
+the final browser/main smoke. Temporary test compile/fixture naming errors were
+fixed before final verification; no old tests or CI gates were removed.
+
+Pre-commit security review reproduced a direct repository bypass for a
+soft-deleted user whose active status and session remained: Table/Scan did not
+apply the User model's soft-delete scope. The transaction now explicitly
+requires users.deleted_at IS NULL. The new regression rejects owner/admin
+list/detail and owner cancellation without changing the task revision or intent.
+After the fix, directed TaskControl tests, build/vet, full Go tests, tidy/module
+cleanliness, dependency checks, touched-Go formatting and the actual-main live
+browser/recovery smoke were rerun and passed. Final raw logs are
+tests-softdelete-final.jsonl and smoke-softdelete-live.log; the manifest is
+source-manifest-softdelete-final.json in the validation directory above.
+
+The prior local source manifest
+b72c60ff4b547a8e07aa448fb62058e0dec57e08531ec47bbe29cfe61a1571a0
+differs only in internal/store/task_control.go and its test. Node syntax/API
+and mock browser results therefore remain applicable: their scripts, web
+assets, HTTP contracts and public signatures are byte-identical after LF
+normalization. The actual-main smoke additionally revalidated the final server.
+Static checks confirmed all 93 old operations/schemas and 20 public package
+declarations unchanged, three smoke Python ASTs valid and 129 local links in
+the six batch Markdown files resolving. No extra workflow run was dispatched.
+
+Exact-head automatic Linux race/container CI, commit and merge remain pending.
+No real Provider, official SDK, billing expansion, OAuth, external Runtime, tag
+or release is claimed. R06's other pages and the full R00-R07 goal stay open.
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。

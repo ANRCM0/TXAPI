@@ -266,30 +266,35 @@ func (s *Store) CancelBackground(ctx context.Context, binding identity.Binding, 
 		if e != nil {
 			return e
 		}
-		if row.Stage == string(bg.StageTerminal) || row.CancelRequested {
-			out = backgroundSnapshot(row)
-			return nil
-		}
-		if row.Revision >= math.MaxInt64 {
-			return bg.ErrConflict
-		}
-		row.CancelRequested = true
-		row.Revision++
-		if row.Stage == string(bg.StageQueued) {
-			row.Stage = string(bg.StageTerminal)
-			row.Ciphertext = []byte{}
-			row.ReservedBytes = 0
-			row.ClaimHash = ""
-			row.ClaimUntil = 0
-		}
-		row.DueAt = 0
-		if e = saveBackground(tx, &row); e != nil {
+		if e = cancelBackgroundRow(tx, &row); e != nil {
 			return e
 		}
 		out = backgroundSnapshot(row)
 		return nil
 	})
 	return
+}
+
+// Both call-Key and session cleanup use this mutation under backgroundLock.
+// Updating only owned columns lets the console avoid reading encrypted content.
+func cancelBackgroundRow(tx *gorm.DB, row *model.BackgroundJob) error {
+	if row.Stage == string(bg.StageTerminal) || row.CancelRequested {
+		return nil
+	}
+	if row.Revision >= math.MaxInt64 {
+		return bg.ErrConflict
+	}
+	row.CancelRequested = true
+	row.Revision++
+	row.DueAt = 0
+	updates := map[string]any{"cancel_requested": true, "revision": row.Revision, "due_at": 0}
+	if row.Stage == string(bg.StageQueued) {
+		row.Stage = string(bg.StageTerminal)
+		row.Ciphertext, row.ReservedBytes, row.ClaimHash, row.ClaimUntil = []byte{}, 0, "", 0
+		updates["stage"], updates["ciphertext"], updates["reserved_bytes"] = row.Stage, []byte{}, 0
+		updates["claim_hash"], updates["claim_until"] = "", 0
+	}
+	return tx.Model(&model.BackgroundJob{}).Where("id = ?", row.ID).Updates(updates).Error
 }
 
 func (s *Store) ReadBackgroundEvents(ctx context.Context, binding identity.Binding, id string, after int64, limit int) (out []bs.Event, err error) {

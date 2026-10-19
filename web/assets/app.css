@@ -96,6 +96,8 @@ p { line-height: 1.65; }
 .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 15px; margin: 26px 0; font-size: .8rem; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.task-detail .section-heading > div { min-width: 0; max-width: 100%; }
+.task-detail .section-heading .muted { overflow-wrap: anywhere; }
 .badge { display: inline-block; font-size: .66rem; border-radius: 4px; padding: 5px 8px; background: #f4e7d1; color: #88602a; white-space: nowrap; }
 .badge.good { color: #2c6344; background: #e6efdc; }
 .table-wrap { overflow: auto; max-width: 100%; }

@@ -6,6 +6,14 @@
 
 S6/M1 已验收并经 PR #8 合并为 `master/ca009c2`，功能头 `9a6eaa2` 的 push/PR 与合并后 master 完整 CI 均通过；精确源码/命令/结果统一见 [PLAN](PLAN.md) 和 [S6 批次记录](history/implementation-s6.md)。A1–A4 原基线 `master/ccbfe29`（PR #6）及其 [完整验证](history/implementation-s5-a3.md#2026-10-18-a3-05a4-最终验收与共同基线) 保留；worker、加密记录、WS I/O、意图与默认关闭的持久 runtime 详见 [运行组件](reference/generation-runtime.md)。生产加密配置与停止后启用/轮换/恢复见 [密钥约定](reference/secret-storage.md)，端口/责任/支持范围和故障矩阵见 [基础层审计](reference/foundation-contracts.md)。A3/S6 原验收未新增公开任务/会话/原生 WS 产品 API；当前 A02 另行交付了会话/历史 API，完整 S5 和 S7 继续独立验收。
 
+## R06a Task Console Increment
+
+OpenAPI 0.7.0 adds five session-protected task metadata/control operations;
+old 93 operations/schemas and schema v15 are unchanged. R06a is implemented,
+not yet accepted by final CI/merge. Permissions, filters, string revisions,
+privacy and cancellation semantics: [task console guide](reference/background-console.md).
+Existing stage records below retain their original checkpoint scope.
+
 ## 工具与工作目录
 
 ### R03b-2 原生 WS 产品接线（disabled 子批已验收合并）

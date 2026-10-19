@@ -264,3 +264,12 @@ fixed temporary retention, cancellation and no blind POST replay are mandatory.
 See [background limits](responses-background.md) and [exact evidence](../history/implementation-fc002.md#fc-002-最终验收与冻结).
 It is not a strict-cost/charged-background/parent/WS/real-provider or SDK acceptance;
 full A03/M3 remains open. The historical S6 inventory above retains its original scope.
+
+## R06a Task Console
+
+Session-protected owner list/detail and CAS cancel plus administrator read-only
+metadata are implemented; final CI/merge pending. No encrypted task content,
+provider/claim handles or creation-Key content authority is exposed. The L3
+consumer uses candidate taskcontrol/v1 and the original cancellation mutation.
+See [API, privacy and runtime boundaries](background-console.md). Full R06,
+OAuth, new billing capabilities and external Runtime remain separate gates.

@@ -2,6 +2,16 @@
 
 核对日期：2026-10-18。本文是唯一活动开发计划；产品边界和最终分层见 [ARCHITECTURE.md](ARCHITECTURE.md)，操作命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，团队接线规则见 [COLLABORATION.md](COLLABORATION.md)。历史 P 系列方案不再用于排期；阶段证据见 [S0–S5 历史验收](history/acceptance-s0-s5.md)，后续实现、命令和合并事实见 [S5–A3 批次记录](history/implementation-s5-a3.md)。
 
+## R06a: Background Task Console
+
+2026-10-19: session-authorized owner metadata/list/detail and CAS cancellation,
+plus read-only administrator diagnostics, are implemented locally. Final-head
+CI and merge are pending. See [scope/ports](../REFERENCE-R06A-IMPLEMENTATION.md),
+[operating contract](reference/background-console.md) and
+[exact evidence](../REFERENCE-ADOPTION-PROGRESS.md). No content authority,
+new worker, billing permission, OAuth or Runtime gate is opened. Full R06 and
+R00-R07 are not complete.
+
 ## R03b-2 当前实施批次
 
 2026-10-19：默认关闭的原生 Responses WS disabled 子批已经 PR #30 合并为 master/a5c7a5f，功能头 81d2afe 的 push/PR 完整 CI 均通过；合并后 39165344718 也已 check/delivery SUCCESS。范围为 billing disabled、显式实际模型、官方 OpenAI endpoint、单连接串行文本/函数轮次与连接内最新 response ID 续接；不支持持久重连、后台、OAuth 或收费。运行边界见 [WS 指南](reference/responses-websocket.md)，六项工作协议见 [实施决策](../REFERENCE-R03B2-IMPLEMENTATION.md)，精确验证见 [吸收记录](../REFERENCE-ADOPTION-PROGRESS.md)。S5-03、完整 A03/A04 和 R00-R07 总目标仍未完成；下文历史时点不扩大本批验收。

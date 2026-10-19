@@ -434,6 +434,22 @@
     "var minigateway/internal/foundation/contracts/state/v1.ErrResponseConflict error",
     "var minigateway/internal/foundation/contracts/state/v1.ErrResponseUnavailable error"
   ],
+  "minigateway/internal/foundation/contracts/taskcontrol/v1": [
+    "const minigateway/internal/foundation/contracts/taskcontrol/v1.Version untyped string = \"1\"",
+    "type minigateway/internal/foundation/contracts/taskcontrol/v1.Access struct{Session string; Administrator bool}",
+    "type minigateway/internal/foundation/contracts/taskcontrol/v1.Page struct{Data []minigateway/internal/foundation/contracts/taskcontrol/v1.Task \"json:\\\"data\\\"\"; HasMore bool \"json:\\\"has_more\\\"\"}",
+    "type minigateway/internal/foundation/contracts/taskcontrol/v1.Query struct{Stage string; OwnerID uint; TokenID uint; Limit int; Offset int}",
+    "type minigateway/internal/foundation/contracts/taskcontrol/v1.Repository interface{Cancel(context.Context, minigateway/internal/foundation/contracts/taskcontrol/v1.Access, string, uint64) (minigateway/internal/foundation/contracts/taskcontrol/v1.Task, error); List(context.Context, minigateway/internal/foundation/contracts/taskcontrol/v1.Access, minigateway/internal/foundation/contracts/taskcontrol/v1.Query) (minigateway/internal/foundation/contracts/taskcontrol/v1.Page, error); Read(context.Context, minigateway/internal/foundation/contracts/taskcontrol/v1.Access, string) (minigateway/internal/foundation/contracts/taskcontrol/v1.Task, error)}",
+    "type minigateway/internal/foundation/contracts/taskcontrol/v1.Service interface{Cancel(context.Context, minigateway/internal/foundation/contracts/taskcontrol/v1.Access, string, uint64) (minigateway/internal/foundation/contracts/taskcontrol/v1.Task, error); List(context.Context, minigateway/internal/foundation/contracts/taskcontrol/v1.Access, minigateway/internal/foundation/contracts/taskcontrol/v1.Query) (minigateway/internal/foundation/contracts/taskcontrol/v1.Page, error); Read(context.Context, minigateway/internal/foundation/contracts/taskcontrol/v1.Access, string) (minigateway/internal/foundation/contracts/taskcontrol/v1.Task, error)}",
+    "type minigateway/internal/foundation/contracts/taskcontrol/v1.Task struct{ID string \"json:\\\"id\\\"\"; UserID uint \"json:\\\"user_id\\\"\"; TokenID uint \"json:\\\"token_id\\\"\"; Model string \"json:\\\"model\\\"\"; Stage string \"json:\\\"stage\\\"\"; Revision uint64 \"json:\\\"revision,string\\\"\"; CreatedAt int64 \"json:\\\"created_at\\\"\"; Deadline int64 \"json:\\\"deadline\\\"\"; ContentExpiresAt int64 \"json:\\\"content_expires_at\\\"\"; MetadataExpiresAt int64 \"json:\\\"metadata_expires_at\\\"\"; CancelRequested bool \"json:\\\"cancel_requested\\\"\"; ContentAvailable bool \"json:\\\"content_available\\\"\"; Deleted bool \"json:\\\"deleted\\\"\"; ReplayPending bool \"json:\\\"replay_pending\\\"\"; EventCount int64 \"json:\\\"event_count\\\"\"; LastSequence *int64 \"json:\\\"last_sequence\\\"\"; CanCancel bool \"json:\\\"can_cancel\\\"\"}",
+    "var minigateway/internal/foundation/contracts/taskcontrol/v1.ErrConflict error",
+    "var minigateway/internal/foundation/contracts/taskcontrol/v1.ErrForbidden error",
+    "var minigateway/internal/foundation/contracts/taskcontrol/v1.ErrInvalid error",
+    "var minigateway/internal/foundation/contracts/taskcontrol/v1.ErrNotFound error",
+    "var minigateway/internal/foundation/contracts/taskcontrol/v1.ErrRateLimited error",
+    "var minigateway/internal/foundation/contracts/taskcontrol/v1.ErrUnauthorized error",
+    "var minigateway/internal/foundation/contracts/taskcontrol/v1.ErrUnavailable error"
+  ],
   "minigateway/internal/foundation/contracts/text/v1": [
     "const minigateway/internal/foundation/contracts/text/v1.Version untyped string = \"1\"",
     "func minigateway/internal/foundation/contracts/text/v1.EstimateTokens(text string) int"

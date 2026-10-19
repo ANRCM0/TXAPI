@@ -50,6 +50,7 @@ import (
 	"minigateway/internal/server"
 	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
+	"minigateway/internal/taskconsole"
 )
 
 // EnvLogCleanupInterval 覆盖日志清理间隔（Go duration，如 "1h"）。
@@ -349,6 +350,7 @@ func main() {
 		Generation:    gateway.NewHTTPExecutor(gw),
 		TokenAuth:     authentication.NewTokenAuthenticator(st),
 		Control:       controlplane.New(persistence.Control(st)),
+		Tasks:         taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
 		Configuration: configurationService,
 		Ledger:        engine,
 		Metrics:       gw.Metrics(),
