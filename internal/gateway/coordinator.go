@@ -24,17 +24,26 @@ type Execution struct {
 // ExecuteTo owns one generation, including admission, attempts and finalization.
 // Result and decoder state are fresh even when callers reuse a parent context.
 func (g *Gateway) ExecuteTo(ctx context.Context, output core.Output, in Execution) RequestResult {
-	return g.executeTo(ctx, output, in, nil, false)
+	return g.executeFrom(ctx, output, in, nil, false, invocationForeground)
 }
 
 // ExecuteClaimedTo consumes an authenticated durable intent through the same
 // authorization/admission/routing/attempt/finalization chain as HTTP. The caller
 // refreshes the Principal and owns lease renewal, output and shutdown joining.
 func (g *Gateway) ExecuteClaimedTo(ctx context.Context, output core.Output, in Execution, claim model.GenerationClaim) RequestResult {
-	return g.executeTo(ctx, output, in, &claim, false)
+	return g.executeFrom(ctx, output, in, &claim, false, invocationClaimed)
 }
 
+// executeTo is the foreground adapter; claimed work retains its separate source.
 func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Execution, claim *model.GenerationClaim, httpAdmission bool) RequestResult {
+	source := invocationForeground
+	if claim != nil {
+		source = invocationClaimed
+	}
+	return g.executeFrom(ctx, output, in, claim, httpAdmission, source)
+}
+
+func (g *Gateway) executeFrom(ctx context.Context, output core.Output, in Execution, claim *model.GenerationClaim, httpAdmission bool, source invocationSource) RequestResult {
 	if httpAdmission {
 		ctx = access.NewHTTPGenerationContext(ctx)
 	} else {
@@ -54,6 +63,7 @@ func (g *Gateway) executeTo(ctx context.Context, output core.Output, in Executio
 		return *result
 	}
 	c := newOutputScope(ctx, output, result, in.SessionID)
+	c.source = source
 	c.responseID = in.ResponseID
 	if in.ResponseTarget != nil {
 		copy := *in.ResponseTarget
@@ -111,7 +121,17 @@ func (g *Gateway) execute(c *executionScope, in Execution) {
 	g.executeScope(c, request)
 }
 
+type invocationSource uint8
+
+const (
+	invocationUnspecified invocationSource = iota
+	invocationForeground
+	invocationClaimed
+)
+
 type executionScope struct {
+	source          invocationSource
+	usageRecording  *usageRecording
 	routeCapture    *routeCapture
 	ctx             context.Context
 	output          *executionOutput

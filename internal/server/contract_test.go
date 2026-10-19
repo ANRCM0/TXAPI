@@ -14,6 +14,7 @@ import (
 	"minigateway/internal/billing"
 	quotation "minigateway/internal/foundation/contracts/quotation/v1"
 	routes "minigateway/internal/foundation/contracts/routes/v1"
+	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	"minigateway/internal/model"
 	"minigateway/internal/server/api"
 	"minigateway/internal/server/middleware"
@@ -164,7 +165,10 @@ func TestOpenAPIMetadataFieldsMatchPublicDTOs(t *testing.T) {
 	cases := map[string]any{"User": model.User{}, "APIKey": model.Token{}, "Channel": model.Channel{}, "Credential": model.Credential{}, "Log": model.RequestLog{}, "Price": model.ModelPrice{}, "Ability": model.Ability{}, "UsageSummary": store.LogSummary{}, "ModelStat": store.ModelStat{}, "ChannelStat": store.ChannelStat{}, "PublicationStatus": api.PublicationStatus{}, "ConfigStatus": api.ConfigStatus{},
 		"BillingReservation": billing.ReservationView{}, "BillingAttempt": billing.AttemptView{}, "BillingResolution": billing.ResolutionView{}, "BillingReservationDetail": billing.ReservationDetail{}, "BillingResolutionInput": billing.ResolutionInput{}, "BillingResolutionUsage": billing.ResolutionUsage{},
 		"RoutingSelection": routes.Selection{}, "RoutingAttempt": routes.Attempt{}, "RoutingTrace": routes.Trace{}, "RoutingPage": routes.Page{},
-		"QuotationCurrent": quotation.Current{}, "SellingQuotation": quotation.Quote{}}
+		"QuotationCurrent": quotation.Current{}, "SellingQuotation": quotation.Quote{},
+		"UsageHistoryHost": usagehistory.HostFacts{}, "UsageHistorySummary": usagehistory.Summary{},
+		"UsageHistoryCounts": usagehistory.UsageView{}, "UsageHistoryAttempt": usagehistory.AttemptView{},
+		"UsageHistoryDetail": usagehistory.Detail{}, "UsageHistoryPage": usagehistory.Page{}}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
 			typ := reflect.TypeOf(value)

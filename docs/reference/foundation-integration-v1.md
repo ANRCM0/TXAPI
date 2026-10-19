@@ -2,6 +2,13 @@
 
 ## Reference Adoption Additions
 
+R05a-3 appends candidate `usagehistory/v1` trusted Recorder and session-authorized
+Repository/Service values. Existing execution/v1/v2/v3 and all earlier public
+declarations remain exact. Foreground host recording and real L3 usageconsole
+consume the new port; neither introduces financial or replay authority. See
+[durable metadata integration](usage-history.md) and the
+[implementation decision](../../REFERENCE-R05A3-IMPLEMENTATION.md).
+
 R05a-2 appends candidate `quotation/v1` Reader/Service values for version-pinned,
 read-only selling calculations. L1 billing owns arithmetic and history; L3
 quoteconsole consumes current sessions/shared admission, and the independent

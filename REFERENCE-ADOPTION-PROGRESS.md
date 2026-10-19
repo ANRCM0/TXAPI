@@ -670,6 +670,95 @@ source hashes remain exact to the passing full suite; only the Python consumer
 changed. This correction requires the new final head's full automatic CI,
 including Linux race and container delivery, before merge.
 
+### R05a-2 Integration
+
+Corrected final head `f794dfa` passed complete automatic push39201855006 and
+PR39201860012 check/delivery. PR #37 merged as
+`master/b30bd5760bfd9522709cd84a20baa7c97da21b9f`, with an identical source tree.
+Independent merged-main39202515426 also passed complete check/delivery, including
+Linux full race, actual-main smoke and container installation/upgrade/recovery.
+
+## R05a-3: Durable Invocation And Attempt Usage Metadata
+
+The backend-first batch builds on accepted master/b30bd57. Its six-part scope,
+candidate Recorder/Repository/Service and synchronous admission/failure policy
+were recorded before implementation in
+[R05a-3](REFERENCE-R05A3-IMPLEMENTATION.md). Operational behavior, exact nullable
+quantities, session permissions, retention and rollback are described in the
+[usage history guide](docs/reference/usage-history.md).
+
+L1 gateway records trusted foreground invocations through the existing execution
+path. The store appends migration16 and two bounded metadata tables, reusing the
+existing current-session transaction checker. L3 usageconsole consumes the new
+candidate usagehistory/v1 and existing current-session/shared-rate ports. OpenAPI
+0.10.0 appends four read-only owner/administrator operations; all104 previous
+operations/schemas and all24 previous public package declarations remain exact.
+No L0, Provider decoder, old price format, balance/hold owner or frontend changes.
+
+Capture defaults off and is accepted only with billing disabled. Native
+background, claimed durable execution and native WS are excluded by trusted
+internal source. Unknown counts remain null, exact zero remains "0", and a
+selling quotation digest is pinned before execution when available. Capture
+never derives v3 facts from old billing estimates or replays generation to
+repair persistence. Expired live records remain counted until orphan recovery
+or an ordinary terminal write; startup marks uncertain records interrupted.
+
+Focused real SQLite/fake-upstream and actual-main tests exercise current
+permissions, exact counts, distinct retry target/group bindings, quotation
+publication/restart and unchanged nonzero financial state. Gateway tests kill
+real child processes at three controlled persistence points; the separate
+actual-main smoke kills after its first delivered SSE chunk and explicitly
+does not claim the other two kill points. Final complete local and exact-head
+Linux/container acceptance are recorded separately after execution.
+
+The independent read-only review found a panic-path metadata defect: a current
+attempt that never returned could leave the invocation summary with the default
+500 or an earlier retry's result. The focused correction uses the conservative
+in-flight host facts while preserving actual delivery state and returned facts;
+it does not change the legacy execution Outcome. This includes pre-dispatch
+adapter and metadata handoff panics, while ordinary returned400/503 and a
+finishRequest panic after success preserve actual returned facts. Final
+verification follows the corrected source. New contracts remain candidate; full R05a/R05b and the
+overall reference-adoption goal are not declared complete.
+
+### R05a-3 Final Local Evidence
+
+2026-10-19, Windows PowerShell, Go1.26.3, GOARCH=amd64, CGO_ENABLED=0.
+The41 changed/new non-Markdown source manifest has LF-normalized digest
+`13f546b4353f91438b9efe62cde6d450f5aeb2c2fa2d20aefb799fc28fc0824f`.
+Raw logs, manifests and helper results are external in
+D:\my-project\TXAPI-references\validation-r05a3.
+
+| Actual Command / Check | Final Result |
+|---|---|
+| go build ./...; go vet ./... | PASS |
+| go test -json -count=1 ./... |1599 tests/subtests and40 test packages PASS; seven expected subprocess helper SKIP;37 packages without tests |
+| go mod tidy; unchanged modules; core/protocol dependency filter | PASS; no added third-party module |
+| architecture/visibility/public signatures and HTTP contracts | PASS in final complete suite; all24 prior public packages and104 prior operations/schemas remain exact; one candidate package and four read operations appended |
+|34 touched-Go gofmt; git diff --check; Python AST/JSON and batch Markdown links | PASS; unrelated source not formatted;137 local links resolve |
+| python -B tests/smoke/local.py --go go | PASS; actual-main JSON/SSE/session isolation, sealed restart, first-chunk kill without replay, capture disabled with retained reads, unchanged financial state and all existing strict/encryption/background recovery scenarios |
+| frontend syntax/API/browser | Reuse accepted d12123d/R06b evidence: web assets, browser scripts and every previous HTTP operation/schema are exact; final main smoke is independently rerun |
+
+The final directed gateway recording command passed in4.462s after the complete
+panic correction. Earlier risk/facts/three-process-kill combinations and the
+full initial1595-test source passed before that correction; their logs/manifests
+are preserved with before-final-panic-fix names and are not used as evidence
+for later source. The corrected source was rebuilt, vetted and completely tested
+again. A final independent read-only review found no actionable issue.
+
+Actual store owner command summaries (not invented raw logs): the complete store
+package passed in21.330s, upgrade/usage groups in7.702s and its later additional
+Begin/MayDispatch failure test in2.360s. The final complete suite includes them.
+The real independent L3 consumer covers JSON/SSE missing/null/zero/full/large
+and breakdown-only observations, one wire per generation, N-to-N+1 selling
+publication, owner/admin/revoked identity behavior, reopening SQLite and exact
+preservation of pre-existing financial state. No real Provider was called.
+
+Final automatic Linux race, main smoke, schema16 container upgrade/backup/restore,
+exact-head acceptance, merge-tree comparison and independent main CI remain
+integration gates. No workflow trigger, old regression or financial rule was
+removed or weakened. No image, tag or release is published by this batch.
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。

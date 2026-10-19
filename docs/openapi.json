@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.9.0",
+    "version": "0.10.0",
     "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported."
   },
   "servers": [
@@ -9617,6 +9617,729 @@
           }
         }
       }
+    },
+    "/api/me/usage-records": {
+      "get": {
+        "operationId": "me_usage_history_list",
+        "summary": "Owner durable usage metadata list",
+        "description": "Session-only read capability, never execution/replay/financial authority. Both L3 and repository refresh current session and role. SQL owner scope applies. Detail rejects all query parameters; list rejects repeated, empty, unknown and noncanonical numeric parameters. Five-second read deadline; shared owner rate 120/minute. Native WS/background/claimed execution is outside capture scope. No retained metadata is proof of nonexecution.",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "sealed",
+                "interrupted"
+              ]
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "description": "Canonical positive platform ID; no signs or leading zeros."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized retained metadata; quantities and bytes are exact decimal strings.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageHistoryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated, unknown or noncanonical query",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current login session required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current administrator required for administrator scope",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner query limit 120/minute; Retry-After: 60",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Usage metadata unavailable",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/usage-records/{id}": {
+      "get": {
+        "operationId": "me_usage_history_read",
+        "summary": "Owner durable usage metadata detail",
+        "description": "Session-only read capability, never execution/replay/financial authority. Both L3 and repository refresh current session and role. SQL owner scope applies. Detail rejects all query parameters; list rejects repeated, empty, unknown and noncanonical numeric parameters. Five-second read deadline; shared owner rate 120/minute. Native WS/background/claimed execution is outside capture scope. No retained metadata is proof of nonexecution.",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^usage_[a-f0-9]{32}$",
+              "maxLength": 38
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized retained metadata; quantities and bytes are exact decimal strings.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/UsageHistoryDetail"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated, unknown or noncanonical query",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current login session required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current administrator required for administrator scope",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner query limit 120/minute; Retry-After: 60",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Usage metadata unavailable",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not retained or not owned; both are indistinguishable.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/usage-records": {
+      "get": {
+        "operationId": "admin_usage_history_list",
+        "summary": "Administrator durable usage metadata list",
+        "description": "Session-only read capability, never execution/replay/financial authority. Both L3 and repository refresh current session and role. SQL owner scope applies. Detail rejects all query parameters; list rejects repeated, empty, unknown and noncanonical numeric parameters. Five-second read deadline; shared owner rate 120/minute. Native WS/background/claimed execution is outside capture scope. No retained metadata is proof of nonexecution.",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "sealed",
+                "interrupted"
+              ]
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "description": "Canonical positive platform ID; no signs or leading zeros."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000,
+              "default": 0
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "description": "Administrator-only exact owner filter."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized retained metadata; quantities and bytes are exact decimal strings.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageHistoryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated, unknown or noncanonical query",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current login session required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current administrator required for administrator scope",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner query limit 120/minute; Retry-After: 60",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Usage metadata unavailable",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/usage-records/{id}": {
+      "get": {
+        "operationId": "admin_usage_history_read",
+        "summary": "Administrator durable usage metadata detail",
+        "description": "Session-only read capability, never execution/replay/financial authority. Both L3 and repository refresh current session and role. SQL owner scope applies. Detail rejects all query parameters; list rejects repeated, empty, unknown and noncanonical numeric parameters. Five-second read deadline; shared owner rate 120/minute. Native WS/background/claimed execution is outside capture scope. No retained metadata is proof of nonexecution.",
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^usage_[a-f0-9]{32}$",
+              "maxLength": 38
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized retained metadata; quantities and bytes are exact decimal strings.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/UsageHistoryDetail"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated, unknown or noncanonical query",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current login session required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current administrator required for administrator scope",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared owner query limit 120/minute; Retry-After: 60",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Usage metadata unavailable",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not retained or not owned; both are indistinguishable.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12461,6 +13184,338 @@
           }
         },
         "description": "One read-only selling calculation. Known=false has empty amount_units, never a zero charge. Known zero has amount_units=0 as a string. Input partitions are disjoint and output already includes reasoning; one final upward rounding. This is not settlement, invoice, Provider spend, hold, execution permission or attestation that supplied quantities occurred."
+      },
+      "UsageHistoryHost": {
+        "type": "object",
+        "required": [
+          "phase",
+          "status",
+          "upstream_status",
+          "http_status",
+          "termination",
+          "protocol_complete",
+          "delivery_committed",
+          "bytes_written"
+        ],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": [
+              "",
+              "not_dispatched",
+              "dispatching",
+              "response_received"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 599
+          },
+          "upstream_status": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 599
+          },
+          "http_status": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 599
+          },
+          "termination": {
+            "type": "string",
+            "enum": [
+              "",
+              "success",
+              "upstream_error",
+              "deadline",
+              "canceled",
+              "client_write_error"
+            ]
+          },
+          "protocol_complete": {
+            "type": "boolean"
+          },
+          "delivery_committed": {
+            "type": "boolean"
+          },
+          "bytes_written": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Nonnegative int64 accepted-output bytes, never proof of client consumption."
+          }
+        },
+        "description": "Distinct host facts; zero/empty status/termination may be unknown. Invocation bytes include its coordination output, attempt bytes describe the attempt output."
+      },
+      "UsageHistorySummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "token_id",
+          "request_id",
+          "operation",
+          "model",
+          "stream",
+          "state",
+          "created_at",
+          "finished_at",
+          "expires_at",
+          "attempt_count",
+          "host"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^usage_[a-f0-9]{32}$",
+            "maxLength": 38
+          },
+          "user_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "token_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional correlation only; repeating it never authorizes generation replay."
+          },
+          "operation": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "sealed",
+              "interrupted"
+            ]
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "finished_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 11
+          },
+          "quotation_version": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Administrator-only optional selling digest captured before generation, never the charged ledger price."
+          },
+          "host": {
+            "$ref": "#/components/schemas/UsageHistoryHost"
+          }
+        },
+        "description": "Metadata sealed means saved, not successful generation, complete usage, known Provider spend or financial settlement. Owner views omit quotation_version."
+      },
+      "UsageHistoryCounts": {
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens",
+          "cached_input_tokens",
+          "cache_write_input_tokens",
+          "reasoning_output_tokens",
+          "completeness",
+          "source",
+          "profile"
+        ],
+        "properties": {
+          "input_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Canonical nonnegative int64 decimal string, maximum 9223372036854775807. Null is unknown; string 0 is known zero."
+          },
+          "output_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Canonical nonnegative int64 decimal string, maximum 9223372036854775807. Null is unknown; string 0 is known zero."
+          },
+          "total_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Canonical nonnegative int64 decimal string, maximum 9223372036854775807. Null is unknown; string 0 is known zero."
+          },
+          "cached_input_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Canonical nonnegative int64 decimal string, maximum 9223372036854775807. Null is unknown; string 0 is known zero."
+          },
+          "cache_write_input_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Canonical nonnegative int64 decimal string, maximum 9223372036854775807. Null is unknown; string 0 is known zero."
+          },
+          "reasoning_output_tokens": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "description": "Canonical nonnegative int64 decimal string, maximum 9223372036854775807. Null is unknown; string 0 is known zero."
+          },
+          "completeness": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "partial",
+              "complete"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "provider_reported"
+            ]
+          },
+          "profile": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "description": "Last accepted cumulative v3 snapshot, not SSE sums or legacy estimates. Complete base usage does not imply known breakdowns."
+      },
+      "UsageHistoryAttempt": {
+        "type": "object",
+        "required": [
+          "number",
+          "state",
+          "may_dispatch",
+          "host",
+          "usage"
+        ],
+        "properties": {
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 11
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "may_dispatch",
+              "observed",
+              "interrupted"
+            ]
+          },
+          "may_dispatch": {
+            "type": "boolean",
+            "description": "A conservative persisted pre-execution marker, not proof that upstream received bytes."
+          },
+          "channel_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "credential_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "actual_model": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "group": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "protocol": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "host": {
+            "$ref": "#/components/schemas/UsageHistoryHost"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageHistoryCounts"
+          }
+        },
+        "description": "Owner projections omit actual target identifiers/model/group/protocol. Unknown remains null even when an old decoder/log provides estimated counts."
+      },
+      "UsageHistoryDetail": {
+        "type": "object",
+        "required": [
+          "record",
+          "attempts"
+        ],
+        "properties": {
+          "record": {
+            "$ref": "#/components/schemas/UsageHistorySummary"
+          },
+          "attempts": {
+            "type": "array",
+            "maxItems": 11,
+            "items": {
+              "$ref": "#/components/schemas/UsageHistoryAttempt"
+            }
+          }
+        }
+      },
+      "UsageHistoryPage": {
+        "type": "object",
+        "required": [
+          "data",
+          "has_more",
+          "enabled",
+          "retention_seconds"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/UsageHistorySummary"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Startup capture flag; retained prior rows remain queryable while disabled. Does not attest that native WS/background/claimed paths were captured."
+          },
+          "retention_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2592000
+          }
+        }
       }
     }
   }

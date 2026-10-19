@@ -141,19 +141,33 @@ func (g *Gateway) executeScope(c *executionScope, req execution.Request) {
 	// panic 会被 Recovery 中间件吞掉，不走 return 之后的代码，
 	// 只有 defer 能在展开过程中执行到。
 	finished := false
+	finishRecording := func(bool) {}
+	recordingReturned := false
 	defer func() {
+		defer func() { finishRecording(recordingReturned) }()
 		if !finished {
 			g.finishRequest(c, req, startedAt, pre, body)
 		}
 	}()
 
+	completeRecording, recordingErr := g.beginUsageRecording(c, req)
+	if recordingErr != nil {
+		writeError(c, http.StatusServiceUnavailable, "usage recording is unavailable", "usage_recording_unavailable")
+		return
+	}
+	finishRecording = completeRecording
+
 	g.relay(c, req, allowedModels, g.attemptTimeout)
+	if c.usageRecording != nil {
+		c.usageRecording.interruptedHost = nil
+	}
 
 	finished = true
 	// 收尾放在 Relay 之后而不是用 defer 直接包：流式响应是在 Relay
 	// 内部边收边发的，函数返回时响应早已写完；非流式的 c.Data 也在
 	// Relay 内部完成。此时结算和记账不会影响客户端拿到的任何字节。
 	g.finishRequest(c, req, startedAt, pre, body)
+	recordingReturned = true
 }
 
 // preRequest 做请求前的额度检查与预扣。返回的快照要传给 finishRequest。

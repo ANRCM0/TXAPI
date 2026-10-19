@@ -195,6 +195,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/usagehistory/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
   "minigateway/internal/foundation/httpoutput/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -324,6 +330,10 @@
   "minigateway/internal/transport/websocket": {
     "layer": "L2",
     "owner": "transport"
+  },
+  "minigateway/internal/usageconsole": {
+    "layer": "L3",
+    "owner": "usageconsole"
   },
   "minigateway/tests/upstream/anthropic": {
     "layer": "L2",

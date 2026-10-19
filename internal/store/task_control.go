@@ -20,26 +20,43 @@ func (s *Store) TaskControl() task.Repository { return &taskControl{s} }
 
 const taskColumns = "id,public_id,user_id,token_id,model,stage,revision,created_at,deadline,content_expires_at,expires_at,cancel_requested,deleted,replay_pending,event_count,last_sequence"
 
-func taskSession(tx *gorm.DB, a task.Access) (model.User, error) {
+var (
+	errSessionUnauthorized = errors.New("current login session required")
+	errSessionForbidden    = errors.New("current administrator required")
+)
+
+// currentSessionScope is shared by session-authorized metadata repositories.
+func currentSessionScope(tx *gorm.DB, session string, administrator bool) (model.User, error) {
 	var user model.User
-	if !strings.HasPrefix(a.Session, "session-") || len(a.Session) > 256 {
-		return user, task.ErrUnauthorized
+	if !strings.HasPrefix(session, "session-") || len(session) > 256 {
+		return user, errSessionUnauthorized
 	}
 	// Table/Scan does not apply the User model's soft-delete scope.
 	result := tx.Table("users").Select("users.id,users.role,users.status").
 		Joins("JOIN sessions ON sessions.user_id = users.id").
-		Where("sessions.hash = ? AND sessions.expires_at > ? AND users.status = ? AND users.deleted_at IS NULL", access.Hash(a.Session), time.Now().Unix(), model.UserStatusActive).
+		Where("sessions.hash = ? AND sessions.expires_at > ? AND users.status = ? AND users.deleted_at IS NULL", access.Hash(session), time.Now().Unix(), model.UserStatusActive).
 		Limit(1).Scan(&user)
 	if result.Error != nil {
 		return user, result.Error
 	}
 	if result.RowsAffected != 1 || user.ID == 0 {
-		return user, task.ErrUnauthorized
+		return user, errSessionUnauthorized
 	}
-	if a.Administrator && user.Role != model.RoleAdmin {
-		return user, task.ErrForbidden
+	if administrator && user.Role != model.RoleAdmin {
+		return user, errSessionForbidden
 	}
 	return user, nil
+}
+
+func taskSession(tx *gorm.DB, a task.Access) (model.User, error) {
+	user, err := currentSessionScope(tx, a.Session, a.Administrator)
+	if errors.Is(err, errSessionUnauthorized) {
+		return user, task.ErrUnauthorized
+	}
+	if errors.Is(err, errSessionForbidden) {
+		return user, task.ErrForbidden
+	}
+	return user, err
 }
 
 func taskProjection(row model.BackgroundJob, admin bool) task.Task {

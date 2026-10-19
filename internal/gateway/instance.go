@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"minigateway/internal/access"
@@ -12,6 +13,8 @@ import (
 	execution "minigateway/internal/foundation/contracts/execution/v1"
 	executionv2 "minigateway/internal/foundation/contracts/execution/v2"
 	executionv3 "minigateway/internal/foundation/contracts/execution/v3"
+	quotation "minigateway/internal/foundation/contracts/quotation/v1"
+	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
 )
@@ -36,28 +39,35 @@ type Options struct {
 	Metrics          *metrics.Registry
 	LogRecorder      func(*dbmodel.RequestLog)
 	RouteDiagnostics bool
+	UsageHistory     usagehistory.Recorder
+	UsageQuotation   quotation.Reader
 	Picker           func([]dbmodel.Credential, map[uint]bool, string, time.Time) (*dbmodel.Credential, bool)
 	HealthReporter   func(*dbmodel.Credential, int, string)
 }
 
 type Gateway struct {
-	routeHistory   *routeHistory
-	admission      Admission
-	adaptors       map[string]execution.Adapter
-	operations     map[execution.Operation]execution.OperationRegistration
-	reg            *registry
-	executor       *core.Executor
-	retryTimes     int
-	attemptTimeout time.Duration
-	totalTimeout   time.Duration
-	billing        LegacyBilling
-	strictBilling  StrictBilling
-	billingMode    billing.Mode
-	limiter        access.Limiter
-	metrics        *metrics.Registry
-	logRecorder    func(*dbmodel.RequestLog)
-	picker         credentialPicker
-	healthReporter credentialHealthReporter
+	routeHistory    *routeHistory
+	admission       Admission
+	adaptors        map[string]execution.Adapter
+	operations      map[execution.Operation]execution.OperationRegistration
+	reg             *registry
+	executor        *core.Executor
+	retryTimes      int
+	attemptTimeout  time.Duration
+	totalTimeout    time.Duration
+	billing         LegacyBilling
+	strictBilling   StrictBilling
+	billingMode     billing.Mode
+	limiter         access.Limiter
+	metrics         *metrics.Registry
+	logRecorder     func(*dbmodel.RequestLog)
+	picker          credentialPicker
+	healthReporter  credentialHealthReporter
+	usageHistory    usagehistory.Recorder
+	usageQuotation  quotation.Reader
+	recordingMu     sync.Mutex
+	recordingClosed bool
+	recordingActive sync.WaitGroup
 }
 
 func New(opts Options) (*Gateway, error) {
@@ -69,6 +79,12 @@ func New(opts Options) (*Gateway, error) {
 	}
 	if err := opts.BillingMode.Validate(); err != nil {
 		return nil, err
+	}
+	if opts.UsageHistory != nil && nilInterface(opts.UsageHistory) || opts.UsageQuotation != nil && nilInterface(opts.UsageQuotation) {
+		return nil, fmt.Errorf("invalid usage history dependency: typed nil")
+	}
+	if opts.UsageHistory != nil && opts.BillingMode != billing.ModeDisabled {
+		return nil, fmt.Errorf("usage history requires disabled billing")
 	}
 	if opts.Admission != nil && nilInterface(opts.Admission) {
 		return nil, fmt.Errorf("invalid gateway admission: typed nil dependency")
@@ -122,7 +138,8 @@ func New(opts Options) (*Gateway, error) {
 		opts.Metrics = metrics.New()
 	}
 	g := &Gateway{admission: opts.Admission, adaptors: protocols, operations: operations, executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout,
-		billing: opts.Billing, strictBilling: opts.StrictBilling, billingMode: opts.BillingMode, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter}
+		billing: opts.Billing, strictBilling: opts.StrictBilling, billingMode: opts.BillingMode, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter,
+		usageHistory: opts.UsageHistory, usageQuotation: opts.UsageQuotation}
 	if err := g.initRegistry(opts.Channels); err != nil {
 		g.Close()
 		return nil, err
@@ -132,7 +149,15 @@ func New(opts Options) (*Gateway, error) {
 	}
 	return g, nil
 }
-func (g *Gateway) Close()                     { g.executor.Close() }
+func (g *Gateway) Close() {
+	if g.usageHistory != nil {
+		g.recordingMu.Lock()
+		g.recordingClosed = true
+		g.recordingMu.Unlock()
+		g.recordingActive.Wait()
+	}
+	g.executor.Close()
+}
 func (g *Gateway) Metrics() *metrics.Registry { return g.metrics }
 
 type Identity struct {
@@ -153,6 +178,8 @@ type AttemptResult struct {
 }
 
 type RequestResult struct {
+	UsageRecordID      string
+	RecordingState     string
 	ResponseTarget     ResponseTarget
 	ResponseStatus     string
 	UpstreamResponseID string

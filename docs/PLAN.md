@@ -60,9 +60,25 @@ registered signatures and strict format1 price/recovery behavior remain exact;
 OpenAPI 0.9.0 appends two operations. The new quotation/v1 contract is candidate.
 See the [six-part decision](../REFERENCE-R05A2-IMPLEMENTATION.md),
 [configuration and integration guide](reference/usage-quotations.md) and
-[verification record](../REFERENCE-ADOPTION-PROGRESS.md). Local and final-head CI
-acceptance are being completed; this batch is not yet accepted or merged.
+[verification record](../REFERENCE-ADOPTION-PROGRESS.md). Final head f794dfa
+passed complete push39201855006/PR39201860012 check/delivery. PR #37 merged as
+master/b30bd57 with the identical tree; independent main39202515426 also passed
+complete check/delivery. This accepts the read-only quotation batch.
 Durable observations, new charging dimensions and R05b remain later backend work.
+
+## R05a-3: Durable Foreground Usage Metadata
+
+The next backend batch starts on accepted master/b30bd57. Default-off capture is
+limited to billing-disabled foreground execution through the existing coordinator.
+It records server invocation IDs, per-attempt actual targets and nullable native
+quantities in two schema16 metadata tables. Session-authorized owner/admin APIs
+are read-only; quantities remain distinct from charges, spend and holds.
+Exact admission/failure/retention/close boundaries are recorded before source in
+the [decision](../REFERENCE-R05A3-IMPLEMENTATION.md) and
+[operating guide](reference/usage-history.md). Final local build/vet,1599 tests
+across40 packages and actual-main recovery smoke pass. Exact-head complete CI,
+merge and independent main acceptance are pending. Native WS/background/claimed
+capture, R05b charging and real OAuth/Provider/SDK gates are not opened.
 
 ## R03b-2 当前实施批次
 
