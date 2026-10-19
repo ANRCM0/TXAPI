@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/34c54806c33d30fba68a5acd6456ac1256c1ed21`，合并后 Verify `39315329679` 已成功。共享历史 owner PR #62 的精确头 `ef80be83ae22c4ff819d3ddaea1ab8b612b8e92f` 六项检查全部成功，已合并为 `2a6a0d05192bb0012909d06cadd7eccf9124b81b`；合并后 Verify `39318095241` 仍运行中。本批接入默认关闭的 WS 持久历史，精确头 CI 另验。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/2a6a0d05192bb0012909d06cadd7eccf9124b81b`，合并后 Verify `39318095241` 已成功。WS 持久续链 PR #63 的精确头 `3fa3a33e6a6999a16fb4ee60d6f2753835b412cd` 的 Verify `39320113678` / `39320047848` 均成功，已合并为 `b85d650418d6cc0779c3bc9c05299c7e2b2b1cde`；合并后 Verify `39321587728` 仍运行中。本批补充独立子进程强杀恢复证据，精确头 CI 另验。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -31,7 +31,7 @@
 | 基础推理 | models、Chat JSON/SSE、embeddings、声明范围的文本/function tools | 能力按操作、源/目标协议、传输、计费模式判断 |
 | Responses HTTP | 独立模型、JSON/SSE、owner/Key 幂等、加密历史、Conversations/items、续链 | 默认关闭；legacy/disabled 可用，strict 全部拒绝 |
 | 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复 | 默认关闭；仅 disabled、自包含文本/函数工具；收费和后台父链未完成 |
-| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；显式持久续链/跨模式本批本地受控验证通过，待精确头CI；真实重连/部署、收费和任意多路复用未验收 |
+| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；显式持久续链/跨模式已通过精确头CI并合并；真实重连/部署、收费和任意多路复用未验收 |
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；真实账号未验收 |
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
@@ -457,7 +457,7 @@ P5 当前门槛评估（2026-10-20）：唯一 active SIWC grant 的候选池恒
 </details>
 
 <details>
-<summary>FC-P6-WS-HISTORY-001：显式持久 WS 历史与 HTTP/WS 完整上下文续链（源码与本地受控验证完成）</summary>
+<summary>FC-P6-WS-HISTORY-001：显式持久 WS 历史与 HTTP/WS 完整上下文续链（精确头CI已通过并合并）</summary>
 
 日期：2026-10-20。按本任务同类契约变更的既有授权实施。机制核对 [OpenAI WebSocket mode - reconnect and recover](https://developers.openai.com/api/docs/guides/websocket-mode)：连接缓存丢失时可重新发送完整上下文。本批只对现有文本/function 单串行轮次接入本地持久恢复，不继承远端额外并发或池化能力。
 
@@ -468,9 +468,13 @@ P5 当前门槛评估（2026-10-20）：唯一 active SIWC grant 的候选池恒
 5. **验证：**默认关闭/配置依赖和非法 boolean；真实双端 socket 的持久文本/工具多轮、同连接与新连接、HTTP↔WS、SQLite 关闭重开和密钥轮换；每新轮次只有一次新 upstream create、完整输入/映射/无 native 父/上游 store=false，历史/usage 不重复；跨 owner/Key、权限撤销、父删除/TTL、变更目标/Key、并发两条分支不共享连接、容量满拒绝。覆盖 failed/incomplete、截断/取消/deadline/下游写失败、历史保存失败/原子CAS、unknown及伪造 busy 清空仍禁续链；现有 stateless WS/HTTP/strict/background 与架构/公开快照/OpenAPI 集中回归，最终精确头 Linux race/交付CI后合并。
 6. **协作与退出：**同一历史 owner/加密键/表/容量域，同时保留独立 usage 每轮记录和协议/机械终态；不新建 HTTP fallback、sender、后台恢复器、缓存或流水账。不扩大收费或真实账号授权；仍只受控夹具验证，真实 Provider/客户端部署和长时容量另行记录。本批必须交付生产组装的真实消费者与跨模式/重启证据，不能只新增接口。
 
-2026-10-20 本地受控证据：真实双端 socket 的 HTTP首轮→WS函数调用→HTTP函数结果→新WS连接续链通过，四个新生成各仅一次上游发送，公开本地ID/模型和完整工具关联保持，终态交付后立即HTTP读取可见；查询/删除不触发生成。生产组装组件关闭重建后，同连接父链与独立两条新连接分支通过，各行/连接/usage独立；SQLite owner关闭重开、旧密文/密钥轮换与四种已知终态另行通过。跨owner/Key、父删除/过期、凭据轮换、Key撤销/模型权限、容量满在发送前拒绝；取消保持uncertain且不续链，注入终态保存失败不发布终态、事务无部分成功，清空明文busy仍由加密active阻止未知重放，已知终态后下游写失败仍可读取真实结果。显式false/省略store维持既有连接内行为、无新历史行；开关非法boolean、缺HTTP owner和nil owner启动拒绝。Windows GOARCH=amd64 build/vet、全量Go回归均通过（cmd/gateway64.156s、architecture54.744s、generation81.686s、Responses14.891s、store79.775s），生产入口local.py通过。公开快照只在既有候选responsehistory/v1追加窄端口，OpenAPI0.13.5/117操作、schema21不变；最终精确头Linux race/交付CI待验收。新WS进程强杀矩阵、真实Provider/Codex组合、部署及长时容量仍分别开放；未执行真实Provider/OAuth或开放收费。
+2026-10-20 本地受控证据：真实双端 socket 的 HTTP首轮→WS函数调用→HTTP函数结果→新WS连接续链通过，四个新生成各仅一次上游发送，公开本地ID/模型和完整工具关联保持，终态交付后立即HTTP读取可见；查询/删除不触发生成。生产组装组件关闭重建后，同连接父链与独立两条新连接分支通过，各行/连接/usage独立；SQLite owner关闭重开、旧密文/密钥轮换与四种已知终态另行通过。跨owner/Key、父删除/过期、凭据轮换、Key撤销/模型权限、容量满在发送前拒绝；取消保持uncertain且不续链，注入终态保存失败不发布终态、事务无部分成功，清空明文busy仍由加密active阻止未知重放，已知终态后下游写失败仍可读取真实结果。显式false/省略store维持既有连接内行为、无新历史行；开关非法boolean、缺HTTP owner和nil owner启动拒绝。Windows GOARCH=amd64 build/vet、全量Go回归均通过（cmd/gateway64.156s、architecture54.744s、generation81.686s、Responses14.891s、store79.775s），生产入口local.py通过。公开快照只在既有候选responsehistory/v1追加窄端口，OpenAPI0.13.5/117操作、schema21不变；PR #63 的最终精确头完整CI已通过并合并。该切片未覆盖的WS进程强杀矩阵另批补充；真实Provider/Codex组合、部署及长时容量仍分别开放；未执行真实Provider/OAuth或开放收费。
 
 </details>
+
+P6 本批验证范围（2026-10-20）：在 `cmd/gateway` 增加独立子进程的持久 WS 强杀回归。六项边界：①只写测试与本方案，复用生产组装函数和真实 socket/SQLite；②消费既有 responsehistory/v1、usagehistory/v1、execution v2 与当前身份/历史查询端口，不新增或冻结端口；③生产实现、L0、迁移、配置和权限不变，故障门闩仅在测试依赖适配器；④分别在发送前、上游已收但响应 ID 未读、历史终态已提交但未交付、交付后用量未收尾强杀并 Wait，再以相同数据/密钥重新组装进程；⑤核对完整上下文新生成、不可重放 unknown、历史/usage 单行与重复恢复幂等、已知 Token 保留/未知不补零、资金事实不变，适用完整 CI 验收；⑥只证明受控生产组件组装进程的恢复，不冒充真实 Provider、未替换的实际 main 二进制、后台/strict 财务强杀矩阵或真实部署验收。复用现有测试资源工厂，不给生产增加端点重定向或故障开关。
+
+2026-10-20 本批本地证据：四种边界均执行真实 Process.Kill + Wait，同一 SQLite/密钥启动恢复进程，再启动第三个进程复验重复恢复。发送前实际 create 为零，其余边界为一次；unknown 查询返回冲突且父链续接不触发发送，已知终态可读取，并只为明确的新轮次发送一次完整上下文。交付后用量未收尾场景由客户端先读取 completed 再强杀，重启后仍保留已观察的 completed/3 Token；其余未知 Token 不补零。旧密文/版本、新历史/usage 行数、资金快照及上游实际请求数保持预期。Windows GOARCH=amd64 的完整 cmd/gateway 回归通过（51.549s），该包 go vet 通过；生产源码与 PR #63 相同，既有全量 build/vet/Go/生产入口证据按原提交复用，新测试的最终精确头 Linux race 与完整交付 CI 另验。
 
 ### P7：后台/WS 用量与收费
 
