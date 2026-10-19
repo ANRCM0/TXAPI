@@ -17,9 +17,10 @@ import tempfile
 import threading
 import time
 
-from stream_baseline import (CLIENT_KEY, UPSTREAM_KEY, Fixture, Resources, call,
+from stream_baseline import (CLIENT_KEY, UPSTREAM_KEY, Fixture, call,
                              clock, events, git, summarize)
 from local import ROOT, ports, ready, service
+from process_resources import RESOURCE_SCOPE, Resources
 
 
 class CapacityFixture(Fixture):
@@ -177,8 +178,9 @@ def main():
         parser.error("workers 1..16, requests 1..200, rounds 1..4, total/target <=3200, delay 1..100ms, deadline 3..15s")
     clean = {k: v for k, v in os.environ.items() if not k.upper().startswith(("GATEWAY_", "TXAPI_"))}
     clean["GOARCH"] = "amd64"
-    report = {"schema": 1, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
+    report = {"schema": 2, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
               "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+              "resources_harness_sha256": hashlib.sha256((ROOT / "tests/smoke/process_resources.py").read_bytes()).hexdigest(),
               "stream_harness_sha256": hashlib.sha256((ROOT / "tests/smoke/stream_baseline.py").read_bytes()).hexdigest()},
               "environment": {"platform": platform.platform(), "python": platform.python_version(),
                               "logical_cpus": os.cpu_count(), "goarch": "amd64",
@@ -187,7 +189,7 @@ def main():
                   "auth": "production API Key", "billing": "disabled", "retries": 0,
                   "connection_policy": "persistent per worker/phase; close on failure and at phase end",
                   "fixture_backlog": 64, "fixture_events": len(events()),
-                  "resource_scope": "Linux /proc only; harness clients and fixture share PID; sampled peaks are lower bounds; overload/direct/gateway phase intervals are separate",
+                  "resource_scope": RESOURCE_SCOPE + "; overload/direct/gateway phase intervals are separate",
                   "limits": "bounded closed-loop workload, not maximum capacity, long-duration soak, TLS/H2 or Provider acceptance"},
               "waves": [], "overload": [], "resources": [], "correctness_failures": []}
     fixture = CapacityFixture(args.event_delay_ms / 1000)
