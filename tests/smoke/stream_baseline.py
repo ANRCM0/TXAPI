@@ -108,6 +108,18 @@ class FixtureHandler(BaseHTTPRequestHandler):
                     self.wfile.write(("%x\r\n" % len(event)).encode() + event + b"\r\n")
                 self.wfile.flush()
                 record["events"].append({"index": index, "write_start_ns": start, "flush_return_ns": clock()})
+                if mode == "cancel" and index == 2:
+                    # A real business event precedes the coordinated cancel.
+                    # Comments keep the socket observable without a terminal.
+                    record["cancel_wait_started"] = True
+                    until = time.monotonic() + 5
+                    while not self.server.stop_event.wait(.02):
+                        if time.monotonic() >= until:
+                            record["cancel_wait_expired"] = True
+                            raise TimeoutError("cancel was not observed")
+                        self.wfile.write(b"10\r\n: cancel-probe\n\n\r\n")
+                        self.wfile.flush()
+                    return
                 if index < len(events()) - 1 and self.server.stop_event.wait(self.server.delay):
                     break
             self.wfile.write(b"0\r\n\r\n")
@@ -118,7 +130,11 @@ class FixtureHandler(BaseHTTPRequestHandler):
             record["finished"] = True
 
 
-def call(connection, key, fixture, deadline_seconds, mode="normal"):
+class ClientCanceled(Exception):
+    """The probe deliberately shut down its exact socket after the barrier."""
+
+
+def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barrier=None):
     tag = uuid.uuid4().hex
     payload = json.dumps({"model": "baseline-model", "stream": True,
                           "messages": [{"role": "user", "content": tag + ":" + mode}]})
@@ -195,6 +211,16 @@ def call(connection, key, fixture, deadline_seconds, mode="normal"):
                         if sample["first_effective_text_ns"] is None:
                             sample["first_effective_text_ns"] = received - started
                         text.append(delta)
+                        if cancel_barrier is not None:
+                            if text != [TEXT[0]]:
+                                raise ValueError("cancel_content_mismatch")
+                            cancel_barrier.wait(timeout=min(2, max(.001, (deadline - clock()) / 1e9)))
+                            sample["cancel_requested_ns"] = clock()
+                            with contextlib.suppress(OSError):
+                                request_socket.shutdown(socket.SHUT_RDWR)
+                            request_socket.close()
+                            connection.close()
+                            raise ClientCanceled()
                     if choice.get("finish_reason") == "stop":
                         finish = True
                 if "usage" in chunk:
@@ -204,6 +230,11 @@ def call(connection, key, fixture, deadline_seconds, mode="normal"):
         if len(sample["events"]) != len(events()):
             raise ValueError("event_count_mismatch")
         sample["success"] = True
+    except ClientCanceled:
+        sample["failure"] = "client_cancel"
+    except threading.BrokenBarrierError:
+        sample["failure"] = "cancel_barrier"
+        connection.close()
     except (OSError, ValueError, http.client.HTTPException) as error:
         sample["failure"] = "timeout" if isinstance(error, (TimeoutError, socket.timeout)) else str(error)[:160]
         connection.close()
@@ -217,6 +248,8 @@ def call(connection, key, fixture, deadline_seconds, mode="normal"):
         if response is not None:
             response.close()
     sample["elapsed_ns"] = clock() - started
+    if cancel_barrier is not None:
+        sample["cancel_protocol_observation"] = {"text": text, "finish": finish, "done": done, "usage": usage}
     # A timed-out client must not leave the fault-injection handler overlapping
     # the next measured request. This drain is excluded from request latency.
     drain_until = time.monotonic() + 2
@@ -233,6 +266,12 @@ def call(connection, key, fixture, deadline_seconds, mode="normal"):
         sample["upstream_handler_finished"] = all(item["finished"] for item in attempts)
         sample["drain_failure"] = not sample["upstream_handler_finished"]
         sample["upstream_write_errors"] = [item["error"] for item in attempts if item["error"]]
+        if cancel_barrier is not None:
+            sample["upstream_cancellation_observed"] = (
+                len(attempts) == 1 and attempts[0]["finished"]
+                and attempts[0].get("cancel_wait_started", False)
+                and not attempts[0].get("cancel_wait_expired", False)
+                and attempts[0]["error"] is not None)
         sent = list(attempts[0]["events"]) if len(attempts) == 1 else []
     sample["upstream_events"] = sent
     if sample["drain_failure"]:
