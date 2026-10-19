@@ -55,3 +55,13 @@
 - 新命令消费者、12 项 Node API/金额用例与账本桌面/手机浏览器回归通过；受控命令只调用模拟 token/JWKS 和真实 loopback，无真实 OAuth/推理请求。
 - 仅格式化本批 29 个 Go 文件。66 份 Markdown / 565 个本地链接锚点、交付脚本 Python AST、3 项变更 JS 语法和 `git diff --check` 通过。OpenAPI/go.mod/go.sum 不变；全部旧公开声明保留，原 S5 快照中的 30 个测试名在当前包均存在。
 - 主线集成基线重新在线核对为 `290ba5d`，其合并后 Verify `39240068432` 全部成功，仅作为原基线证据。本批最终提交的自动 push/PR Linux 全量 race、冒烟及容器交付仍须独立通过后才合并；不手动 dispatch 或借用旧绿灯。
+
+### 最终 CI、合并与清理
+
+- 最终整合头 `b30f4d26644a2fd6fc70984889868f1fb2348574` 在基线 `290ba5d` 上通过自动 [push Verify 39244005306](https://github.com/ANRCM0/TXAPI/actions/runs/39244005306) 和 [PR Verify 39244013899](https://github.com/ANRCM0/TXAPI/actions/runs/39244013899)，两次 check/delivery 均成功，包含依赖/契约、构建、vet、格式、Linux 全量 race、冒烟和容器交付。
+- [PR #44](https://github.com/ANRCM0/TXAPI/pull/44) 于 2026-10-19 合并为 `master/03c40011273dc9407ae07b7b6d2d2e31a62568c7`。`git diff --exit-code b30f4d2 03c4001` 无差异；两头 tree 均为 `895192e373e6a431cf48524b0434b7b3edacd596`。
+- 合并后精确头 `03c4001` 的独立 [master Verify 39245348032](https://github.com/ANRCM0/TXAPI/actions/runs/39245348032) 也完整成功，check/delivery 均通过。该记录与合并前 CI 分开，不把旧基线或同树判断代替主线实际结果。
+- 用户确认 5506 与 R04 工作树在整合期间被外部删除属于预期清理；本批随后通过 `git worktree remove` 移除没有 tracked/untracked/ignored 改动的 background-null 工作树。最终只保留主目录工作树。
+- 7 个旧本地分支已退役，远端集成分支已删除；`git branch -vv`、`git worktree list`、`git ls-remote --heads origin` 与打开 PR 查询确认本地/远端均只剩 master，无打开 PR，主目录干净并与远端同步。6 个本地恢复标签全部保留，原始 WIP 未推送。
+- 本次收尾仅修改 history、活动计划和能力状态说明；不属于运行层，无接口依赖或地基/契约变化，不影响其他模块。复用上述精确源码 CI，仅检查文档差异、链接、阶段清单及非 Markdown 文件一致性，不重复运行 Go 测试或手动触发 CI。后续文档提交的自动 CI 结果须另行记录，不能沿用 `03c4001` 的提交身份。
+- 收尾文档检查：以 Python 执行既有 `.local/validation/check_cleanup_docs.py`，仅在内存中将 schema 预期从 16 更新为已合并的 17；66 份 Markdown / 565 个本地链接和锚点无错误，58 条功能清单及原计划快照不变，OpenAPI 0.11.0 / 111 操作、schema17 和 `git diff --check` 通过。相对 `03c4001` 的非 Markdown 文件无差异。

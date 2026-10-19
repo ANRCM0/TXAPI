@@ -1,7 +1,7 @@
 # Reference Adoption Status
 
-Integration baseline verified on 2026-10-19: master/290ba5d (PR #43).
-The current R04a/R06c source integration is recorded separately in the
+Integration accepted on 2026-10-19: master/03c4001 (PR #44), based on 290ba5d.
+The R04a/R06c source integration and branch cleanup are recorded in the
 [branch integration log](../history/branch-integration-20261019.md).
 This is a status and evidence index for the complete
 [R00-R07 design](../../REFERENCE-ADOPTION-DESIGN.md), not a replacement scope.
@@ -15,8 +15,12 @@ Its complete Verify `39228308923` passed both check and delivery, including Linu
 race, contract/build/vet/format checks, main smoke and container recovery.
 That baseline had OpenAPI 0.11.0 with 111 operations and schema 16.
 Its successor master/290ba5d passed independent Verify39240068432.
-The current integration keeps that HTTP contract and appends schema17.
-This is baseline evidence, not CI for later uncommitted R04a or documentation.
+PR #44 keeps that HTTP contract and appends schema17. Final source head
+b30f4d2 passed automatic push39244005306 and PR39244013899; merged
+master/03c4001 passed independent Verify39245348032. All three complete
+check/delivery runs succeeded. The source and merge have the identical
+895192e373e6a431cf48524b0434b7b3edacd596 tree. These exact source results
+do not assert CI success for a later documentation commit.
 
 The source evidence below retains PR #41's exact original head/tree and local
 validation. The user requested consolidation of the preserved branches, resuming the
@@ -52,10 +56,10 @@ Exact earlier heads, failed runs and correction evidence remain in the
 | R01 | Versioned execution facts, native optional token breakdown and real HTTP/SSE consumers are implemented and accepted. Compatible older contracts remain. | New operations/profiles require a concrete consumer and contract decision; candidate additions are not automatically frozen. |
 | R02 | Native long-lived resource ownership, preparation/publication, retirement, drain, failed cleanup recovery and management/main wiring are implemented. | This does not implement a generic external Runtime or freeze every candidate port. |
 | R03a/b | Bounded mechanical WS execution and a default-off disabled-billing native MVP are accepted; terminal handoff is corrected through PR #39. | Real Provider and broader client/SDK compatibility remain unproved. Paid WS, persistent reconnect and arbitrary multiplexing are outside the selected MVP. |
-| R04 | Existing static API Key operation remains available. | R04a operator authorization/refresh/encrypted-account source is integrated in the current batch; exact CI/merge evidence is separate. Inference use, full management and real-account acceptance remain incomplete. |
+| R04 | Static API Key operation remains available. R04a operator authorization/refresh/encrypted accounts passed controlled command regressions and complete CI, and merged through PR #44. | Inference use, full management and real-account acceptance remain incomplete; candidate upstreamauth/v1 is not frozen. |
 | R05a | Selected HTTP/SSE cached/reasoning facts, immutable selling quotation history and durable foreground metadata/read APIs are accepted. | This is partial dimensional integration, not posted dimensional charging or all-transport capture. Further profiles require separate slices; frontend displays remain deferred. |
 | R05b | Existing strict ledger, dual holds, immutable price/Provider snapshots and durable intent primitives are reusable foundations. | Full operation/failed-charge cost proof and costed native Responses/background/WS code remain incomplete. Disabled mode is still required for native background/WS. |
-| R06 | Background owner/admin controls, recent routing reads, configuration status/apply, quotation/usage reads and personal financial reads exist. | Account management depends on R04. The user resumed the existing R06c ledger presentation slice for this integration. Broader frontend/product work remains deferred; the whole program is partial. |
+| R06 | Background owner/admin controls, routing reads, configuration status/apply, quotation/usage reads and personal financial reads exist. R06c ledger presentation passed desktop/mobile regressions and merged through PR #44. | Account management depends on R04. Broader frontend/product work remains deferred; the whole program is partial. |
 | R07 | Compile-time registrations remain the current extension mechanism. | External SDK/Runtime host/distribution code remains unimplemented. Entry requires at least two actual independently installable/upgradable consumers and insufficient compile-time registration. Examples/tests do not satisfy it. |
 
 No additional missing behavior was identified inside the concrete selected
@@ -77,12 +81,12 @@ its limit. A scoped pass is not proof for an unimplemented operation.
 
 | Design requirement | Current evidence and limit |
 |---|---|
-| Owner/Key isolation and per-round authority | Existing real identity/HTTP/WS integration negatives run in full CI. New owner ledger/task/usage/routing reads retain session authority. OAuth account authorization is not implemented. |
+| Owner/Key isolation and per-round authority | Existing identity/HTTP/WS integration negatives run in full CI. Owner ledger/task/usage/routing reads retain session authority. R04a operator authorization is implemented and tested with simulated Provider responses; real-account and inference acceptance remain separate. |
 | No attempt on selection/admission failure; pinned target cannot migrate | Selection/preflight and actual send-count regressions pass; shadow compares only the eligible priority pool and skips pinned continuations. |
 | Single wire delivery, cumulative facts and no duplicate settlement | Codec/execution/ledger regressions and final SDK roundtrips cover selected HTTP/SSE/WS paths. New quantities/quotations do not become settlement authority. |
 | Unknown sending survives partial I/O, timeout and process death | Existing durable dispatch/fencing and forced-kill recovery regressions pass. They do not authorize replay/refund of unknown native charged execution. |
 | Publication lifetime, cleanup and last-owner close | Native resource generation and cleanup concurrency/race regressions pass; shadow retirement also preserves unknown old activity across publications. |
-| Single refresh, stale CAS rejection and credential-state convergence | Not achieved for OAuth: its code and real account/protocol entry condition remain missing. Static credential health tests are not OAuth proof. |
+| Single refresh, stale CAS rejection and credential-state convergence | R04a controlled regressions cover single refresh, claim/start/CAS, stale replies and uncertain recovery through actual commands and encrypted storage. Real-account protocol behavior and inference use remain unproved. |
 | Dual-balance transaction, all-attempt cost and unknown preservation | Existing strict regressions pass for admitted dated Chat/embeddings profiles. Complete failed/rejected-request bounds, actual credential invoices and native operation cost proof remain missing. |
 | Bounded capacity/backpressure and close | Existing HTTP/WS/worker/resource limits and new fixed shadow storage/overflow regressions pass. External-process Runtime isolation is not implemented. |
 | Existing API and frontend compatibility | Complete CI preserves old contracts and Node/API checks; main smoke and ten controlled SDK cases pass. Broader Provider/client compatibility and deferred new frontend remain separate. |
@@ -115,8 +119,9 @@ background replay/cancel or universal SDK compatibility is proved.
 ## Next Entry Conditions
 
 Keep the complete objective open. Select another implementation slice when
-its documented prerequisite becomes true. R04a may finish the authorized source/
-controlled-validation increment; real-account/Provider acceptance remains separate.
+its documented prerequisite becomes true. R04a's authorized source and
+controlled-validation increment is accepted and merged; real-account/Provider
+acceptance and inference integration remain separate.
 Other gates are independent full cost/operation evidence for R05b, the
 user's separate authorization for broader frontend work, or two actual independent consumers for
 R07. Do not fabricate Provider invoices, infer zero unknown cost, prebuild a
