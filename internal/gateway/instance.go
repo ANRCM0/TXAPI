@@ -11,6 +11,7 @@ import (
 	"minigateway/internal/core"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
 	executionv2 "minigateway/internal/foundation/contracts/execution/v2"
+	executionv3 "minigateway/internal/foundation/contracts/execution/v3"
 	"minigateway/internal/metrics"
 	dbmodel "minigateway/internal/model"
 )
@@ -157,6 +158,7 @@ type RequestResult struct {
 	UpstreamResponseID string
 	nativeFailed       bool
 	protocolFacts      []executionv2.AttemptFacts
+	usageFacts         []executionv3.AttemptUsage
 	Operation          execution.Operation
 	reservation        *billing.PreDeduct
 	strictRequest      *billing.StrictRequest

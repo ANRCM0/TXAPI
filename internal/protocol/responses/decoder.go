@@ -11,6 +11,7 @@ import (
 
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	execv2 "minigateway/internal/foundation/contracts/execution/v2"
+	execv3 "minigateway/internal/foundation/contracts/execution/v3"
 	"minigateway/internal/protocol/jsonutil"
 )
 
@@ -29,33 +30,53 @@ type Usage struct {
 	Total  *int `json:"total_tokens"`
 }
 
+type usageWire struct {
+	Usage
+	InputDetails  json.RawMessage `json:"input_tokens_details"`
+	OutputDetails json.RawMessage `json:"output_tokens_details"`
+}
+
 func ParseResponse(body []byte) (Response, *execv1.Usage, error) {
+	r, usage, _, err := parseResponse(body)
+	return r, usage, err
+}
+
+func parseResponse(body []byte) (Response, *execv1.Usage, *usageWire, error) {
 	var r Response
 	if err := jsonutil.Validate(body); err != nil {
-		return r, nil, err
+		return r, nil, nil, err
 	}
-	if err := json.Unmarshal(body, &r); err != nil {
-		return r, nil, err
+	var wire struct {
+		Response
+		Usage *usageWire `json:"usage"`
 	}
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return r, nil, nil, err
+	}
+	r = wire.Response
+	if wire.Usage != nil {
+		r.Usage = &wire.Usage.Usage
+	}
+
 	if r.ID == "" || r.Object != "response" {
-		return r, nil, errors.New("invalid Responses object")
+		return r, nil, nil, errors.New("invalid Responses object")
 	}
 	switch r.Status {
 	case "completed", "incomplete", "failed", "cancelled", "queued", "in_progress":
 	default:
-		return r, nil, errors.New("unknown Responses state")
+		return r, nil, nil, errors.New("unknown Responses state")
 	}
 	if r.Usage == nil {
-		return r, nil, nil
+		return r, nil, wire.Usage, nil
 	}
 	u := r.Usage
 	if u.Input == nil || u.Output == nil || u.Total == nil {
-		return r, nil, nil
+		return r, nil, wire.Usage, nil
 	}
 	if *u.Input < 0 || *u.Output < 0 || *u.Total < 0 || *u.Input > math.MaxInt-*u.Output || *u.Input+*u.Output != *u.Total {
-		return r, nil, errors.New("invalid Responses usage")
+		return r, nil, nil, errors.New("invalid Responses usage")
 	}
-	return r, &execv1.Usage{PromptTokens: *u.Input, CompletionTokens: *u.Output, TotalTokens: *u.Total}, nil
+	return r, &execv1.Usage{PromptTokens: *u.Input, CompletionTokens: *u.Output, TotalTokens: *u.Total}, wire.Usage, nil
 }
 
 type Observation struct {
@@ -96,28 +117,40 @@ func (d *Decoder) Decode(body []byte) ([]byte, *execv1.Usage, error) {
 }
 
 func (d *Decoder) decode(body []byte, facts bool) (execv2.Envelope, *execv1.Usage, error) {
+	envelope, usage, err := d.decodeUsage(body, facts, false)
+	return envelope.Execution, usage, err
+}
+
+func (d *Decoder) decodeUsage(body []byte, facts, enriched bool) (execv3.Envelope, *execv1.Usage, error) {
 	d.observe(Observation{})
-	r, usage, err := ParseResponse(body)
+	r, usage, details, err := parseResponse(body)
 	if err != nil {
-		return execv2.Envelope{}, nil, err
+		return execv3.Envelope{}, nil, err
 	}
 	if !terminalStatus(r.Status) {
-		return execv2.Envelope{}, nil, errors.New("Responses synchronous response is not terminal")
+		return execv3.Envelope{}, nil, errors.New("Responses synchronous response is not terminal")
 	}
 	envelope := execv2.Envelope{ProtocolTerminal: true, Native: &execv1.NativeCompletion{ID: r.ID, Status: r.Status}, Failed: r.Status == "failed" || r.Status == "cancelled"}
 	if facts {
 		envelope.Usage, err = usageObservation(r.Usage)
 		if err != nil {
-			return execv2.Envelope{}, nil, err
+			return execv3.Envelope{}, nil, err
+		}
+	}
+	var enhanced *execv3.UsageObservation
+	if enriched {
+		enhanced, err = enrichedUsageObservation(details, envelope.Usage)
+		if err != nil {
+			return execv3.Envelope{}, nil, err
 		}
 	}
 	out, err := rewrite(body, d.publicID, true, false)
 	if err != nil {
-		return execv2.Envelope{}, nil, err
+		return execv3.Envelope{}, nil, err
 	}
 	d.observe(Observation{ID: r.ID, Status: r.Status, Usage: usage})
 	envelope.Data = out
-	return envelope, usage, nil
+	return execv3.Envelope{Execution: envelope, Usage: enhanced}, usage, nil
 }
 func (d *Decoder) NewStream() execv1.StreamDecoder {
 	d.observe(Observation{})
@@ -126,16 +159,18 @@ func (d *Decoder) NewStream() execv1.StreamDecoder {
 
 // SSE framing and mutable protocol state belong to exactly one attempt.
 type streamDecoder struct {
-	owner        *Decoder
-	upstreamID   string
-	wire         bytes.Buffer
-	data         []string
-	event        string
-	lastSequence int64
-	terminal     bool
-	captureFacts bool
-	factUsage    *execv2.UsageObservation
-	factNative   *execv1.NativeCompletion
+	owner         *Decoder
+	upstreamID    string
+	wire          bytes.Buffer
+	data          []string
+	event         string
+	lastSequence  int64
+	terminal      bool
+	captureFacts  bool
+	captureUsage  bool
+	enrichedUsage *execv3.UsageObservation
+	factUsage     *execv2.UsageObservation
+	factNative    *execv1.NativeCompletion
 }
 
 const maxEventBytes = 1 << 20
@@ -200,7 +235,8 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	var usage *execv1.Usage
 	if present(event.Response) {
 		var err error
-		response, usage, err = ParseResponse(event.Response)
+		var details *usageWire
+		response, usage, details, err = parseResponse(event.Response)
 		if err != nil {
 			return nil, err
 		}
@@ -213,6 +249,12 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 			s.factUsage, err = usageObservation(response.Usage)
 			if err != nil {
 				return nil, err
+			}
+			if s.captureUsage {
+				s.enrichedUsage, err = enrichedUsageObservation(details, s.factUsage)
+				if err != nil {
+					return nil, err
+				}
 			}
 			s.factNative = &execv1.NativeCompletion{ID: s.upstreamID, Status: response.Status}
 		}

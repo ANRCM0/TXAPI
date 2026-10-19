@@ -431,6 +431,90 @@ Local Linux race/Docker and real Provider/SDK were not run. Automatic exact-head
 full CI, merge-tree verification and post-merge results remain to be recorded;
 the local correction is not a candidate-contract freeze or full-goal completion.
 
+### R02 Cleanup Integration
+
+Final head 135e6578a3d98e7412254564fa1efc81cf5bd8ce passed complete automatic
+push 39193105666 and PR 39193153559 check/delivery. PR #34 merged as
+master/252c3792de2786045500073f84a2161e6c911e54 with the exact accepted source
+tree. Independent post-merge 39193688299 also passed check/delivery.
+No manual redispatch or new Provider/SDK/financial acceptance is implied.
+
+## R05a-1 Native Token Breakdown Observations
+
+The user prioritized backend completion and deferred frontend. The fully local
+R06c presentation work is checkpointed at feat/reference-r06-ledger/28fc3ec;
+it has no push/PR/merge. Later frontend batches should prioritize codex-proxy-rs
+structure, interaction and suitable mature implementation. OAuth's real-account
+gate stays closed at the user's explicit request.
+
+R05a-1 starts from accepted master/252c379 and implements the six-part
+[decision](REFERENCE-R05A-IMPLEMENTATION.md). It adds candidate execution/v3,
+owned host snapshots, optional native Responses JSON/SSE token breakdowns and
+an independent L3 consumer with current real identity refresh. All 22 existing
+registered package declarations stay exact; the candidate adds ten declarations.
+L0, HTTP operations, schema v15, financial permissions and frontend are exact.
+Source adaptations from fixed codex-proxy-rs events.rs retain their license and
+[specific attribution](THIRD_PARTY_NOTICES.md). No sub2api source/dependency is copied.
+
+Quantities distinguish unknown from explicit zero, validate strict nonnegative
+integers and checked base/child bounds, and retain cumulative high-water marks
+across unknown snapshots. Historical children constrain a later explicit parent;
+old parents never bound a later child when the current parent is absent. Both
+wire projections must agree on base quantities. V3 failure never falls back to
+another decoder or duplicates delivery. Returned projections do not alias.
+The existing terminal base projection alone can enter existing accounting;
+details do not open new prices or charging. Native WS stays on its v2 path.
+
+First complete local pass: go build/vet, tidy/module/dependency checks, full
+ordinary suite (1459 tests/subtests, 38 packages, six expected helper SKIP) and
+actual-main smoke passed. Final review found one additional impossible partial
+snapshot case, cached=5/total=3 with unknown input. Validation and the host now
+also check known child lower bounds against partial totals without synthesizing
+missing parents. Directed contract/protocol/independent-consumer checks passed;
+the final affected full checks are rerun before committing. The first pass is
+not treated as final-code acceptance. Raw logs and manifests remain outside Git
+under D:\my-project\TXAPI-references\validation-r05a-1.
+
+### R05a-1 Final Local Evidence
+
+2026-10-19, Windows/PowerShell, Go 1.26.3, GOARCH=amd64, CGO_ENABLED=0.
+Latest fetched origin/master equals base 252c3792de2786045500073f84a2161e6c911e54.
+The 18 changed/new non-Markdown sources have LF-normalized manifest digest
+`f86b0a21443267e05f4fb6f01d7ad07bb1c32ec2820ad6710c5bfb7e5d2d4f94`.
+Final logs/manifests are external in the directory above, not shipped assets.
+
+| Actual Command / Check | Final Result |
+|---|---|
+| go build ./...; go vet ./... | PASS after partial-total correction |
+| go test -json -count=1 ./... | 1476 tests/subtests and 38 test packages PASS; six expected helper SKIP |
+| go mod tidy; module cleanliness; core/protocol dependency filter | PASS on first pass; reused because imports/modules are exact after arithmetic-only correction |
+| architecture, recursive visibility, signature snapshot and HTTP contracts | PASS in final full suite; all 22 old registered packages exact, ten candidate v3 declarations added |
+| gofmt -l on 15 touched Go files; git diff --check | PASS; no unrelated Go formatting |
+| JSON/OpenAPI equality, core source equality, batch Markdown targets | PASS; 132 local file targets resolve |
+| python -B tests/smoke/local.py --go go | PASS after correction, including actual-main strict/encryption, credential rotation, forced kill/recovery and native background/SSE |
+| Node/API/browser evidence | Reuse accepted d12123d/R06b: all web assets, API tests, browser scripts and OpenAPI are unchanged; final server rebuilt and actual-main smoke revalidated |
+
+Directed coverage includes native JSON/SSE unknown/null/zero/invalid integers,
+all containment and transitive lower bounds, cross-event/cross-attempt snapshots,
+six cumulative high-water marks, explicit old projection equality, exact single
+decoder/delivery selection, failed v3 without fallback, deep copies, retries,
+cancel/short-write/panic and real SQLite identity revocation in the independent
+L3 consumer. A separate read-only agent review found no remaining actionable
+gateway/consumer issue. Native base fields retain the old machine-int range;
+full int64 coverage is accepted on amd64. Enclosing containers retain Go JSON
+compatibility case matching; new nested child lookup is exact, without aliases.
+
+An initial directed gateway compile found an unused test import, fixed before
+the passing runs. An initial API snapshot byte check found HTML-escape formatting
+lost by JSON reserialization; semantic comparison showed every old declaration
+exact, and the exact Go-generated candidate bytes were copied before final
+architecture/full checks. Neither failed intermediate result is called accepted.
+
+Local Linux race/Docker and real Provider/SDK were not run. Exact-head automatic
+full CI, merge-tree and independent post-merge results remain separate gates.
+Pricing history, durable observations, new management APIs and R05b cost/charged
+background remain later backend batches; R05a-1 does not complete all R05 or R00-R07.
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。

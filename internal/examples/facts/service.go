@@ -21,13 +21,18 @@ func (s Service) Run(ctx context.Context, output v1.Output, body []byte) (v2.Out
 	if s.Authority == nil || s.Executor == nil {
 		return v2.Outcome{}, errors.New("facts example dependencies are required")
 	}
-	principal, ok := s.Authority.Current(ctx)
-	if !ok {
-		return v2.Outcome{}, identity.ErrUnauthorized
-	}
-	current, _, err := s.Authority.Refresh(ctx, identity.Binding{UserID: principal.UserID, TokenID: principal.TokenID})
+	current, err := currentContext(ctx, s.Authority)
 	if err != nil {
 		return v2.Outcome{}, err
 	}
 	return s.Executor.Execute(current, output, v1.Invocation{Operation: v1.Responses, Body: body}), nil
+}
+
+func currentContext(ctx context.Context, authority identity.Authority) (context.Context, error) {
+	principal, ok := authority.Current(ctx)
+	if !ok {
+		return nil, identity.ErrUnauthorized
+	}
+	current, _, err := authority.Refresh(ctx, identity.Binding{UserID: principal.UserID, TokenID: principal.TokenID})
+	return current, err
 }

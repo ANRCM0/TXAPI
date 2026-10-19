@@ -17,6 +17,10 @@ func NewFactsExecutor(g *Gateway) v2.Executor { return &factsExecutor{gateway: g
 
 func (e *factsExecutor) Execute(ctx context.Context, output v1.Output, in v1.Invocation) v2.Outcome {
 	result := e.gateway.executeTo(ctx, ToCoreOutput(output), invocation(in), nil, false)
+	return factsOutcome(result)
+}
+
+func factsOutcome(result RequestResult) v2.Outcome {
 	facts := append([]v2.AttemptFacts(nil), result.protocolFacts...)
 	for i := range facts {
 		facts[i].Usage = cloneUsageFact(facts[i].Usage)

@@ -43,6 +43,12 @@ func TestIndependentFactsConsumerUsesCurrentAuthorityAndRealJSONSSE(t *testing.T
 		if request.Input == "zero" {
 			document = strings.TrimSuffix(document, "}") + `,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}`
 		}
+		if request.Input == "details" {
+			document = strings.TrimSuffix(document, "}") + `,"usage":{"input_tokens":10,"output_tokens":6,"total_tokens":16,"input_tokens_details":{"cached_tokens":3,"cache_write_tokens":2},"output_tokens_details":{"reasoning_tokens":4}}}`
+		}
+		if request.Input == "detail-only" {
+			document = strings.TrimSuffix(document, "}") + `,"usage":{"input_tokens_details":{"cached_tokens":0}}}`
+		}
 		if request.Stream {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = io.WriteString(w, "event: response.completed\ndata: "+`{"type":"response.completed","response":`+document+"}\n\n")
@@ -83,6 +89,7 @@ func TestIndependentFactsConsumerUsesCurrentAuthorityAndRealJSONSSE(t *testing.T
 		t.Fatal("real authentication failed")
 	}
 	service := facts.Service{Authority: identityimpl.New(st.ResolvePrincipal), Executor: gateway.NewFactsExecutor(g)}
+	usageService := facts.UsageService{Authority: service.Authority, Executor: gateway.NewUsageFactsExecutor(g)}
 	for _, stream := range []bool{false, true} {
 		for _, input := range []string{"missing", "zero"} {
 			body, _ := json.Marshal(map[string]any{"model": "m", "input": input, "stream": stream})
@@ -100,6 +107,41 @@ func TestIndependentFactsConsumerUsesCurrentAuthorityAndRealJSONSSE(t *testing.T
 			}
 		}
 	}
+	for _, stream := range []bool{false, true} {
+		for _, input := range []string{"missing", "zero", "details", "detail-only"} {
+			body, _ := json.Marshal(map[string]any{"model": "m", "input": input, "stream": stream})
+			recorder := httptest.NewRecorder()
+			before := hits.Load()
+			out, err := usageService.Run(ctx, httpoutput.New(recorder), body)
+			if err != nil || out.Execution.Legacy.StatusCode != 200 || len(out.Execution.Attempts) != 1 || len(out.Usage) != 1 || hits.Load() != before+1 || strings.Count(recorder.Body.String(), `"object":"response"`) != 1 {
+				t.Fatalf("usage consumer did not use one real execution: err=%v outcome=%+v body=%s", err, out, recorder.Body.String())
+			}
+			observation := out.Usage[0]
+			if observation.Number != out.Execution.Attempts[0].Number || observation.Usage.Validate() != nil {
+				t.Fatalf("unbound or invalid usage observation: %+v", observation)
+			}
+			base := out.Execution.Attempts[0].Usage
+			switch input {
+			case "missing":
+				if observation.Usage.Completeness != v2.Unknown || observation.Usage.Breakdown.CachedInputTokens != nil {
+					t.Fatal("missing details acquired known quantities")
+				}
+			case "zero":
+				if observation.Usage.Completeness != v2.Complete || observation.Usage.Counts.TotalTokens == nil || *observation.Usage.Counts.TotalTokens != 0 {
+					t.Fatal("explicit zero lost in enriched consumer")
+				}
+			case "details":
+				d := observation.Usage.Breakdown
+				if d.CachedInputTokens == nil || *d.CachedInputTokens != 3 || d.CacheWriteInputTokens == nil || *d.CacheWriteInputTokens != 2 || d.ReasoningOutputTokens == nil || *d.ReasoningOutputTokens != 4 || base.Profile != "responses_native_tokens_v1" || observation.Usage.Profile != "responses_native_tokens_v2" {
+					t.Fatalf("details/profiles were lost: %+v", observation)
+				}
+			case "detail-only":
+				if observation.Usage.Completeness != v2.Partial || observation.Usage.Counts.InputTokens != nil || observation.Usage.Breakdown.CachedInputTokens == nil || *observation.Usage.Breakdown.CachedInputTokens != 0 || base.Completeness != v2.Unknown {
+					t.Fatal("detail-only zero inferred parent or complete base usage")
+				}
+			}
+		}
+	}
 	if _, err := service.Run(context.Background(), httpoutput.New(httptest.NewRecorder()), []byte(`{"model":"m","input":"x"}`)); !errors.Is(err, identity.ErrUnauthorized) {
 		t.Fatal("untrusted context acquired authority from facts")
 	}
@@ -109,5 +151,8 @@ func TestIndependentFactsConsumerUsesCurrentAuthorityAndRealJSONSSE(t *testing.T
 	before := hits.Load()
 	if _, err := service.Run(ctx, httpoutput.New(httptest.NewRecorder()), []byte(`{"model":"m","input":"x"}`)); !errors.Is(err, identity.ErrUnauthorized) || hits.Load() != before {
 		t.Fatal("old context survived key revocation")
+	}
+	if _, err := usageService.Run(ctx, httpoutput.New(httptest.NewRecorder()), []byte(`{"model":"m","input":"details"}`)); !errors.Is(err, identity.ErrUnauthorized) || hits.Load() != before {
+		t.Fatal("enriched facts bypassed current authorization")
 	}
 }

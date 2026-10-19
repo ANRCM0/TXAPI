@@ -15,6 +15,7 @@ import (
 	"minigateway/internal/billing"
 	execution "minigateway/internal/foundation/contracts/execution/v1"
 	executionv2 "minigateway/internal/foundation/contracts/execution/v2"
+	executionv3 "minigateway/internal/foundation/contracts/execution/v3"
 	dbmodel "minigateway/internal/model"
 	"minigateway/internal/scheduler"
 )
@@ -271,6 +272,7 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.Request, timeout time.Duration) (result core.Result) {
 	number := len(c.result.Attempts) + 1
 	facts := &protocolFacts{usage: unknownUsageFact()}
+	usage := &usageFacts{usage: unknownDetailedUsageFact()}
 	dispatched, returned := false, false
 	defer func() {
 		dispatch := execution.Phase(result.Phase)
@@ -283,6 +285,7 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		c.result.protocolFacts = append(c.result.protocolFacts, executionv2.AttemptFacts{Number: number, Dispatch: dispatch,
 			ProtocolComplete: result.ProtocolComplete, DeliveryCommitted: result.Committed, BytesWritten: result.BytesWritten,
 			Usage: cloneUsageFact(facts.usage), Native: facts.native})
+		c.result.usageFacts = append(c.result.usageFacts, executionv3.AttemptUsage{Number: number, Usage: cloneDetailedUsageFact(usage.usage)})
 	}()
 	if g.operations[req.Operation()].OpaqueErrors {
 		defer func() {
@@ -302,8 +305,12 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	}
 	prepared, err := a.Prepare(req, *m)
 	input := ToCoreInput(prepared)
-	richDecoder, hasFacts := prepared.Decoder.(executionv2.Decoder)
-	if hasFacts && !nilInterface(richDecoder) {
+	hasFacts := false
+	if richDecoder, ok := prepared.Decoder.(executionv3.Decoder); ok && !nilInterface(richDecoder) {
+		hasFacts = true
+		input.Decoder = usageDecoderBridge{decoder: richDecoder, facts: facts, usage: usage}
+	} else if richDecoder, ok := prepared.Decoder.(executionv2.Decoder); ok && !nilInterface(richDecoder) {
+		hasFacts = true
 		input.Decoder = factsDecoderBridge{decoder: richDecoder, facts: facts}
 	}
 	if err == nil && (prepared.Stream != req.Stream() || nilInterface(prepared.Decoder)) {

@@ -2,6 +2,12 @@
 
 ## Reference Adoption Additions
 
+R05a-1 adds candidate `execution/v3` for optional native token breakdowns,
+with a real JSON/SSE decoder and independent L3 consumer. Existing registered
+declarations remain exact; this is not a new freeze. See
+[quantity semantics and integration](usage-observations.md) and the
+[implementation decision](../../REFERENCE-R05A-IMPLEMENTATION.md).
+
 The R01/R03 batches append execution/v2 and native WS mechanisms without
 changing the original frozen declarations. R03b-2 registers responsesws/v1 as
 a candidate public application port, consumed by the real L3 client and L2
