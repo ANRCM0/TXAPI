@@ -132,12 +132,9 @@ func TestStrictOnlyPortPreservesDurableFinalization(t *testing.T) {
 			transport := client.Transport
 			client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				port.calls = append(port.calls, "dispatch")
-				copy, err := r.GetBody()
-				if err != nil {
-					return nil, err
-				}
-				body, err := io.ReadAll(copy)
-				copy.Close()
+				body, err := io.ReadAll(r.Body)
+				r.Body.Close()
+				r.Body = io.NopCloser(bytes.NewReader(body))
 				if err != nil {
 					return nil, err
 				}

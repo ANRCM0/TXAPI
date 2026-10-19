@@ -95,9 +95,11 @@ type Input struct {
 	Header            http.Header
 	Body              []byte
 	Stream            bool
-	Replayable        bool
-	Timeout           time.Duration
-	Decoder           Decoder
+	// Replayable is the coordinator's retry permission, not a transport body
+	// replay hook. Every permitted model retry needs its own attempt admission.
+	Replayable bool
+	Timeout    time.Duration
+	Decoder    Decoder
 }
 
 type Options struct {
@@ -231,6 +233,10 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 		result.Error = failure(400, "invalid upstream request", "invalid_request")
 		return
 	}
+	// Model body retries belong to the coordinator's separately costed attempts.
+	// NewRequest supplies GetBody for bytes.Reader; retaining it lets a reused
+	// Transport replay an accepted POST with an idempotency marker inside Do.
+	req.GetBody = nil
 	req.Header = in.Header.Clone()
 	if req.Header == nil {
 		req.Header = make(http.Header)
