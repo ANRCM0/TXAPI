@@ -200,6 +200,22 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 
 </details>
 
+<details>
+<summary>FC-P0-REPLAY-001：模型正文隐式重发与连接故障回归（源码与定向验证完成）</summary>
+
+已定向复现：同一已复用HTTP/1连接上，受控Provider完整读取带 `Idempotency-Key` / `X-Idempotency-Key` 的POST后断开且不返回headers；当前L0用bytes.Reader创建的Request自动带GetBody，标准Transport在一个ExecuteTo内再次发送正文。即使Input.Replayable=false，夹具收到2次、GotConn/WroteRequest均2次，Result却只有一次成功。这不是当前内置适配器默认会附加幂等头的声明，也不能依赖Provider真实去重来证明收费次数。
+
+1. **层级/目录及必要性：**L0 `internal/core` 持有实际Request及GetBody，L1无法控制Client.Do内部的正文重放；按唯一attempt权威去除模型Request的GetBody回放hook，保留当前共享Transport和L1有限重试。L0/gateway测试、PLAN及适用OpenAPI声明同批更新，不新建HTTP client、Transport或账本。
+2. **精确契约/公开依赖：**不改core.Input/Result及冻结execution类型、签名或版本。Replayable只作为既有L1重试许可返回，不授权Transport在该L1 attempt内重发已读正文；ExecuteTo构造Request后清空GetBody，保留原Body、ContentLength、Header和已验证成本正文。ExecuteRaw已有无hook行为保持。此修复不宣称任意自定义RoundTripper、空正文GET、HTTP2拒绝流等所有机械恢复都等于一次物理连接取得；重点是非空模型POST在可能已受理后的正文重放不能被隐藏。
+3. **consumer/兼容与回退：**Chat/embeddings仍由gateway按Replayable、状态、提交和全部attempt成本决定重试；Responses仍NonReplayable。自定义client/测试probe不能依赖模型Request.GetBody复制正文，必须在自己的有界观察中读取并原位恢复Body；现有两处strict/shadow测试probe同步迁移；既有managed/static自定义client回归同步声明307/308不重放正文，同时保留302到GET、Cookie jar和自定义callback行为。默认不跟随redirect保持；自行配置跟随307/308并依赖GetBody重放正文的client将不再得到自动正文回放。失效复用连接零写入的恢复也可能交回L1并形成保守unknown，而非在L0免费重开一次。回退旧二进制会恢复旧隐式回放行为，无数据迁移。
+4. **行为/故障范围：**实际socket记录连接取得/复用、完整服务端请求及正文、L1 attempt。HTTP/1明文/TLS覆盖幂等头有/无、Replayable有/无、已受理无headers；另覆盖零写入的失效复用、建连/TLS失败、JSON头后截断、SSE提交前/后截断和Responses不重试。保持请求总deadline、取消、提交屏障、关闭/join及原安全错误；Dispatching依旧不证明未执行。
+5. **验证/资金：**先保存上述失败复现，再集中定向/包级及精确头Linux race/完整CI。strict真实socket验证先前unknown与后续成功各有单独durable attempt/Provider预算，先前Provider包络与CostKnown=false不清零。没有完整最终结果时保持pending及user/Key双hold；若另一个已准入attempt产出已知完整最终答案，则复用现有最终答案结算，用户双hold释放/记收费，同时先前Provider预算历史继续占用。既有strict费用档案原本已拒绝额外幂等头，此拒绝继续在发送前回归，不把此L0扩展场景称为已开放strict漏洞。非空Model POST与Raw消费者均核对正文和Header不变；不以夹具成功证明Provider去重、单次真实收费或完整S5-03。
+6. **协作/边界：**本任务用户已授权同类开发契约调整记录方案后直接实施、集中验证修复，不重复请示；不开放真实账号、收费、新Provider/协议、WS池或前端。源码机制依据仍为既有固定参考项目的发送watermark/提交屏障对照；Go net/http文档及官方 `https://raw.githubusercontent.com/golang/go/go1.23.12/src/net/http/transport.go`、request.go仅核对HTTP/1恢复条件，夹具和修复独立编写，无第三方代码复制。响应头PR #55精确头Verify `39296951675` 全部成功并合并为 `d02933a6d24adb97b76d7ed0887beb469455d8ce`；本批已经集成其源码，按最终范围复验。
+
+Go1.26.3/Windows GOARCH=amd64的受控复现先失败后修复：HTTP/1明文/TLS、两类幂等marker、Replayable有/无共12种场景修复后均只受理一次；零写入故障、受控DNS/TLS失败与注册adapter三种操作的attempt计数也通过。gateway故障矩阵覆盖Chat/embeddings/Responses、JSON截断/SSE首事件前后、429/503，检查Credential变化和所有租借归零；strict单次unknown及unknown后成功的独立attempt/预算/双余额状态、额外marker发送前拒绝、strict/shadow探针迁移均通过。集成完整build/vet和全部包测试已执行：仅旧managed redirect测试仍期待307自动重发而失败，已按本CR迁移并定向通过；此改动仅测试，随后仅重跑受影响gateway全包，不把首次全量记为全绿。生产local.py冒烟与固定Python SDK均已通过；迁移后gateway全包 `go test ./internal/gateway -count=1`（47.862秒）及包级vet通过；其他包在首轮完整测试均通过且源码未再改变，不额外重复全量。集成容量4worker、每worker5请求、2round，直连/网关各40次全部完成且仅1上游attempt，两个无发送429与全部4槽恢复/active=0通过；测量时仅managed测试/方案有未提交修改，未改生产源码。远端精确头Linux race/交付CI仍须独立通过。
+
+</details>
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。

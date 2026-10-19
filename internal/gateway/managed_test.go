@@ -214,58 +214,80 @@ func TestManagedGrantFiltersModelsAndKeepsOtherStaticRoutesIndependent(t *testin
 
 func TestManagedRedirectPolicyKeepsStaticClientBehavior(t *testing.T) {
 	for _, customRedirect := range []bool{false, true} {
-		t.Run(fmt.Sprint(customRedirect), func(t *testing.T) {
-			a, d := &managedAccessFixture{}, &managedDirectoryFixture{}
-			jar, _ := cookiejar.New(nil)
-			for _, origin := range []string{"https://api.openai.com", "http://static.test"} {
-				r, _ := http.NewRequest(http.MethodGet, origin, nil)
-				jar.SetCookies(r.URL, []*http.Cookie{{Name: "fixture", Value: "cookie"}})
-			}
-			staticHits, managedHits, redirects := 0, 0, 0
-			client := &http.Client{Jar: jar, Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.Host == "api.openai.com" {
-					managedHits++
-					if r.Header.Get("Cookie") != "" {
-						t.Fatal("managed inference used static client cookies")
+		for _, status := range []int{http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+			t.Run(fmt.Sprintf("custom=%v/status=%d", customRedirect, status), func(t *testing.T) {
+				a, d := &managedAccessFixture{}, &managedDirectoryFixture{}
+				jar, _ := cookiejar.New(nil)
+				for _, origin := range []string{"https://api.openai.com", "http://static.test"} {
+					r, _ := http.NewRequest(http.MethodGet, origin, nil)
+					jar.SetCookies(r.URL, []*http.Cookie{{Name: "fixture", Value: "cookie"}})
+				}
+				staticHits, managedHits, redirects := 0, 0, 0
+				client := &http.Client{Jar: jar, Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if r.URL.Host == "api.openai.com" {
+						managedHits++
+						if r.Header.Get("Cookie") != "" {
+							t.Fatal("managed inference used static client cookies")
+						}
+						return &http.Response{StatusCode: status, Header: http.Header{"Location": {"https://untrusted.test/responses"}, "Set-Cookie": {"fixture=managed-response"}}, Body: io.NopCloser(strings.NewReader("redirect"))}, nil
 					}
-					return &http.Response{StatusCode: http.StatusTemporaryRedirect, Header: http.Header{"Location": {"https://untrusted.test/responses"}, "Set-Cookie": {"fixture=managed-response"}}, Body: io.NopCloser(strings.NewReader("redirect"))}, nil
+					if r.URL.Host != "static.test" {
+						t.Fatal("managed inference followed cross-origin redirect")
+					}
+					staticHits++
+					if r.Header.Get("Cookie") != "fixture=cookie" {
+						t.Fatal("static route lost supplied client cookie jar")
+					}
+					if r.URL.Path != "/finished" {
+						if r.Method != http.MethodPost || r.GetBody != nil {
+							t.Fatal("model POST gained a transport replay hook")
+						}
+						return &http.Response{StatusCode: status, Header: http.Header{"Location": {"http://static.test/finished"}}, Body: io.NopCloser(strings.NewReader("redirect"))}, nil
+					}
+					// A caller-supplied client retains 302's normal POST -> GET
+					// behavior. 307/308 cannot repeat the model POST body.
+					if status != http.StatusFound || r.Method != http.MethodGet || r.Body != nil {
+						t.Fatal("redirect replayed model POST")
+					}
+					return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(managedTestTerminal("completed")))}, nil
+				})}
+				if customRedirect {
+					client.CheckRedirect = func(*http.Request, []*http.Request) error { redirects++; return nil }
 				}
-				if r.URL.Host != "static.test" {
-					t.Fatal("managed inference followed cross-origin redirect")
+				g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, Channels: managedTestChannels(), Client: client,
+					ManagedInference: &ManagedInferenceOptions{Enabled: true, Credentials: a, DirectoryCaller: d, ValidateModel: openaiauth.ValidateVisibleModel, FailureRecorder: &managedRecorderFixture{}, ClassifyFailure: openaiauth.ClassifyInferenceFailure}})
+				if err != nil {
+					t.Fatal(err)
 				}
-				staticHits++
-				if r.Header.Get("Cookie") != "fixture=cookie" {
-					t.Fatal("static route lost supplied client cookie jar")
+				defer g.Close()
+				other := access.WithPrincipal(context.Background(), access.Principal{UserID: 2, TokenID: 2, Policy: access.Policy{Mode: access.All}})
+				result := g.ExecuteTo(other, &observerOutput{}, Execution{Operation: execution.Responses, Body: []byte(managedTestBody)})
+				wantStatic, wantCallbacks := 1, 0
+				if status == http.StatusFound {
+					wantStatic = 2
+					if customRedirect {
+						wantCallbacks = 1
+					}
+					if result.Error != nil || !result.ProtocolComplete {
+						t.Fatalf("caller-supplied static 302 behavior disturbed: %+v", result)
+					}
+				} else if result.Error == nil || result.ProtocolComplete || result.UpstreamStatus != status {
+					t.Fatalf("307/308 automatically replayed model body: %+v", result)
 				}
-				if r.URL.Path != "/finished" {
-					return &http.Response{StatusCode: http.StatusTemporaryRedirect, Header: http.Header{"Location": {"http://static.test/finished"}}, Body: io.NopCloser(strings.NewReader("redirect"))}, nil
+				if staticHits != wantStatic {
+					t.Fatalf("static sends=%d want=%d", staticHits, wantStatic)
 				}
-				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(managedTestTerminal("completed")))}, nil
-			})}
-			if customRedirect {
-				client.CheckRedirect = func(*http.Request, []*http.Request) error { redirects++; return nil }
-			}
-			g, err := newRegisteredGateway(Options{BillingMode: billing.ModeDisabled, Channels: managedTestChannels(), Client: client,
-				ManagedInference: &ManagedInferenceOptions{Enabled: true, Credentials: a, DirectoryCaller: d, ValidateModel: openaiauth.ValidateVisibleModel, FailureRecorder: &managedRecorderFixture{}, ClassifyFailure: openaiauth.ClassifyInferenceFailure}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer g.Close()
-			other := access.WithPrincipal(context.Background(), access.Principal{UserID: 2, TokenID: 2, Policy: access.Policy{Mode: access.All}})
-			result := g.ExecuteTo(other, &observerOutput{}, Execution{Operation: execution.Responses, Body: []byte(managedTestBody)})
-			if result.Error != nil || staticHits != 2 {
-				t.Fatalf("static redirect disturbed: %+v hits=%d", result, staticHits)
-			}
-			result = g.ExecuteTo(outputIdentity(), &observerOutput{}, Execution{Operation: execution.Responses, Body: []byte(managedTestBody)})
-			if result.Error == nil || managedHits != 1 || staticHits != 2 || customRedirect && redirects != 1 {
-				t.Fatalf("managed redirect policy: %+v managed=%d static=%d callbacks=%d", result, managedHits, staticHits, redirects)
-			}
-			r, _ := http.NewRequest(http.MethodGet, "https://api.openai.com", nil)
-			cookies := jar.Cookies(r.URL)
-			if len(cookies) != 1 || cookies[0].Value != "cookie" {
-				t.Fatal("managed response changed supplied client cookie jar")
-			}
-		})
+				result = g.ExecuteTo(outputIdentity(), &observerOutput{}, Execution{Operation: execution.Responses, Body: []byte(managedTestBody)})
+				if result.Error == nil || managedHits != 1 || staticHits != wantStatic || redirects != wantCallbacks {
+					t.Fatalf("managed redirect policy: %+v managed=%d static=%d callbacks=%d", result, managedHits, staticHits, redirects)
+				}
+				r, _ := http.NewRequest(http.MethodGet, "https://api.openai.com", nil)
+				cookies := jar.Cookies(r.URL)
+				if len(cookies) != 1 || cookies[0].Value != "cookie" {
+					t.Fatal("managed response changed supplied client cookie jar")
+				}
+			})
+		}
 	}
 }
 
