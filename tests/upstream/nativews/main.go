@@ -212,7 +212,13 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if write(map[string]any{"type": "response.completed", "stream_id": "main", "sequence_number": 6, "response": document(id, output)}) != nil {
+		status := "completed"
+		terminal := document(id, output)
+		if text == "failed" || text == "incomplete" {
+			status = text
+			terminal["status"], terminal["usage"] = status, nil
+		}
+		if write(map[string]any{"type": "response." + status, "stream_id": "main", "sequence_number": 6, "response": terminal}) != nil {
 			return
 		}
 	}

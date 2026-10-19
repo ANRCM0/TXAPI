@@ -92,6 +92,45 @@ func TestIsolatedFixtureTLSAndProxy(t *testing.T) {
 	if !terminal {
 		t.Fatal("fixture terminal missing")
 	}
+	for _, status := range []string{"failed", "incomplete"} {
+		c, _, err := websocket.Dial(ctx, "wss://api.openai.com/v1/responses", &websocket.DialOptions{HTTPClient: client,
+			HTTPHeader: http.Header{"Authorization": {"Bearer " + upstreamKey}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := strings.Replace(request, `"fixture"`, `"`+status+`"`, 1)
+		if err := c.Write(ctx, websocket.MessageText, []byte(payload)); err != nil {
+			t.Fatal(err)
+		}
+		seen := false
+		for count := 0; count < 8; count++ {
+			_, raw, err := c.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var event struct {
+				Type     string
+				Response struct {
+					Status string
+					Usage  json.RawMessage
+				}
+			}
+			if json.Unmarshal(raw, &event) != nil || event.Type == "response.completed" {
+				t.Fatal("fixture fabricated success", string(raw))
+			}
+			if event.Type == "response."+status {
+				if event.Response.Status != status || string(event.Response.Usage) != "null" {
+					t.Fatal("fixture lost non-success/unknown usage", string(raw))
+				}
+				seen = true
+				break
+			}
+		}
+		_ = c.CloseNow()
+		if !seen {
+			t.Fatal("fixture non-success terminal missing", status)
+		}
+	}
 	// Simulate only the provider wire contract so the fixture client and proxy
 	// can be checked on Windows before the real Linux image is available.
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +160,7 @@ func TestIsolatedFixtureTLSAndProxy(t *testing.T) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.requests) != 3 || len(f.errors) != 0 || f.requests[0].InputKind != "array" || !f.requests[0].Store || f.requests[1].Store {
+	if len(f.requests) != 5 || len(f.errors) != 0 || f.requests[0].InputKind != "array" || !f.requests[0].Store || f.requests[1].Store {
 		t.Fatal("fixture observations did not match controlled requests", f.errors)
 	}
 }

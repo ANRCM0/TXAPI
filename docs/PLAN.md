@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/b85d650418d6cc0779c3bc9c05299c7e2b2b1cde`，WS 持久续链 PR #63 的精确头 `3fa3a33e6a6999a16fb4ee60d6f2753835b412cd` 及合并后 Verify `39321587728` 均成功。WS 进程强杀 PR #64 的最终头 `d13e1ee78f9abe34806d1a2ec59ef3290c4d151b` 六项 CI 已通过，已合并为 `d4c09e79174b4f539aca3d261ca0194435a801b1`，合并后 Verify `39324629036` 已成功；本批实际镜像受控部署的精确头 CI 另验。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/d4c09e79174b4f539aca3d261ca0194435a801b1`，WS 持久续链及进程强杀 PR #63/#64 均已通过各自最终精确头 CI 并合并，合并后 Verify `39324629036` 已成功。实际镜像 WS 交付 PR #65 精确头 `78d5b07aa1ef908b3672e3f265795a11ef525d1b` 的 Verify `39326569100` / `39326561052` 均完整成功，已合并为 `b4d628138d0d01a4a5a901f4a5fc8c4e9d420aca`，合并后 Verify `39328615465` 仍运行中；本批固定 WS SDK 及镜像组合验收单列。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -35,7 +35,7 @@
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；真实账号未验收 |
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
-| 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/SDK WS/Codex 完整组合未验收；账号管理待后端能力 |
+| 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
 本批源码的 [OpenAPI](openapi.json) 为 `0.13.5` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
@@ -420,6 +420,16 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 5. **验证：**Windows 独立虚拟环境定向运行已通过；Verify 增加相同固定依赖和回归；PR #50 精确头 `749c591d6284facd2cc00b571f900b8fc4976a40` 的 Linux Verify 成功并已合并。所有账号、Key 与上游均为一次性夹具，无真实 Provider 调用，不代表官方服务、其它 SDK 版本或 Codex/WS/后台已验收。
 6. **协作：**保留已有冒烟、架构、race 和交付门槛；可通过 `make sdk-conformance PYTHON=<虚拟环境解释器>` 单独运行。新前端、收费和账号路线无变化。
 
+#### P4 固定 Python WS SDK 子批（2026-10-20）
+
+1. **层级/目录：**仅 cmd/gateway 的可选测试子进程、tests/smoke/ws_sdk_conformance.py、独立固定依赖、Makefile、既有 CI 与本方案；复用现有真实双端 socket/SQLite 的生产组件组装夹具。
+2. **公开依赖：**消费当前 Responses WS、HTTP 历史检索接口；固定 openai==3.8.0、websockets==15.0.1，不替换原 HTTP SDK 2.11.0 环境，不新增地基端口。
+3. **地基影响：**生产实现、L0、配置、schema、计费和权限不变；只有测试资源工厂使用 loopback，上下游发送次数与保存结果由 Go 夹具独立核对。
+4. **行为/兼容：**官方 SDK 类型化文本/工具事件、同连接三轮、显式新连接续链、HTTP 检索、failed/incomplete、关闭客户端后的 unknown 拒绝及新根生成；SDK HTTP 重试/WS 重连均关闭，禁用代理和环境凭据。8 次明确新生成各仅1上游create；unknown父拒绝不发送、不补完成。
+5. **验证：**独立 Python 虚拟环境、每客户端进程25秒总预算、唯一 reader、fixture进程 Kill/Wait 清理；核对8行历史/usage、7已知加1uncertain、完整上下文与工具call_id、真实Key鉴权及私有头隔离。集中受影响包/脚本检查与精确头完整CI，默认全量Go测试跳过需要Python依赖的helper。
+6. **协作/边界：**这是固定SDK与生产组件组装的受控兼容证据，不等于实际main镜像、官方Provider、其它SDK/Codex、自动恢复、收费或长期容量验收；实际镜像由P6独立批验证。官方文档 WebSocket mode 用于核对connect/create方式，当前固定安装包源码另核对精确版本签名，无第三方实现复制。
+2026-10-20 本地证据：固定 openai3.8.0/websockets15.0.1 的真实 socket 回归通过，SDK 解析8次新生成的类型化事件，同连接前三轮和新连接完整上下文/工具关联正确；HTTP 检索不触发上游。5次 completed、1次failed、1次incomplete与1次客户端取消分别保留事实；8条历史/usage和8条已发送attempt独立核对，取消历史uncertain且父链拒绝不发送，5条已知3 Token保留，另3条未知不补零。非成功终态及父链拒绝可能按既有策略关闭连接，仅对成功多轮声明同连接复用，后续使用明确新连接。Windows GOARCH=amd64 完整cmd/gateway回归通过（50.940s）及该包vet通过；新增独立持久事实断言随后在同一SDK harness内通过。Python AST、CI结构及diff检查通过。此处仍是生产组件组装和受控Provider证据，精确头完整CI另验，不表示官方服务或SDK自动重连通过。
+P4 本批组合验证扩展：①在同一SDK脚本增加显式deployed入口，复用全部8个固定SDK用例；②仅扩展已受控验收的native_ws_delivery.py、fixture与既有delivery步骤，继续使用当前HTTP/WS接口；③实际gateway镜像和生产拨号/权限不变，独立非root Python SDK镜像只在构建阶段安装固定依赖，运行时加入唯一Docker internal网络；④在原6次部署生成之后执行8次SDK生成，核对全部14次create、2条unknown不可重放、13sealed/1interrupted用量、历史及恢复，不把组件与镜像的分离证据直接等同组合证据；⑤复用SDK客户端的25秒执行预算、容器命名/显式清理、网络与只读挂载检查，Linux精确头delivery验收；⑥本机无Docker，组合只能由CI证明，原有局部证据保留，不宣称真实Provider、自动恢复或收费许可。
 ### P5：账号信号与调度评估
 
 - **层级/目录：**L1 scheduler/gateway；L3 routes 查询。
@@ -476,7 +486,7 @@ P6 本批验证范围（2026-10-20）：在 `cmd/gateway` 增加独立子进程�
 
 2026-10-20 本批本地证据：四种边界均执行真实 Process.Kill + Wait，同一 SQLite/密钥启动恢复进程，再启动第三个进程复验重复恢复。发送前实际 create 为零，其余边界为一次；unknown 查询返回冲突且父链续接不触发发送，已知终态可读取，并只为明确的新轮次发送一次完整上下文。交付后用量未收尾场景由客户端先读取 completed 再强杀，重启后仍保留已观察的 completed/3 Token；其余未知 Token 不补零。旧密文/版本、新历史/usage 行数、资金快照及上游实际请求数保持预期。Windows GOARCH=amd64 的完整 cmd/gateway 回归通过（51.549s），该包 go vet 通过；生产源码与 PR #63 相同，既有全量 build/vet/Go/生产入口证据按原提交复用，PR #64 的最终精确头 d13e1ee 已通过六项 CI 并合并；合并后验收见基线。
 
-P6 本批交付验证范围（2026-10-20）：①仅 `tests/upstream/nativews`、`tests/smoke/native_ws_delivery.py`、新夹具包的架构登记、既有 CI 和本方案，运行实际 Dockerfile 镜像的 main 与独立反代/受控 TLS 服务；②消费现有 HTTP/WS/本人用量公开接口，不新增生产端口或冻结契约；③生产拨号、TLS 校验、权限、迁移、L0 与配置默认值不改，Docker internal 网络以临时证书和网络内同名 alias 承接固定官方地址，禁止访问真实服务；④复用现有持久开关、同一数据卷和密钥，测试普通/工具轮次、HTTP↔WS、新连接与容器重启、在途强杀、关闭开关后历史可读与 WS 拒绝；⑤核对实际上游请求次数/完整上下文、Upgrade 反代、已知/未知终态、重复恢复无重放/重复历史/用量、不泄漏凭据和全部 fixture 清理，集中最终精确头 CI 验证；⑥这是实际镜像的受控部署证据，真实 Provider/OAuth/SDK WS/Codex、长期容量和收费仍另行验收。本机无 Docker，不能以本地夹具预检冒充容器验收；完整交付脚本在 Linux Docker CI 中运行。 CI 初轮暴露夹具错误假设：HTTP 持久请求保留显式 store=true，持久 WS 请求才强制上游 store=false；两条路径均重建完整数组上下文。已按现有生产契约修正夹具及逐请求断言，不修改生产存储语义，实际镜像验收须重新完成。
+P6 本批交付验证范围（2026-10-20）：①仅 `tests/upstream/nativews`、`tests/smoke/native_ws_delivery.py`、新夹具包的架构登记、既有 CI 和本方案，运行实际 Dockerfile 镜像的 main 与独立反代/受控 TLS 服务；②消费现有 HTTP/WS/本人用量公开接口，不新增生产端口或冻结契约；③生产拨号、TLS 校验、权限、迁移、L0 与配置默认值不改，Docker internal 网络以临时证书和网络内同名 alias 承接固定官方地址，禁止访问真实服务；④复用现有持久开关、同一数据卷和密钥，测试普通/工具轮次、HTTP↔WS、新连接与容器重启、在途强杀、关闭开关后历史可读与 WS 拒绝；⑤核对实际上游请求次数/完整上下文、Upgrade 反代、已知/未知终态、重复恢复无重放/重复历史/用量、不泄漏凭据和全部 fixture 清理，集中最终精确头 CI 验证；⑥这是实际镜像的受控部署证据，真实 Provider/OAuth/SDK WS/Codex、长期容量和收费仍另行验收。本机无 Docker，不能以本地夹具预检冒充容器验收；完整交付脚本在 Linux Docker CI 中运行。 PR #65 最终精确头 78d5b07 的完整 CI 与实际镜像交付均已通过并合并，HTTP/WS工具续链、在途SIGKILL unknown与持久用量的组合已受控验证；本批SDK镜像增量仍另验。CI 初轮暴露夹具错误假设：HTTP 持久请求保留显式 store=true，持久 WS 请求才强制上游 store=false；两条路径均重建完整数组上下文。已按现有生产契约修正夹具及逐请求断言，不修改生产存储语义，实际镜像验收须重新完成。
 
 2026-10-20 本批本地预检：临时 CA 的官方域名 TLS 握手、夹具完整事件、真实 Upgrade 反代和客户端读取通过；全量 architecture 包、OpenAPI 定向检查、全仓 build、新夹具 go vet、Python 语法与 CLI 预检通过。这里只记录夹具和静态证据，尚未运行 Docker；实际镜像、数据卷重启、SIGKILL 与 TLS/反代全链路须由最终精确头交付 CI 证明。
 

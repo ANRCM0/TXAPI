@@ -90,7 +90,7 @@ class Installation:
         run(["docker", "volume", "create", "--label", self.label, self.volume])
         self.created_volume = True
         run(["docker", "create", "--name", self.provider, "--label", self.label,
-             "--network", self.network, "--network-alias", "api.openai.com", "--user", "0",
+             "--network", self.network, "--network-alias", "api.openai.com", "--network-alias", "nativews-fixture", "--user", "0",
              *self.helper_mount, "--mount", f"type=bind,source={self.work},target=/fixtures,readonly",
              "--entrypoint", "/smoke-nativews", self.image])
         self.containers.append(self.provider)
@@ -214,17 +214,50 @@ class Installation:
         assert not any(event.get("type") == "response.completed" for event in events)
         return public_id
 
-    def final_snapshot(self, unknown):
+    def sdk(self, image):
+        settings = self.work / "sdk.json"
+        settings.write_text(json.dumps({"base": "http://nativews-fixture:8081", "key": CLIENT_KEY}))
+        settings.chmod(0o644)
+        name = self.name + "-sdk"
+        run(["docker", "create", "--name", name, "--label", self.label,
+             "--network", self.network, "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+             "--mount", f"type=bind,source={ROOT / 'tests' / 'smoke'},target=/smoke,readonly",
+             "--mount", f"type=bind,source={self.work},target=/fixtures,readonly",
+             image, "/smoke/ws_sdk_conformance.py", "--client", "/fixtures/sdk.json", "--deployed"])
+        self.containers.append(name)
+        state = json.loads(run(["docker", "inspect", name], capture=True).stdout)[0]
+        assert set(state["NetworkSettings"]["Networks"]) == {self.network}
+        assert state["Config"]["User"] == "65532:65532" and state["HostConfig"]["ReadonlyRootfs"]
+        result = run(["docker", "start", "--attach", name], capture=True, timeout=25)
+        state = json.loads(run(["docker", "inspect", name], capture=True).stdout)[0]
+        assert not state["State"]["Running"] and state["State"]["ExitCode"] == 0, result.stdout
+        print(result.stdout.strip(), flush=True)
+        report = json.loads(result.stdout.splitlines()[-1])
+        assert report["cases"] == 8 and len(set(report["ids"])) == 8
+        self.api("/v1/responses/" + report["unknown"], CLIENT_KEY, status=409)
+        records = self.usage(self.api("/api/auth/login", body=ADMIN, method="POST")["session_token"], 14)
+        assert sum(row["state"] == "interrupted" for row in records) == 1
+        state = self.wait_sends(14)
+        assert not state["errors"]
+        requests = state["requests"][6:]
+        assert [len(row["input"]) for row in requests] == [1, 3, 5, 7, 1, 1, 1, 1]
+        assert all(row["transport"] == "ws" and row["model"] == "m" and not row["store"] and not row["previous"] for row in requests)
+        assert requests[2]["input"][3]["call_id"] == requests[2]["input"][4]["call_id"]
+        return report["unknown"]
+
+    def final_snapshot(self, unknowns, count):
         run(["docker", "stop", "--time", "15", self.gateway])
         assert self.inspect()["State"]["ExitCode"] == 0
         copy = self.work / "snapshot"
         copy.mkdir()
         run(["docker", "cp", self.gateway + ":/app/data/.", str(copy)])
         with contextlib.closing(sqlite3.connect(copy / "gateway.db")) as db:
-            assert db.execute("SELECT COUNT(*) FROM response_histories").fetchone() == (6,)
-            assert db.execute("SELECT COUNT(*) FROM usage_invocations").fetchone() == (6,)
-            assert db.execute("SELECT state,COUNT(*) FROM usage_invocations GROUP BY state ORDER BY state").fetchall() == [("interrupted", 1), ("sealed", 5)]
-            assert db.execute("SELECT busy FROM response_histories WHERE id=?", (unknown,)).fetchone() == ("uncertain",)
+            assert db.execute("SELECT COUNT(*) FROM response_histories").fetchone() == (count,)
+            assert db.execute("SELECT COUNT(*) FROM usage_invocations").fetchone() == (count,)
+            assert db.execute("SELECT state,COUNT(*) FROM usage_invocations GROUP BY state ORDER BY state").fetchall() == [("interrupted", 1), ("sealed", count - 1)]
+            assert db.execute("SELECT COUNT(*) FROM response_histories WHERE busy='uncertain'").fetchone() == (len(unknowns),)
+            for unknown in unknowns:
+                assert db.execute("SELECT busy FROM response_histories WHERE id=?", (unknown,)).fetchone() == ("uncertain",)
             for table in ("users", "tokens"):
                 assert db.execute(f"SELECT COUNT(*) FROM {table} WHERE used_quota != 0").fetchone() == (0,)
             for table in ("billing_reservations", "billing_attempts"):
@@ -245,7 +278,7 @@ class Installation:
             run(["docker", "network", "rm", self.network])
 
 
-def exercise(installation):
+def exercise(installation, sdk_image=None):
     i = installation
     session = i.api("/api/auth/login", body=ADMIN, method="POST")["session_token"]
     first = i.api("/v1/responses", CLIENT_KEY, {"model": "alias", "input": "http-root", "store": True}, "POST")
@@ -287,24 +320,30 @@ def exercise(installation):
     function = requests[2]["input"]
     assert function[-2]["type"] == "function_call" and function[-1]["type"] == "function_call_output"
     assert function[-2]["call_id"] == function[-1]["call_id"] == second["output"][0]["call_id"]
+    unknowns, count = [unknown], 6
+    if sdk_image:
+        unknowns.append(i.sdk(sdk_image))
+        count = 14
     i.settings["responses_ws"]["persistent_history"] = False
     i.save()
     i.restart()
     i.api("/v1/responses/" + sixth["id"], CLIENT_KEY)
     i.api("/v1/responses/" + unknown, CLIENT_KEY, status=409)
     i.ws(sixth["id"], "persistent-disabled", refused=True)
-    i.usage(session, 6)
-    assert len(i.wait_sends(6)["requests"]) == 6
-    i.final_snapshot(unknown)
+    i.usage(session, count)
+    assert len(i.wait_sends(count)["requests"]) == count
+    i.final_snapshot(unknowns, count)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--go", default="go")
+    parser.add_argument("--sdk", action="store_true", help="also run the fixed official Python SDK inside the isolated network")
     args = parser.parse_args()
     assert os.name != "nt", "requires Linux Docker; local harness tests are separate evidence"
     assert run(["docker", "info", "--format", "{{.OSType}}"], capture=True).stdout.strip() == "linux"
     image = "txapi-nativews-smoke:" + uuid.uuid4().hex[:12]
+    sdk_image = image + "-sdk" if args.sdk else None
     with tempfile.TemporaryDirectory(prefix="txapi-nativews-") as temporary:
         work = Path(temporary)
         helper = work / "nativews"
@@ -316,8 +355,15 @@ def main():
         installation = Installation(fixtures, image, helper)
         try:
             run(["docker", "build", "--tag", image, str(ROOT)], timeout=600)
+            if sdk_image:
+                dockerfile = work / "SDK.Dockerfile"
+                dockerfile.write_text('FROM python:3.13-slim\nCOPY tests/smoke/requirements-ws-sdk.txt /tmp/requirements.txt\n'
+                                     'RUN pip install --no-cache-dir -r /tmp/requirements.txt\n'
+                                     'ENV PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1\n'
+                                     'USER 65532:65532\nENTRYPOINT ["python"]\n')
+                run(["docker", "build", "--file", str(dockerfile), "--tag", sdk_image, str(ROOT)], timeout=600)
             installation.create()
-            exercise(installation)
+            exercise(installation, sdk_image)
             print("PASS: actual non-root image, verified fixture TLS, reverse-proxy Upgrade, HTTP/WS tool history, restart, in-flight SIGKILL unknown protection and durable usage; isolated Docker only", flush=True)
         except BaseException:
             with contextlib.suppress(Exception):
@@ -337,6 +383,8 @@ def main():
                 installation.cleanup()
             finally:
                 run(["docker", "image", "rm", image], check=False)
+                if sdk_image:
+                    run(["docker", "image", "rm", sdk_image], check=False)
 
 
 if __name__ == "__main__":

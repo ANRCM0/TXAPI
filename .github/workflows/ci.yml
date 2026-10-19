@@ -88,6 +88,13 @@ jobs:
           "$RUNNER_TEMP/txapi-sdk-venv/bin/python" -m pip install -r tests/smoke/requirements-sdk.txt
           "$RUNNER_TEMP/txapi-sdk-venv/bin/python" tests/smoke/sdk_conformance.py --go go
 
+      - name: 固定官方 Python WS SDK 的受控兼容回归
+        timeout-minutes: 5
+        run: |
+          python3 -m venv "$RUNNER_TEMP/txapi-ws-sdk-venv"
+          "$RUNNER_TEMP/txapi-ws-sdk-venv/bin/python" -m pip install -r tests/smoke/requirements-ws-sdk.txt
+          "$RUNNER_TEMP/txapi-ws-sdk-venv/bin/python" tests/smoke/ws_sdk_conformance.py --go go
+
       - name: 转发性能基线（仅报告）
         run: |
           set -o pipefail
@@ -133,4 +140,4 @@ jobs:
         run: python3 tests/smoke/delivery.py --go go
       - name: 实际镜像原生 WS TLS、反代、持久续链与强杀恢复
         timeout-minutes: 6
-        run: python3 tests/smoke/native_ws_delivery.py --go go
+        run: python3 tests/smoke/native_ws_delivery.py --go go --sdk
