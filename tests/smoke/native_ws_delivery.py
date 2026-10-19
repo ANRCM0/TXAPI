@@ -278,9 +278,12 @@ def exercise(installation):
     assert not state["errors"] and state["proxy_upgrades"] >= 5
     requests = state["requests"]
     assert [row["transport"] for row in requests] == ["http", "ws", "http", "ws", "ws", "ws"]
-    assert [row["input_kind"] for row in requests] == ["string", "array", "array", "array", "array", "array"]
+    assert all(row["input_kind"] == "array" for row in requests)
     assert [len(row["input"]) for row in requests] == [1, 3, 5, 7, 9, 9]
-    assert all(row["model"] == "m" and not row["store"] and not row["previous"] for row in requests)
+    assert all(row["model"] == "m" and not row["previous"] for row in requests)
+    # HTTP preserves its explicit store policy; persistent WS privately stores
+    # locally and requests store=false from its native upstream connection.
+    assert [row["store"] for row in requests] == [True, False, True, False, False, False]
     function = requests[2]["input"]
     assert function[-2]["type"] == "function_call" and function[-1]["type"] == "function_call_output"
     assert function[-2]["call_id"] == function[-1]["call_id"] == second["output"][0]["call_id"]
@@ -317,6 +320,10 @@ def main():
             exercise(installation)
             print("PASS: actual non-root image, verified fixture TLS, reverse-proxy Upgrade, HTTP/WS tool history, restart, in-flight SIGKILL unknown protection and durable usage; isolated Docker only", flush=True)
         except BaseException:
+            with contextlib.suppress(Exception):
+                # Stats contain only these synthetic requests and fixed fixture
+                # error reasons, never the authentication headers or key ring.
+                print("fixture observations:", json.dumps(installation.stats(), ensure_ascii=False), flush=True)
             for name in installation.containers:
                 result = run(["docker", "inspect", "--format", "{{json .State}}", name], capture=True, check=False)
                 print(name, result.stdout.strip(), flush=True)

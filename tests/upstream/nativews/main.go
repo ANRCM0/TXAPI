@@ -80,8 +80,8 @@ func (f *fixture) observe(raw []byte, transport string) (map[string]any, string,
 	previous, _ := body["previous_response_id"].(string)
 	stored, ok := body["store"].(bool)
 	items, array := body["input"].([]any)
-	if model != "m" || !ok || stored || previous != "" {
-		return nil, "", errors.New("mapped model, local parent and store=false required")
+	if model != "m" || !ok || previous != "" || stored != (transport == "http") {
+		return nil, "", errors.New("mapped model, local parent and transport-specific store required")
 	}
 	kind := "array"
 	if !array {
