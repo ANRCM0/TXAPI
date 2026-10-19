@@ -17,6 +17,13 @@ Existing stage records below retain their original checkpoint scope.
 
 ## R06b Routing Diagnostics Increment
 
+The optional shadow comparison follow-on uses both `server.route_diagnostics`
+and `server.shadow_route_scoring`; the latter defaults false. Its bounded
+foreground HTTP observations never control actual routing. Existing metrics
+and rate-limited debug records are its consumers; see
+[meaning, bounds and rollback](reference/shadow-routing.md). This is separate
+from recent-request console retention and is not a traffic-quality claim.
+
 OpenAPI 0.8.0 adds four session-protected read operations for recent HTTP
 routing observations. Enable `server.route_diagnostics` at startup; it defaults
 false. Retention, owner/admin projections, Request ID filters, scope coverage

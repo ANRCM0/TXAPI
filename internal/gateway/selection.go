@@ -12,6 +12,7 @@ import (
 )
 
 type routeDecision struct {
+	shadowPool             [8]shadowCandidate
 	outcome                string
 	picker                 string
 	candidateChannels      int
@@ -60,10 +61,18 @@ func (g *Gateway) selectTargetScope(c *executionScope, candidates []*channel, tr
 	started := time.Now()
 	ch, credential, decision := g.chooseTarget(candidates, tried, session, now)
 	g.recordScopeRouteDecision(c, decision, time.Since(started))
+	if ch != nil {
+		c.result.selectedEpoch = ch.epoch
+	}
+	g.compareShadowRoute(c, decision, ch, now)
 	return ch, credential
 }
 
 func (g *Gateway) chooseTarget(candidates []*channel, tried map[uint]bool, session string, now time.Time) (*channel, *model.Credential, routeDecision) {
+	return g.chooseTargetWithDraw(candidates, tried, session, now, rand.Intn)
+}
+
+func (g *Gateway) chooseTargetWithDraw(candidates []*channel, tried map[uint]bool, session string, now time.Time, draw func(int) int) (*channel, *model.Credential, routeDecision) {
 	d := routeDecision{outcome: "no_candidates", picker: "none", candidateChannels: len(candidates)}
 	if len(candidates) == 0 {
 		return nil, nil, d
@@ -103,10 +112,15 @@ func (g *Gateway) chooseTarget(candidates []*channel, tried map[uint]bool, sessi
 		}
 	}
 	d.selectionPoolChannels = len(pool)
+	if g.shadow != nil && len(pool) <= len(d.shadowPool) {
+		for i, candidate := range pool {
+			d.shadowPool[i] = shadowCandidate{channelID: uint(candidate.id), epoch: candidate.epoch}
+		}
+	}
 	if len(pool) == 0 {
 		return nil, nil, d
 	}
-	ch := chooseWeightedChannel(pool, rand.Intn)
+	ch := chooseWeightedChannel(pool, draw)
 	credential, picker := g.pickCredentialDecision(ch, tried, session, now)
 	d.picker = picker
 	if credential == nil {

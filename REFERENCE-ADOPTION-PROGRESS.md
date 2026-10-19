@@ -997,3 +997,115 @@ pass. Prior browser/frontend evidence is reused from exact unchanged main755128d
 source; normal automatic CI continues its normal Node/API checks. No Docker or
 Linux race is claimed locally; final automatic head check/delivery remains the
 owner merge gate. Raw commands/full logs/manifest are external validation-r06d-owner.
+
+
+## R06d Integration And Shadow Follow-on Boundary
+
+Final owner-ledger headcee15e066eb112f2365e07b344d71fc9bf2c0d4e and
+tree026daba87277e8baadd3d0279e72a0b9779cd05f passed complete automatic
+push39217668258 and PR39217752127 check/delivery, with no failed steps.
+PR #40 merged as master/9a1264291a789e2e8d86c82614dd86f1ef12d20d with the
+identical tested tree. Independent main39218975413 also completed full
+check/delivery success. Exact job JSON and merge proof are external
+validation-r06d-owner. This accepts only the personal financial read backend;
+R06/frontend, R05b paid execution, real OAuth/Provider and Runtime gates remain
+separate. No release, tag or image publication is part of this batch.
+
+The next backend slice records its [concrete decision](REFERENCE-R00-SHADOW-IMPLEMENTATION.md)
+before source work on this accepted baseline. It adds opt-in bounded shadow
+load/error comparisons through existing operational metrics/debug consumers,
+without changing production selection, frozen declarations, L0 or schema16.
+Implementation and full acceptance of that source are pending at this checkpoint.
+
+
+### Shadow Source, Consumers And Performance Checkpoint
+
+The private L1 sampler has eight slots,64 outcomes each and a ten-minute
+window. Exact rational comparisons consume the already filtered priority pool;
+production weighted draws and extension/affinity calls remain unchanged. Both
+startup flags are required. Epoch/reset, retired/untracked activity, cap
+saturation and late token consumption are bounded under a sampler-only mutex.
+Successful configuration publication stamps an immutable epoch before atomic
+publication; failed Publish and health refresh retain prior identity. Shadow
+overflow never fails the real configuration or changes an actual selection.
+
+Directed sampler risk groups pass3.292s. Nine gateway integration groups pass
+5.982s: deterministic selection trace, genuine HTTP rejection versus body-read
+failure, excluded local/protocol/cancellation/panic paths, finalizer occupancy,
+multi-publication retirement, real concurrent publication/health, debug privacy,
+JSON/SSE wire parity and real SQLite strict success/pending-receipt-fault parity.
+The new actual-main four-flag matrix passes6.536s with metrics/debug consumers,
+exact POST/output counts and unchanged disabled financial state. Initial fixture
+issues were corrected before acceptance: ownerless seed token lacked the
+existing claim step; legacy Chat passthrough is not a strict JSON decoder; SSE
+required its existing finish frame. No production code was changed to accept
+those invalid fixtures. Directed command summaries and raw final integration
+JSON are separate in external validation-r00-shadow.
+
+Metrics fixed-reason/concurrency/privacy tests pass0.739s. Recording counters
+allocate zero; sampler Begin/End plus full8-slot/64-live-outcome Compare also
+allocate zero in1000 AllocsPerRun iterations (directed package3.322s).
+The complete selection path retains its existing allocations, rather than
+claiming the entire scheduler is allocation-free.
+
+Performance uses Go1.26.3 installed windows/386 with GOARCH=amd64 CGO_ENABLED=0,
+Windows10.0.26300.0, Intel i5-12500H,10000 serial selections per case and full
+64-outcome rings per enabled channel (one HTTP error every four outcomes).
+The first ordinary time.Now/Since per-call report could not resolve p50/p95:
+its zeros are not accepted as latency evidence. Its mean/alloc logs remain
+preserved. A Windows-only external Go overlay then substitutes
+QueryPerformanceCounter timing (frequency10000000) only in the measurement
+fixture, preserving the actual selection implementation. Before-source overlay
+uses master/9a12642 selection bodies plus only a private decision field and an
+uncalled new-test compile shim. It adds no production shadow call. No Windows
+measurement API, overlay or downloaded code is committed to the repository.
+
+| Source/path | Pool | Mean ns/op | B/op | Allocs/op | QPC p50 ns | QPC p95 ns |
+|---|---:|---:|---:|---:|---:|---:|
+| accepted before / disabled |2|643.1|464|5|600|1200|
+| accepted before / disabled |8|1004|528|6|800|1500|
+| final source / shadow off |2|646.7|464|5|600|1300|
+| final source / shadow on |2|1368|464|5|1600|2600|
+| final source / shadow off |8|902.3|528|6|800|1300|
+| final source / shadow on |8|4358|528|6|4300|5700|
+
+Enabled added p95 is1.3us for2 and4.4us for8 channels on this synthetic host;
+no selection allocations are added. Timing includes counter overhead; this
+single non-race/serial host measurement proves neither contention behavior nor
+traffic benefit. The10us added-p95 target is met only for these recorded cases.
+Full commands, raw before/after logs, measurement overlay hashes and source
+binding are external performance-*-commands.json and performance-environment.json.
+The final checked-in timing report explicitly marks unresolved clocks instead
+of presenting zero quantiles; that log-only change leaves all measured loops
+and selection source unchanged. Default enablement and any actual scoring
+algorithm remain outside this batch.
+
+Final full local checks and actual-main smoke now run on the unchanged latest
+accepted master/9a12642 baseline. Complete exact-head automatic CI, merge-tree
+verification and independent main checks remain pending.
+
+
+### Shadow Final Local Acceptance
+
+Final16 non-Markdown sources (13 Go) have LF-normalized manifest digest
+202abef4f8f0e8a18157a8951a6c0a09e90f79956b56ee34531bf2778db20a4c.
+Latest origin/master was fetched and remains9a1264291a789e2e8d86c82614dd86f1ef12d20d.
+On that accepted baseline, Windows/PowerShell GOARCH=amd64 CGO_ENABLED=0:
+go mod tidy with semantic module diff, core/protocol dependency list/guard,
+go build ./..., go vet ./... and full go test -json -count=1 ./... all pass.
+Final1707 tests/subtests in41 packages pass89.455s; seven expected process
+helpers skip and38 packages have no tests. Full actual-main smoke passes61.402s,
+including the new four-flag/metrics/debug scenario and all existing strict,
+credential/encryption, forced-kill/recovery, background/SSE/cancel/TTL and
+usage-history checks. No local Linux race or container execution is claimed.
+
+All13 changed Go files have no gofmt output. Python AST and152 local links in
+five changed Markdown documents pass; diff whitespace checks pass. Existing
+registered public snapshots, OpenAPI0.11.0/111 operations, core, models,
+schema16/migrations, modules, CI workflows and frontend bytes remain exact.
+Earlier frontend/browser evidence is reused only for that unchanged source;
+automatic CI still executes its ordinary Node/API checks. Independent read-only
+sampler/integration review found no actionable remaining issue. Raw full logs,
+commands and final source manifest are external validation-r00-shadow/full-final.
+Final automatic push/PR and independent merged-main verification remain the
+acceptance gates for this source; no manual workflow run or reduced CI is used.

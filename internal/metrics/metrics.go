@@ -103,6 +103,83 @@ type Registry struct {
 	attemptDurations map[string]*histogram
 	routeSelections  map[string]*counter
 	routeDurations   map[string]*histogram
+	shadowRecorded   atomic.Bool
+	shadowReasons    [11]atomic.Uint64
+	shadowSamples    [2]atomic.Uint64
+}
+
+var shadowReasons = [...]string{"compared_equal", "compared_different", "disabled", "pinned", "pool_size", "slots_busy", "stale_epoch", "retired_active", "untracked_active", "saturated", "unknown"}
+
+// RecordShadowComparison accepts only fixed aggregate reasons, never target labels.
+// Eligible means enabled, unpinned, pool size 2..8, before state checks.
+func (r *Registry) RecordShadowComparison(reason string) {
+	index := len(shadowReasons) - 1
+	switch reason {
+	case "compared_equal":
+		index = 0
+	case "compared_different":
+		index = 1
+	case "disabled":
+		index = 2
+	case "pinned":
+		index = 3
+	case "pool_size":
+		index = 4
+	case "slots_busy":
+		index = 5
+	case "stale_epoch":
+		index = 6
+	case "retired_active":
+		index = 7
+	case "untracked_active":
+		index = 8
+	case "saturated":
+		index = 9
+	}
+	r.shadowReasons[index].Add(1)
+	r.shadowRecorded.Store(true)
+}
+
+// RecordShadowSample records a bounded aggregate HTTP observation.
+func (r *Registry) RecordShadowSample(errorSample bool) {
+	index := 0
+	if errorSample {
+		index = 1
+	}
+	r.shadowSamples[index].Add(1)
+	r.shadowRecorded.Store(true)
+}
+
+func (r *Registry) renderShadow(b *strings.Builder) {
+	if !r.shadowRecorded.Load() {
+		return
+	}
+	var counts [11]uint64
+	var eligible uint64
+	for i := range counts {
+		counts[i] = r.shadowReasons[i].Load()
+		if i < 2 || i >= 5 && i < 10 {
+			eligible += counts[i]
+		}
+	}
+	writeFamilyHeader(b, "gateway_shadow_comparisons_total", "counter", "Shadow comparison outcomes with fixed reasons")
+	for i, reason := range shadowReasons {
+		fmt.Fprintf(b, "gateway_shadow_comparisons_total{reason=\"%s\"} %d\n", reason, counts[i])
+	}
+	for _, metric := range []struct {
+		name, help string
+		value      uint64
+	}{
+		{"gateway_shadow_eligible_total", "Enabled unpinned comparisons with pool size 2..8 before state checks", eligible},
+		{"gateway_shadow_compared_total", "Shadow comparisons evaluated", counts[0] + counts[1]},
+		{"gateway_shadow_matched_total", "Shadow comparisons matching the authoritative target", counts[0]},
+	} {
+		writeFamilyHeader(b, metric.name, "counter", metric.help)
+		fmt.Fprintf(b, "%s %d\n", metric.name, metric.value)
+	}
+	writeFamilyHeader(b, "gateway_shadow_samples_total", "counter", "Shadow HTTP samples with fixed outcomes")
+	fmt.Fprintf(b, "gateway_shadow_samples_total{outcome=\"clean_http_200\"} %d\n", r.shadowSamples[0].Load())
+	fmt.Fprintf(b, "gateway_shadow_samples_total{outcome=\"http_error\"} %d\n", r.shadowSamples[1].Load())
 }
 
 type LogQueueStats struct {
@@ -390,6 +467,7 @@ func (r *Registry) Render(w io.Writer) error {
 
 	var b strings.Builder
 
+	r.renderShadow(&b)
 	writeFamilyHeader(&b, MetricAttemptsTotal, "counter", "Executed upstream attempts, including retries")
 	writeCounters(&b, MetricAttemptsTotal, r.attempts, 1)
 	writeFamilyHeader(&b, MetricAttemptDuration, "histogram", "Upstream attempt duration in seconds")
