@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/d4c09e79174b4f539aca3d261ca0194435a801b1`，WS 持久续链及进程强杀 PR #63/#64 均已通过各自最终精确头 CI 并合并，合并后 Verify `39324629036` 已成功。实际镜像 WS 交付 PR #65 精确头 `78d5b07aa1ef908b3672e3f265795a11ef525d1b` 的 Verify `39326569100` / `39326561052` 均完整成功，已合并为 `b4d628138d0d01a4a5a901f4a5fc8c4e9d420aca`，合并后 Verify `39328615465` 仍运行中；本批固定 WS SDK 及镜像组合验收单列。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/b4d628138d0d01a4a5a901f4a5fc8c4e9d420aca`，Verify `39328615465` 已完整成功。WS SDK PR #66 最终精确头 `f9e0f5849d8b5d81732f537cff110b4e4796d4bb` 的 Verify `39329673632` / `39329668835` 全部六项成功，固定客户端与实际镜像/TLS/反代/恢复组合通过，已合并为 `2ea7ccc5718977598abea26242a0d4957c0b5f95`；合并后完整 Verify 另验。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -31,7 +31,7 @@
 | 基础推理 | models、Chat JSON/SSE、embeddings、声明范围的文本/function tools | 能力按操作、源/目标协议、传输、计费模式判断 |
 | Responses HTTP | 独立模型、JSON/SSE、owner/Key 幂等、加密历史、Conversations/items、续链 | 默认关闭；legacy/disabled 可用，strict 全部拒绝 |
 | 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复 | 默认关闭；仅 disabled、自包含文本/函数工具；收费和后台父链未完成 |
-| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；显式持久续链/跨模式已通过精确头CI并合并；真实重连/部署、收费和任意多路复用未验收 |
+| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；显式持久续链/跨模式、受控镜像TLS/反代/重启及固定WS SDK已通过精确头CI并合并；真实Provider部署、收费和任意多路复用未验收 |
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；真实账号未验收 |
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
@@ -430,6 +430,23 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 6. **协作/边界：**这是固定SDK与生产组件组装的受控兼容证据，不等于实际main镜像、官方Provider、其它SDK/Codex、自动恢复、收费或长期容量验收；实际镜像由P6独立批验证。官方文档 WebSocket mode 用于核对connect/create方式，当前固定安装包源码另核对精确版本签名，无第三方实现复制。
 2026-10-20 本地证据：固定 openai3.8.0/websockets15.0.1 的真实 socket 回归通过，SDK 解析8次新生成的类型化事件，同连接前三轮和新连接完整上下文/工具关联正确；HTTP 检索不触发上游。5次 completed、1次failed、1次incomplete与1次客户端取消分别保留事实；8条历史/usage和8条已发送attempt独立核对，取消历史uncertain且父链拒绝不发送，5条已知3 Token保留，另3条未知不补零。非成功终态及父链拒绝可能按既有策略关闭连接，仅对成功多轮声明同连接复用，后续使用明确新连接。Windows GOARCH=amd64 完整cmd/gateway回归通过（50.940s）及该包vet通过；新增独立持久事实断言随后在同一SDK harness内通过。Python AST、CI结构及diff检查通过。此处仍是生产组件组装和受控Provider证据，精确头完整CI另验，不表示官方服务或SDK自动重连通过。
 P4 本批组合验证扩展：①在同一SDK脚本增加显式deployed入口，复用全部8个固定SDK用例；②仅扩展已受控验收的native_ws_delivery.py、fixture与既有delivery步骤，继续使用当前HTTP/WS接口；③实际gateway镜像和生产拨号/权限不变，独立非root Python SDK镜像只在构建阶段安装固定依赖，运行时加入唯一Docker internal网络；④在原6次部署生成之后执行8次SDK生成，核对全部14次create、2条unknown不可重放、13sealed/1interrupted用量、历史及恢复，不把组件与镜像的分离证据直接等同组合证据；⑤复用SDK客户端的25秒执行预算、容器命名/显式清理、网络与只读挂载检查，Linux精确头delivery验收；⑥本机无Docker，组合只能由CI证明，原有局部证据保留，不宣称真实Provider、自动恢复或收费许可。
+#### P4 固定 Codex CLI 受控子批（2026-10-20）
+
+PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329673632 / 39329668835 全部六项成功并已合并；delivery 明确证明同一固定 SDK 客户端经过实际 main 镜像、TLS 夹具和反代的组合，14次 create、历史/用量、unknown 拒绝及强杀恢复均通过。初轮浅挂载导入宿主路径的脚本缺陷已修复，不把失败头记录为验收。
+
+1. **层级/目录：**仅 tests/smoke、既有 CI/Makefile 与本方案；运行固定官方 CLI 0.163.0，经实际 main 的标准 API Key Responses HTTP/SSE 到隔离 loopback Provider。先观察真实请求，再按现有协议范围接入回归。
+2. **公开依赖：**只消费现有 Responses 接口、当前鉴权/准入和 disabled 用量；CLI 使用独立命名 custom provider 与现有 Responses wire API。固定 release 资源和 SHA-256 校验，外部二进制不入库，不修改宿主安装。
+3. **地基影响：**不先扩大工具种类或 hosted 能力，不改 L0、契约、迁移及默认配置；若发现新的能力缺口，明确当前拒绝与所需增量后再记录具体实现范围。
+4. **行为/回退：**临时 CODEX_HOME 和工作目录、合成 Key、只读 CLI、关闭自动重试/WS/环境代理、无个人配置/账号读取；Provider 只发送固定文本或已声明函数事件，工具只由 CLI 客户端执行。先证明文本终态与错误/截断事实，再决定必要的函数工具子集；不把完整 Codex 产品支持作为本批结论。
+5. **验证：**独立进程预算、失败 Kill/Wait、真实请求与实际上游次数、映射模型/字段/事件、CLI JSON 终态、用量和资金边界、无密钥日志、夹具释放；本地定向验证后精确头完整 CI，固定 Linux/Windows 客户端证据分别记录。
+6. **协作/边界：**原 HTTP/WS SDK 和镜像证据按提交保留；不调用真实 Provider、不替换用户 Magpie/认证/配置，不扩大 strict/后台/WS/任意工具许可。官方 Advanced Configuration 核对 custom provider 与临时 CODEX_HOME 用法；具体功能以固定二进制实际请求为准。
+
+本批本地证据：官方 Windows release `rust-v0.163.0` 的 `codex-x86_64-pc-windows-msvc.exe.zip` 经 SHA-256 `dabdb4d16aaf10fea40b74811c96efddcd9138f122163b69ed604fcb3eb704c3` 核对；实际 CLI 输出 `codex-cli 0.163.0`。六个场景分别验证文本、客户端函数结果往返、failed、incomplete、截断与 namespace 发送前拒绝。函数场景使用 CLI 已声明的 request_user_input，非交互模式返回 unavailable，再以对应 call_id 交回完整上下文；不执行命令、外部工具或询问真实用户。每个完整 SSE 事件内部按3字节切块并覆盖 UTF-8，模型映射到独立 native-* 目标。6条用量各绑定1条已发送 attempt，全部用量封口且不重试，3条已知3 Token与3条未知保留，namespace拒绝零发送且不新增用量/资金事实，disabled资金不变。首次脚本末尾误用了不存在的用量表名，改为现有 usage_attempt_receipts 后，最终完整本地harness通过；Python AST、CI结构和diff检查通过。生产源码与已通过精确头CI的PR66相同，复用原完整Go验证；新脚本及Linux固定客户端须由本批最终精确头完整CI单列证明。
+
+支持边界：使用全新临时 CODEX_HOME/工作目录、API Key custom provider 与 Responses HTTP；关闭 apply_patch_freeform、multi_agent、goals、apps及WS/自动重试。默认 namespace 工具表当前会被明确拒绝，不能将本批标为完整默认 Codex、shell/apply_patch 执行、后台恢复或WS支持。夹具模型使用客户端fallback metadata，未证明官方模型目录和元数据。Windows CLI日志文件采用独立Job清理辅助进程，Linux用独立进程组和Kill/Wait；从未读取/改写用户Codex/Magpie配置。CI固定Linux release `codex-x86_64-unknown-linux-musl.tar.gz`，SHA-256 `beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4`；release只作为独立客户端依赖，不复制上游实现。
+
+官方配置依据：`https://developers.openai.com/codex/config-advanced`；固定发行来源：`https://github.com/openai/codex/releases/tag/rust-v0.163.0`。
+
 ### P5：账号信号与调度评估
 
 - **层级/目录：**L1 scheduler/gateway；L3 routes 查询。
