@@ -88,6 +88,13 @@ jobs:
           "$RUNNER_TEMP/txapi-sdk-venv/bin/python" -m pip install -r tests/smoke/requirements-sdk.txt
           "$RUNNER_TEMP/txapi-sdk-venv/bin/python" tests/smoke/sdk_conformance.py --go go
 
+      - name: 固定官方 Python WS SDK 的受控兼容回归
+        timeout-minutes: 5
+        run: |
+          python3 -m venv "$RUNNER_TEMP/txapi-ws-sdk-venv"
+          "$RUNNER_TEMP/txapi-ws-sdk-venv/bin/python" -m pip install -r tests/smoke/requirements-ws-sdk.txt
+          "$RUNNER_TEMP/txapi-ws-sdk-venv/bin/python" tests/smoke/ws_sdk_conformance.py --go go
+
       - name: 转发性能基线（仅报告）
         run: |
           set -o pipefail
