@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的合并基线：`master/75be4bf7edc0cb2fe43d5b71e9761de6c84b68d0`，Verify `39286276760` 已成功，包含受控 P1/P2。随后 SDK/P3/真实网络回归 PR #50/#51/#52 各自精确头 Verify 均成功且已合并；最新集成主线 `444bb67331f017dcb1956ba8df10b24f74b1f3ae` 的合并后 Verify 仍在后台，不能继承旧 CI。此证据仅覆盖相应提交，不表示当前 HTTP 阶段超时已通过远端验收。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的合并基线：`master/444bb67331f017dcb1956ba8df10b24f74b1f3ae`，对应 Verify `39291096094` 的 check/delivery 均成功，覆盖已合并 P1/P2/P3、固定 Python SDK 及 TLS/HTTP2/反代生命周期回归。此证据只覆盖该提交；PR #53 的阶段超时精确头 `b239adcd1ad31fce47a684682b95406fefd24ca8` 另通过 Verify `39291807727` 并合并为 `07fb7ecbebcdbb9a03d7383f31b1ee2102337b0d`；其合并后CI单列，当前并发基线不继承旧CI。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -153,6 +153,15 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 
 后续同条件性能改动的前瞻预算先固定为：正常样本完成率 100%、每请求一个上游 attempt、drain 失败 0；配对首正文与首有效文本增量 P95 各不超过 5ms，网关完整事件观察延迟上界 P95 不超过 2ms。此预算用于下一轮同机重复对照，尚非本批通过声明或 CI 硬门槛；资源预算须先取得 Linux 可靠基线，P99 须扩大独立请求和重复轮次。TLS/HTTP2/反代、慢读/不读、持续并发/过载恢复、取消风暴及真实 Provider/客户端验收继续开放，P0 完整性能矩阵未完成。
 
+本轮 P0 并发承载/过载恢复基线切片（源码及本地受控检查完成，精确头 CI 待验证）：
+
+1. **层级/目录：**仅 `tests/smoke/capacity_baseline.py`、既有 `stream_baseline.py` 的有界 hold 场景、Verify 与本方案；运行生产 `cmd/gateway`，不修改转发热路径。
+2. **公开依赖：**通过既有 HTTP API、测试用启动配置和进程生命周期消费现有鉴权、容量、路由、执行及 SQLite；复用既有完整 SSE 观察/绝对 deadline/上游 drain 测量，不增加公开端口或冻结声明。
+3. **地基影响：**无 L0、地基契约、迁移和产品配置变更；无需新增 CR。单实例/用户/Key/channel 有限准入保持原实现，不旁路鉴权或改健康状态。
+4. **行为/回退：**同机 loopback HTTP/1.1 明文，固定有限 worker/请求/轮次、每 worker 持久连接；直连与完整网关分阶段交替先后。先同时占满 Key 名额，额外请求必须429且上游 attempt=0；释放后每个 holder 完整终态且一次发送，再以保留全部尝试的有限 no-send429探测验证恢复。恢复成功也须只有一次发送，并再同时填满全部 Key 名额，检出只恢复一个空位的部分租借泄漏。每阶段请求完成后上游活动归零；正常请求失败保留样本并停止该 worker，计划/实际启动数同时报告，不选择性隐去失败。
+5. **验证/验收：**并发1、4和16的有界回归、既有串行 self-check，Linux CI再采样进程 CPU/RSS/FD/线程；各阶段资源分别记录，峰值为50ms采样下界。记录首正文、首有效文本、完整事件延迟、完成率、吞吐/连接及恢复时间；并发分布差只做非配对描述，不套用已有并发1的配对性能预算。CI检查完整终态、一次发送、满额拒绝、drain和恢复，性能数值只报告。本切片不改优化参数，取得重复资源基线后再制定后续优化/容量门槛。
+6. **协作：**报告写仓库外，记录源码SHA/dirty、两个harness摘要、环境和有限负载；CI不把临时报告当永久制品。Windows资源采样仍unsupported；有限closed-loop不宣称最大容量、长时soak、TLS/H2/反代承载或真实Provider验收。P0完整矩阵仍开放。
+
 <details>
 <summary>FC-P0-HTTP-001：前台 HTTP 阶段超时具体 CR（已批准，源码与本地验证完成）</summary>
 
@@ -167,7 +176,7 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 
 本 CR 已按批准范围完成源码：启动配置/组装 → gateway 前台 source 与 capability 预检 → 同一个 L2 stream 的 v4 进展 → 既有 L0 executor 的单 watchdog/同步输出 deadline → ErrorDetail.Code 与固定 route reason。后台/claimed/WS不接新增阶段。新增阶段超时不重试或处罚凭据；strict仍由既有EndAttempt/Finish处理未知用量和双hold。候选v4已登记并更新公开快照，未宣称冻结。
 
-定向验证已覆盖实际socket的role/usage/finish-only、半事件滴流、文本后idle、Chat/Responses工具、空/incomplete终态；三类等待超时各仅一个attempt且strict保留pending、Provider hold及user/Key双hold。L0定向覆盖write暂停、合法终态与late-timer仲裁、取消/join、TLS/HTTP2不读下游。零配置下的既有End确认与资金事实回归保持原行为。Windows GOARCH=amd64 build ./...、vet ./...、全量 go test ./... -count=1、生产主进程 local.py 冒烟与定向协议/网关/配置/架构检查均已通过。包含当前授权、静态Key/Responses/后台/WS、强杀恢复、usage与shadow回归；小数秒/越界/溢出/拼错阶段字段拒绝启动。精确提交Linux race/交付CI待运行，不将本地通过写成远端验收。
+定向验证已覆盖实际socket的role/usage/finish-only、半事件滴流、文本后idle、Chat/Responses工具、空/incomplete终态；三类等待超时各仅一个attempt且strict保留pending、Provider hold及user/Key双hold。L0定向覆盖write暂停、合法终态与late-timer仲裁、取消/join、TLS/HTTP2不读下游。零配置下的既有End确认与资金事实回归保持原行为。Windows GOARCH=amd64 build ./...、vet ./...、全量 go test ./... -count=1、生产主进程 local.py 冒烟与定向协议/网关/配置/架构检查均已通过。包含当前授权、静态Key/Responses/后台/WS、强杀恢复、usage与shadow回归；小数秒/越界/溢出/拼错阶段字段拒绝启动。PR #53 精确头 `b239adcd1ad31fce47a684682b95406fefd24ca8` 的 Verify `39291807727` 已成功，Linux race、冒烟、SDK与容器交付均通过，并已合并；合并后 CI 与后续修改单列。
 
 实际限制单列：当前Go HTTP/1 TLS写入失败后的标准库close_notify关闭路径可能额外等待约5秒；阶段触发与最终返回不是同一时刻，不能声称所有TLS阻塞都在配置秒数内完成释放。真实TLS/H2测试验证写阶段归因并以8秒封顶检查退出。Windows明文HTTP/1测试可能被内核完整缓冲，未实际阻塞的子场景标记skip，不作为TCP写阻塞证据。同步自定义Output必须遵守已声明deadline语义，无遗留写goroutine兜底；真实Provider及外部部署仍未验收。
 
