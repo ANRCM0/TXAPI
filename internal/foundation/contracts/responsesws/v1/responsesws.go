@@ -32,8 +32,11 @@ type Open struct {
 
 type Create struct{ JSON []byte }
 type Result struct {
-	Facts   execution.ExchangeResult
-	Problem *Problem
+	// Host-only correlation; these fields are never injected into provider frames.
+	UsageRecordID  string
+	RecordingState string
+	Facts          execution.ExchangeResult
+	Problem        *Problem
 }
 
 type Session interface {

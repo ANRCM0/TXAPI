@@ -4,6 +4,7 @@ import history "minigateway/internal/foundation/contracts/usagehistory/v1"
 
 // UsageInvocation contains bounded execution metadata, never content or financial authority.
 type UsageInvocation struct {
+	Transport         string            `gorm:"size:16;not null;default:http"`
 	ID                string            `gorm:"primaryKey;size:38"`
 	UserID            uint              `gorm:"not null;index:idx_usage_owner,priority:1"`
 	TokenID           uint              `gorm:"not null;index"`

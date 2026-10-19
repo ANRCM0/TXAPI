@@ -34,10 +34,10 @@
 | 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；持久重连、跨模式续链、收费和任意多路复用未完成 |
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；真实账号未验收 |
-| 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；后台/WS 明细与收费未覆盖；S5-03 完整成本证明未完成 |
+| 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；本轮 WS 明细待验收，后台明细及后台/WS 收费未覆盖；S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/SDK WS/Codex 完整组合未验收；账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.2` / 117 操作；数据库迁移追加 schema v19，FC-P1/P3-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.3` / 117 操作；数据库迁移追加 schema v20，FC-P7-WS-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -70,7 +70,7 @@
 
 先过滤授权、模型、能力、绑定和凭据资格，再在有效优先级池选择。故障回退不能突破账号范围，资格变化在发送前复核。`route_diagnostics` 与 `shadow_route_scoring` 默认关闭；shadow 仅为有界前台 HTTP 对比，不改变真实优先级、权重、亲和、重试，样本不代表 Provider 总负载。
 
-`usage_history` 默认关闭且仅允许 disabled，覆盖前台 Chat/embeddings/Responses；不覆盖 native WS、原生后台或 durable claimed 执行。实例父记录上限 1..65536、owner 上限不大于实例、保留期 1..2592000 秒；零配置采用有限默认值，每调用预留有限 retry 子槽。预留/写入失败沿既有准入拒绝，不退化成可丢日志；记录数限制不是磁盘/WAL 字节保证。
+`usage_history` 默认关闭且仅允许 disabled，覆盖前台 Chat/embeddings/Responses 与原生 WS 每轮；不覆盖原生后台或 durable claimed 执行。本轮 WS 增量仍待精确头验收，查询用 transport 区分 HTTP/WS，用 protocol_status 区分协议快照与宿主终态。实例父记录上限 1..65536、owner 上限不大于实例、保留期 1..2592000 秒；零配置采用有限默认值，每调用预留有限 retry 子槽。预留/写入失败沿既有准入拒绝，不退化成可丢日志；记录数限制不是磁盘/WAL 字节保证。
 
 ### 账号与持久状态
 
@@ -78,7 +78,7 @@ R04a 命令为 `-upstream-account authorize|reauthorize|list|refresh|disable`，
 
 历史绑定当前 owner、创建 Key 和模型权限，内容加密、CAS/TTL/容量受限。`previous_response_id` 与 conversation 明确上下文来源，原生父 ID 和本地全上下文不能重复叠加；只有完整可重建、重新准入和计价的上下文才允许显式重放。`store=false` 不变永久历史，原生后台仍按声明临时保存恢复内容。后台受理先持久化任务和适用准入/预留事实再确认；内部任务状态、公开协议状态和财务终态分别映射。事件序号先持久提交再公开，按 `sequence_number` / `starting_after` 恢复；事件过期、丢失或不可重建时显式报错。
 
-迁移只追加版本，不修改已发布步骤。schema v19 升级前停写并一致备份；旧 schema18 二进制拒绝打开 v19，回退需恢复匹配的停写备份，不能删账号或改写账本/迁移修复。凭据/内容密钥、备份/WAL、内存和公网 TLS 的边界独立维护，管理掩码不构成加密。
+迁移只追加版本，不修改已发布步骤。schema v20 升级前停写并一致备份；旧 schema19 二进制拒绝打开 v20，回退需恢复匹配的停写备份，不能删账号或改写账本/迁移修复。凭据/内容密钥、备份/WAL、内存和公网 TLS 的边界独立维护，管理掩码不构成加密。
 
 ## 严格计费边界
 
@@ -424,6 +424,22 @@ P5 当前门槛评估（2026-10-20）：唯一 active SIWC grant 的候选池恒
 - **行为/契约：**先补准确用量与未知事实，再开放满足证明的收费子集；每次生成独立准入/RPM/账单，轮询/重连/重放有读取限流但不重复收费。queued 不占网络 attempt 槽，后台在途单独有界；取消未知不退款，迟到 usage 仍能对账。
 - **验收：**重复/迟到终态、取消完成竞争、漏 usage、断线、强杀重启、报价中途变化、缓存维度和账号归因；未完成的财务状态可持久查询/恢复，未知占用不丢失、不重复结算。
 - **协作影响：**不引入透支、补零或内存费用队列作为权威；HTTP 的成本许可不自动覆盖后台/WS，未通过 P8 对应操作证明时保持拒绝收费扩展。
+
+<details>
+<summary>FC-P7-WS-USAGE-001：disabled 原生 WS 每轮持久用量观察（源码及本地受控验证完成，精确头CI待验证）</summary>
+
+本批按当前任务的同类 CR 常设授权记录后直接实施。现有 WS 每轮已有发送、终态和基础用量事实，但没有持久查询消费者；先补观察，不开放收费。
+
+1. **层级/目录：**L1 gateway 的 nativeSession 负责每轮 Begin/Prepare/MayDispatch/Observe/Finish、唯一准入与关闭 join；store/model 复用既有 usage 权威和查询。L2 compat/responsesws 复用 Responses v3 解析，组装根注入详细解码器；现有 SessionBearer 查询和消费者同步新增 transport。L0 与执行循环不另建。
+2. **公开入口：**usagehistory/v1.Start 和 Summary 追加 Transport（http/websocket；Start 空值兼容 http），HostFacts 追加可选 ProtocolStatus（空/queued/in_progress/completed/failed/incomplete/cancelled，宿主终态与协议快照独立），responsesws/v1.Result 追加 UsageRecordID/RecordingState 供宿主关联；NativeWSOptions 追加可选 UsageDecoder 工厂，兼容原 Decoder。DecodeUsage 返回 v3.Envelope，原 Decode 继续返回其 v2 投影。只使用既有 v3 UsageObservation/校验，不修改冻结执行端口，不把候选端口推断为全量冻结。
+3. **迁移/回退：**追加 schema20 transport 和嵌入 host_protocol_status 列，旧记录明确 http/空协议快照；空值/显式 http 的 Start 指纹仍采用旧 JSON 形状，保留重放幂等。仅接受 http 或原生 Responses stream、MaxAttempts=1 的 websocket。旧 schema19 二进制拒绝 v20；回退恢复停写匹配备份，禁止改迁移或资金事实。OpenAPI 小版本说明新增查询字段；无新开关、依赖或查询端点。
+4. **行为/边界：**仅 usage_history 已启用且 disabled 时记录，默认关闭。每个已授权/准入轮次独立随机 usage ID，绑定可信当前 owner/Key 和连接请求 ID，不存正文/原生父 ID/密钥。Prepare 在 dial 前，MayDispatch 在唯一 round Write 前；持久失败不发送，不额外重试。成功/failed/incomplete/取消/截断保留宿主 phase/协议终态/写入下界，WS 的 HTTP 状态为0；机械 failed 映射既有 upstream_error，deadline 与取消分开；incomplete 可传输成功但协议状态仍明确 incomplete，不推断 completed。未知不补零，部分/缓存/推理细分沿 v3 有界校验。发送后 Observe/Finish 独立2秒、保留身份并脱离取消，失败标 unavailable/interrupted，不重写已交付的 Provider 结果；重启沿既有 InterruptUsageHistory 留未知。查询按已有权限脱敏，行数/TTL/单尝试/关闭 join 复用，不从记录推导资金或恢复授权。
+5. **验证：**定向覆盖同连接多轮/续链、不同连接与 owner/Key、精确/零/部分/未知/细分、失败/incomplete/写失败/取消/deadline；Begin/Prepare/MayDispatch 失败及 panic 均不发送，Observe/Finish 失败不伪造成功用量。验证实时 SQLite 查询、容量、停用后只收尾、关闭 join、schema19→20 保留指纹/历史/账本并两次重开；架构/公开快照/OpenAPI与现有 HTTP/strict/原生WS回归同批集中验收，完整精确头CI后合并。
+6. **协作与范围：**HTTP 默认行为和已有 Header不变，不向原生 WS 帧注入私有字段。Result 的usage ID只对宿主可见，终端用户通过现有列表读取；transport区分请求来源。原生后台、durable claimed、WS 收费/成本许可、持久续链、真实 Provider 与商业页面保持原边界；本子批不关闭 P7/P8 或S5-03。
+
+2026-10-20 本地受控证据：双端真实 socket 同连接文本/函数两轮后，通过登录 SessionBearer 列表/详情读到各轮独立记录；调用 Key 不可作 Session、跨 owner 返回404、私有目标与密钥不泄漏。服务定向覆盖完整/零/部分/未知和细分、failed/incomplete独立快照、取消/deadline/写失败/panic、各持久步骤失败、Key停用后收尾、关闭join和满额禁发。schema19→20 两次重开保留旧Start/Observe/Finish指纹与重放，历史HTTP来源回填；既有升级回归继续核对账本/加密内容与已发布迁移时间。Windows GOARCH=amd64 build/vet通过；全量Go回归初轮仅旧Responses历史测试的最新版本写死19，补20后完整store包复验通过，其余包初轮已通过。生产主进程local.py与12项控制台行为通过；Linux race/容器交付按最终精确头CI验收。所有上游/账号仍为夹具，未执行真实Provider/OAuth，不声明收费或生产容量。
+
+</details>
 
 ### P8：完整成本证明
 

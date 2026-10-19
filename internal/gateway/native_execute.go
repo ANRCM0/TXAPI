@@ -8,8 +8,10 @@ import (
 	"minigateway/internal/access"
 	v1 "minigateway/internal/foundation/contracts/execution/v1"
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
+	v3 "minigateway/internal/foundation/contracts/execution/v3"
 	contract "minigateway/internal/foundation/contracts/responsesws/v1"
 	textvalue "minigateway/internal/foundation/contracts/text/v1"
+	history "minigateway/internal/foundation/contracts/usagehistory/v1"
 )
 
 func (n *nativeSession) Execute(parent context.Context, in contract.Create, deliver v2.FrameDelivery) (result contract.Result) {
@@ -42,8 +44,12 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	reserved, exchangeStarted, deliveryStarted := false, false, false
 	estimate := 0
 	gateContext := ctx
+	var recording *nativeUsageRecording
+	observed := websocketExchangeObservation{usage: unknownDetailedUsageFact()}
+	interrupted := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			interrupted = true
 			result.Problem = nativeProblem("upstream_error", 1011)
 			result.Facts.Err = errors.New("native websocket round panicked")
 			result.Facts.Termination = v2.Failed
@@ -53,6 +59,7 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 			}
 			result.Facts.DeliveryCommitted = result.Facts.DeliveryCommitted || deliveryStarted
 		}
+		recording.finish(ctx, &result, observed.usage, observed.native.Status, interrupted)
 		if reserved {
 			actual := 0
 			if result.Facts.UpstreamWriteStarted {
@@ -148,6 +155,15 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	if err != nil || release == nil {
 		return fail("rate_limited", 1013, err)
 	}
+	recording, err = n.service.gateway.beginNativeUsage(ctx, create.Model)
+	if err != nil {
+		result.RecordingState = "unavailable"
+		return fail("unavailable", 1013, err)
+	}
+	if recording != nil {
+		result.UsageRecordID, result.RecordingState = recording.id, "open"
+	}
+
 	wasBound := n.target.ChannelID != 0
 	ch, credential, err := n.targetForRound(ctx, create.Model)
 	if err != nil {
@@ -167,6 +183,10 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	if err != nil {
 		return fail("invalid_request", 1008, err)
 	}
+	if !recording.prepare(ctx, history.Target{ActualModel: n.target.ActualModel, Group: ch.groupName, Protocol: ch.typ, ChannelID: uint(ch.id), CredentialID: credential.ID}) {
+		return fail("unavailable", 1013, errors.New("usage recording unavailable"))
+	}
+
 	if nilInterface(n.connection) {
 		n.connection, err = n.generation.transport.Dial(ctx, credential.APIKey)
 		if err != nil || nilInterface(n.connection) {
@@ -177,21 +197,27 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	if decoder == nil {
 		return fail("upstream_error", 1011, errors.New("native websocket decoder unavailable"))
 	}
-	var native v1.NativeCompletion
+	var decodeUsage func(v2.Frame) (v3.Envelope, error)
+	if n.service.options.UsageDecoder != nil {
+		rich := n.service.options.UsageDecoder(n.target.ActualModel)
+		if rich == nil {
+			return fail("upstream_error", 1011, errors.New("native websocket usage decoder unavailable"))
+		}
+		decodeUsage = rich
+	}
+
+	if !recording.dispatch(ctx) {
+		return fail("unavailable", 1013, errors.New("usage recording unavailable"))
+	}
 	exchangeStarted = true
-	result.Facts = (WebSocketExchangeExecutor{}).ExecuteExchange(ctx, v2.Exchange{Upstream: n.connection, Initial: initial,
-		Decode: func(frame v2.Frame) (v2.Envelope, error) {
-			envelope, err := decoder(frame)
-			if err == nil && envelope.Native != nil {
-				native = *envelope.Native
-			}
-			return envelope, err
-		},
+	result.Facts = executeWebSocketExchange(ctx, v2.Exchange{Upstream: n.connection, Initial: initial,
+		Decode: decoder,
 		Deliver: func(ctx context.Context, frame v2.Frame) (int, error) {
 			deliveryStarted = true
 			return deliver(ctx, frame)
 		},
-	})
+	}, decodeUsage, &observed)
+	native := observed.native
 	if result.Facts.Termination != v2.Success || !result.Facts.ProtocolComplete || native.Status != "completed" || native.ID == "" || len(native.ID) > 256 {
 		return fail("upstream_error", 1011, result.Facts.Err)
 	}

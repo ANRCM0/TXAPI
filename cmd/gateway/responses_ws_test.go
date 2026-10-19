@@ -26,11 +26,13 @@ import (
 	"minigateway/internal/foundation/persistence"
 	"minigateway/internal/gateway"
 	"minigateway/internal/management"
+	"minigateway/internal/model"
 	"minigateway/internal/protocol"
 	"minigateway/internal/server"
 	"minigateway/internal/server/middleware"
 	"minigateway/internal/store"
 	transport "minigateway/internal/transport/websocket"
+	"minigateway/internal/usageconsole"
 )
 
 type wsAssemblyObservation struct {
@@ -192,6 +194,10 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 	}
 }
 func newWSAssemblyFixture(t *testing.T) *wsAssemblyFixture {
+	return newWSAssemblyFixtureWithUsage(t, false)
+}
+
+func newWSAssemblyFixtureWithUsage(t *testing.T, recordUsage bool) *wsAssemblyFixture {
 	t.Helper()
 	dir := t.TempDir()
 	credentialKeys := runtimeKeyFile(t, "native-credentials", 21, 25)
@@ -227,7 +233,11 @@ func newWSAssemblyFixture(t *testing.T) *wsAssemblyFixture {
 		t.Fatal(err)
 	}
 	limiter := access.NewMemoryLimiter()
-	f.gw, err = gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: f.st.Channels(), BillingMode: billing.ModeDisabled, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: f.capacity}})
+	gatewayOptions := gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: f.st.Channels(), BillingMode: billing.ModeDisabled, Limiter: limiter, Admission: gateway.CapacityAdmission{Capacity: f.capacity}}
+	if recordUsage {
+		gatewayOptions.UsageHistory = f.st.UsageRecorder(model.UsageHistoryLimits{InstanceRecords: 8, OwnerRecords: 8, RetentionSeconds: 3600})
+	}
+	f.gw, err = gateway.New(gatewayOptions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +268,7 @@ func newWSAssemblyFixture(t *testing.T) *wsAssemblyFixture {
 		}
 		return f.runtime.Publish(channels)
 	}, nil)
-	engine := server.NewEngine(server.Deps{Generation: gateway.NewHTTPExecutor(f.gw), TokenAuth: identity.NewTokenAuthenticator(f.st), Control: controlplane.New(persistence.Control(f.st)), Configuration: f.configuration, Metrics: f.gw.Metrics(), ResponsesWS: f.runtime.Handler(), AdminAuth: middleware.AdminAuth("assembly-admin-fixture"), RateLimiter: limiter, RateGate: access.NewRateGate(limiter)})
+	engine := server.NewEngine(server.Deps{Generation: gateway.NewHTTPExecutor(f.gw), TokenAuth: identity.NewTokenAuthenticator(f.st), Control: controlplane.New(persistence.Control(f.st)), Configuration: f.configuration, Metrics: f.gw.Metrics(), UsageHistory: usageconsole.New(f.st.UsageHistory(recordUsage, 3600), controlplane.New(persistence.Control(f.st)), limiter), ResponsesWS: f.runtime.Handler(), AdminAuth: middleware.AdminAuth("assembly-admin-fixture"), RateLimiter: limiter, RateGate: access.NewRateGate(limiter)})
 	f.front = httptest.NewServer(engine)
 	return f
 }

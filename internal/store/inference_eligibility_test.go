@@ -419,7 +419,7 @@ func TestInferenceEligibilitySchema18UpgradePreservesStaticSecretsAndAccount(t *
 	if err := f.store.DB().Migrator().DropTable(&model.InferenceEligibility{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.DB().Where("version = ?", 19).Delete(&model.SchemaMigration{}).Error; err != nil {
+	if err := f.store.DB().Where("version > ?", 18).Delete(&model.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	_ = f.store.Close()
@@ -439,7 +439,7 @@ func TestInferenceEligibilitySchema18UpgradePreservesStaticSecretsAndAccount(t *
 		t.Fatal("schema18 accepted schema19")
 	}
 	var ledger []model.SchemaMigration
-	if err = upgraded.DB().Order("version").Find(&ledger).Error; err != nil || len(ledger) != len(released)+1 || ledger[len(ledger)-1].Version != 19 {
+	if err = upgraded.DB().Order("version").Find(&ledger).Error; err != nil || len(ledger) != len(released)+2 || ledger[len(ledger)-2].Version != 19 || ledger[len(ledger)-1].Version != 20 {
 		t.Fatal("schema19 not appended once", err)
 	}
 	for i, old := range released {

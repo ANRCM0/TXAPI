@@ -218,6 +218,8 @@ def usage_history_workflow(gateway, work, env, service, ready, request):
                     assert time.monotonic() < deadline, detail
                     time.sleep(0.02)
                 assert detail["record"]["request_id"] == "same-usage-smoke-request"
+                assert detail["record"]["transport"] == "http"
+                assert "protocol_status" not in detail["record"]["host"]
                 assert detail["record"]["stream"] is stream and len(detail["attempts"]) == 1
                 target = detail["attempts"][0]
                 assert target["actual_model"] == "actual-history-model" and target["channel_id"] == 1
