@@ -780,6 +780,32 @@ in2.489s and all UsageHistory groups in7.139s. These are owner command summaries
 not invented raw logs. The full f406503 results are preserved separately and
 do not accept the corrected source; final local and automatic CI run again.
 
+## R05a-3 Final Integration And R06d Scope
+
+R05a-3 final head906f6e4c20ec51f87c46b7fdfe1b6908a27f23a2, tree
+7b505d1a2cd152503d829112409a554d1f318e80, passed complete automatic
+push39207672342 and PR39207678441 check/delivery. PR #38 merged as
+master/ef7a1da5660a661fd90067b757e54af15ec91c1a with the identical tree;
+independent main39208662187 also completed check/delivery success. Final
+local1600 tests/subtests in40 packages, build/vet and actual-main smoke passed.
+Evidence outside Git is validation-r05a3; olderf406503 passes remain separate.
+
+R06d then adds current-owner financial reads per its prior six-part decision:
+new ownerledger/v1, L3 ownerbilling, Store projections, API/assembly, OpenAPI
+0.11.0/111 operations and the owner guide. No prior public declaration/HTTP
+operation, schema16, model/migration, billing writer or frontend change.
+The independent consumer and Store risk groups have directed passes; exact
+final local and automatic CI/merge acceptance are still pending.
+
+A controlled official Python SDK check on accepted R05a-3 source passed nine
+bounded fixture subsets. Optional background retrieve returned None once;
+that run did not capture its raw response. Later diagnostic polls were200
+JSON objects, so the original SDK failure remains an unaccepted observation.
+Independent code review found persisted dispatch Document:null can be returned
+as200 JSONnull. A separate corrective worktree owns its deterministic regression
+and acceptance; no successful retry is used to hide that defect. External
+SDK evidence is sdk-validation-2026-10-19. No real Provider/OAuth was called.
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。
@@ -914,3 +940,60 @@ validation-response-boundaries-final; originalf8 CI failures remain separate.
 Normal automatic final-head Linux race/container delivery and merge/main checks
 still gate acceptance. No manual workflow rerun, reduced regression or approval
 bypass is used. The optional fixed SDK probe will use that accepted binary.
+
+
+## Response Boundary Correction Integration And Owner Rebase
+
+Final corrective headbb5a00630accd7127f87c2464841b4aad88633b2 and
+tree2f56eaeee85a222a9fcb740504c43891706d5b2a passed complete automatic
+push39215267374 and PR39215271764, including full Linux race, coverage, main
+smoke, benchmarks and container delivery. No failed steps remain in either run.
+PR #39 merged as master/755128df7612a00bed5f62c91c6b34a96fbd3a1b with the
+identical tested tree. Independent main39216287290 is running and remains a
+separate check; previousf8 failures are retained and not relabeled as success.
+
+A single fixed official SDK probe against binarySHA256
+cdd490ca784be693f2bda22815ce2a3c3ee82f347f5f78a904d18d8ee9906a68 from
+that exact corrective head passed7.37s. The Provider was held after real dispatch;
+SDK rawGET returned200/application-json/197bytes queued Response, notNone.
+After one Provider response and durable terminal, the second fixed rawGET returned
+completed Response/531bytes with unchanged output text. Exactly one generation
+POST and two reads, no SDK/gateway retries; Provider errors empty and thread
+joined. Source/script/binary hashes and all raw bodies are in
+sdk-validation-2026-10-19/background-fixed-153006. This accepts only the held-
+dispatch/terminal JSON subset. Other nine SDK subsets retain their original
+906f6e4 source binding; no real Provider/OAuth/WS/replay/cancel/charging claim.
+
+Owner R06d authored commit52cbe2c was rebased as04799e8 onto this merged baseline.
+Its implementation and prior direct evidence remain distinguishable. Complete
+local owner checks, including actual-main owner metadata smoke, now run against
+the rebased source before a final owner commit/automatic CI/merge acceptance.
+
+
+### R06d Final Local Acceptance
+
+Independent corrective main39216287290 completed full check/delivery success
+on755128df7612a00bed5f62c91c6b34a96fbd3a1b, with no failed steps. Its job JSON
+and merge-tree proof are preserved separately from final-head push/PR evidence.
+The longer main race run completed successfully; no manual rerun was used.
+
+Owner final18 non-Markdown source files (14 Go) have LF-normalized digest
+d744f6447cfbfd2b0ecfc543af1780d8cce5dd5adbe73235e25e507eeb012c54.
+On actual latest accepted master/755128d, Windows Go1.26.3 GOARCH=amd64
+CGO_ENABLED=0: module tidy/content diff, core/protocol dependencies, build/vet
+and full go test -json -count=1 ./... pass. Final1642 tests/subtests across41
+packages pass83.250s, with7 expected process helpers skip and38 no-test packages.
+Actual-main complete smoke passes47.427s. It now checks unknown/empty personal
+reads and the real strict forced-kill pending hold, then existing idempotent
+waiver followed by the personal historical ceiling/zero charge/released user
+hold projection. Those reads preserve Provider privacy and never resolve funds.
+
+Public snapshot adds only ownerledger/v1's14 declarations; all prior25 packages
+remain exact. OpenAPI0.11.0 adds only3 operations to111 and4 owner DTO schemas;
+all prior108 operation/schema values remain exact. Core, model, billing writes,
+schema16/migrations, modules, workflows and frontend sources are unchanged.
+Fourteen changed Go files have no gofmt output; source identity, diff and links
+pass. Prior browser/frontend evidence is reused from exact unchanged main755128d
+source; normal automatic CI continues its normal Node/API checks. No Docker or
+Linux race is claimed locally; final automatic head check/delivery remains the
+owner merge gate. Raw commands/full logs/manifest are external validation-r06d-owner.

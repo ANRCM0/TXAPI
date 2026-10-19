@@ -1,5 +1,16 @@
 # Foundation API v1：实施清单与迁移边界
 
+## R06d Candidate Owner Financial Reads
+
+`foundation/contracts/ownerledger/v1` (Version="1") adds Access, Query,
+Summary, Reservation, Detail, Page and Repository/Service Summary/List/Read.
+Access has only a login session, with no supplied owner or administrator scope.
+L3 ownerbilling and an independent real Engine consumer use it; L1 Store owns
+same-transaction authorization/whitelist projections. No mutation or Engine
+capability is exposed. Existing public declarations remain exact. Unknown,
+zero, lifecycle, precision, rates and privacy are defined in the
+[owner financial guide](owner-billing.md). The addition remains candidate.
+
 状态：FC-001 的 FND-01 至 FND-05 已全部验收，2026-10-18 冻结为 **v1 / frozen**。
 代码基线 `master/889ecbd`（PR #18，功能头 `38a8cce`）；L0/L1/L2 DoD、独立样例与精确头/合并后完整 CI 已通过，证据见下方实施记录。
 排期与勾选只维护 [PLAN](../PLAN.md#地基符合性收口fc-001)，目标范围见

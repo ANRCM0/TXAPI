@@ -153,6 +153,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/ownerledger/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
   "minigateway/internal/foundation/contracts/responses/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -246,6 +252,10 @@
   "minigateway/internal/model": {
     "layer": "L1",
     "owner": "model"
+  },
+  "minigateway/internal/ownerbilling": {
+    "layer": "L3",
+    "owner": "ownerbilling"
   },
   "minigateway/internal/protocol": {
     "layer": "L2",

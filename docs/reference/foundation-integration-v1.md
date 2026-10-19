@@ -1,5 +1,14 @@
 # Foundation v1：接入、归属与 DoD
 
+## R06d Owner Financial Capability
+
+Candidate ownerledger/v1 is a separate read-only port, implemented by Store and
+consumed by L3 ownerbilling and an independent Engine/SQLite integration. Inject
+it at main/server; do not pass the administrator ledger into a personal feature
+or filter administrator results after reading them. Current owner SQL scope,
+unknown balances/charges and no-mutation semantics are in the
+[owner guide](owner-billing.md). Prior registered declarations remain exact.
+
 ## Reference Adoption Additions
 
 R05a-3 appends candidate `usagehistory/v1` trusted Recorder and session-authorized

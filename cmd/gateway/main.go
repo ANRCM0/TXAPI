@@ -47,6 +47,7 @@ import (
 	"minigateway/internal/logging"
 	"minigateway/internal/metrics"
 	"minigateway/internal/model"
+	"minigateway/internal/ownerbilling"
 	"minigateway/internal/quoteconsole"
 	"minigateway/internal/routeconsole"
 	"minigateway/internal/scheduler"
@@ -387,6 +388,7 @@ func main() {
 		Generation:    gateway.NewHTTPExecutor(gw),
 		TokenAuth:     authentication.NewTokenAuthenticator(st),
 		Control:       controlplane.New(persistence.Control(st)),
+		OwnerLedger:   ownerbilling.New(st.OwnerLedger(), controlplane.New(persistence.Control(st)), limiter),
 		Tasks:         taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
 		Routes:        routeconsole.New(gw.Diagnostics(), controlplane.New(persistence.Control(st)), limiter),
 		Quotation:     quoteconsole.New(quotationBook, controlplane.New(persistence.Control(st)), limiter),

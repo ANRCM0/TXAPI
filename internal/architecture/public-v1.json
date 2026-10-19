@@ -328,6 +328,22 @@
     "func minigateway/internal/foundation/contracts/observability/v1.RequestID(ctx context.Context) string",
     "func minigateway/internal/foundation/contracts/observability/v1.WithRequestID(ctx context.Context, id string) context.Context"
   ],
+  "minigateway/internal/foundation/contracts/ownerledger/v1": [
+    "const minigateway/internal/foundation/contracts/ownerledger/v1.Version untyped string = \"1\"",
+    "type minigateway/internal/foundation/contracts/ownerledger/v1.Access struct{Session string}",
+    "type minigateway/internal/foundation/contracts/ownerledger/v1.Detail struct{Reservation minigateway/internal/foundation/contracts/ownerledger/v1.Reservation \"json:\\\"reservation\\\"\"; ResolutionAction string \"json:\\\"resolution_action,omitempty\\\"\"}",
+    "type minigateway/internal/foundation/contracts/ownerledger/v1.Page struct{Data []minigateway/internal/foundation/contracts/ownerledger/v1.Reservation \"json:\\\"data\\\"\"; HasMore bool \"json:\\\"has_more\\\"\"}",
+    "type minigateway/internal/foundation/contracts/ownerledger/v1.Query struct{State string; TokenID uint; Limit int; Offset int}",
+    "type minigateway/internal/foundation/contracts/ownerledger/v1.Repository interface{List(context.Context, minigateway/internal/foundation/contracts/ownerledger/v1.Access, minigateway/internal/foundation/contracts/ownerledger/v1.Query) (minigateway/internal/foundation/contracts/ownerledger/v1.Page, error); Read(context.Context, minigateway/internal/foundation/contracts/ownerledger/v1.Access, string) (minigateway/internal/foundation/contracts/ownerledger/v1.Detail, error); Summary(context.Context, minigateway/internal/foundation/contracts/ownerledger/v1.Access) (minigateway/internal/foundation/contracts/ownerledger/v1.Summary, error)}",
+    "type minigateway/internal/foundation/contracts/ownerledger/v1.Reservation struct{ID string \"json:\\\"id\\\"\"; TokenID uint \"json:\\\"token_id\\\"\"; OriginModel string \"json:\\\"origin_model\\\"\"; PriceVersion string \"json:\\\"price_version\\\"\"; State string \"json:\\\"state\\\"\"; OriginalReservedUnits string \"json:\\\"original_reserved_units\\\"\"; HeldUnits string \"json:\\\"held_units\\\"\"; ChargeUnits *string \"json:\\\"charge_units\\\"\"; LeaseUntil int64 \"json:\\\"lease_until\\\"\"; CreatedAt time.Time \"json:\\\"created_at\\\"\"; UpdatedAt time.Time \"json:\\\"updated_at\\\"\"}",
+    "type minigateway/internal/foundation/contracts/ownerledger/v1.Service interface{List(context.Context, minigateway/internal/foundation/contracts/ownerledger/v1.Access, minigateway/internal/foundation/contracts/ownerledger/v1.Query) (minigateway/internal/foundation/contracts/ownerledger/v1.Page, error); Read(context.Context, minigateway/internal/foundation/contracts/ownerledger/v1.Access, string) (minigateway/internal/foundation/contracts/ownerledger/v1.Detail, error); Summary(context.Context, minigateway/internal/foundation/contracts/ownerledger/v1.Access) (minigateway/internal/foundation/contracts/ownerledger/v1.Summary, error)}",
+    "type minigateway/internal/foundation/contracts/ownerledger/v1.Summary struct{UnitScale string \"json:\\\"unit_scale\\\"\"; BalanceKnown bool \"json:\\\"balance_known\\\"\"; PostedUsedUnits *string \"json:\\\"posted_used_units\\\"\"; HeldUnits *string \"json:\\\"held_units\\\"\"; PendingCount string \"json:\\\"pending_count\\\"\"; AsOf int64 \"json:\\\"as_of\\\"\"}",
+    "var minigateway/internal/foundation/contracts/ownerledger/v1.ErrInvalid error",
+    "var minigateway/internal/foundation/contracts/ownerledger/v1.ErrNotFound error",
+    "var minigateway/internal/foundation/contracts/ownerledger/v1.ErrRateLimited error",
+    "var minigateway/internal/foundation/contracts/ownerledger/v1.ErrUnauthorized error",
+    "var minigateway/internal/foundation/contracts/ownerledger/v1.ErrUnavailable error"
+  ],
   "minigateway/internal/foundation/contracts/quotation/v1": [
     "const minigateway/internal/foundation/contracts/quotation/v1.Version untyped string = \"1\"",
     "type minigateway/internal/foundation/contracts/quotation/v1.Access struct{Session string}",

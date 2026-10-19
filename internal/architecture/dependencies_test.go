@@ -33,6 +33,7 @@ func TestProductionDependencyBoundaries(t *testing.T) {
 		"routeconsole": {"foundation": true},
 		"quoteconsole": {"foundation": true},
 		"usageconsole": {"foundation": true},
+		"ownerbilling": {"foundation": true},
 		"transport":    {"transport": true},
 		"compat":       {"foundation": true, "compat": true, "protocol": true, "transport": true},
 		"foundation":   {"store": true, "foundation": true, "access": true, "core": true, "gateway": true, "model": true},
