@@ -185,7 +185,7 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 </details>
 
 <details>
-<summary>FC-P0-HEADERS-001：前台 HTTP 上游诊断与重试头具体 CR（已批准，源码与定向验证完成）</summary>
+<summary>FC-P0-HEADERS-001：前台 HTTP 上游诊断与重试头具体 CR（已批准，源码与本地验证完成）</summary>
 
 此切片补当前 `ExecuteTo` 丢失全部上游 Header 的具体缺口：客户端看不到最终上游的 request ID，也收不到429/503的 Retry-After。只追加有限元数据，不改变现有 JSON/SSE 正文、状态码、ID/错误改写、HTTP 提交屏障或重试许可。本 CR 已获用户明确批准实施与集中验证；随后用户又授权本任务后续同类开发契约调整记录方案后直接推进。
 
@@ -196,7 +196,7 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 5. **验证/验收：**L0测试一次回调/时序、零配置、无response/发送前失败不调用、原正文/终态/关闭不变；L1/L2实socket覆盖Chat JSON/SSE、embeddings、Responses与现有转换、429/503数值和HTTP-date、重复/超长/非法头、Connection动态排除、本地ID与元数据优先级。多attempt验证首个错误的Header不串入后续成功/本地准入拒绝/无response；发送前拒绝与已提交失败均不重试越权，strict未知与双hold不变。config默认/布尔类型拒绝、OpenAPI与公开快照同步；集中本地回归和完整精确头CI后合并，真实Provider不在授权范围。
 6. **协作/边界：**这是P0/P4的诊断与客户端退避元数据切片，不扩大账号推理范围、定价、收费、额度恢复或后台/WS；新开关只重启生效。RFC9110第7.6.1与10.2.3节用于Connection逐跳排除及Retry-After语法核对，不复制参考项目实现。参考：`https://www.rfc-editor.org/rfc/rfc9110.html`。无新前端、依赖、迁移或性能提升声明。
 
-源码已按该范围接入；OpenAPI `0.13.2` / 117操作与L0公开快照同步。定向验证覆盖只读观察时序、配置布尔类型、实socket的Chat JSON/SSE、embeddings、Responses及Anthropic/Gemini现有转换、原生HTTP自动gzip解压、429/503数值/HTTP-date、重复/超长/非法值、Connection动态排除和未入选敏感头不转发。重试回归分别证明旧响应头不进入后续成功、无response及本地准入拒绝，已提交截断只发送一次且不伪造完成；非foreground不继承开关。strict阶段超时回归保留pending、Provider hold及user/Key双hold，并保留独立billing ID。本批Windows GOARCH=amd64的build ./...、vet ./...和全量go test ./... -count=1均已通过；生产主进程local.py受控冒烟也已通过；固定SDK、集成容量回归与精确头远端CI状态另行更新，不继承其他批次通过。
+源码已按该范围接入；OpenAPI `0.13.2` / 117操作与L0公开快照同步。定向验证覆盖只读观察时序、配置布尔类型、实socket的Chat JSON/SSE、embeddings、Responses及Anthropic/Gemini现有转换、原生HTTP自动gzip解压、429/503数值/HTTP-date、重复/超长/非法值、Connection动态排除和未入选敏感头不转发。重试回归分别证明旧响应头不进入后续成功、无response及本地准入拒绝，已提交截断只发送一次且不伪造完成；非foreground不继承开关。strict阶段超时回归保留pending、Provider hold及user/Key双hold，并保留独立billing ID。本批Windows GOARCH=amd64的build ./...、vet ./...和全量go test ./... -count=1均已通过；生产主进程local.py受控冒烟也已通过；固定Python SDK回归与合入主线后的并发容量回归也已通过：4worker、每worker5请求、2round，直连/网关各40次全部完成且每次仅1上游attempt，两次过载均在发送前429，所有4槽再次并发占满后释放并恢复active=0。合入的主线只改变容量Python脚本/CI与方案，没有Go运行源码差异，因此复用本批已有完整Go验证；精确头远端CI仍单列，不继承其他批次通过。
 
 </details>
 
