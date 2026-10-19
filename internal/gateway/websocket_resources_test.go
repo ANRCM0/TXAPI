@@ -117,7 +117,9 @@ func TestWebSocketResourcesFailedCandidateAndCloseRetry(t *testing.T) {
 	}
 	_ = lease.Release()
 	partial.fail.Store(false)
-	o.retryClose()
+	if err := o.recoverCleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	resourceWait(t, partial.closed)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

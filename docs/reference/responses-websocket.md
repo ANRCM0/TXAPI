@@ -73,6 +73,16 @@ running. Successful publication retains old transports until their leases end;
 a previously bound session must reconnect before starting on a new revision.
 HTTP and native WS do not have separately fallible publication commits.
 
+If discarded or retired resource cleanup fails, the owner retains the resource
+and its capacity slot. A subsequent serialized Apply retries each eligible
+failed cleanup once and waits for any existing cleanup worker before preparing
+another candidate. This recovery wait respects the caller context and is at most
+10 seconds; main's complete publication call also has a 10-second context.
+Failure or timeout leaves desired pending and current/applied unchanged. Cleanup
+continues under the resource owner after a request timeout, and a later Apply
+can recover. Current resources and pinned retired resources are never closed
+by this step. No background retry loop or provider request replay is added.
+
 Stop rejects new handshakes, rounds and publications, cancels active rounds,
 joins sessions, releases leases and closes transport generations before shared
 gateway/limiter/store dependencies. Drain timeout is an error, not permission

@@ -28,6 +28,9 @@ func (g *nativeGeneration) Close(ctx context.Context) error { return g.transport
 func (s *NativeWebSocketService) Publish(ctx context.Context, channels []model.Channel) error {
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
+	if err := s.resources.recoverCleanup(ctx); err != nil {
+		return err
+	}
 	if err := s.gateway.validateChannels(channels); err != nil {
 		return err
 	}

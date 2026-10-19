@@ -39,12 +39,13 @@ type wsAssemblyObservation struct {
 	PrivateHeaders              bool
 }
 type wsAssemblyResource struct {
-	manager  *transport.Manager
-	endpoint string
-	prefix   int
-	serial   atomic.Int64
-	closed   chan struct{}
-	once     sync.Once
+	manager     *transport.Manager
+	endpoint    string
+	prefix      int
+	serial      atomic.Int64
+	closed      chan struct{}
+	once        sync.Once
+	beforeClose func(context.Context) error
 }
 
 func (r *wsAssemblyResource) Dial(ctx context.Context, key string) (execution.Connection, error) {
@@ -55,6 +56,11 @@ func (r *wsAssemblyResource) Dial(ctx context.Context, key string) (execution.Co
 	return bridge.Adapt(execution.ConnectionID(fmt.Sprintf("up-%d-%d", r.prefix, r.serial.Add(1))), connection), nil
 }
 func (r *wsAssemblyResource) Close(ctx context.Context) error {
+	if r.beforeClose != nil {
+		if err := r.beforeClose(ctx); err != nil {
+			return err
+		}
+	}
 	if err := r.manager.Close(ctx); err != nil {
 		return err
 	}

@@ -374,6 +374,63 @@ Local Linux race, Docker delivery, real Provider and official SDK checks were no
 run. Automatic exact-head CI and merge are still pending; this local evidence
 does not mark full R06 or the R00-R07 objective complete.
 
+### R06b Integration
+
+Final head d12123d41dfc5110db85ec108c0a8f66a1d3b3a8 passed complete automatic
+push 39191699174 and PR 39191725219 (check/delivery SUCCESS). PR #33 merged as
+master/deb9e211c338288b288addb8d710617cab182590; tree
+4cefcdd1ab10f2f7a809eed43b0a1c81b2d7b94d exactly matches the accepted head.
+Independent merged-main run 39192304586 also passed check/delivery SUCCESS.
+R06b's exact-head, merged-tree and post-merge gates are complete. No manual
+redispatch, real Provider/SDK, release or full-goal claim.
+
+## R02 Runtime Cleanup Recovery
+
+A post-R06b requirements audit found an actual runtime recovery gap: failed
+candidate/retired Close references were retained correctly, but production Apply
+never invoked the retry path. The next independent batch repairs this before
+R06c presentation work. Exact ownership, compatibility and acceptance requirements
+are recorded before source changes in
+[R02 cleanup decision](REFERENCE-R02-CLEANUP-IMPLEMENTATION.md). Existing real WS
+resources and publication are already implemented through R03b; historical
+statements about missing R02 resources must not be read as current conclusions.
+
+### R02 Cleanup Final Local Evidence
+
+2026-10-19, Windows/PowerShell, Go 1.26.3, GOARCH=amd64, CGO_ENABLED=0.
+Base is master/deb9e211c338288b288addb8d710617cab182590; its independent
+post-merge check/delivery has now passed. Six changed/new Go source files have
+LF-normalized manifest digest
+`ef70e5f0c97e240a807d20de036cde35178a06866ca347cf870d755973a7f9f2`.
+Manifest and raw final tests/smoke logs are outside Git in
+`D:\my-project\TXAPI-references\validation-r02-cleanup`.
+
+| Actual Command / Check | Result |
+|---|---|
+| gateway publication/resources/session/management directed tests, -count=3 | PASS after reproducing old Publish failure (expected two cleanup calls, observed one) |
+| main TestResponsesWSMainJoinRetriesCloseBeforeSharedDependencyTeardown | PASS using real WS assembly/runtime and SQLite |
+| go build ./...; go vet ./... | PASS |
+| go test -json -count=1 ./... | 1376 tests/subtests and 37 test packages PASS; six expected helper SKIP |
+| go mod tidy; module cleanliness; core/protocol dependency filter | PASS |
+| architecture/public signatures/OpenAPI | PASS in full suite; signatures and HTTP contract also byte-equal to accepted d12123d |
+| six touched Go files gofmt; git diff --check; batch local links | PASS |
+| python -B tests/smoke/local.py --go go | PASS, including strict/encryption, forced kill/pending recovery and native background/SSE recovery |
+| Node/API/mock and actual-main routing browser evidence | Reuse accepted d12123d/R06b: web assets, browser tests, API tests and HTTP contracts are unchanged; final server rebuilt and smoke revalidated |
+
+The implementation retries eligible failed cleanup through serialized production
+Publish, waits for an existing worker within the finite cleanup context, and
+keeps ownership on failure/timeout. New tests prove candidate and retired
+recovery, current/pinned preservation, factory exclusion during uncertain cleanup,
+partial prepare cancellation, concurrent duplicate Release and short Close
+deadline with callback/lease retention. Main's retry test blocks the second Close
+and proves dependency teardown cannot advance while SQLite remains usable.
+No production main change, new worker, public contract, schema or financial
+behavior was required. The requirement mapping is in the decision document.
+
+Local Linux race/Docker and real Provider/SDK were not run. Automatic exact-head
+full CI, merge-tree verification and post-merge results remain to be recorded;
+the local correction is not a candidate-contract freeze or full-goal completion.
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。
