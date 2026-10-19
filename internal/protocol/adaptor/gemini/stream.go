@@ -54,6 +54,16 @@ func (t *translator) ParseStreamLine(line []byte) ([]*canonical.StreamChunk, err
 	if chunk.Error != nil {
 		return nil, errors.New("Gemini 上游流报告错误")
 	}
+	// The event carrying finishReason may also carry its final content. Only
+	// later events are restricted: usage snapshots and duplicate finishes keep
+	// their existing behavior, but no new text or function call may follow.
+	if t.finished && len(chunk.Candidates) > 0 {
+		for _, part := range chunk.Candidates[0].Content.Parts {
+			if part.Text != "" || part.FunctionCall != nil {
+				return nil, errors.New("Gemini stream content after finish")
+			}
+		}
+	}
 
 	var chunks []*canonical.StreamChunk
 

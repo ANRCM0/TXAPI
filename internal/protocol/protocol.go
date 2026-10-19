@@ -4,7 +4,6 @@ package protocol
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -121,55 +120,21 @@ func (d *decoder) NewStream() execv1.StreamDecoder {
 }
 
 type streamDecoder struct {
-	decoder *decoder
-	session adaptor.StreamSession
-	name    string
-	raw     bool
-	finish  bool
-	done    bool
-	chat    chatSSEEvent
+	decoder   *decoder
+	session   adaptor.StreamSession
+	name      string
+	raw       bool
+	finish    bool
+	done      bool
+	chat      chatSSEEvent
+	converted convertedSSEEvent
 }
 
 func (s *streamDecoder) DecodeLine(line []byte) ([]execv1.Frame, error) {
 	if s.raw {
 		return s.decodeChatLine(line)
 	}
-	data := strings.TrimSpace(string(line))
-	if strings.HasPrefix(data, "data:") {
-		data = strings.TrimSpace(strings.TrimPrefix(data, "data:"))
-		if data == "[DONE]" {
-			s.done = true
-			return []execv1.Frame{{Complete: true}}, nil
-		}
-		var envelope struct {
-			Error *json.RawMessage `json:"error"`
-			Type  string           `json:"type"`
-		}
-		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
-			return nil, err
-		}
-		if envelope.Error != nil || envelope.Type == "error" {
-			return nil, errors.New("upstream reported stream error")
-		}
-		if envelope.Type == "message_stop" {
-			s.done = true
-		}
-	}
-	lines, err := ConvertStreamLine(s.decoder.a, line, s.session, &s.decoder.target)
-	if err != nil {
-		return nil, err
-	}
-	frames := make([]execv1.Frame, 0, len(lines)+1)
-	for _, ln := range lines {
-		if hasFinishReason(ln) {
-			s.finish = true
-		}
-		frames = append(frames, execv1.Frame{Data: append(ln, '\n', '\n'), Usage: usageFromLine(ln)})
-	}
-	if s.done {
-		frames = append(frames, execv1.Frame{Complete: true})
-	}
-	return frames, nil
+	return s.decodeConvertedLine(line)
 }
 func (s *streamDecoder) End() ([]execv1.Frame, error) {
 	if s.raw {
@@ -178,7 +143,7 @@ func (s *streamDecoder) End() ([]execv1.Frame, error) {
 		}
 		return []execv1.Frame{{Data: s.chat.terminal}}, nil
 	}
-	if !s.finish || ((s.raw || s.name == "anthropic") && !s.done) {
+	if !s.finish || (s.name == "anthropic" && !s.done) || s.converted.wireBytes != 0 {
 		return nil, fmt.Errorf("missing stream terminal state")
 	}
 	return []execv1.Frame{{Data: []byte("data: [DONE]\n\n")}}, nil

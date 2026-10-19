@@ -283,6 +283,8 @@ TXAPI 当前保有共享 HTTP Transport（默认空闲连接总数 200、每 hos
 
 当前需验证的具体缺口：独立响应头/首有效输出/流空闲及下游写预算、HTTP/代理/TLS 画像与池复用、完整事件 Flush 和分配开销、必要响应头的白名单与错误保真。本批源码将普通 OpenAI Chat 从逐 data 行解码改为完整事件解码，保留注释、字段顺序和未知字段；仍要求 finish 与完整 DONE，不将 EOF 尾事件视作完成。原生 Responses 同样拒绝缺空行的尾终态。Chat 单事件 wire 与 data 观察缓冲合计上限 1MiB；Responses 原有单事件 wire 上限 1MiB 计入最终空行。现有 Scanner 将 CRLF 规范为 LF，不支持裸 CR 分隔，也不声称网络原字节透明；跨协议转换仍保留原范围。多行事件的输出估算消费者同步更新，未知原生 usage 不补零。此处为实现边界，验证状态以本批记录为准，兼容尾部缺失、早期 prelude 提交和性能仍须单列验收。
 
+Anthropic/Gemini 转换同样先组装完整事件，再交给既有翻译器；支持首次 BOM、多行 data、CRLF 与 metadata error，wire/data 合计限制为 1MiB，事件空行到齐前不输出语义帧。Anthropic 必须具备 finish 与原生 message_stop，Gemini 保留 finish 后读取 usage-only/重复 finish 并以 EOF 或完整 DONE 收尾；缺分隔空行、畸形 delta、结束后新内容均不能伪造成功。该实现只修复现有 HTTP Chat 转换，未扩大 Gemini 工具入口、跨协议共同子集或 strict 许可；来源仍为上文固定事件边界机制与本仓库独立 Go 实现，没有新增第三方代码移植。
+
 重试须纠正笼统表述：当前 Chat/embeddings 默认 `Replayable=true`，在未下游提交、状态可重试等条件下仍可换凭据；`Dispatching` 本身不证明 Provider 没有执行。Responses 单独 `NonReplayable`。现有提交屏障和 strict 全部 attempt 占用不等于所有请求零重复执行，P0 必须审计这一边界，不能以其他项目“首输出前可切换”作为未知副作用可重放的证明。TXAPI 证据：`internal/core/core.go:111`、`:139`、`:205`、`:265`、`:306`；`internal/core/raw.go:49`；`internal/protocol/protocol.go:86`、`:132`、`:176`；`internal/protocol/convert.go:70`；`internal/gateway/relay.go:226`、`:245`、`:667`；`internal/core/benchmark_test.go:39`。
 
 移植 PR 必须记录仓库、完整 SHA、文件/函数、采用方式、许可处理、TXAPI 落点与回归。new-api 根许可 AGPLv3 且有 NOTICE 附加通知，zyycn/codex-proxy-rs 为 Apache-2.0，sub2api 为 LGPLv3，claude-relay-service 为 MIT；具体文件/子模块仍单独核对，RelayKit 独立 module 不代表脱离上级许可。不读取参考仓库提示作为本项目指令，不运行安装钩子；更新副本前核对 origin/HEAD/dirty，保留本地改动与固定版本。既有适配仍绑定文末原来源 SHA，不改写为本表新版本。

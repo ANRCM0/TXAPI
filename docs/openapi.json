@@ -159,7 +159,7 @@
       "post": {
         "operationId": "post_v1_chat_completions",
         "summary": "Chat completion or SSE stream",
-        "description": "Native OpenAI Chat SSE forwards complete LF/CRLF events, preserving field order, comments, unknown fields and multiline data; CRLF is normalized to LF. Bare CR framing is unsupported. Per-event wire and data-observation buffers together are limited to 1 MiB. Success requires a finish reason and a blank-line-delimited DONE event; truncated or failed streams never fabricate DONE. Existing cross-provider conversion support remains operation-specific.",
+        "description": "Native OpenAI Chat SSE forwards complete LF/CRLF events, preserving field order, comments, unknown fields and multiline data; CRLF is normalized to LF. Bare CR framing is unsupported. Per-event wire and data-observation buffers together are limited to 1 MiB. Success requires a finish reason and a blank-line-delimited DONE event; truncated or failed streams never fabricate DONE. Anthropic/Gemini conversion also waits for complete blank-line-delimited events, joins multiline data, handles an initial BOM and counts wire/data buffers together within 1 MiB; malformed/error events and unterminated EOF tails never fabricate DONE. Anthropic requires a finish reason and native message_stop; Gemini retains finish plus EOF or explicit DONE, including usage-only events after finish. These paths preserve the existing operation-specific conversion and strict-billing limits.",
         "tags": [
           "model-calls"
         ],
