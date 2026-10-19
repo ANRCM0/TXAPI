@@ -39,16 +39,19 @@ type Options struct {
 }
 
 type Runner struct {
-	mu          sync.Mutex
-	closed      bool
-	ctx         context.Context
-	cancel      context.CancelFunc
-	jobs        chan *job
-	pending     int
-	submissions sync.WaitGroup
-	done        chan struct{}
-	opts        Options
+	mu           sync.Mutex
+	closed       bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	jobs         chan *job
+	pending      int
+	preparations map[*submissionPreparation]struct{}
+	submissions  sync.WaitGroup
+	done         chan struct{}
+	opts         Options
 }
+
+type submissionPreparation struct{ cancel context.CancelFunc }
 
 type outcome struct {
 	result execv1.Outcome
@@ -164,8 +167,26 @@ func (r *Runner) submit(observer context.Context, binding access.Binding, output
 	}
 	r.pending++
 	r.submissions.Add(1)
+	preparationContext, cancelPreparation := context.WithCancel(observer)
+	preparation := &submissionPreparation{cancel: cancelPreparation}
+	if r.preparations == nil {
+		r.preparations = make(map[*submissionPreparation]struct{})
+	}
+	r.preparations[preparation] = struct{}{}
+	stopPreparation := context.AfterFunc(r.ctx, cancelPreparation)
 	r.mu.Unlock()
-	defer r.submissions.Done()
+	pending := true
+	defer func() {
+		stopPreparation()
+		cancelPreparation()
+		r.mu.Lock()
+		delete(r.preparations, preparation)
+		if pending {
+			r.pending--
+		}
+		r.mu.Unlock()
+		r.submissions.Done()
+	}()
 	// Reserve queue capacity before storage I/O without holding the shutdown lock.
 	// Close joins in-progress handoffs before allowing the store to be closed.
 	in.Body = append([]byte(nil), in.Body...)
@@ -175,24 +196,25 @@ func (r *Runner) submit(observer context.Context, binding access.Binding, output
 	var preparationErr error
 	if recorded {
 		request, err := r.opts.Parser.ParseRequest(in.Operation, in.Body)
-		if err != nil || nilPort(request) || len(request.Model()) > 256 {
+		model := ""
+		if err == nil && !nilPort(request) {
+			model = request.Model()
+		}
+		if err != nil || nilPort(request) || len(model) > 256 {
 			preparationErr = fmt.Errorf("invalid recorded generation request")
 		} else {
-			ctx, cancel := context.WithTimeout(observer, 2*time.Second)
-			stop := context.AfterFunc(r.ctx, cancel)
-			out, err := r.opts.Archive.start(ctx, binding)
-			stop()
-			cancel()
+			storageContext, cancelStorage := context.WithTimeout(preparationContext, 2*time.Second)
+			out, err := r.opts.Archive.start(storageContext, binding)
+			cancelStorage()
 			if err != nil {
 				preparationErr = err
 			} else {
-				out.model = request.Model()
+				out.model = model
 				output, id = out, out.record.ID
 			}
 		}
 	}
 	r.mu.Lock()
-	r.pending--
 	if preparationErr == nil {
 		if r.closed || r.ctx.Err() != nil {
 			preparationErr = ErrClosed
@@ -208,6 +230,9 @@ func (r *Runner) submit(observer context.Context, binding access.Binding, output
 		return nil, id, preparationErr
 	}
 	defer r.mu.Unlock()
+	r.pending--
+	pending = false
+	delete(r.preparations, preparation)
 	ctx, cancel := context.WithTimeout(r.ctx, r.opts.MaxDuration)
 	future := &Future{cancel: cancel, result: make(chan outcome, 1)}
 	r.jobs <- &job{ctx: ctx, binding: binding, requestID: requestID, output: output, in: in, future: future}
@@ -294,6 +319,10 @@ func (r *Runner) stop() {
 		r.closed = true
 		close(r.jobs)
 		r.cancel()
+	}
+	// Close owns cancellation ordering; AfterFunc alone may run after Close returns.
+	for preparation := range r.preparations {
+		preparation.cancel()
 	}
 }
 

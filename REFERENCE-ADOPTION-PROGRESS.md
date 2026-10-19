@@ -515,6 +515,76 @@ full CI, merge-tree and independent post-merge results remain separate gates.
 Pricing history, durable observations, new management APIs and R05b cost/charged
 background remain later backend batches; R05a-1 does not complete all R05 or R00-R07.
 
+### R05a-1 Exact-Head Integration And Main Failure
+
+Final head a440a4d006335548aece183d93a4d892eb6d5314 passed complete automatic
+push39196504025 and PR39196509658 (check/delivery SUCCESS). PR #35 merged as
+master/5998e43a7e80a32aa755bd81980bf2b7889c9130; tree
+ba32cc587716055ad5237ac81a8b1fea561b3a19 exactly equals the accepted head.
+
+Independent merged-main39197079265 passed delivery but failed the existing
+generation race regression TestArchiveHandoffDoesNotHoldShutdownLockAndCloseJoinsStorage
+with "canceled storage operation committed: 1". It is not a green post-merge
+result and no manual redispatch was used to conceal it. Inspection found that
+Runner preparation cancellation depended on an asynchronous context.AfterFunc;
+an already-canceled Close waiting context could return before storage itself
+was canceled. The independent lifetime correction is defined before changes in
+[the shutdown decision](REFERENCE-ARCHIVE-SHUTDOWN-IMPLEMENTATION.md).
+Raw failure evidence is external in validation-r05a-1/ci-postmerge-failed.log.
+
+R05a-2 versioned selling quotes were started next, with an explicit decision,
+candidate contract, immutable format2 calculation, current-admin L3 service,
+strict string-count HTTP adapters and startup-only wiring. Directed billing,
+quoteconsole and API/config checks passed; full integration was not complete.
+This work is preserved only locally at feat/reference-r05a-quotation/2c42b11,
+without push/PR. It resumes from the corrected main after shutdown acceptance.
+R06c remains local/deferred. No durable usage, charging or OAuth gate is opened.
+
+## Archive Preparation Shutdown Correction
+
+Scope and unchanged public/lifetime boundaries were recorded before source in
+[the shutdown decision](REFERENCE-ARCHIVE-SHUTDOWN-IMPLEMENTATION.md). The runner
+now registers preparation cancellation with pending admission under its shutdown
+mutex and synchronously cancels all registered preparations before Close returns.
+Storage I/O and join stay outside that mutex; the two-second budget still starts
+at storage, not parsing. Successful handoff atomically transfers pending to the
+queue. A unified defer releases registration/pending on errors and Parser/Model
+panic, with submissions.Done last so a failed archive finish remains joined.
+Existing observer values/deadlines and the single upstream execution are retained.
+
+### Reproduction And Final Local Evidence
+
+2026-10-19, Windows PowerShell, Go1.26.3, GOARCH=amd64, CGO_ENABLED=0.
+Latest fetched origin/master equals base5998e43a7e80a32aa755bd81980bf2b7889c9130.
+Only runner.go and archive_test.go are changed Go sources, normalized manifest
+digest `8436da9fd73b9c994027d7ffaa1002f3da0ef7d25850c59e2a26928fb5ac03f0`.
+Raw full-check logs and the source manifest are external in
+D:\my-project\TXAPI-references\validation-archive-shutdown. Agent-directed
+command/result summaries are explicitly summaries, not invented raw logs.
+
+| Actual Command / Check | Result |
+|---|---|
+| strengthened old TestArchiveHandoffDoesNotHoldShutdownLockAndCloseJoinsStorage, -count=30 -timeout60s | Expected FAIL: repeated Close returned with uncanceled storage context; 7.649s |
+| four final shutdown/admission/failure groups, -count=30 -timeout90s | PASS, 53.109s; the command hard cap covers repeated tests, product storage budget stays two seconds |
+| go build ./...; go vet ./... | PASS |
+| go test -json -count=1 ./... | 1486 tests/subtests and 38 test packages PASS; six expected helper SKIP |
+| gofmt -l two touched Go files; git diff --check; batch local links | PASS; 83 local Markdown file targets resolve |
+| old public/architecture/OpenAPI/core source/module equality | Exact; final full suite includes boundary/visibility/signature/HTTP tests |
+| module/dependency and frontend/browser evidence | Reuse accepted a440a4d/R05a-1: no module/production import or contract/web/browser changes; final build and full tests rerun |
+
+Final `python -B tests/smoke/local.py --go go` PASS, including actual main,
+strict/encryption/credential rotation, forced-kill recovery and native background
+SSE/cancel/TTL. Linux race/container delivery, exact functional head, merge tree
+and independent merged-main result remain CI/integration gates, not local claims.
+
+Regression coverage includes eight simultaneous Close calls, two preparations,
+external parent shutdown after observing owner stop, pre-canceled and post-close
+admission, ParseRequest/Model panic, parser/storage failure and storage panic,
+registry/pending cleanup, capacity reuse and later successful Close join. The
+original shutdown-lock, join and zero-row assertions remain. Independent read-only
+review found no actionable issue. Already committed observations are not deleted,
+and cancellation is not claimed globally atomic with database commit.
+
 ## 后续批次
 
 R02 资源代次、R03 原生 WS、R04 账号授权、R05 计量/收费后台、R06 管理产品、R07 外部 Runtime 仍按方案依赖逐批推进。
