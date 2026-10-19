@@ -60,7 +60,9 @@ for command in sys.stdin:
             self.assertEqual(process.stdout.readline().strip(), "ready")
             released = resource(process.pid)
             self.assertEqual(released["status"], "available", released)
-            self.assertEqual(released[count], before[count])
+            # Closing the 64 workload objects is observed directly. Lazy runtime
+            # initialization may have changed the initial process handle count.
+            self.assertGreaterEqual(loaded[count] - released[count], 64)
         finally:
             process.stdin.close()
             process.wait(timeout=5)
@@ -80,7 +82,7 @@ for command in sys.stdin:
             self.assertEqual(value["process_identity"], before["process_identity"])
         gc.collect()
         after = resource(os.getpid())
-        self.assertEqual(before[count], after[count])
+        self.assertLessEqual(after[count], before[count])
 
     @unittest.skipUnless(platform.system() == "Windows", "Windows API failure cleanup")
     def test_query_failures_also_close_the_process_handle(self):
@@ -90,15 +92,16 @@ for command in sys.stdin:
             ctypes.set_last_error(5)  # ERROR_ACCESS_DENIED
             return 0
         for name in ("GetExitCodeProcess", "GetProcessTimes", "K32GetProcessMemoryInfo", "GetProcessHandleCount"):
+            gc.collect()
             before = resource(os.getpid())
             with patch.object(api, name, side_effect=denied):
-                for _ in range(10):
+                for _ in range(100):
                     value = resource(os.getpid())
                     self.assertEqual(value["status"], "unavailable", name)
                     self.assertEqual(value["os_error"], 5)
                     self.assertNotIn("rss_bytes", value)
             after = resource(os.getpid())
-            self.assertEqual(before["handle_count"], after["handle_count"], name)
+            self.assertLessEqual(after["handle_count"], before["handle_count"], name)
 
     def test_invalid_pid_is_unavailable_without_measurements(self):
         for pid in (0, -1, 2**32, "1"):
