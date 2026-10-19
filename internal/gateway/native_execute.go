@@ -114,6 +114,9 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	if !principal.Policy.Allows(create.Model) {
 		return fail("unauthorized", 1008, nil)
 	}
+	if n.service.gateway.hasManagedGrant(principal.UserID, principal.TokenID, create.Model) {
+		return fail("unavailable", 1013, nil)
+	}
 	if n.model != "" && n.model != create.Model {
 		return fail("continuation_invalid", 1008, nil)
 	}

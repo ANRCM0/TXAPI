@@ -45,6 +45,7 @@ type Options struct {
 	UsageQuotation     quotation.Reader
 	Picker             func([]dbmodel.Credential, map[uint]bool, string, time.Time) (*dbmodel.Credential, bool)
 	HealthReporter     func(*dbmodel.Credential, int, string)
+	ManagedInference   *ManagedInferenceOptions
 }
 
 type Gateway struct {
@@ -70,6 +71,7 @@ type Gateway struct {
 	logRecorder     func(*dbmodel.RequestLog)
 	picker          credentialPicker
 	healthReporter  credentialHealthReporter
+	managed         *managedInference
 	usageHistory    usagehistory.Recorder
 	usageQuotation  quotation.Reader
 	recordingMu     sync.Mutex
@@ -86,6 +88,13 @@ func New(opts Options) (*Gateway, error) {
 	}
 	if err := opts.BillingMode.Validate(); err != nil {
 		return nil, err
+	}
+	managed, err := newManagedInference(opts.ManagedInference, opts.BillingMode)
+	if err != nil {
+		return nil, err
+	}
+	if managed != nil && opts.Client != nil {
+		opts.Client = managedHTTPClient(opts.Client)
 	}
 	if opts.UsageHistory != nil && nilInterface(opts.UsageHistory) || opts.UsageQuotation != nil && nilInterface(opts.UsageQuotation) {
 		return nil, fmt.Errorf("invalid usage history dependency: typed nil")
@@ -147,6 +156,7 @@ func New(opts Options) (*Gateway, error) {
 	g := &Gateway{admission: opts.Admission, adaptors: protocols, operations: operations, executor: core.New(core.Options{Client: opts.Client}), retryTimes: opts.RetryTimes, attemptTimeout: opts.AttemptTimeout, totalTimeout: opts.TotalTimeout,
 		billing: opts.Billing, strictBilling: opts.StrictBilling, billingMode: opts.BillingMode, limiter: opts.Limiter, metrics: opts.Metrics, logRecorder: opts.LogRecorder, picker: opts.Picker, healthReporter: opts.HealthReporter,
 		usageHistory: opts.UsageHistory, usageQuotation: opts.UsageQuotation}
+	g.managed = managed
 	if err := g.initRegistry(opts.Channels); err != nil {
 		g.Close()
 		return nil, err

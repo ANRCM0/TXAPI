@@ -12,6 +12,7 @@ package api
 import (
 	"errors"
 	cfg "minigateway/internal/foundation/contracts/configuration/v1"
+	managed "minigateway/internal/foundation/contracts/configuration/v2"
 	control "minigateway/internal/foundation/contracts/control/v1"
 	ledger "minigateway/internal/foundation/contracts/ledger/v1"
 	ownerledger "minigateway/internal/foundation/contracts/ownerledger/v1"
@@ -41,23 +42,25 @@ type Handler struct {
 	control       control.Service
 	ledger        ledger.Service
 	configuration cfg.Service
+	managed       managed.Service
 }
 type Dependencies struct {
-	OwnerLedger   ownerledger.Service
-	UsageHistory  usagehistory.Service
-	Quotation     quotation.Service
-	Routes        routes.Service
-	Tasks         task.Service
-	Control       control.Service
-	Ledger        ledger.Service
-	Configuration cfg.Service
+	OwnerLedger          ownerledger.Service
+	UsageHistory         usagehistory.Service
+	Quotation            quotation.Service
+	Routes               routes.Service
+	Tasks                task.Service
+	Control              control.Service
+	Ledger               ledger.Service
+	Configuration        cfg.Service
+	ManagedConfiguration managed.Service
 }
 
 func New(deps Dependencies) *Handler {
 	if deps.Control == nil || deps.Configuration == nil {
 		panic("management application services must be explicitly supplied")
 	}
-	return &Handler{ownerLedger: deps.OwnerLedger, control: deps.Control, ledger: deps.Ledger, configuration: deps.Configuration, tasks: deps.Tasks, routes: deps.Routes, quotation: deps.Quotation, usageHistory: deps.UsageHistory}
+	return &Handler{ownerLedger: deps.OwnerLedger, control: deps.Control, ledger: deps.Ledger, configuration: deps.Configuration, managed: deps.ManagedConfiguration, tasks: deps.Tasks, routes: deps.Routes, quotation: deps.Quotation, usageHistory: deps.UsageHistory}
 }
 
 // Register 把管理路由挂到引擎上。
@@ -92,6 +95,10 @@ func (h *Handler) Register(r *gin.RouterGroup, adminAuth gin.HandlerFunc) {
 // 这是客户端问题，不是服务端故障。
 func fail(c *gin.Context, err error) {
 	if err == nil {
+		return
+	}
+	if errors.Is(err, managed.ErrConflict) {
+		c.JSON(http.StatusConflict, gin.H{"error": gin.H{"message": "Managed credential configuration conflict", "type": "configuration_conflict"}})
 		return
 	}
 	if errors.Is(err, control.ErrNotFound) {

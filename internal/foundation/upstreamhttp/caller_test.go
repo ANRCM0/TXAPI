@@ -80,6 +80,28 @@ func TestCallerRealHTTPRefusesRedirectWithoutLeakingBody(t *testing.T) {
 	}
 }
 
+func TestCallerModelsBearerValidationAndDispatch(t *testing.T) {
+	calls := 0
+	caller := NewCaller(&http.Client{Transport: fixtureTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Method != http.MethodGet || r.URL.String() != "https://api.openai.com/v1/models" || r.Header.Get("Authorization") != "Bearer synthetic-access" {
+			t.Fatal("directory target or authorization changed")
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"models":[]}`))}, nil
+	})})
+	defer caller.Close()
+	request := auth.Request{Method: http.MethodGet, URL: "https://api.openai.com/v1/models", Header: http.Header{"Authorization": {"Bearer synthetic-access"}, "Accept": {"application/json"}}}
+	if response := caller.Call(context.Background(), request); !response.Complete || response.Status != 200 || calls != 1 {
+		t.Fatal("valid Bearer directory request rejected")
+	}
+	for _, value := range []string{"Bearer ", "Bearer  extra", "Bearer token extra", "Bearer token\t", "bearer token", "Bearer " + strings.Repeat("x", auth.MaxTokenBytes+1)} {
+		request.Header.Set("Authorization", value)
+		if response := caller.Call(context.Background(), request); response.Complete || response.Phase != execution.NotDispatched || calls != 1 {
+			t.Fatal("invalid Bearer directory request dispatched")
+		}
+	}
+}
+
 func TestCallerOwnedTransportIsFiniteAndCannotBorrowCookies(t *testing.T) {
 	caller := NewCaller(nil)
 	defer caller.Close()

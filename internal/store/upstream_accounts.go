@@ -78,7 +78,7 @@ func (r *upstreamAccounts) write(ctx context.Context, secret bool, fn func(*gorm
 		return db.Transaction(func(tx *gorm.DB) error {
 			// A write before any claim/capacity read also serializes other CLI
 			// processes; Store's single connection alone cannot provide that.
-			locked := tx.Exec("UPDATE schema_migrations SET version = version WHERE version = 17")
+			locked := tx.Exec("UPDATE schema_migrations SET version = version WHERE version = ?", latestMigrationVersion)
 			if locked.Error != nil {
 				return locked.Error
 			}
@@ -176,6 +176,7 @@ func upstreamSave(tx *gorm.DB, old, row model.ManagedUpstreamAccount) error {
 	result := tx.Model(&model.ManagedUpstreamAccount{}).
 		Where("id = ? AND row_revision = ? AND credential_revision = ? AND fence = ?", old.ID, old.RowRevision, old.CredentialRevision, old.Fence).
 		UpdateColumns(map[string]any{"name": row.Name, "row_revision": row.RowRevision, "credential_revision": row.CredentialRevision,
+			"auth_source": row.AuthSource, "resource": row.Resource,
 			"fence": row.Fence, "token_ciphertext": row.TokenCiphertext, "state": row.State, "has_refresh": row.HasRefresh,
 			"scopes_known": row.ScopesKnown, "scopes_json": row.ScopesJSON,
 			"expires_at": row.ExpiresAt, "next_refresh_at": row.NextRefreshAt, "last_failure": row.LastFailure,
@@ -376,6 +377,7 @@ func (r *upstreamAccounts) SaveAuthorization(ctx context.Context, in auth.Author
 				return e
 			}
 		}
+		row.AuthSource, row.Resource = managedSIWCSource, managedSIWCResource
 		row.Name, row.State, row.HasRefresh = in.Name, string(auth.Active), in.Tokens.RefreshToken.Value() != ""
 		row.ScopesKnown, row.ScopesJSON = in.Tokens.ScopesKnown, "[]"
 		row.ScopesJSON, _ = upstreamScopeJSON(in.Tokens.ScopesKnown, in.Tokens.Scopes)

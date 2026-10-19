@@ -72,7 +72,12 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 	}
 
 	// 1. 筛选出能服务这个模型的渠道
-	candidates := g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget)
+	if failure := g.prepareManagedScope(c, req, allowedModels); failure != nil {
+		result.Error, result.StatusCode, result.ErrorMessage = failure, failure.StatusCode, failure.Error.Message
+		writeError(c, failure.StatusCode, failure.Error.Message, failure.Error.Type)
+		return
+	}
+	candidates := g.scopeCandidates(c, req, allowedModels)
 	if c.responseTarget != nil && len(candidates) == 0 {
 		g.recordScopeRouteDecision(c, routeDecision{outcome: "continuation_unavailable", picker: "none"}, 0)
 		writeError(c, http.StatusConflict, "the original Responses target is no longer available", "continuation_target_unavailable")
@@ -135,7 +140,7 @@ func (g *Gateway) relay(c *executionScope, req execution.Request, allowedModels 
 			result.Termination = term
 			break
 		}
-		ch, cred := g.selectTargetScope(c, g.responseChannels(g.capableChannels(req, allowedModels), req.Model(), c.responseTarget), triedCred, sessionID, time.Now())
+		ch, cred := g.selectTargetScope(c, g.scopeCandidates(c, req, allowedModels), triedCred, sessionID, time.Now())
 		if ch == nil {
 			break
 		}
@@ -385,6 +390,17 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		return core.Result{Phase: core.NotDispatched, StatusCode: err.StatusCode, Error: toCoreError(err), Termination: core.UpstreamError}
 	}
 	input.Timeout = timeout
+	if failure := g.authorizeManagedInput(c, m, req, &input); failure != nil {
+		term := core.UpstreamError
+		if c.ctx.Err() != nil {
+			failure = admissionFailure(c.ctx, nil)
+			term = core.Deadline
+			if c.ctx.Err() == context.Canceled {
+				term = core.Canceled
+			}
+		}
+		return core.Result{Phase: core.NotDispatched, StatusCode: failure.StatusCode, Error: failure, Termination: term}
+	}
 	pre := c.result.reservation
 	if g.billingMode == billing.ModeStrict {
 		name := a.Name()
@@ -442,7 +458,11 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		shadowToken = g.shadow.Begin(c.result.selectedEpoch, uint(m.ChannelID), g.shadowTime())
 		shadowBegun = true
 	}
-	result = g.executor.ExecuteTo(c.ctx, c.output, input)
+	wireContext := c.ctx
+	if c.managedTarget != nil {
+		wireContext = context.WithValue(wireContext, managedWireKey{}, true)
+	}
+	result = g.executor.ExecuteTo(wireContext, c.output, input)
 	rawCoreResult = result
 	returned = true
 	var observation execution.Observation
@@ -455,6 +475,10 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	if hasFacts || observation.Native.ID != "" || observation.Failed || observation.Usage != nil {
 		c.result.nativeFailed = observation.Failed
 		c.result.ResponseStatus, c.result.UpstreamResponseID = observation.Native.Status, observation.Native.ID
+		if c.managedTarget != nil && result.ProtocolComplete && observation.Native.Status != "completed" {
+			observation.Failed = true
+			c.result.nativeFailed = true
+		}
 		if observation.Usage != nil {
 			result.Usage = toCoreUsage(observation.Usage)
 		}
@@ -571,7 +595,7 @@ func hasUntriedCredential(ch *channel, triedCred map[uint]bool, now time.Time) b
 		if triedCred[c.ID] {
 			continue
 		}
-		if c.IsUsable(now) && c.APIKey != "" {
+		if availableCredential(c, now) {
 			return true
 		}
 	}
@@ -587,7 +611,7 @@ func countAvailableCredentials(candidates []*channel, now time.Time) int {
 	for _, ch := range candidates {
 		for i := range ch.credentials {
 			c := &ch.credentials[i]
-			if c.IsUsable(now) && c.APIKey != "" {
+			if availableCredential(c, now) {
 				n++
 			}
 		}
@@ -720,7 +744,7 @@ type credentialHealthReporter func(cred *dbmodel.Credential, statusCode int, err
 // 「被计数的失败」永远是同一批——两处各写一遍判定的话，以后改分类
 // 规则一定会漏改一处，指标和冷却行为就会对不上。
 func (g *Gateway) reportCredentialHealth(channel string, cred *dbmodel.Credential, statusCode int, errMsg string) {
-	if cred == nil {
+	if cred == nil || isManaged(cred) {
 		return
 	}
 	if statusCode != http.StatusOK && scheduler.ShouldPenalizeCredential(statusCode) {

@@ -874,11 +874,11 @@ func TestUpstreamAccountsMigration16UpgradeFailureRollbackAndOldGuard(t *testing
 	if err := f.store.DB().Migrator().DropTable(&model.ManagedUpstreamAccount{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.DB().Where("version = ?", 17).Delete(&model.SchemaMigration{}).Error; err != nil {
+	if err := f.store.DB().Where("version >= ?", 17).Delete(&model.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	var before []model.SchemaMigration
-	if err := f.store.DB().Order("version").Find(&before).Error; err != nil || len(before) != len(dataMigrations)-1 || before[len(before)-1].Version != 16 {
+	if err := f.store.DB().Order("version").Find(&before).Error; err != nil || len(before) != len(dataMigrations)-2 || before[len(before)-1].Version != 16 {
 		t.Fatal("not a schema16 fixture", len(before), err)
 	}
 	if err := f.store.DB().Exec("CREATE TRIGGER upstream_reject_migration17 BEFORE INSERT ON schema_migrations WHEN NEW.version = 17 BEGIN SELECT RAISE(ABORT,'controlled-managed-migration-failure'); END").Error; err != nil {
@@ -912,7 +912,7 @@ func TestUpstreamAccountsMigration16UpgradeFailureRollbackAndOldGuard(t *testing
 	_ = f.store.Close()
 	upgraded := f.open(t, f.key)
 	var after []model.SchemaMigration
-	if err := upgraded.DB().Order("version").Find(&after).Error; err != nil || len(after) != len(before)+1 || !reflect.DeepEqual(before, after[:len(before)]) {
+	if err := upgraded.DB().Order("version").Find(&after).Error; err != nil || len(after) != len(before)+2 || !reflect.DeepEqual(before, after[:len(before)]) {
 		t.Fatal("schema16 upgrade rewrote released migration evidence", err)
 	}
 	if err := checkMigrationVersion(upgraded.DB(), 16); err == nil {

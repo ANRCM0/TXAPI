@@ -5,6 +5,8 @@ import "time"
 // ManagedUpstreamAccount is independent of routing credentials and finances.
 // TokenCiphertext contains the complete account-bound authenticated envelope.
 type ManagedUpstreamAccount struct {
+	AuthSource         string    `gorm:"not null;default:'';size:32"`
+	Resource           string    `gorm:"not null;default:'';size:128"`
 	ID                 string    `gorm:"primaryKey;size:35"`
 	Provider           string    `gorm:"not null;size:32"`
 	Name               string    `gorm:"not null;size:128"`

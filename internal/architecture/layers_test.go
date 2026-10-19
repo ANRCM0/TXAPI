@@ -189,7 +189,8 @@ func TestEveryProductionPackageHasFourLayerOwnership(t *testing.T) {
 			t.Errorf("only cmd/gateway may assemble production layers: %s", path)
 		}
 		version := "1"
-		if path == module+"internal/foundation/contracts/responses/v2" || path == module+"internal/foundation/contracts/execution/v2" {
+		if path == module+"internal/foundation/contracts/responses/v2" || path == module+"internal/foundation/contracts/execution/v2" ||
+			path == module+"internal/foundation/contracts/configuration/v2" || path == module+"internal/foundation/contracts/upstreamauth/v2" {
 			version = "2"
 		}
 		if path == module+"internal/foundation/contracts/execution/v3" {

@@ -90,7 +90,7 @@ func (g *Gateway) chooseTargetWithDraw(candidates []*channel, tried map[uint]boo
 			switch {
 			case tried[credential.ID]:
 				d.triedCredentials++
-			case credential.APIKey == "" || !credential.IsUsable(now):
+			case !availableCredential(&credential, now):
 				d.unavailableCredentials++
 			default:
 				eligible++
@@ -143,7 +143,7 @@ func (g *Gateway) pickCredentialDecision(ch *channel, tried map[uint]bool, sessi
 		chosen, ok := g.picker(append([]model.Credential(nil), ch.credentials...), excluded, session, now)
 		if ok && chosen != nil {
 			for _, candidate := range ch.credentials {
-				if candidate.ID == chosen.ID && !tried[candidate.ID] && candidate.IsUsable(now) && candidate.APIKey != "" {
+				if candidate.ID == chosen.ID && !tried[candidate.ID] && availableCredential(&candidate, now) {
 					return &candidate, "extension"
 				}
 			}

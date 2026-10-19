@@ -31,8 +31,10 @@ import (
 	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	authentication "minigateway/internal/foundation/identity"
 	"minigateway/internal/foundation/persistence"
+	"minigateway/internal/foundation/upstreamhttp"
 	"minigateway/internal/management"
 	"minigateway/internal/protocol"
+	"minigateway/internal/protocol/openaiauth"
 	"net/http"
 	"os"
 	"os/signal"
@@ -252,7 +254,14 @@ func main() {
 		return st.GetCredential(id)
 	})
 	defer health.Close()
+	var managedInference *gateway.ManagedInferenceOptions
+	if cfg.UpstreamAccounts.Inference.Enabled {
+		caller := upstreamhttp.NewCaller(nil)
+		defer caller.Close()
+		managedInference = &gateway.ManagedInferenceOptions{Enabled: true, Credentials: st.InferenceCredentials(), DirectoryCaller: caller, ValidateModel: openaiauth.ValidateVisibleModel}
+	}
 	gw, err = gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(),
+		ManagedInference:   managedInference,
 		UsageHistory:       usageRecorder,
 		UsageQuotation:     quotationBook,
 		RouteDiagnostics:   cfg.Server.RouteDiagnostics,
@@ -270,6 +279,9 @@ func main() {
 			return scheduler.Pick(creds, exclude, now)
 		},
 		HealthReporter: func(cred *model.Credential, statusCode int, errMsg string) {
+			if cred.Source == "managed_account" {
+				return
+			}
 			// 成功/失败都走这里：scheduler 内部按状态码决定是清零还是退避，
 			// 并在状态真的变化时才落库（见 scheduler.HealthUpdate.Changed）。
 			now := time.Now()
@@ -396,27 +408,31 @@ func main() {
 		}
 		return nil
 	})
+	if cfg.UpstreamAccounts.Inference.Enabled {
+		configurationService.SetManagedRepository(st.ManagedChannels())
+	}
 	gw.Metrics().SetCredentialStatsProvider(gw.CredentialStats)
 	gw.Metrics().SetLogStatsProvider(func() metrics.LogQueueStats {
 		stats := st.LogQueueStats()
 		return metrics.LogQueueStats{Depth: stats.Depth, Capacity: stats.Capacity, Dropped: stats.Dropped, Failed: stats.Failed}
 	})
 	httpEngine := server.NewEngine(server.Deps{
-		Generation:    gateway.NewHTTPExecutor(gw),
-		TokenAuth:     authentication.NewTokenAuthenticator(st),
-		Control:       controlplane.New(persistence.Control(st)),
-		OwnerLedger:   ownerbilling.New(st.OwnerLedger(), controlplane.New(persistence.Control(st)), limiter),
-		Tasks:         taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
-		Routes:        routeconsole.New(gw.Diagnostics(), controlplane.New(persistence.Control(st)), limiter),
-		Quotation:     quoteconsole.New(quotationBook, controlplane.New(persistence.Control(st)), limiter),
-		UsageHistory:  usageconsole.New(st.UsageHistory(cfg.UsageHistory.Enabled, cfg.UsageHistory.RetentionSeconds), controlplane.New(persistence.Control(st)), limiter),
-		Configuration: configurationService,
-		Ledger:        engine,
-		Metrics:       gw.Metrics(),
-		RateGate:      access.NewRateGate(limiter),
-		Responses:     responsesRuntime.Handler(),
-		ResponsesWS:   nativeResponsesRuntime.Handler(),
-		RateLimiter:   limiter,
+		Generation:           gateway.NewHTTPExecutor(gw),
+		TokenAuth:            authentication.NewTokenAuthenticator(st),
+		Control:              controlplane.New(persistence.Control(st)),
+		OwnerLedger:          ownerbilling.New(st.OwnerLedger(), controlplane.New(persistence.Control(st)), limiter),
+		Tasks:                taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
+		Routes:               routeconsole.New(gw.Diagnostics(), controlplane.New(persistence.Control(st)), limiter),
+		Quotation:            quoteconsole.New(quotationBook, controlplane.New(persistence.Control(st)), limiter),
+		UsageHistory:         usageconsole.New(st.UsageHistory(cfg.UsageHistory.Enabled, cfg.UsageHistory.RetentionSeconds), controlplane.New(persistence.Control(st)), limiter),
+		Configuration:        configurationService,
+		ManagedConfiguration: configurationService,
+		Ledger:               engine,
+		Metrics:              gw.Metrics(),
+		RateGate:             access.NewRateGate(limiter),
+		Responses:            responsesRuntime.Handler(),
+		ResponsesWS:          nativeResponsesRuntime.Handler(),
+		RateLimiter:          limiter,
 		// IP 级兜底限流：防「拿随机 key 试」的探测请求（那种请求
 		// 过不了鉴权，令牌级限流根本轮不到它）。阈值取自配置，
 		// 0 = 不限。默认 0——自用场景（本机/内网单客户端）没有

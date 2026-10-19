@@ -139,6 +139,7 @@ type executionScope struct {
 	sessionID       string
 	responseID      string
 	responseTarget  *ResponseTarget
+	managedTarget   *model.Credential
 	requestAdmitted bool
 	claim           *model.GenerationClaim
 }

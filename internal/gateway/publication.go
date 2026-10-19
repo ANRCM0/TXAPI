@@ -23,6 +23,9 @@ func (g *Gateway) Publish(channels []model.Channel) error {
 
 func (g *Gateway) validateChannels(channels []model.Channel) error {
 	for _, ch := range channels {
+		if err := validateCredentialSources(ch); err != nil {
+			return err
+		}
 		if !ch.IsEnabled() {
 			continue
 		}
@@ -53,6 +56,9 @@ func (g *Gateway) RefreshHealth(channels []model.Channel) {
 		next := *ch
 		next.credentials = append([]model.Credential(nil), ch.credentials...)
 		for i, current := range ch.credentials {
+			if !isStatic(&current) {
+				continue
+			}
 			update, ok := incoming[current.ID]
 			if !ok || update.HealthGeneration != current.HealthGeneration || update.APIKey != current.APIKey || update.HealthObservedAt < current.HealthObservedAt {
 				continue

@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 17
+const latestMigrationVersion = 18
 
 type dataMigration struct {
 	Version int
@@ -78,6 +78,13 @@ var dataMigrations = []dataMigration{
 	{Version: 17, Apply: func(tx *gorm.DB) error {
 		// Static API Keys never imply an OAuth account or authorization grant.
 		return tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_account_identity ON managed_upstream_accounts(provider, issuer, subject, client_id)").Error
+	}},
+	{Version: 18, Apply: func(tx *gorm.DB) error {
+		// Existing accounts have no inferred SIWC resource provenance.
+		if err := tx.Exec("UPDATE credentials SET source = 'static_api_key' WHERE source IS NULL OR source = ''").Error; err != nil {
+			return err
+		}
+		return tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_managed_binding ON credentials(source) WHERE source = 'managed_account' AND status = 'active'").Error
 	}},
 }
 

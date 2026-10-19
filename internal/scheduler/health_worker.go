@@ -74,6 +74,9 @@ func (h *HealthWorker) process(event healthEvent) {
 		}
 	}()
 	current := event.credential
+	if current.Source != "" && current.Source != dbmodel.CredentialSourceStatic {
+		return
+	}
 	if h.refresh != nil {
 		latest, err := h.refresh(current.ID)
 		if err != nil {
@@ -84,6 +87,9 @@ func (h *HealthWorker) process(event healthEvent) {
 			return
 		}
 		current = *latest
+	}
+	if current.Source != "" && current.Source != dbmodel.CredentialSourceStatic {
+		return
 	}
 	if current.HealthGeneration != event.credential.HealthGeneration || current.APIKey != event.credential.APIKey {
 		return
