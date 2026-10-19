@@ -175,6 +175,20 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 
 </details>
 
+<details>
+<summary>FC-P0-HEADERS-001：前台 HTTP 上游诊断与重试头具体 CR（待批准）</summary>
+
+此切片补当前 `ExecuteTo` 丢失全部上游 Header 的具体缺口：客户端看不到最终上游的 request ID，也收不到429/503的 Retry-After。只追加有限元数据，不改变现有 JSON/SSE 正文、状态码、ID/错误改写、HTTP 提交屏障或重试许可。本节是具体变更请求，获明确批准前不实施新增地基字段或转发语义。
+
+1. **层级/目录及现有扩展不足：**L0 `internal/core` 持有唯一实际 HTTP response，既有 Decoder 只看正文，L1无法在首次输出/错误收尾前读取 Header；`ExecuteRaw` 有独立 Header，但改走 Raw 会旁路当前流/执行事实。L0只增加同步只读机械观察入口，L1 `gateway` 决定白名单、校验、attempt隔离及最终提交；L2现有HTTP Output继续只渲染已有 `ResponseMetadata.Values`；config、组装、OpenAPI、架构快照与测试同批更新。不另建 HTTP client、Transport、正文/错误解析器或执行链。
+2. **精确公开变化：**L0 `core.Input` 追加可选 `ObserveResponseHeaders func(status int, headers http.Header)`。每个成功返回非nilresponse的 `ExecuteTo` attempt 在标记ResponseReceived后、任何正文读取/输出前同步调用一次；无response/未发送则不调用。Header为仅回调期间有效的只读借用，回调禁止保留/修改map、I/O、阻塞或panic；L1实现只复制经过有限校验的两个字符串。nil维持原行为，Raw/WS不接该入口。L1 `gateway.Options.ForwardUpstreamMetadata bool` 和startup `server.forward_upstream_metadata` 默认false；仅foreground HTTP使用。保持冻结execution/v1/v2/v3/v4的类型/签名不变，不新增地基版本或数据库迁移。L0不携带项目白名单、重试/健康/账本策略，也不将完整原始Header加入Result/日志/持久状态。
+3. **白名单和校验：**启用后，已登记前台Chat、embeddings与Responses（同协议或现有已批准转换）统一只考虑 `X-Request-Id` / `Request-Id` 和 `Retry-After`。恰有一个request-ID来源且只有一个非空值时，将最多128字节的可见ASCII单值输出为 `X-TXAPI-Upstream-Request-ID`，不覆盖本地 `X-Request-ID`；重复、歧义、控制字符、逗号或超长则忽略。Retry-After仅用于最终upstream429/503且最终HTTP错误状态仍相同；单值最多64字节，接受非负十进制0..2147483647或 `http.ParseTime` 可解析HTTP-date，保留去除首尾OWS后的原值，不猜reset、不睡眠或自动重试。`Connection` 不分大小写点名的任何候选头均剔除；Connection输入至多16值、合计4096字节/64选项，超界则丢弃本次全部上游元数据。未列入的鉴权/Cookie/Set-Cookie/WWW-Authenticate/Location、逐跳/长度/压缩、Provider账号/限额/组织等头均不转发；不承诺全Header透明。
+4. **提交/attempt/兼容：**上游元数据保存在请求Output的独立私有attempt槽，选定下一attempt并检查准入前清空，不覆盖本地billing/usage/retry等元数据。只有最终实际输出合并该槽；先前429/503/ID不能进入后来成功、无response或本地拒绝的回复。只读headers观察不提前Commit，不增加prelude；已Commit后不再改Header。成功、协议失败、上游错误、取消/阶段超时都复用现有终态、资金与安全错误规则；HTTP status不一致时不残留Retry-After。关闭开关并回退旧二进制即可，无数据回退；默认false及后台/claimed/WS维持原行为。自定义Executor调用者的非nil回调须遵守同步只读约定。
+5. **验证/验收：**L0测试一次回调/时序、零配置、无response/发送前失败不调用、原正文/终态/关闭不变；L1/L2实socket覆盖Chat JSON/SSE、embeddings、Responses与现有转换、429/503数值和HTTP-date、重复/超长/非法头、Connection动态排除、本地ID与元数据优先级。多attempt验证首个错误的Header不串入后续成功/本地准入拒绝/无response；发送前拒绝与已提交失败均不重试越权，strict未知与双hold不变。config默认/布尔类型拒绝、OpenAPI与公开快照同步；集中本地回归和完整精确头CI后合并，真实Provider不在授权范围。
+6. **协作/边界：**这是P0/P4的诊断与客户端退避元数据切片，不扩大账号推理范围、定价、收费、额度恢复或后台/WS；新开关只重启生效。RFC9110第7.6.1与10.2.3节用于Connection逐跳排除及Retry-After语法核对，不复制参考项目实现。参考：`https://www.rfc-editor.org/rfc/rfc9110.html`。无新前端、依赖、迁移或性能提升声明。
+
+</details>
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。
