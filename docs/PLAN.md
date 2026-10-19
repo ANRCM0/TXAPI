@@ -1,5 +1,17 @@
 # 当前开发计划：中转内核、业务层与统一兼容层
 
+## R00 Follow-on: Bounded Shadow Routing
+
+The backend follow-on starts on accepted master/9a12642. Default-off shadow
+comparisons use only the existing eligible highest-priority pool and bounded
+foreground HTTP host observations. Actual weighted/extension/affinity routing
+remains authoritative. No frozen contract, L0, schema or frontend is changed.
+The [six-part decision](../REFERENCE-R00-SHADOW-IMPLEMENTATION.md) and
+[operational consumer](reference/shadow-routing.md) define missing-data,
+publication, storage and rollback behavior. The final local1707-test suite and actual-main smoke pass; complete exact-head
+automatic CI and merge/main verification remain pending in the batch record.
+This does not enable a production scoring algorithm.
+
 ## R06d: Personal Financial Read Backend
 
 An additive candidate ownerledger/v1 port provides session-scoped summary,
@@ -7,8 +19,10 @@ reservation list/detail and a real L3 consumer. It reads the existing strict
 ledger without financial writes, price recalculation, Provider disclosure,
 schema changes or frontend work. The [decision](../REFERENCE-R06D-IMPLEMENTATION.md)
 and [owner contract](reference/owner-billing.md) define permissions and unknown
-versus zero. On accepted master/755128d the full local1642-test suite and
-actual-main smoke pass; exact-head CI/merge acceptance remains pending in the [batch record](../REFERENCE-ADOPTION-PROGRESS.md). R06 remains partial.
+versus zero. Final head cee15e0 passed the local1642-test suite, actual-main
+smoke and complete push/PR CI; PR #40 merged as master/9a12642 with the same
+tree. Independent main39218975413 also passed full check/delivery. Exact proof
+is in the [batch record](../REFERENCE-ADOPTION-PROGRESS.md). R06 remains partial.
 
 核对日期：2026-10-18。本文是唯一活动开发计划；产品边界和最终分层见 [ARCHITECTURE.md](ARCHITECTURE.md)，操作命令见 [DEVELOPMENT.md](DEVELOPMENT.md)，团队接线规则见 [COLLABORATION.md](COLLABORATION.md)。历史 P 系列方案不再用于排期；阶段证据见 [S0–S5 历史验收](history/acceptance-s0-s5.md)，后续实现、命令和合并事实见 [S5–A3 批次记录](history/implementation-s5-a3.md)。
 
@@ -85,9 +99,10 @@ quantities in two schema16 metadata tables. Session-authorized owner/admin APIs
 are read-only; quantities remain distinct from charges, spend and holds.
 Exact admission/failure/retention/close boundaries are recorded before source in
 the [decision](../REFERENCE-R05A3-IMPLEMENTATION.md) and
-[operating guide](reference/usage-history.md). Final local build/vet,1600 tests
-across40 packages and actual-main recovery smoke pass. Exact-head complete CI,
-merge and independent main acceptance are pending. Native WS/background/claimed
+[operating guide](reference/usage-history.md). Final head906f6e4 passed local
+build/vet,1600 tests across40 packages, recovery smoke and full push/PR CI.
+PR #38 merged as master/ef7a1da with the same tree; independent main39208662187
+also passed check/delivery. Native WS/background/claimed
 capture, R05b charging and real OAuth/Provider/SDK gates are not opened.
 
 ## Background Dispatch Null Read Correction
@@ -97,10 +112,13 @@ A deterministic real SQLite/encrypted dispatch snapshot plus actual HTTP GET
 regression then reproduced200 JSONnull on accepted master/ef7a1da. The
 [narrow correction](../REFERENCE-BACKGROUND-NULL-IMPLEMENTATION.md) normalizes
 absent/null document reads and preserves actual document bytes and snapshot
-format. New and related background regressions and complete local checks pass1602
-tests/subtests plus actual-main smoke; exact-head CI/merge acceptance remains
-pending in the
-[batch record](../REFERENCE-ADOPTION-PROGRESS.md). Real Provider/SDK completeness
+format. The final combined correctionbb5a006 includes the WS boundary fix,
+passes1613 local tests and full push/PR CI, and merged through PR #39 as
+master/755128d with an identical tree. Independent main39216287290 also passed.
+One fixed official SDK probe then read held-dispatch queued and completed JSON
+successfully, with exactly one POST and two GETs. The
+[batch record](../REFERENCE-ADOPTION-PROGRESS.md) retains its narrow source and
+compatibility scope. Real Provider/SDK completeness
 and paid background gates remain separate.
 
 ## WS Terminal Boundary Correction During Full CI
@@ -110,8 +128,10 @@ in existing immediate-next-round native WS tests withbusy; both container delive
 jobs passed. That head is not accepted. A separate
 [concrete boundary decision](../REFERENCE-WS-TERMINAL-BOUNDARY-IMPLEMENTATION.md)
 adds terminal-aware sequential client coordination without changing frozen
-contracts, public routes or disabled billing. The final combined source passes1613 local tests/subtests and actual-main smoke;
-complete automatic CI remains required before merge. The
+contracts, public routes or disabled billing. The final combined headbb5a006
+passed1613 local tests/subtests, actual-main smoke and complete push/PR CI;
+PR #39 merged as master/755128d with an identical tree and independent
+main39216287290 passed check/delivery. The
 [batch record](../REFERENCE-ADOPTION-PROGRESS.md) preserves the original failures.
 
 ## R03b-2 当前实施批次

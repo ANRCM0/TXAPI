@@ -27,6 +27,7 @@ import (
 // 装载时选死一把存进 key 字段，等于让网关在下次热更新之前一直用那把
 // 可能已经被拉黑的 Key——这正是 credentials 表的健康字段变成死数据的原因。
 type channel struct {
+	epoch   uint64
 	id      int
 	name    string
 	typ     string
@@ -117,6 +118,9 @@ func (g *Gateway) initRegistry(channels []model.Channel) error {
 	if err := r.apply(channels); err != nil {
 		return err
 	}
+	r.mu.Lock()
+	g.publishShadowEpochLocked(r, true)
+	r.mu.Unlock()
 	g.reg = r
 	return nil
 }
@@ -163,6 +167,7 @@ func (g *Gateway) Reload(channels []model.Channel) error {
 			}
 		}
 	}
+	g.publishShadowEpochLocked(g.reg, false)
 	return nil
 }
 

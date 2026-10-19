@@ -279,6 +279,28 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	facts := &protocolFacts{usage: unknownUsageFact()}
 	usage := &usageFacts{usage: unknownDetailedUsageFact()}
 	dispatched, returned := false, false
+	shadowEnabled := g.shadow != nil && c.source == invocationForeground
+	var shadowToken shadowToken
+	var rawCoreResult core.Result
+	shadowBegun, shadowNormal, shadowLocalFault := false, false, false
+	if shadowEnabled {
+		defer func() {
+			recovered := recover()
+			if shadowBegun {
+				outcome := shadowIgnored
+				if recovered == nil && shadowNormal && returned && !shadowLocalFault && !facts.failed && !c.result.nativeFailed &&
+					(c.usageRecording == nil || !c.usageRecording.failed) && c.ctx.Err() == nil {
+					outcome = classifyShadowHTTP(rawCoreResult)
+				}
+				if g.shadow.End(&shadowToken, outcome, g.shadowTime()) && g.metrics != nil {
+					g.metrics.RecordShadowSample(outcome == shadowHTTPError)
+				}
+			}
+			if recovered != nil {
+				panic(recovered)
+			}
+		}()
+	}
 	preparedRecording := false
 	rejectedRecording := false
 	startedWritten := c.output.written
@@ -416,7 +438,12 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	}
 	c.result.Phase = core.Dispatching
 	dispatched = true
+	if shadowEnabled {
+		shadowToken = g.shadow.Begin(c.result.selectedEpoch, uint(m.ChannelID), g.shadowTime())
+		shadowBegun = true
+	}
 	result = g.executor.ExecuteTo(c.ctx, c.output, input)
+	rawCoreResult = result
 	returned = true
 	var observation execution.Observation
 	if hasFacts {
@@ -444,6 +471,7 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		err := g.strictBilling.EndAttempt(ctx, pre, number, result.StatusCode, string(result.Termination), fromCoreUsage(result.Usage))
 		cancel()
 		if err != nil {
+			shadowLocalFault = true
 			result.StatusCode, result.Termination = 503, core.UpstreamError
 			kind, message := "billing_unavailable", "billing attempt result could not be recorded"
 			if errors.Is(err, billing.ErrProviderLimit) {
@@ -453,6 +481,7 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 		}
 	}
 	g.metrics.RecordAttempt(c.result.ChannelName, string(result.Termination), result.StatusCode, result.Duration)
+	shadowNormal = true
 	return result
 }
 

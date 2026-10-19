@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"minigateway/internal/access"
@@ -33,19 +34,25 @@ type Options struct {
 	Billing        LegacyBilling
 	// StrictBilling can be supplied independently. For existing callers, Billing
 	// is also used when it implements StrictBilling. Strict never uses legacy fees.
-	StrictBilling    StrictBilling
-	BillingMode      billing.Mode
-	Limiter          access.Limiter
-	Metrics          *metrics.Registry
-	LogRecorder      func(*dbmodel.RequestLog)
-	RouteDiagnostics bool
-	UsageHistory     usagehistory.Recorder
-	UsageQuotation   quotation.Reader
-	Picker           func([]dbmodel.Credential, map[uint]bool, string, time.Time) (*dbmodel.Credential, bool)
-	HealthReporter   func(*dbmodel.Credential, int, string)
+	StrictBilling      StrictBilling
+	BillingMode        billing.Mode
+	Limiter            access.Limiter
+	Metrics            *metrics.Registry
+	LogRecorder        func(*dbmodel.RequestLog)
+	RouteDiagnostics   bool
+	ShadowRouteScoring bool
+	UsageHistory       usagehistory.Recorder
+	UsageQuotation     quotation.Reader
+	Picker             func([]dbmodel.Credential, map[uint]bool, string, time.Time) (*dbmodel.Credential, bool)
+	HealthReporter     func(*dbmodel.Credential, int, string)
 }
 
 type Gateway struct {
+	shadow          *shadowSampler
+	appliedEpoch    atomic.Uint64
+	shadowNow       func() time.Time
+	shadowLogMu     sync.Mutex
+	shadowLastLog   time.Time
 	routeHistory    *routeHistory
 	admission       Admission
 	adaptors        map[string]execution.Adapter
@@ -146,10 +153,17 @@ func New(opts Options) (*Gateway, error) {
 	}
 	if opts.RouteDiagnostics {
 		g.routeHistory = &routeHistory{now: time.Now}
+		if opts.ShadowRouteScoring {
+			g.shadow = newShadowSampler(&g.appliedEpoch)
+			g.shadowNow = time.Now
+		}
 	}
 	return g, nil
 }
 func (g *Gateway) Close() {
+	if g.shadow != nil {
+		g.shadow.Close()
+	}
 	if g.usageHistory != nil {
 		g.recordingMu.Lock()
 		g.recordingClosed = true
@@ -178,6 +192,7 @@ type AttemptResult struct {
 }
 
 type RequestResult struct {
+	selectedEpoch      uint64
 	UsageRecordID      string
 	RecordingState     string
 	ResponseTarget     ResponseTarget

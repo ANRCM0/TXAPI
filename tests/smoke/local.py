@@ -23,6 +23,7 @@ import urllib.request
 
 from background import background_workflow
 from usage_history import usage_history_workflow
+from shadow_routing import shadow_routing_workflow
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -545,6 +546,7 @@ def main():
             generation_runtime_workflow(gateway, config, config_path, work, clean_env, gateway_port)
             background_workflow(gateway, work, clean_env, service, ready, request)
             usage_history_workflow(gateway, work, clean_env, service, ready, request)
+            shadow_routing_workflow(gateway, work, clean_env, service, ready, request)
     print("PASS: production startup/auth/normal/SSE/console, strict missing-price/input/tariff rejection; isolated main settlement, credential rotation refusal/recovery, encrypted runtime restart/key rejection and shutdown")
 
 
