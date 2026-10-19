@@ -89,12 +89,16 @@ type Decoder interface {
 }
 
 type Input struct {
-	HTTPStageTimeouts HTTPStageTimeouts
-	Method            string
-	URL               string
-	Header            http.Header
-	Body              []byte
-	Stream            bool
+	// ObserveResponseHeaders runs once after a successful Do, before reading or
+	// committing output. Headers are borrowed read-only for this call only.
+	// The observer must not retain/mutate them, perform I/O, block or panic.
+	ObserveResponseHeaders func(status int, headers http.Header)
+	HTTPStageTimeouts      HTTPStageTimeouts
+	Method                 string
+	URL                    string
+	Header                 http.Header
+	Body                   []byte
+	Stream                 bool
 	// Replayable is the coordinator's retry permission, not a transport body
 	// replay hook. Every permitted model retry needs its own attempt admission.
 	Replayable bool
@@ -257,6 +261,9 @@ func (e *Executor) ExecuteTo(parent context.Context, output Output, in Input) (r
 	defer resp.Body.Close()
 	result.Phase = ResponseReceived
 	result.UpstreamStatus = resp.StatusCode
+	if in.ObserveResponseHeaders != nil {
+		in.ObserveResponseHeaders(resp.StatusCode, resp.Header)
+	}
 	if resp.StatusCode != http.StatusOK {
 		body, readErr := readBounded(resp.Body, e.maxResponseBytes)
 		if readErr != nil {

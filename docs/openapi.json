@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.13.1",
+    "version": "0.13.2",
     "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events, store=false and disabled billing. Sessions and continuation handles are connection-local and ephemeral; hosted tools, media, multiplexing, prewarm and automatic replay are unsupported. FC-P1-001 adds opt-in disabled-billing single SIWC account/owner/key/model Responses text streaming. Managed bindings use real persisted credentials and CAS revisions. No real-account acceptance is implied. FC-P3-001 adds persisted, version-fenced eligibility feedback and administrator CAS resume for the single managed binding. Unknown resets require manual review; credentials are retained. Schema19 requires a matching stopped-write backup for rollback."
   },
   "servers": [
@@ -159,7 +159,7 @@
       "post": {
         "operationId": "post_v1_chat_completions",
         "summary": "Chat completion or SSE stream",
-        "description": " Strict billing reserves the configured full user-fee ceiling before execution. Missing/invalid usage or actual cost above this ceiling retains the hold as pending; it never silently treats the call as free or supplements the budget beyond its hold. Unsupported or unpriced billing dimensions return 400 before forwarding. Strict JSON must be UTF-8, contain no repeated object keys and use explicit text message content and typed stream options. The prepared upstream request must preserve the explicit output limit and a single candidate before any durable network attempt starts. max_completion_tokens is supported only on the existing OpenAI-compatible path; cross-protocol conversion is rejected rather than substituted with max_tokens or a default. This check is not a complete input-token or provider-spend bound. Strict execution also requires an exact channel/base URL/protocol/actual-model/operation provider cost contract and independent request budget. The entire conservative attempt bound is durably occupied before sending; failed or unknown attempts do not restore retry capacity. Before every strict attempt, the pinned selling-price and target group-rate snapshot must price the entire contracted input envelope plus the explicit output cap within the durable user-fee reservation. Uncovered or overflowing bounds return 400 billing_fee_limit without starting that attempt; unknown earlier execution remains pending. Before recording an attempt, the final converted JSON body must also satisfy the strict text-only billing allowlist. Unknown fields, tools/media, explicit cache/thinking/non-default service-tier configuration and duplicate keys are rejected with unsupported_billing_dimension. This validation does not prove implicit model behavior or real input-token ceilings. Native OpenAI fields remain on the fast path. Cross-protocol requests reject unrepresentable options with 400 instead of log-only field loss; function tools are currently routed to OpenAI or Anthropic, not Gemini. Strict tools remain unsupported. Strict execution requires a registered input_bound_profile; missing profiles return 503 provider_input_unproven before any upstream I/O or durable attempt, regardless of nonempty operator evidence. Unsupported targets and compatibility proxies cannot inherit an official profile. The final body output limit must exactly match the limit used for cost admission. The openai_chat_v1 profile binds the official gpt-4o-mini-2024-07-18 endpoint, input ceiling >= 128000, max_completion_tokens <= 16384 and an explicit service_tier=default on the actual request. The gateway never silently substitutes a service tier; this input profile does not certify operator tariffs or rejected-request charging. Strict execution also requires tariff_profile=openai_standard_usd_2026_10_17, currency=USD, rates at or above registered standard floors and explicit credential ID/key SHA-256 bindings. Missing tariff profiles return 503 provider_tariff_unproven; new/rotated credentials or mismatched final authentication headers return 503 provider_credential_unproven. Both refuse before I/O, do not retry or penalize health, and retain holds for earlier unknown execution. A registered standard floor is not certification of credential-specific maximum rates, surcharges, future pricing or rejected-request charging. Nonempty model POST bodies are not automatically replayed by the standard HTTP transport via Request.GetBody; any allowed Chat/embeddings retry remains a separate gateway attempt with fresh admission and applicable cumulative cost accounting. Dispatching still does not prove non-execution, and a permitted retry may execute twice at a Provider. Responses remains non-replayable; custom transports must preserve these boundaries.",
+        "description": " Strict billing reserves the configured full user-fee ceiling before execution. Missing/invalid usage or actual cost above this ceiling retains the hold as pending; it never silently treats the call as free or supplements the budget beyond its hold. Unsupported or unpriced billing dimensions return 400 before forwarding. Strict JSON must be UTF-8, contain no repeated object keys and use explicit text message content and typed stream options. The prepared upstream request must preserve the explicit output limit and a single candidate before any durable network attempt starts. max_completion_tokens is supported only on the existing OpenAI-compatible path; cross-protocol conversion is rejected rather than substituted with max_tokens or a default. This check is not a complete input-token or provider-spend bound. Strict execution also requires an exact channel/base URL/protocol/actual-model/operation provider cost contract and independent request budget. The entire conservative attempt bound is durably occupied before sending; failed or unknown attempts do not restore retry capacity. Before every strict attempt, the pinned selling-price and target group-rate snapshot must price the entire contracted input envelope plus the explicit output cap within the durable user-fee reservation. Uncovered or overflowing bounds return 400 billing_fee_limit without starting that attempt; unknown earlier execution remains pending. Before recording an attempt, the final converted JSON body must also satisfy the strict text-only billing allowlist. Unknown fields, tools/media, explicit cache/thinking/non-default service-tier configuration and duplicate keys are rejected with unsupported_billing_dimension. This validation does not prove implicit model behavior or real input-token ceilings. Native OpenAI fields remain on the fast path. Cross-protocol requests reject unrepresentable options with 400 instead of log-only field loss; function tools are currently routed to OpenAI or Anthropic, not Gemini. Strict tools remain unsupported. Strict execution requires a registered input_bound_profile; missing profiles return 503 provider_input_unproven before any upstream I/O or durable attempt, regardless of nonempty operator evidence. Unsupported targets and compatibility proxies cannot inherit an official profile. The final body output limit must exactly match the limit used for cost admission. The openai_chat_v1 profile binds the official gpt-4o-mini-2024-07-18 endpoint, input ceiling >= 128000, max_completion_tokens <= 16384 and an explicit service_tier=default on the actual request. The gateway never silently substitutes a service tier; this input profile does not certify operator tariffs or rejected-request charging. Strict execution also requires tariff_profile=openai_standard_usd_2026_10_17, currency=USD, rates at or above registered standard floors and explicit credential ID/key SHA-256 bindings. Missing tariff profiles return 503 provider_tariff_unproven; new/rotated credentials or mismatched final authentication headers return 503 provider_credential_unproven. Both refuse before I/O, do not retry or penalize health, and retain holds for earlier unknown execution. A registered standard floor is not certification of credential-specific maximum rates, surcharges, future pricing or rejected-request charging. Optional startup server.forward_upstream_metadata (default false) exposes only a validated final foreground attempt request ID as X-TXAPI-Upstream-Request-ID, plus Retry-After on matching upstream/final 429 or 503. Local metadata takes precedence; other upstream headers are excluded. Background, claimed execution and WS are unchanged. Nonempty model POST bodies are not automatically replayed by the standard HTTP transport via Request.GetBody; any allowed Chat/embeddings retry remains a separate gateway attempt with fresh admission and applicable cumulative cost accounting. Dispatching still does not prove non-execution, and a permitted retry may execute twice at a Provider. Responses remains non-replayable; custom transports must preserve these boundaries.",
         "tags": [
           "model-calls"
         ],
@@ -199,6 +199,15 @@
                   "type": "string",
                   "maxLength": 64
                 }
+              },
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
+                }
               }
             }
           },
@@ -208,6 +217,17 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -220,6 +240,17 @@
                   "$ref": "#/components/schemas/Error"
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
+                }
+              }
             }
           },
           "403": {
@@ -228,6 +259,17 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -243,10 +285,20 @@
             },
             "headers": {
               "Retry-After": {
-                "description": "Suggested seconds before retry; not a capacity reservation.",
+                "description": "Suggested delay, not a capacity reservation. Local admission seconds take precedence. With server.forward_upstream_metadata=true, a final upstream 429/503 with matching HTTP status may supply validated seconds (0..2147483647) or HTTP-date, at most 64 bytes. No automatic retry or wait is added.",
                 "schema": {
-                  "type": "integer",
-                  "minimum": 1
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -262,10 +314,20 @@
             },
             "headers": {
               "Retry-After": {
-                "description": "Suggested seconds before retry; not a capacity reservation.",
+                "description": "Suggested delay, not a capacity reservation. Local admission seconds take precedence. With server.forward_upstream_metadata=true, a final upstream 429/503 with matching HTTP status may supply validated seconds (0..2147483647) or HTTP-date, at most 64 bytes. No automatic retry or wait is added.",
                 "schema": {
-                  "type": "integer",
-                  "minimum": 1
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -276,6 +338,17 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -341,6 +414,15 @@
                   "type": "string",
                   "maxLength": 64
                 }
+              },
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
+                }
               }
             }
           },
@@ -350,6 +432,17 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -362,6 +455,17 @@
                   "$ref": "#/components/schemas/Error"
                 }
               }
+            },
+            "headers": {
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
+                }
+              }
             }
           },
           "403": {
@@ -370,6 +474,17 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -385,10 +500,20 @@
             },
             "headers": {
               "Retry-After": {
-                "description": "Suggested seconds before retry; not a capacity reservation.",
+                "description": "Suggested delay, not a capacity reservation. Local admission seconds take precedence. With server.forward_upstream_metadata=true, a final upstream 429/503 with matching HTTP status may supply validated seconds (0..2147483647) or HTTP-date, at most 64 bytes. No automatic retry or wait is added.",
                 "schema": {
-                  "type": "integer",
-                  "minimum": 1
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -404,10 +529,20 @@
             },
             "headers": {
               "Retry-After": {
-                "description": "Suggested seconds before retry; not a capacity reservation.",
+                "description": "Suggested delay, not a capacity reservation. Local admission seconds take precedence. With server.forward_upstream_metadata=true, a final upstream 429/503 with matching HTTP status may supply validated seconds (0..2147483647) or HTTP-date, at most 64 bytes. No automatic retry or wait is added.",
                 "schema": {
-                  "type": "integer",
-                  "minimum": 1
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
                 }
               }
             }
@@ -434,7 +569,7 @@
             }
           }
         ],
-        "description": " Strict billing reserves the configured full user-fee ceiling before execution. Missing/invalid usage or actual cost above this ceiling retains the hold as pending; it never silently treats the call as free or supplements the budget beyond its hold. Unsupported or unpriced billing dimensions return 400 before forwarding. Strict embeddings require a nonempty string or nonempty batch of nonempty strings, positive integer dimensions when supplied, and float/base64 encoding when supplied. Repeated JSON object keys are rejected. Only the existing OpenAI-compatible upstream operation is supported; converting embeddings into cross-protocol chat is rejected before any durable network attempt starts. Input-token and complete provider-spend bounds remain pending. Strict execution also requires an exact channel/base URL/protocol/actual-model/operation provider cost contract and independent request budget. The entire conservative attempt bound is durably occupied before sending; failed or unknown attempts do not restore retry capacity. Before every strict attempt, the pinned selling-price and target group-rate snapshot must price the entire contracted input envelope plus the explicit output cap within the durable user-fee reservation. Uncovered or overflowing bounds return 400 billing_fee_limit without starting that attempt; unknown earlier execution remains pending. Before recording an attempt, the final converted JSON body must also satisfy the strict text-only billing allowlist. Unknown fields, tools/media, explicit cache/thinking/service-tier configuration and duplicate keys are rejected with unsupported_billing_dimension. This validation does not prove implicit model behavior or real input-token ceilings. Strict execution requires a registered input_bound_profile for the final destination, actual model and text batch before recording an attempt. Missing profiles return 503 provider_input_unproven even with operator evidence. Legacy/disabled compatibility is unchanged; unprofiled strict contracts remain loadable only for history and recovery. openai_embeddings_v1 is limited to the documented official endpoint and registered embedding models, requires at least the full 300000-token request envelope and does not certify operator-supplied tariffs or precise local token counting. Strict execution also requires tariff_profile=openai_standard_usd_2026_10_17, currency=USD, rates at or above registered standard floors and explicit credential ID/key SHA-256 bindings. Missing tariff profiles return 503 provider_tariff_unproven; new/rotated credentials or mismatched final authentication headers return 503 provider_credential_unproven. Both refuse before I/O, do not retry or penalize health, and retain holds for earlier unknown execution. A registered standard floor is not certification of credential-specific maximum rates, surcharges, future pricing or rejected-request charging. Nonempty model POST bodies are not automatically replayed by the standard HTTP transport via Request.GetBody; any allowed Chat/embeddings retry remains a separate gateway attempt with fresh admission and applicable cumulative cost accounting. Dispatching still does not prove non-execution, and a permitted retry may execute twice at a Provider. Responses remains non-replayable; custom transports must preserve these boundaries."
+        "description": " Strict billing reserves the configured full user-fee ceiling before execution. Missing/invalid usage or actual cost above this ceiling retains the hold as pending; it never silently treats the call as free or supplements the budget beyond its hold. Unsupported or unpriced billing dimensions return 400 before forwarding. Strict embeddings require a nonempty string or nonempty batch of nonempty strings, positive integer dimensions when supplied, and float/base64 encoding when supplied. Repeated JSON object keys are rejected. Only the existing OpenAI-compatible upstream operation is supported; converting embeddings into cross-protocol chat is rejected before any durable network attempt starts. Input-token and complete provider-spend bounds remain pending. Strict execution also requires an exact channel/base URL/protocol/actual-model/operation provider cost contract and independent request budget. The entire conservative attempt bound is durably occupied before sending; failed or unknown attempts do not restore retry capacity. Before every strict attempt, the pinned selling-price and target group-rate snapshot must price the entire contracted input envelope plus the explicit output cap within the durable user-fee reservation. Uncovered or overflowing bounds return 400 billing_fee_limit without starting that attempt; unknown earlier execution remains pending. Before recording an attempt, the final converted JSON body must also satisfy the strict text-only billing allowlist. Unknown fields, tools/media, explicit cache/thinking/service-tier configuration and duplicate keys are rejected with unsupported_billing_dimension. This validation does not prove implicit model behavior or real input-token ceilings. Strict execution requires a registered input_bound_profile for the final destination, actual model and text batch before recording an attempt. Missing profiles return 503 provider_input_unproven even with operator evidence. Legacy/disabled compatibility is unchanged; unprofiled strict contracts remain loadable only for history and recovery. openai_embeddings_v1 is limited to the documented official endpoint and registered embedding models, requires at least the full 300000-token request envelope and does not certify operator-supplied tariffs or precise local token counting. Strict execution also requires tariff_profile=openai_standard_usd_2026_10_17, currency=USD, rates at or above registered standard floors and explicit credential ID/key SHA-256 bindings. Missing tariff profiles return 503 provider_tariff_unproven; new/rotated credentials or mismatched final authentication headers return 503 provider_credential_unproven. Both refuse before I/O, do not retry or penalize health, and retain holds for earlier unknown execution. A registered standard floor is not certification of credential-specific maximum rates, surcharges, future pricing or rejected-request charging. Optional startup server.forward_upstream_metadata (default false) exposes only a validated final foreground attempt request ID as X-TXAPI-Upstream-Request-ID, plus Retry-After on matching upstream/final 429 or 503. Local metadata takes precedence; other upstream headers are excluded. Background, claimed execution and WS are unchanged. Nonempty model POST bodies are not automatically replayed by the standard HTTP transport via Request.GetBody; any allowed Chat/embeddings retry remains a separate gateway attempt with fresh admission and applicable cumulative cost accounting. Dispatching still does not prove non-execution, and a permitted retry may execute twice at a Provider. Responses remains non-replayable; custom transports must preserve these boundaries."
       }
     },
     "/api/auth/login": {
@@ -6587,7 +6722,7 @@
             "CallBearer": []
           }
         ],
-        "description": "Requires responses.enabled and mounted content/credential keys. Limit 1 MiB. Supports text, instructions, native function tools/history and reasoning items; no Chat conversion. Native foreground SSE dispatches only blank-line-delimited LF/CRLF events with a 1 MiB wire-event limit including the delimiter. An unterminated EOF tail is discarded and cannot establish completion. Defaults store=true without injecting that field upstream. Local response IDs are stable across replay; upstream IDs are metadata only. Idempotency-Key (1-256 visible ASCII bytes) is scoped to current owner and API key. Object key order/JSON whitespace do not affect the digest; numeric lexical representations and omitted/defaulted fields remain distinct. A known terminal receipt expires after configured retention (default 24h), allowing reuse; dispatching/unknown receipts do not expire automatically. Stored replay expires earlier (default 1h) or may be unavailable after an output failure; store=false never retains response bodies. A retry in those states returns 409 and never re-executes. Replays reauthorize identity/model and do not create attempts, consume generation RPM or charge again. Stored responses support GET/delete/input_items and local previous_response_id or conversation continuation, mutually exclusive. Expanded stored context is capped at 256 KiB and 1024 items, pinned to the original target and reauthorized per turn; no native parent ID is sent. store=false cannot reference history. background=true additionally requires responses.background.enabled, explicit channel_ids and billing.mode=disabled; legacy/strict reject before acceptance or network I/O. The background input limit is 256 KiB including the private envelope; self-contained text/function tools only, no previous_response_id/conversation. Original stream=true background requests are observed as durable native sequence-numbered SSE and can resume on GET with stream=true and optional starting_after; nil and zero cursors differ. Only original stream=true jobs support event replay. Native task terminal and terminal event persistence are separate facts. Incomplete, unavailable or expired logs never fabricate DONE/completion. A queued local receipt does not prove remote acceptance or completion. Workers persist their target before POST, bind an accepted remote ID, then inspect/cancel/resume only that exact target. Disconnect does not cancel work; unknown dispatch is never blindly resubmitted. Background content (also store=false) has fixed temporary retention (default 10 minutes); idempotency tombstones default to 24h and uncertainty stays protected. Background is not promoted to A02 long-term history. Native WS remains unsupported. Strict returns 400 unsupported_billing_dimension before any monetary reservation. Nonempty model POST bodies are not automatically replayed by the standard HTTP transport via Request.GetBody; any allowed Chat/embeddings retry remains a separate gateway attempt with fresh admission and applicable cumulative cost accounting. Dispatching still does not prove non-execution, and a permitted retry may execute twice at a Provider. Responses remains non-replayable; custom transports must preserve these boundaries.",
+        "description": "Requires responses.enabled and mounted content/credential keys. Limit 1 MiB. Supports text, instructions, native function tools/history and reasoning items; no Chat conversion. Native foreground SSE dispatches only blank-line-delimited LF/CRLF events with a 1 MiB wire-event limit including the delimiter. An unterminated EOF tail is discarded and cannot establish completion. Defaults store=true without injecting that field upstream. Local response IDs are stable across replay; upstream IDs are metadata only. Idempotency-Key (1-256 visible ASCII bytes) is scoped to current owner and API key. Object key order/JSON whitespace do not affect the digest; numeric lexical representations and omitted/defaulted fields remain distinct. A known terminal receipt expires after configured retention (default 24h), allowing reuse; dispatching/unknown receipts do not expire automatically. Stored replay expires earlier (default 1h) or may be unavailable after an output failure; store=false never retains response bodies. A retry in those states returns 409 and never re-executes. Replays reauthorize identity/model and do not create attempts, consume generation RPM or charge again. Stored responses support GET/delete/input_items and local previous_response_id or conversation continuation, mutually exclusive. Expanded stored context is capped at 256 KiB and 1024 items, pinned to the original target and reauthorized per turn; no native parent ID is sent. store=false cannot reference history. background=true additionally requires responses.background.enabled, explicit channel_ids and billing.mode=disabled; legacy/strict reject before acceptance or network I/O. The background input limit is 256 KiB including the private envelope; self-contained text/function tools only, no previous_response_id/conversation. Original stream=true background requests are observed as durable native sequence-numbered SSE and can resume on GET with stream=true and optional starting_after; nil and zero cursors differ. Only original stream=true jobs support event replay. Native task terminal and terminal event persistence are separate facts. Incomplete, unavailable or expired logs never fabricate DONE/completion. A queued local receipt does not prove remote acceptance or completion. Workers persist their target before POST, bind an accepted remote ID, then inspect/cancel/resume only that exact target. Disconnect does not cancel work; unknown dispatch is never blindly resubmitted. Background content (also store=false) has fixed temporary retention (default 10 minutes); idempotency tombstones default to 24h and uncertainty stays protected. Background is not promoted to A02 long-term history. Native WS remains unsupported. Strict returns 400 unsupported_billing_dimension before any monetary reservation. Optional startup server.forward_upstream_metadata (default false) exposes only a validated final foreground attempt request ID as X-TXAPI-Upstream-Request-ID, plus Retry-After on matching upstream/final 429 or 503. Local metadata takes precedence; other upstream headers are excluded. Background, claimed execution and WS are unchanged. Nonempty model POST bodies are not automatically replayed by the standard HTTP transport via Request.GetBody; any allowed Chat/embeddings retry remains a separate gateway attempt with fresh admission and applicable cumulative cost accounting. Dispatching still does not prove non-execution, and a permitted retry may execute twice at a Provider. Responses remains non-replayable; custom transports must preserve these boundaries.",
         "parameters": [
           {
             "in": "header",
@@ -6645,6 +6780,15 @@
                   "format": "date-time"
                 },
                 "description": "Fixed local content expiry, not a provider retention guarantee."
+              },
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
+                }
               }
             },
             "content": {
@@ -6667,6 +6811,25 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-TXAPI-Upstream-Request-ID": {
+                "description": "Optional when server.forward_upstream_metadata=true (default false), only for a foreground HTTP attempt. Validated final-attempt X-Request-Id or Request-Id, preserved separately from local X-Request-ID; ambiguous, repeated, invalid, oversized or Connection-nominated values are omitted. Credential and account header fields are excluded.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[\\x21-\\x2B\\x2D-\\x7E]+$"
+                }
+              },
+              "Retry-After": {
+                "description": "Suggested delay, not a capacity reservation. Local admission seconds take precedence. With server.forward_upstream_metadata=true, a final upstream 429/503 with matching HTTP status may supply validated seconds (0..2147483647) or HTTP-date, at most 64 bytes. No automatic retry or wait is added.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
                 }
               }
             }

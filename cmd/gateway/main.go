@@ -268,8 +268,9 @@ func main() {
 		ShadowRouteScoring: cfg.Server.ShadowRouteScoring,
 		Admission:          gateway.CapacityAdmission{Capacity: capacity},
 		Channels:           st.Channels(), RetryTimes: cfg.Server.RetryTimes,
-		AttemptTimeout: time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
-		TotalTimeout:   time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
+		AttemptTimeout:          time.Duration(cfg.Server.TimeoutSeconds) * time.Second,
+		TotalTimeout:            time.Duration(cfg.Server.TotalTimeoutSeconds) * time.Second,
+		ForwardUpstreamMetadata: cfg.Server.ForwardUpstreamMetadata,
 		HTTPStageTimeouts: gateway.HTTPStageTimeouts{
 			Headers:              time.Duration(cfg.Server.HTTPStageTimeouts.HeadersSeconds) * time.Second,
 			FirstEffectiveOutput: time.Duration(cfg.Server.HTTPStageTimeouts.FirstEffectiveOutputSeconds) * time.Second,

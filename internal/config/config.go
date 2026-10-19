@@ -33,6 +33,8 @@ type ServerConfig struct {
 	TotalTimeoutSeconds int `yaml:"total_timeout_seconds"`
 	// HTTPStageTimeouts applies only to foreground HTTP attempts; zero disables each stage.
 	HTTPStageTimeouts HTTPStageTimeoutsConfig `yaml:"http_stage_timeouts"`
+	// ForwardUpstreamMetadata exposes only validated final-attempt diagnostic headers.
+	ForwardUpstreamMetadata bool `yaml:"forward_upstream_metadata"`
 	// SessionAffinity is an opt-in optimization. Keep it disabled until an
 	// operator has measured a real upstream cache/latency benefit.
 	SessionAffinity bool `yaml:"session_affinity"`

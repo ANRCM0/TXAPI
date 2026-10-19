@@ -26,6 +26,8 @@ func TestHTTPStageTimeoutPreservesStrictUnknownHolds(t *testing.T) {
 				hits.Add(1)
 				io.Copy(io.Discard, r.Body)
 				if mode != core.TimeoutHeaders {
+					w.Header().Set("X-Request-ID", "strict-stage")
+					w.Header().Set("Retry-After", "99")
 					w.Header().Set("Content-Type", "text/event-stream")
 					w.WriteHeader(200)
 					if mode == core.TimeoutStreamIdle {
@@ -51,7 +53,7 @@ func TestHTTPStageTimeoutPreservesStrictUnknownHolds(t *testing.T) {
 			case core.TimeoutStreamIdle:
 				stages.StreamIdle = 100 * time.Millisecond
 			}
-			g, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2, TotalTimeout: 2 * time.Second, HTTPStageTimeouts: stages, HealthReporter: func(*dbmodel.Credential, int, string) { penalties.Add(1) }})
+			g, err := newRegisteredGateway(Options{Channels: channels, Client: client, Billing: engine, BillingMode: billing.ModeStrict, RetryTimes: 2, TotalTimeout: 2 * time.Second, HTTPStageTimeouts: stages, ForwardUpstreamMetadata: true, HealthReporter: func(*dbmodel.Credential, int, string) { penalties.Add(1) }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,6 +67,13 @@ func TestHTTPStageTimeoutPreservesStrictUnknownHolds(t *testing.T) {
 			result := g.ExecuteTo(ctx, out, Execution{Operation: protocol.Chat, Body: []byte(`{"model":"gpt-4o-mini","max_completion_tokens":32,"service_tier":"default","stream":true,"messages":[{"role":"user","content":"hello"}]}`)})
 			if hits.Load() != 1 || len(result.Attempts) != 1 || result.TimeoutStage != mode || result.ProtocolComplete || result.Termination != core.Deadline || penalties.Load() != 0 {
 				t.Fatalf("timeout execution facts: hits=%d penalties=%d result=%+v", hits.Load(), penalties.Load(), result)
+			}
+			wantID := "strict-stage"
+			if mode == core.TimeoutHeaders {
+				wantID = ""
+			}
+			if out.metadata.Values["X-TXAPI-Upstream-Request-ID"] != wantID || out.metadata.Values["Retry-After"] != "" {
+				t.Fatalf("timeout metadata changed: %+v", out.metadata)
 			}
 			detail, err := engine.ReservationDetail(context.Background(), out.metadata.Values["X-TXAPI-Billing-ID"])
 			if err != nil {
