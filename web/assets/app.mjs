@@ -225,7 +225,7 @@ function signOut(message = "") {
 
 const pages = [
   ["overview", "Overview", "01"], ["keys", "My API keys", "02"], ["models", "Models", "03"],
-  ["playground", "Try a request", "04"], ["logs", "Request logs", "05"],
+  ["playground", "Try a request", "04"], ["logs", "Request logs", "05"], ["tasks", "Background tasks", "10"],
 ];
 const adminPages = [["users", "Users", "06"], ["channels", "Channels", "07"], ["settings", "Settings", "08"], ["billing", "Billing ledger", "09"]];
 function shell() {
@@ -282,7 +282,7 @@ async function navigate({ refreshIdentity = true, recoverForbidden = true } = {}
   const view = document.querySelector("#view");
   view.replaceChildren(text("p", "Loading live data...", "empty"));
   try {
-    const content = await ({ overview, keys, models: modelPage, playground, logs, users, channels, settings, billing: billingLedger })[page]();
+    const content = await ({ overview, keys, models: modelPage, playground, logs, users, channels, settings, tasks: backgroundTasks, billing: billingLedger })[page]();
     if (epoch === generation && user) view.replaceChildren(content);
   } catch (error) {
     if (error.status === 403 && recoverForbidden && epoch === generation && user) {
@@ -728,3 +728,88 @@ function priceDialog(value = {}) {
 
 window.addEventListener("hashchange", () => run(navigate));
 login();
+
+async function backgroundTasks() {
+  const epoch = generation;
+  let disposed = false, offset = 0, hasMore = false, version = 0, detailVersion = 0;
+  let controller, detailController;
+  const current = () => !disposed && epoch === generation && user;
+  disposeView = () => { disposed = true; controller?.abort(); detailController?.abort(); };
+  const host = el("div"), detail = el("div", { class: "task-detail" }), error = el("p", { role: "alert", class: "form-error" });
+  const count = text("span", "", "muted");
+  const scope = el("select", { "aria-label": "Task scope" }, el("option", { value: "me" }, "My tasks"),
+    user.role === "admin" ? el("option", { value: "admin" }, "All users (metadata only)") : null);
+  const stage = el("select", { "aria-label": "Task stage" }, ["", "queued", "dispatching", "remote_active", "terminal", "uncertain"]
+    .map(value => el("option", { value }, value || "All stages")));
+  const owner = el("input", { type: "number", min: 1, "aria-label": "Task owner ID", placeholder: "Owner ID (admin)", disabled: true });
+  const key = el("input", { type: "number", min: 1, "aria-label": "Creation Key ID", placeholder: "Creation Key ID" });
+  const filter = el("form", { class: "filter-bar" }, scope, stage, owner, key, el("button", { class: "button secondary" }, "Refresh tasks"));
+  const previous = button("Previous", () => load(Math.max(0, offset - 50)));
+  const next = button("Next", () => load(offset + 50));
+  const base = () => "/api/" + scope.value + "/background";
+  const date = value => value ? new Date(value).toLocaleString() : "Not recorded";
+  async function load(target = offset) {
+    const ownVersion = ++version;
+    ++detailVersion; detailController?.abort(); detail.replaceChildren();
+    controller?.abort(); controller = new AbortController();
+    previous.disabled = next.disabled = true; error.textContent = "";
+    const query = new URLSearchParams({ limit: "50", offset: String(target) });
+    if (stage.value) query.set("stage", stage.value);
+    if (key.value) query.set("token_id", key.value);
+    if (scope.value === "admin" && owner.value) query.set("user_id", owner.value);
+    try {
+      const response = await api.request(base() + "?" + query, { signal: controller.signal });
+      if (!current() || ownVersion !== version) return;
+      offset = target; hasMore = response.has_more === true;
+      host.replaceChildren(table(["Task / created", "Owner / Key", "Model / stage", "Content / events", "Actions"], list(response.data), row => [
+        el("div", {}, text("code", row.id, "block"), date(row.created_at)),
+        "User " + row.user_id + " / Key " + row.token_id,
+        el("div", {}, row.model, text("span", row.stage + (row.cancel_requested ? " / cancel requested" : ""), "block")),
+        el("div", {}, row.content_available ? "Retained (not displayed)" : "Expired or deleted", text("span", String(row.event_count) + (row.replay_pending ? " / replay pending" : "") , "block")),
+        button("Inspect task", () => inspect(row.id), "quiet")
+      ]));
+      count.textContent = "Rows " + (response.data?.length ? offset + 1 : 0) + "-" + (offset + list(response.data).length);
+    } catch (failure) { if (current() && ownVersion === version && failure.name !== "AbortError") error.textContent = failure.message; }
+    finally { if (current() && ownVersion === version) { previous.disabled = offset === 0; next.disabled = !hasMore || offset >= 10000; } }
+  }
+  async function inspect(id) {
+    const ownVersion = ++detailVersion, requestBase = base();
+    detailController?.abort(); detailController = new AbortController();
+    error.textContent = "";
+    try {
+      const response = await api.request(requestBase + "/" + encodeURIComponent(id), { signal: detailController.signal });
+      if (!current() || ownVersion !== detailVersion) return;
+      const row = response.data;
+      const requestCancel = button("Request cancellation", async () => {
+        if (!current() || ownVersion !== detailVersion || !confirm("Request cancellation for " + row.id + "? This does not prove remote work has stopped.")) return;
+        requestCancel.disabled = true;
+        try {
+          await api.request("/api/me/background/" + encodeURIComponent(row.id) + "/cancel", { method: "POST", body: { revision: row.revision }, signal: detailController.signal });
+          if (!current() || ownVersion !== detailVersion) return;
+          notice("Cancellation recorded. Refresh to observe the remote outcome; uncertain work remains uncertain.");
+          await load();
+        } catch (failure) {
+          if (!current() || ownVersion !== detailVersion) return;
+          if (failure.status === 409) await inspect(row.id);
+          if (current()) error.textContent = failure.message;
+        } finally { if (requestCancel.isConnected) requestCancel.disabled = false; }
+      }, "danger");
+      detail.replaceChildren(heading("Task metadata", row.id),
+        text("p", "Stage: " + row.stage + ". Terminal is not proof of success or settlement. No content or upstream handle is exposed.", "muted"),
+        el("dl", { class: "facts" },
+          text("dt", "Revision"), text("dd", row.revision),
+          text("dt", "Deadline"), text("dd", date(row.deadline)),
+          text("dt", "Content expiry"), text("dd", date(row.content_expires_at)),
+          text("dt", "Metadata cleanup eligibility"), text("dd", date(row.metadata_expires_at)),
+          text("dt", "Last persisted sequence"), text("dd", row.last_sequence === null ? "None" : String(row.last_sequence)),
+          text("dt", "Replay pending"), text("dd", String(row.replay_pending)),
+          text("dt", "Cancellation requested"), text("dd", String(row.cancel_requested))),
+        row.can_cancel && scope.value === "me" ? requestCancel : text("p", "Read-only or no further cancellation available.", "fine"));
+    } catch (failure) { if (current() && ownVersion === detailVersion && failure.name !== "AbortError") error.textContent = failure.message; }
+  }
+  filter.addEventListener("submit", event => { event.preventDefault(); load(0); });
+  scope.addEventListener("change", () => { owner.disabled = scope.value !== "admin"; host.replaceChildren(); offset = 0; hasMore = false; load(0); });
+  await load(0);
+  return el("div", {}, pageHeader("Background tasks", "Session-authorized metadata. Call-Key content access and billing remain separate."),
+    panel(text("p", "Cancel requests are not refunds or proof that remote work stopped. Expired metadata may survive for safe recovery.", "muted"), filter, error, host, actions(previous, count, next)), panel(detail));
+}

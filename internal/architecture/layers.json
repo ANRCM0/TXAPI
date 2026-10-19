@@ -161,6 +161,12 @@
     "public": true,
     "version": "1"
   },
+  "minigateway/internal/foundation/contracts/taskcontrol/v1": {
+    "layer": "L1",
+    "owner": "foundation",
+    "public": true,
+    "version": "1"
+  },
   "minigateway/internal/foundation/contracts/text/v1": {
     "layer": "L1",
     "owner": "foundation",
@@ -204,10 +210,6 @@
   "minigateway/internal/management": {
     "layer": "L3",
     "owner": "management"
-  },
-  "minigateway/internal/responsesws": {
-    "layer": "L3",
-    "owner": "responsesws"
   },
   "minigateway/internal/metrics": {
     "layer": "L1",
@@ -261,6 +263,10 @@
     "layer": "L3",
     "owner": "responses"
   },
+  "minigateway/internal/responsesws": {
+    "layer": "L3",
+    "owner": "responsesws"
+  },
   "minigateway/internal/scheduler": {
     "layer": "L1",
     "owner": "scheduler"
@@ -284,6 +290,10 @@
   "minigateway/internal/store": {
     "layer": "L1",
     "owner": "store"
+  },
+  "minigateway/internal/taskconsole": {
+    "layer": "L3",
+    "owner": "taskconsole"
   },
   "minigateway/internal/transport/websocket": {
     "layer": "L2",
