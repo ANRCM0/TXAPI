@@ -28,3 +28,22 @@ func TestManagedInferenceRequiresExplicitSafeDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpstreamRefreshDefaultsBoundsAndEncryption(t *testing.T) {
+	cfg, err := Load(writeCfg(t, minimalCfg))
+	if err != nil || cfg.UpstreamAccounts.Refresh.Enabled || cfg.UpstreamAccounts.Refresh.IntervalSeconds != 30 || cfg.UpstreamAccounts.Refresh.BeforeExpirySeconds != 600 || cfg.UpstreamAccounts.Refresh.MaxAttemptsPerCycle != 4 {
+		t.Fatalf("refresh default configuration: %v", err)
+	}
+	for _, fields := range []string{
+		"enabled: true", "interval_seconds: -1", "interval_seconds: 3601", "before_expiry_seconds: 29", "before_expiry_seconds: 86401", "max_attempts_per_cycle: -1", "max_attempts_per_cycle: 17", "interval_seconds: 3600\n    before_expiry_seconds: 600",
+	} {
+		_, err := Load(writeCfg(t, minimalCfg+"upstream_accounts:\n  refresh:\n    "+fields+"\n"))
+		if err == nil || !strings.Contains(err.Error(), "upstream_accounts.refresh") {
+			t.Fatalf("accepted invalid refresh configuration %q: %v", fields, err)
+		}
+	}
+	_, err = Load(writeCfg(t, minimalCfg+"database:\n  credential_keys_file: fixture-keys.json\nupstream_accounts:\n  refresh:\n    enabled: true\n"))
+	if err != nil {
+		t.Fatal("refresh lifecycle should not require enabling inference", err)
+	}
+}
