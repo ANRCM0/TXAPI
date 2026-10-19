@@ -153,6 +153,15 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 
 后续同条件性能改动的前瞻预算先固定为：正常样本完成率 100%、每请求一个上游 attempt、drain 失败 0；配对首正文与首有效文本增量 P95 各不超过 5ms，网关完整事件观察延迟上界 P95 不超过 2ms。此预算用于下一轮同机重复对照，尚非本批通过声明或 CI 硬门槛；资源预算须先取得 Linux 可靠基线，P99 须扩大独立请求和重复轮次。TLS/HTTP2/反代、慢读/不读、持续并发/过载恢复、取消风暴及真实 Provider/客户端验收继续开放，P0 完整性能矩阵未完成。
 
+本轮 P0 并发承载/过载恢复基线切片（源码及本地受控检查完成，精确头 CI 待验证）：
+
+1. **层级/目录：**仅 `tests/smoke/capacity_baseline.py`、既有 `stream_baseline.py` 的有界 hold 场景、Verify 与本方案；运行生产 `cmd/gateway`，不修改转发热路径。
+2. **公开依赖：**通过既有 HTTP API、测试用启动配置和进程生命周期消费现有鉴权、容量、路由、执行及 SQLite；复用既有完整 SSE 观察/绝对 deadline/上游 drain 测量，不增加公开端口或冻结声明。
+3. **地基影响：**无 L0、地基契约、迁移和产品配置变更；无需新增 CR。单实例/用户/Key/channel 有限准入保持原实现，不旁路鉴权或改健康状态。
+4. **行为/回退：**同机 loopback HTTP/1.1 明文，固定有限 worker/请求/轮次、每 worker 持久连接；直连与完整网关分阶段交替先后。先同时占满 Key 名额，额外请求必须429且上游 attempt=0；释放后每个 holder 完整终态且一次发送，再以保留全部尝试的有限 no-send429探测验证恢复。恢复成功也须只有一次发送，并再同时填满全部 Key 名额，检出只恢复一个空位的部分租借泄漏。每阶段请求完成后上游活动归零；正常请求失败保留样本并停止该 worker，计划/实际启动数同时报告，不选择性隐去失败。
+5. **验证/验收：**并发1、4和16的有界回归、既有串行 self-check，Linux CI再采样进程 CPU/RSS/FD/线程；各阶段资源分别记录，峰值为50ms采样下界。记录首正文、首有效文本、完整事件延迟、完成率、吞吐/连接及恢复时间；并发分布差只做非配对描述，不套用已有并发1的配对性能预算。CI检查完整终态、一次发送、满额拒绝、drain和恢复，性能数值只报告。本切片不改优化参数，取得重复资源基线后再制定后续优化/容量门槛。
+6. **协作：**报告写仓库外，记录源码SHA/dirty、两个harness摘要、环境和有限负载；CI不把临时报告当永久制品。Windows资源采样仍unsupported；有限closed-loop不宣称最大容量、长时soak、TLS/H2/反代承载或真实Provider验收。P0完整矩阵仍开放。
+
 <details>
 <summary>FC-P0-HTTP-001：前台 HTTP 阶段超时具体 CR（已批准，源码与本地验证完成）</summary>
 
@@ -187,7 +196,7 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 5. **验证/验收：**L0测试一次回调/时序、零配置、无response/发送前失败不调用、原正文/终态/关闭不变；L1/L2实socket覆盖Chat JSON/SSE、embeddings、Responses与现有转换、429/503数值和HTTP-date、重复/超长/非法头、Connection动态排除、本地ID与元数据优先级。多attempt验证首个错误的Header不串入后续成功/本地准入拒绝/无response；发送前拒绝与已提交失败均不重试越权，strict未知与双hold不变。config默认/布尔类型拒绝、OpenAPI与公开快照同步；集中本地回归和完整精确头CI后合并，真实Provider不在授权范围。
 6. **协作/边界：**这是P0/P4的诊断与客户端退避元数据切片，不扩大账号推理范围、定价、收费、额度恢复或后台/WS；新开关只重启生效。RFC9110第7.6.1与10.2.3节用于Connection逐跳排除及Retry-After语法核对，不复制参考项目实现。参考：`https://www.rfc-editor.org/rfc/rfc9110.html`。无新前端、依赖、迁移或性能提升声明。
 
-源码已按该范围接入；OpenAPI `0.13.2` / 117操作与L0公开快照同步。定向验证覆盖只读观察时序、配置布尔类型、实socket的Chat JSON/SSE、embeddings、Responses及Anthropic/Gemini现有转换、原生HTTP自动gzip解压、429/503数值/HTTP-date、重复/超长/非法值、Connection动态排除和未入选敏感头不转发。重试回归分别证明旧响应头不进入后续成功、无response及本地准入拒绝，已提交截断只发送一次且不伪造完成；非foreground不继承开关。strict阶段超时回归保留pending、Provider hold及user/Key双hold，并保留独立billing ID。本批Windows GOARCH=amd64的build ./...、vet ./...和全量go test ./... -count=1均已通过；主进程受控冒烟与精确头远端CI状态另行更新，不继承其他批次通过。
+源码已按该范围接入；OpenAPI `0.13.2` / 117操作与L0公开快照同步。定向验证覆盖只读观察时序、配置布尔类型、实socket的Chat JSON/SSE、embeddings、Responses及Anthropic/Gemini现有转换、原生HTTP自动gzip解压、429/503数值/HTTP-date、重复/超长/非法值、Connection动态排除和未入选敏感头不转发。重试回归分别证明旧响应头不进入后续成功、无response及本地准入拒绝，已提交截断只发送一次且不伪造完成；非foreground不继承开关。strict阶段超时回归保留pending、Provider hold及user/Key双hold，并保留独立billing ID。本批Windows GOARCH=amd64的build ./...、vet ./...和全量go test ./... -count=1均已通过；生产主进程local.py受控冒烟也已通过；固定SDK、集成容量回归与精确头远端CI状态另行更新，不继承其他批次通过。
 
 </details>
 

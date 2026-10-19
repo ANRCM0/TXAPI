@@ -50,6 +50,7 @@ class Fixture(ThreadingHTTPServer):
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
         self.connections = 0
+        self.release_held = threading.Event()
 
     def get_request(self):
         pair = super().get_request()
@@ -73,11 +74,15 @@ class FixtureHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         tag, mode = payload["messages"][0]["content"].split(":", 1)
-        record = {"events": [], "finished": False, "error": None}
+        record = {"events": [], "finished": False, "error": None, "mode": mode}
         with self.server.lock:
             self.server.records.setdefault(tag, []).append(record)
         if self.path != "/v1/chat/completions" or self.headers.get("Authorization") != "Bearer " + UPSTREAM_KEY:
             self.send_error(401)
+            return
+        if mode == "hold" and not self.server.release_held.wait(5):
+            record["finished"] = True
+            self.send_error(504)
             return
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
