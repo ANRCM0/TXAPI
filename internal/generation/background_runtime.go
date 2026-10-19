@@ -42,6 +42,10 @@ func (s *BackgroundService) openSnapshot(r bs.Record) (backgroundSnapshot, error
 	if (r.Stage == string(bg.StageRemoteActive) || r.ReplayPending) && out.RemoteID == "" {
 		return backgroundSnapshot{}, bg.ErrUnavailable
 	}
+	// Legacy dispatch snapshots encode an absent RawMessage as JSON null.
+	if bytes.Equal(bytes.TrimSpace(out.Document), []byte("null")) {
+		out.Document = nil
+	}
 	return out, nil
 }
 func (s *BackgroundService) sealSnapshot(r bs.Record, in backgroundSnapshot) ([]byte, error) {

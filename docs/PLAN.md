@@ -80,6 +80,19 @@ across40 packages and actual-main recovery smoke pass. Exact-head complete CI,
 merge and independent main acceptance are pending. Native WS/background/claimed
 capture, R05b charging and real OAuth/Provider/SDK gates are not opened.
 
+## Background Dispatch Null Read Correction
+
+Official SDK controlled validation exposed one background retrieve returning None.
+A deterministic real SQLite/encrypted dispatch snapshot plus actual HTTP GET
+regression then reproduced200 JSONnull on accepted master/ef7a1da. The
+[narrow correction](../REFERENCE-BACKGROUND-NULL-IMPLEMENTATION.md) normalizes
+absent/null document reads and preserves actual document bytes and snapshot
+format. New and related background regressions and complete local checks pass1602
+tests/subtests plus actual-main smoke; exact-head CI/merge acceptance remains
+pending in the
+[batch record](../REFERENCE-ADOPTION-PROGRESS.md). Real Provider/SDK completeness
+and paid background gates remain separate.
+
 ## R03b-2 当前实施批次
 
 2026-10-19：默认关闭的原生 Responses WS disabled 子批已经 PR #30 合并为 master/a5c7a5f，功能头 81d2afe 的 push/PR 完整 CI 均通过；合并后 39165344718 也已 check/delivery SUCCESS。范围为 billing disabled、显式实际模型、官方 OpenAI endpoint、单连接串行文本/函数轮次与连接内最新 response ID 续接；不支持持久重连、后台、OAuth 或收费。运行边界见 [WS 指南](reference/responses-websocket.md)，六项工作协议见 [实施决策](../REFERENCE-R03B2-IMPLEMENTATION.md)，精确验证见 [吸收记录](../REFERENCE-ADOPTION-PROGRESS.md)。S5-03、完整 A03/A04 和 R00-R07 总目标仍未完成；下文历史时点不扩大本批验收。
