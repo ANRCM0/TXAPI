@@ -132,6 +132,8 @@ func routeReason(result *RequestResult, returned bool) string {
 	switch {
 	case !returned:
 		return "scope_interrupted"
+	case result.TimeoutStage != "":
+		return "timeout_" + string(result.TimeoutStage)
 	case result.Termination == core.ClientWriteError:
 		return "delivery_failed"
 	case result.Termination == core.Canceled:

@@ -6,6 +6,7 @@ import (
 	v1 "minigateway/internal/foundation/contracts/execution/v1"
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
 	v3 "minigateway/internal/foundation/contracts/execution/v3"
+	v4 "minigateway/internal/foundation/contracts/execution/v4"
 )
 
 func enrichedUsageObservation(usage *usageWire, base *v2.UsageObservation) (*v3.UsageObservation, error) {
@@ -73,6 +74,8 @@ func (d *Decoder) NewUsageEnvelopeStream() v3.StreamDecoder {
 }
 
 type usageEnvelopeStream struct{ stream *streamDecoder }
+
+func (s usageEnvelopeStream) Progress() v4.Progress { return s.stream.Progress() }
 
 func (s usageEnvelopeStream) envelopes(frames []v1.Frame, err error) ([]v3.Envelope, error) {
 	base, err := (envelopeStream{stream: s.stream}).envelopes(frames, err)

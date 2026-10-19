@@ -22,6 +22,10 @@
     "const minigateway/internal/core.NotDispatched minigateway/internal/core.Phase = \"not_dispatched\"",
     "const minigateway/internal/core.ResponseReceived minigateway/internal/core.Phase = \"response_received\"",
     "const minigateway/internal/core.Success minigateway/internal/core.Termination = \"success\"",
+    "const minigateway/internal/core.TimeoutDownstreamWrite minigateway/internal/core.TimeoutStage = \"downstream_write\"",
+    "const minigateway/internal/core.TimeoutFirstEffectiveOutput minigateway/internal/core.TimeoutStage = \"first_effective_output\"",
+    "const minigateway/internal/core.TimeoutHeaders minigateway/internal/core.TimeoutStage = \"headers\"",
+    "const minigateway/internal/core.TimeoutStreamIdle minigateway/internal/core.TimeoutStage = \"stream_idle\"",
     "const minigateway/internal/core.UpstreamError minigateway/internal/core.Termination = \"upstream_error\"",
     "const minigateway/internal/core.Version untyped string = \"1\"",
     "func (*minigateway/internal/core.Executor).Close()",
@@ -39,9 +43,10 @@
     "type minigateway/internal/core.Error struct{StatusCode int; Error minigateway/internal/core.ErrorDetail}",
     "type minigateway/internal/core.ErrorDetail struct{Message string \"json:\\\"message\\\"\"; Type string \"json:\\\"type,omitempty\\\"\"; Code any \"json:\\\"code,omitempty\\\"\"}",
     "type minigateway/internal/core.Executor struct{client *net/http.Client; maxResponseBytes int64; maxLineBytes int}",
-    "type minigateway/internal/core.Frame struct{Data []byte; Usage *minigateway/internal/core.Usage; Complete bool}",
+    "type minigateway/internal/core.Frame struct{EffectiveOutput bool; EventComplete bool; Data []byte; Usage *minigateway/internal/core.Usage; Complete bool}",
     "type minigateway/internal/core.HTTPOutput struct{writer net/http.ResponseWriter; state minigateway/internal/core.OutputState}",
-    "type minigateway/internal/core.Input struct{Method string; URL string; Header net/http.Header; Body []byte; Stream bool; Replayable bool; Timeout time.Duration; Decoder minigateway/internal/core.Decoder}",
+    "type minigateway/internal/core.HTTPStageTimeouts struct{Headers time.Duration; FirstEffectiveOutput time.Duration; StreamIdle time.Duration; DownstreamWrite time.Duration}",
+    "type minigateway/internal/core.Input struct{HTTPStageTimeouts minigateway/internal/core.HTTPStageTimeouts; Method string; URL string; Header net/http.Header; Body []byte; Stream bool; Replayable bool; Timeout time.Duration; Decoder minigateway/internal/core.Decoder}",
     "type minigateway/internal/core.Options struct{Client *net/http.Client; MaxResponseBytes int64; MaxLineBytes int}",
     "type minigateway/internal/core.Output interface{Commit(context.Context, minigateway/internal/core.ResponseMetadata) error; Flush(context.Context) error; State() minigateway/internal/core.OutputState; Write(context.Context, []byte) (int, error)}",
     "type minigateway/internal/core.OutputState struct{Committed bool; HTTPStatus int}",
@@ -49,9 +54,10 @@
     "type minigateway/internal/core.RawInput struct{Method string; URL string; Header net/http.Header; Body []byte; Timeout time.Duration}",
     "type minigateway/internal/core.RawResult struct{Phase minigateway/internal/core.Phase; StatusCode int; Header net/http.Header; Body []byte; Complete bool; Termination minigateway/internal/core.Termination}",
     "type minigateway/internal/core.ResponseMetadata struct{StatusCode int; ContentType string; Values map[string]string}",
-    "type minigateway/internal/core.Result struct{Phase minigateway/internal/core.Phase; UpstreamStatus int; ProtocolComplete bool; StatusCode int; HTTPStatus int; Committed bool; Replayable bool; Termination minigateway/internal/core.Termination; Usage *minigateway/internal/core.Usage; Error *minigateway/internal/core.Error; Duration time.Duration; BytesWritten int64}",
+    "type minigateway/internal/core.Result struct{TimeoutStage minigateway/internal/core.TimeoutStage; Phase minigateway/internal/core.Phase; UpstreamStatus int; ProtocolComplete bool; StatusCode int; HTTPStatus int; Committed bool; Replayable bool; Termination minigateway/internal/core.Termination; Usage *minigateway/internal/core.Usage; Error *minigateway/internal/core.Error; Duration time.Duration; BytesWritten int64}",
     "type minigateway/internal/core.StreamDecoder interface{DecodeLine([]byte) ([]minigateway/internal/core.Frame, error); End() ([]minigateway/internal/core.Frame, error)}",
     "type minigateway/internal/core.Termination string",
+    "type minigateway/internal/core.TimeoutStage string",
     "type minigateway/internal/core.Usage struct{PromptTokens int \"json:\\\"prompt_tokens\\\"\"; CompletionTokens int \"json:\\\"completion_tokens\\\"\"; TotalTokens int \"json:\\\"total_tokens\\\"\"}"
   ],
   "minigateway/internal/core/websocket": [
@@ -286,6 +292,11 @@
     "type minigateway/internal/foundation/contracts/execution/v3.StreamDecoder interface{DecodeUsageEnvelopes([]byte) ([]minigateway/internal/foundation/contracts/execution/v3.Envelope, error); EndUsageEnvelopes() ([]minigateway/internal/foundation/contracts/execution/v3.Envelope, error)}",
     "type minigateway/internal/foundation/contracts/execution/v3.TokenBreakdown struct{CachedInputTokens *int64; CacheWriteInputTokens *int64; ReasoningOutputTokens *int64}",
     "type minigateway/internal/foundation/contracts/execution/v3.UsageObservation struct{Counts minigateway/internal/foundation/contracts/execution/v2.TokenCounts; Breakdown minigateway/internal/foundation/contracts/execution/v3.TokenBreakdown; Completeness minigateway/internal/foundation/contracts/execution/v2.Completeness; Source minigateway/internal/foundation/contracts/execution/v2.UsageSource; Profile string}"
+  ],
+  "minigateway/internal/foundation/contracts/execution/v4": [
+    "const minigateway/internal/foundation/contracts/execution/v4.Version untyped string = \"4\"",
+    "type minigateway/internal/foundation/contracts/execution/v4.Progress struct{EffectiveOutput bool; CompleteEvents uint64}",
+    "type minigateway/internal/foundation/contracts/execution/v4.StreamProgress interface{Progress() minigateway/internal/foundation/contracts/execution/v4.Progress}"
   ],
   "minigateway/internal/foundation/contracts/identity/v1": [
     "const minigateway/internal/foundation/contracts/identity/v1.All untyped string = \"all\"",

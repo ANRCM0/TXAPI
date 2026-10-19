@@ -65,6 +65,7 @@ func FromGateway(in RequestResult) execution.Outcome {
 }
 
 func fromCoreResult(in core.Result) execution.Result {
+	attachHTTPTimeoutCode(&in)
 	out := execution.Result{Phase: execution.Phase(in.Phase), UpstreamStatus: in.UpstreamStatus, ProtocolComplete: in.ProtocolComplete,
 		StatusCode: in.StatusCode, HTTPStatus: in.HTTPStatus, Committed: in.Committed, Replayable: in.Replayable, Termination: execution.Termination(in.Termination), Duration: in.Duration, BytesWritten: in.BytesWritten}
 	if in.Usage != nil {

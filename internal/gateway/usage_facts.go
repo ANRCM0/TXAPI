@@ -138,7 +138,7 @@ func (d usageDecoderBridge) NewStream() core.StreamDecoder {
 	if nilInterface(stream) {
 		return nil
 	}
-	return usageStreamBridge{decoder: stream, facts: d.facts, usage: d.usage}
+	return progressStream(usageStreamBridge{decoder: stream, facts: d.facts, usage: d.usage}, stream)
 }
 
 type usageStreamBridge struct {

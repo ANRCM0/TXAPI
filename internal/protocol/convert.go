@@ -114,13 +114,20 @@ func ConvertResponseBody(a adaptor.Adaptor, body []byte, m *meta.Meta) ([]byte, 
 // 上游的 [DONE] 之类的协议终止标记在这里被消费掉，由客户端适配器
 // 重新生成自己的终止标记（不同协议的 [DONE] 语义一致但位置不同）。
 func ConvertStreamLine(a adaptor.Adaptor, line []byte, session adaptor.StreamSession, m *meta.Meta) ([][]byte, error) {
+	lines, _, err := convertStreamLine(a, line, session, m)
+	return lines, err
+}
+
+// Progress comes from the same validated canonical chunks that are encoded,
+// never from decoding the generated client bytes a second time.
+func convertStreamLine(a adaptor.Adaptor, line []byte, session adaptor.StreamSession, m *meta.Meta) ([][]byte, bool, error) {
 	if m != nil && m.Mode == meta.ModeResponses {
-		return nil, fmt.Errorf("native Responses streams require the operation stream decoder")
+		return nil, false, fmt.Errorf("native Responses streams require the operation stream decoder")
 	}
 	upstreamPA, ok := a.(adaptor.ProtocolAdaptor)
 	if !ok || upstreamPA.Name() == "openai" {
 		// openai 上游：原样透传（P1 行为）
-		return [][]byte{line}, nil
+		return [][]byte{line}, false, nil
 	}
 
 	var chunks []*canonical.StreamChunk
@@ -131,9 +138,10 @@ func ConvertStreamLine(a adaptor.Adaptor, line []byte, session adaptor.StreamSes
 		chunks, err = upstreamPA.ParseStreamLine(line)
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out [][]byte
+	effective := false
 	for _, ch := range chunks {
 		if ch == nil {
 			continue
@@ -151,11 +159,17 @@ func ConvertStreamLine(a adaptor.Adaptor, line []byte, session adaptor.StreamSes
 		}
 		encoded, err := (&openai.Adaptor{}).BuildStreamLine(ch)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if len(encoded) > 0 {
 			out = append(out, encoded)
+			for _, content := range ch.Content {
+				effective = effective || content.Type == canonical.PartText && content.Text != ""
+			}
+			for _, tool := range ch.ToolCalls {
+				effective = effective || tool.Name != "" || tool.Arguments != ""
+			}
 		}
 	}
-	return out, nil
+	return out, effective, nil
 }

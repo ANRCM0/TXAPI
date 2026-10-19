@@ -1,6 +1,6 @@
 # TXAPI 后端开发方案
 
-更新日期：2026-10-19。本文是当前唯一开发方案，统一记录实际能力、后端开发顺序、架构约束和验收门槛。批次验证证据写入 PR/提交记录，不再新增平行方案或进度文档；第三方适配声明与许可证保留在文末。
+更新日期：2026-10-20。本文是当前唯一开发方案，统一记录实际能力、后端开发顺序、架构约束和验收门槛。批次验证证据写入 PR/提交记录，不再新增平行方案或进度文档；第三方适配声明与许可证保留在文末。
 
 ## 目标与范围
 
@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的合并基线：`master/444bb67331f017dcb1956ba8df10b24f74b1f3ae`，对应 Verify `39291096094` 的 check/delivery 均成功，覆盖已合并 P1/P2/P3、固定 Python SDK 及 TLS/HTTP2/反代生命周期回归。此证据只覆盖该提交；当前并发基线及独立 PR #53 的 HTTP 阶段超时不继承旧 CI。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的合并基线：`master/444bb67331f017dcb1956ba8df10b24f74b1f3ae`，对应 Verify `39291096094` 的 check/delivery 均成功，覆盖已合并 P1/P2/P3、固定 Python SDK 及 TLS/HTTP2/反代生命周期回归。此证据只覆盖该提交；PR #53 的阶段超时精确头 `b239adcd1ad31fce47a684682b95406fefd24ca8` 另通过 Verify `39291807727` 并合并为 `07fb7ecbebcdbb9a03d7383f31b1ee2102337b0d`；其合并后CI单列，当前并发基线不继承旧CI。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -33,11 +33,11 @@
 | 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复 | 默认关闭；仅 disabled、自包含文本/函数工具；收费和后台父链未完成 |
 | 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；持久重连、跨模式续链、收费和任意多路复用未完成 |
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
-| 托管账号 | R04a operator-only 授权/重授权、加密保存、单次刷新、停用、CAS/uncertain | 没有推理凭据消费者、自动刷新 worker 或完整账号池；真实账号未验收 |
+| 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；P3合并后CI待确认，真实账号未验收 |
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；后台/WS 明细与收费未覆盖；S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/SDK WS/Codex 完整组合未验收；账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.0` / 117 操作；数据库迁移追加 schema v19，FC-P1/P3-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.1` / 117 操作；数据库迁移追加 schema v19，FC-P1/P3-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -159,8 +159,30 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 2. **公开依赖：**通过既有 HTTP API、测试用启动配置和进程生命周期消费现有鉴权、容量、路由、执行及 SQLite；复用既有完整 SSE 观察/绝对 deadline/上游 drain 测量，不增加公开端口或冻结声明。
 3. **地基影响：**无 L0、地基契约、迁移和产品配置变更；无需新增 CR。单实例/用户/Key/channel 有限准入保持原实现，不旁路鉴权或改健康状态。
 4. **行为/回退：**同机 loopback HTTP/1.1 明文，固定有限 worker/请求/轮次、每 worker 持久连接；直连与完整网关分阶段交替先后。先同时占满 Key 名额，额外请求必须429且上游 attempt=0；释放后每个 holder 完整终态且一次发送，再以保留全部尝试的有限 no-send429探测验证恢复。恢复成功也须只有一次发送，并再同时填满全部 Key 名额，检出只恢复一个空位的部分租借泄漏。每阶段请求完成后上游活动归零；正常请求失败保留样本并停止该 worker，计划/实际启动数同时报告，不选择性隐去失败。
-5. **验证/验收：**并发1和4的有界回归、既有串行 self-check，Linux CI再采样进程 CPU/RSS/FD/线程；各阶段资源分别记录，峰值为50ms采样下界。记录首正文、首有效文本、完整事件延迟、完成率、吞吐/连接及恢复时间；并发分布差只做非配对描述，不套用已有并发1的配对性能预算。CI检查完整终态、一次发送、满额拒绝、drain和恢复，性能数值只报告。本切片不改优化参数，取得重复资源基线后再制定后续优化/容量门槛。
+5. **验证/验收：**并发1、4和16的有界回归、既有串行 self-check，Linux CI再采样进程 CPU/RSS/FD/线程；各阶段资源分别记录，峰值为50ms采样下界。记录首正文、首有效文本、完整事件延迟、完成率、吞吐/连接及恢复时间；并发分布差只做非配对描述，不套用已有并发1的配对性能预算。CI检查完整终态、一次发送、满额拒绝、drain和恢复，性能数值只报告。本切片不改优化参数，取得重复资源基线后再制定后续优化/容量门槛。
 6. **协作：**报告写仓库外，记录源码SHA/dirty、两个harness摘要、环境和有限负载；CI不把临时报告当永久制品。Windows资源采样仍unsupported；有限closed-loop不宣称最大容量、长时soak、TLS/H2/反代承载或真实Provider验收。P0完整矩阵仍开放。
+
+<details>
+<summary>FC-P0-HTTP-001：前台 HTTP 阶段超时具体 CR（已批准，源码与本地验证完成）</summary>
+
+本 CR 的目标是让同一个既有 attempt 在响应头、首有效输出、流事件空闲或下游写阻塞时有界退出并可定位原因，不新增 sender、重试权威或读队列。实现按“header/write 机械部分 → L2 进展与 first/idle → 集中验证”连续交付，全部配置默认0关闭。
+
+1. **层级与现有扩展不足。** L0 `internal/core` 当前只有 `Input.Timeout`，阻塞的 `Client.Do`/`Scanner.Scan`/同步 write 无法从 L2 取消并报告独立阶段；`len(Frame.Data)>0` 无法区分文本/工具与 role/usage/heartbeat。共享 Transport 也不能提供请求级语义进展。新增最小机械字段，保持 L0 无项目依赖。L1 gateway 控制启用、输入 capability 检查、重试/health/unknown 与现有诊断；L2 protocol 只报告完整已校验事件事实；config/组装、OpenAPI和架构登记同批协调。
+2. **精确端口与字段。** 保持冻结 `execution/v1` 与既有 v2/v3 结构不变。新增候选 `execution/v4`：`Progress{EffectiveOutput bool; CompleteEvents uint64}`、可选 `StreamProgress interface { Progress() Progress }`，由本 stream decoder 报告单调快照，禁止 I/O、策略或资金含义。L1 的现有 decoder/facts/usage bridge 取一次既有解码结果及可选快照，不重复解码；零数据进展帧只传机械事实，不额外写客户端。L0 新增 `HTTPStageTimeouts{Headers, FirstEffectiveOutput, StreamIdle, DownstreamWrite time.Duration}`、`Input.HTTPStageTimeouts`、`Frame.EffectiveOutput bool`、`Frame.EventComplete bool`、`Result.TimeoutStage TimeoutStage`；新增 `TimeoutStage` 固定值 `headers`、`first_effective_output`、`stream_idle`、`downstream_write`（未发生新增阶段超时时为空）。这些是经本 CR 明确请求批准的 L0 v1 追加字段/语义，不宣称现有冻结已自动允许。gateway.Options 追加同名阶段配置；新增 startup `server.http_stage_timeouts.{headers_seconds,first_effective_output_seconds,stream_idle_seconds,downstream_write_seconds}`，各0关闭、非零1..3600秒；负数/溢出拒绝。无数据库迁移。
+3. **阶段时间与有效输出。** Headers 从 core 调用既有 Client.Do 前开始至返回最终响应头，包含连接、代理、TLS及上传等待，不能冒充纯 Provider 计算耗时。成功 headers 后，stream 首有效输出及 idle 开始；first 在完整已校验的非空文本或实际 function/tool 名称/参数增量后停止，合法完整终态也停止，不要求空成功输出产生文本。role、空 delta、ID、usage、heartbeat、单独 finish reason 不停止 first。Idle 每个完整合法 SSE 事件重置；合法 comment/heartbeat 可以证明连接活动但不取消 first，半行/半事件/非法事件不重置。已声明 Chat/转换路径、原生 Responses 和 SIWC wrapper 在各自既有解析中报告这些事实，未知字段不推断业务内容。JSON 仅启用 headers/write/原有总超时，first/idle 不适用。
+4. **背压与终态。** 首输出和 idle 的上游等待预算在同步 commit/write/flush 区间暂停，下游独立 write budget 继续约束；这不是墙钟 TTFT 承诺，性能测量仍记录真实 headers→首有效输出墙钟时间。每次 commit/write/flush 用 `min(now+writeBudget, attemptDeadline, generationDeadline)` 设置已有真实 write deadline，结束恢复原总截止时间；显式启用 write 而 Output 不支持时发送前拒绝，不能用遗留写 goroutine 伪造中断。显式启用 first/idle 的 stream decoder 不支持 v4 时，同样发送前拒绝，不降级按字节判断。一次 attempt 至多一个有界 timer/watchdog，由同一状态机仲裁触发、暂停、终态和关闭并 join；无另行读 worker、额外缓冲队列或执行权威。先确认协议终态不被晚到 timer 追改，但终态已收到后下游交付仍可失败；只见 finish/EOF 不伪造终态。
+5. **结果、权限与兼容。** 仅接现有前台 HTTP 执行源；后台受理/查询/取消、durable claimed 和 WS 保持现有预算。已有 attempt/total deadline 永远优先约束，新增阶段不延长它们。L0 保持原 Termination 枚举，上游等待阶段为 Deadline，write 为 ClientWriteError，并用 TimeoutStage 精确归因；未提交时等待超时可返回504，已提交状态单调且保留原 HTTP status。L1 通过现有 ErrorDetail.Code 承载固定 `{"timeout_stage":"..."}`（不改 v1 类型），已有 routing Trace.Reason 追加相应固定原因并更新 OpenAPI。金额/unknown 仍由执行 owner 处理，不以错误文案为资金权威。已 dispatch 的新增阶段超时不新增自动重试；write 不重试、不处罚凭据。静态/托管凭据权限不扩大，prelude 已提交时不恢复重试资格；没有 usage 不补零。0配置保持原行为，自定义 decoder/client 的旧路线继续可用；关闭新增配置并回退原二进制即可，无数据迁移。
+6. **验证与协作。** 定向覆盖延迟 headers、持续 role/heartbeat、慢首文本/工具、usage-only、合法空终态、半事件滴流、首输出后 idle、错误/incomplete/截断；真实 socket/TLS/HTTP2/反代慢读和不读、write/flush 阻塞、取消/终态/timer 竞态与 close/join。检查一次发送、commit单调、取消不占租借、无伪完成、未知成本不清零、managed反馈不误罚，以及0配置静态/Responses/后台/WS回归。先集中本地验证、Linux race/交付及精确头 CI再合并；不把阶段超时当性能优化排名，不跳过现有鉴权/账本，不新增前端或收费许可。新 v4 仅登记候选，不宣称全量冻结。
+
+本 CR 已按批准范围完成源码：启动配置/组装 → gateway 前台 source 与 capability 预检 → 同一个 L2 stream 的 v4 进展 → 既有 L0 executor 的单 watchdog/同步输出 deadline → ErrorDetail.Code 与固定 route reason。后台/claimed/WS不接新增阶段。新增阶段超时不重试或处罚凭据；strict仍由既有EndAttempt/Finish处理未知用量和双hold。候选v4已登记并更新公开快照，未宣称冻结。
+
+定向验证已覆盖实际socket的role/usage/finish-only、半事件滴流、文本后idle、Chat/Responses工具、空/incomplete终态；三类等待超时各仅一个attempt且strict保留pending、Provider hold及user/Key双hold。L0定向覆盖write暂停、合法终态与late-timer仲裁、取消/join、TLS/HTTP2不读下游。零配置下的既有End确认与资金事实回归保持原行为。Windows GOARCH=amd64 build ./...、vet ./...、全量 go test ./... -count=1、生产主进程 local.py 冒烟与定向协议/网关/配置/架构检查均已通过。包含当前授权、静态Key/Responses/后台/WS、强杀恢复、usage与shadow回归；小数秒/越界/溢出/拼错阶段字段拒绝启动。PR #53 精确头 `b239adcd1ad31fce47a684682b95406fefd24ca8` 的 Verify `39291807727` 已成功，Linux race、冒烟、SDK与容器交付均通过，并已合并；合并后 CI 与后续修改单列。
+
+实际限制单列：当前Go HTTP/1 TLS写入失败后的标准库close_notify关闭路径可能额外等待约5秒；阶段触发与最终返回不是同一时刻，不能声称所有TLS阻塞都在配置秒数内完成释放。真实TLS/H2测试验证写阶段归因并以8秒封顶检查退出。Windows明文HTTP/1测试可能被内核完整缓冲，未实际阻塞的子场景标记skip，不作为TCP写阻塞证据。同步自定义Output必须遵守已声明deadline语义，无遗留写goroutine兜底；真实Provider及外部部署仍未验收。
+
+用户已明确批准直接实施并集中验证修复；默认关闭、无真实账号调用授权，已有批次CI在后台运行。
+
+</details>
 
 ### P1：最小托管账号推理
 
@@ -306,7 +328,7 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 
 用户已明确批准本 CR 的源码实施与集中验证修复；无真实账号调用授权。CI 后台执行，连续推进源码批次后集中修复，但未通过的检查不记为通过。
 
-本子批已接通唯一存储、gateway 发放/反馈、L2 旁路分类、configuration 管理和真实 SessionBearer HTTP 查询/恢复链。定向测试已覆盖持久拒绝、独立重开读取、管理员恢复、恢复后重新获取目录、旧 epoch 回包 no-op，以及精确 int64 字符串、权限拒绝和错误脱敏。Windows GOARCH=amd64 完整 build、vet、全量 Go 测试及生产主进程冒烟均已通过；包含静态 Key、严格计费拒绝、SSE 强杀/恢复、后台、usage 和 shadow 回归。独立审查发现的取消等待问题已修复并定向复验。精确提交 Linux race/交付 CI 待运行，不把本地通过写成远端验收。
+本子批已接通唯一存储、gateway 发放/反馈、L2 旁路分类、configuration 管理和真实 SessionBearer HTTP 查询/恢复链。定向测试已覆盖持久拒绝、独立重开读取、管理员恢复、恢复后重新获取目录、旧 epoch 回包 no-op，以及精确 int64 字符串、权限拒绝和错误脱敏。Windows GOARCH=amd64 完整 build、vet、全量 Go 测试及生产主进程冒烟均已通过；包含静态 Key、严格计费拒绝、SSE 强杀/恢复、后台、usage 和 shadow 回归。独立审查发现的取消等待问题已修复并定向复验。PR #51 精确头 `00adba13a4c6af2d69346e50d3ba2266b5ae25ae` 的 Linux race/交付 Verify 均成功并已合并；最新集成主线证据单列，不把旧通过扩展到新增阶段超时。
 
 资源边界：待写反馈最多16个 issued tuple，同 tuple 合并固定分类，溢出永久阻止本进程新发放；未提交反馈不能靠重启恢复，不能把重启当解除拒绝的流程。串行反馈/发放的等待可按请求取消，普通内存锁不包数据库 I/O；发放含等待最多5秒，反馈独立5秒，SQLite COMMIT 失败另允许最多1秒清理确切连接，清理失败丢弃连接。反馈不会撤回已授权发送，不承诺强杀未提交窗口 exactly-once。
 
@@ -328,7 +350,7 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 2. **公开依赖：**消费现有 Chat/Responses HTTP JSON/SSE 接口，无 Go 公开端口或冻结范围变更；固定官方 Python `openai==2.11.0`、`httpx==0.28.1`。
 3. **地基影响：**无生产、L0、schema、配置或计费许可变化。每个故障场景使用独立渠道/凭据，避免健康冷却污染下一场景。
 4. **行为与回退：**SDK 禁用自动重试、代理环境和环境凭据；loopback 上游使用逐字节 UTF-8 和多行事件。检查类型化 JSON、文本/函数参数、completed/failed/incomplete、终态后保持连接、截断、取消和单 Key 名额释放；13 个实际上游场景各一条请求，忙时请求不发送。SDK 该版本在干净 EOF 截断时不会自行报错，断言只得到部分内容且没有成功终态，不能把 EOF 当完成。
-5. **验证：**Windows 独立虚拟环境定向运行已通过；Verify 增加相同固定依赖和回归，精确提交 Linux 证据待 CI。所有账号、Key 与上游均为一次性夹具，无真实 Provider 调用，不代表官方服务、其它 SDK 版本或 Codex/WS/后台已验收。
+5. **验证：**Windows 独立虚拟环境定向运行已通过；Verify 增加相同固定依赖和回归；PR #50 精确头 `749c591d6284facd2cc00b571f900b8fc4976a40` 的 Linux Verify 成功并已合并。所有账号、Key 与上游均为一次性夹具，无真实 Provider 调用，不代表官方服务、其它 SDK 版本或 Codex/WS/后台已验收。
 6. **协作：**保留已有冒烟、架构、race 和交付门槛；可通过 `make sdk-conformance PYTHON=<虚拟环境解释器>` 单独运行。新前端、收费和账号路线无变化。
 
 ### P5：账号信号与调度评估
@@ -339,6 +361,8 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 - **行为/契约：**先比较负载、等待、错误、TTFT、窗口和亲和信号，显式区分未知/过期与零；保持有界采样。真实评分是后续独立子批，须明确启用、回退和效果标准。
 - **验收：**不合格目标不入选、最高优先级不变、样本不足不当零；候选策略验证拥塞、饥饿、分布、亲和逃离和关闭恢复。shadow 对比不能当线上效果证明。
 - **协作影响：**复用已交付 R00，不重复建设观测框架，不在 shadow 批修改真实重试或 strict。
+
+P5 当前门槛评估（2026-10-20）：唯一 active SIWC grant 的候选池恒为1，既有 shadow 比较要求2..8个渠道；P3仅提供带版本的拒绝与人工恢复，reset 始终 unknown，没有可信窗口、剩余额度、等待或账号间相对负载。因此账号评分/真实调度继续后置，不能为做评分扩大账号池或猜窗口。现有 R00 的8槽、每槽64结果、10分钟保留和最高优先级池内静态路线比较直接复用；不足4个有效结果保持 neutral。P3本地拒绝在 shadow Begin 前退出，不进入HTTP成功/错误样本；真实发出的完整HTTP错误可作为既有渠道结果，但不能推导账号窗口或账号质量。管理选择日志的 managed eligible 数仅表示配置快照候选，当前权威资格由发送前 AcquireAccess 决定。此评估不表示P5全量验收。
 
 ### P6：续链与原生长连接语义
 

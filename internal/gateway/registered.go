@@ -122,7 +122,7 @@ func (d decoderBridge) NewStream() core.StreamDecoder {
 	if nilInterface(stream) {
 		return nil
 	}
-	return streamBridge{stream}
+	return progressStream(streamBridge{stream}, stream)
 }
 
 type streamBridge struct{ decoder execution.StreamDecoder }
