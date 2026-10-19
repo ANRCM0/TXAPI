@@ -1,7 +1,7 @@
-"""Pinned official Python WS SDK against assembled TXAPI and loopback providers.
+"""Pinned official Python WS SDK against assembled and shipped TXAPI fixtures.
 
-The shipped image/TLS deployment is verified separately. No real provider,
-credentials, ambient proxies, automatic reconnects or SDK retries are used.
+No real provider, credentials, ambient proxies, automatic reconnects or SDK
+retries are used.
 """
 
 import argparse
@@ -13,8 +13,6 @@ import subprocess
 import sys
 import tempfile
 import time
-
-from local import ROOT
 
 
 def client_phase(path, deployed=False):
@@ -118,6 +116,10 @@ def main():
         client_phase(args.client, args.deployed)
         return
     assert not args.deployed, "deployed mode requires an explicit fixture client file"
+    # Only the host-side assembly harness needs the repository. The deployed
+    # client also runs from a shallow read-only mount without a source checkout.
+    from local import ROOT
+
     env = {key: value for key, value in os.environ.items()
            if not key.upper().startswith(("OPENAI_", "TXAPI_", "GATEWAY_"))}
     env.update(GOARCH="amd64")
