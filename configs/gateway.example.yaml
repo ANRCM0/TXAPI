@@ -104,6 +104,7 @@ billing:
 # explicit actual model names. Only the official OpenAI endpoint is used.
 responses_ws:
   enabled: false
+  persistent_history: false # 显式 store=true 使用本地持久历史；要求 responses.enabled，保持 disabled 计费
   models: []
   # Browser origins must be same-origin or exact http(s) scheme and host.
   origins: []

@@ -13,6 +13,7 @@ import (
 	"minigateway/internal/compat/httpoutput"
 	"minigateway/internal/config"
 	bg "minigateway/internal/foundation/contracts/background/v1"
+	history "minigateway/internal/foundation/contracts/responsehistory/v1"
 	authority "minigateway/internal/foundation/identity"
 	bridge "minigateway/internal/foundation/runtime"
 	"minigateway/internal/gateway"
@@ -27,6 +28,7 @@ import (
 type responsesRuntime struct {
 	worker  *generation.BackgroundRunner
 	handler http.Handler
+	history history.Repository
 	cancel  context.CancelFunc
 	done    chan struct{}
 }
@@ -154,7 +156,7 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 		}
 	}
 	background, stop := context.WithCancel(context.Background())
-	r := &responsesRuntime{handler: responseshttp.New(service, httpoutput.New), cancel: stop, done: make(chan struct{})}
+	r := &responsesRuntime{handler: responseshttp.New(service, httpoutput.New), history: historyRepository, cancel: stop, done: make(chan struct{})}
 	if backgroundService != nil {
 		r.worker, err = generation.NewBackgroundRunner(background, generation.BackgroundRunnerOptions{Service: backgroundService, Remote: remote, Resolve: st.ResolvePrincipal})
 		if err != nil {
@@ -175,6 +177,13 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	})
 	go r.retention(background, st, true)
 	return r, nil
+}
+
+func (r *responsesRuntime) History() history.Repository {
+	if r == nil {
+		return nil
+	}
+	return r.history
 }
 
 func (r *responsesRuntime) retention(ctx context.Context, st *store.Store, foreground bool) {

@@ -43,7 +43,7 @@ func TestResponseHistoryOwnerLegacyCiphertextRoundTrip(t *testing.T) {
 	store := &historyCompatibilityStore{row: state.ResponseHistory{ID: "resp_legacy", UserID: 7, TokenID: 11, Kind: "response", Model: "m", Version: 1, CreatedAt: 1700000000000, ExpiresAt: 1700000060000, ReservedBytes: 2048}}
 	// Literal JSON and AAD describe the pre-extraction persisted format without
 	// using the new Content type or its identity helper to build the fixture.
-	legacy := []byte(`{"request":{"model":"m","input":[]},"ready":true,"input":[{"id":"input_1"}],"items":[{"id":"output_1"}],"response":{"id":"resp_legacy","output":[]},"metadata":{"fixture":"private"},"parent":"resp_parent","conversation":"conv_legacy","target":{"ChannelID":1,"CredentialID":2,"ActualModel":"native-m","Fingerprint":"legacy-pin"},"price_version":"price","billing_id":"bill"}`)
+	legacy := []byte(`{"request":{"model":"m","input":[]},"ready":true,"input":[{"id":"input_1"}],"items":[{"id":"output_1"}],"response":{"id":"resp_legacy","output":[]},"metadata":{"fixture":"private"},"parent":"resp_parent","conversation":"conv_legacy","target":{"channel_id":1,"credential_id":2,"actual_model":"native-m","fingerprint":"legacy-pin"},"price_version":"price","billing_id":"bill"}`)
 	store.row.Ciphertext, err = oldRing.Seal(legacy, []byte("TXAPI/response-history/v1/resp_legacy/7/11/response/m/1/1700000000000/1700000060000/2048/false/"))
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestResponseHistoryOwnerLegacyCiphertextRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	row, content, err := repository.Read(context.Background(), identity.Binding{UserID: 7, TokenID: 11}, store.row.ID)
-	if err != nil || !content.Ready || content.Target.Fingerprint != "legacy-pin" || content.Parent != "resp_parent" || content.BillingID != "bill" {
+	if err != nil || !content.Ready || content.Target.Fingerprint != "legacy-pin" || content.Target.ChannelID != 1 || content.Target.CredentialID != 2 || content.Target.ActualModel != "native-m" || content.Parent != "resp_parent" || content.BillingID != "bill" {
 		t.Fatal("legacy content unavailable", err, content)
 	}
 	row.Version++

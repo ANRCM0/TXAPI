@@ -4,15 +4,39 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type ResponsesWSConfig struct {
-	Enabled bool     `yaml:"enabled"`
-	Models  []string `yaml:"models"`
-	Origins []string `yaml:"origins"`
+	Enabled           bool     `yaml:"enabled"`
+	PersistentHistory bool     `yaml:"persistent_history"`
+	Models            []string `yaml:"models"`
+	Origins           []string `yaml:"origins"`
+}
+
+func (c *ResponsesWSConfig) UnmarshalYAML(node *yaml.Node) error {
+	var setting struct {
+		Value yaml.Node `yaml:"persistent_history"`
+	}
+	if err := node.Decode(&setting); err != nil {
+		return err
+	}
+	value := &setting.Value
+	if value.Kind == yaml.AliasNode {
+		value = value.Alias
+	}
+	if value.Kind != 0 && (value.Kind != yaml.ScalarNode || value.Tag != "!!bool") {
+		return fmt.Errorf("responses_ws.persistent_history must be a boolean")
+	}
+	type plain ResponsesWSConfig
+	return node.Decode((*plain)(c))
 }
 
 func (c ResponsesWSConfig) validate() error {
+	if c.PersistentHistory && !c.Enabled {
+		return fmt.Errorf("responses_ws.persistent_history requires responses_ws.enabled")
+	}
 	if !c.Enabled {
 		return nil
 	}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"math"
+	"time"
 
 	"minigateway/internal/access"
 	v1 "minigateway/internal/foundation/contracts/execution/v1"
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
 	v3 "minigateway/internal/foundation/contracts/execution/v3"
+	stored "minigateway/internal/foundation/contracts/responsehistory/v1"
 	contract "minigateway/internal/foundation/contracts/responsesws/v1"
 	textvalue "minigateway/internal/foundation/contracts/text/v1"
 	history "minigateway/internal/foundation/contracts/usagehistory/v1"
@@ -45,6 +47,7 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	estimate := 0
 	gateContext := ctx
 	var recording *nativeUsageRecording
+	var storedRound stored.StoredRound
 	observed := websocketExchangeObservation{usage: unknownDetailedUsageFact()}
 	interrupted := false
 	defer func() {
@@ -58,6 +61,11 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 				result.Facts.UpstreamWriteStarted = true
 			}
 			result.Facts.DeliveryCommitted = result.Facts.DeliveryCommitted || deliveryStarted
+		}
+		if storedRound != nil {
+			if err := finishStoredNativeRound(storedRound, result.Facts.UpstreamWriteStarted || result.Facts.Dispatch != v2.NotDispatched); err != nil {
+				result.Problem = nativeProblem("unavailable", 1013)
+			}
 		}
 		recording.finish(ctx, &result, observed.usage, observed.native.Status, interrupted)
 		if reserved {
@@ -127,11 +135,27 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	if n.model != "" && n.model != create.Model {
 		return fail("continuation_invalid", 1008, nil)
 	}
-	if create.PreviousID != "" && (n.latestID == "" || create.PreviousID != n.latestID) {
+	if !create.Store && create.PreviousID != "" && (n.latestID == "" || create.PreviousID != n.latestID) {
 		return fail("continuation_invalid", 1008, nil)
 	}
+	var required *v1.TargetConstraint
+	if create.Store {
+		if nilInterface(n.service.options.StoredHistory) || n.service.options.EncodeStored == nil {
+			return fail("invalid_request", 1008, nil)
+		}
+		storedRound, err = n.service.options.StoredHistory.Prepare(ctx, n.binding, stored.StoredCreate{Model: create.Model, PreviousID: create.PreviousID, JSON: create.Initial.Data})
+		if err != nil || nilInterface(storedRound) {
+			if create.PreviousID != "" {
+				return fail("continuation_invalid", 1008, err)
+			}
+			return fail("unavailable", 1013, err)
+		}
+		prepared := storedRound.Prepared()
+		create.Initial = v2.Frame{Type: 1, Data: prepared.JSON}
+		create.PromptText, required = prepared.PromptText, prepared.Target
+	}
 	estimate = textvalue.EstimateTokens(create.PromptText)
-	if create.PreviousID != "" && principal.TPMLimit > 0 {
+	if !create.Store && create.PreviousID != "" && principal.TPMLimit > 0 {
 		if n.previousTotal == nil || *n.previousTotal > int64(math.MaxInt-estimate) {
 			return fail("invalid_request", 1008, nil)
 		}
@@ -165,9 +189,9 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	}
 
 	wasBound := n.target.ChannelID != 0
-	ch, credential, err := n.targetForRound(ctx, create.Model)
+	ch, credential, err := n.targetForRound(ctx, create.Model, required)
 	if err != nil {
-		if !wasBound {
+		if !wasBound && required == nil {
 			return fail("unavailable", 1013, err)
 		}
 		return fail("continuation_invalid", 1008, err)
@@ -179,7 +203,11 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	if err != nil || attempt == nil {
 		return fail("rate_limited", 1013, err)
 	}
-	initial, err := n.service.options.Encode(create.Initial, n.target.ActualModel)
+	encode := n.service.options.Encode
+	if create.Store {
+		encode = n.service.options.EncodeStored
+	}
+	initial, err := encode(create.Initial, n.target.ActualModel)
 	if err != nil {
 		return fail("invalid_request", 1008, err)
 	}
@@ -213,8 +241,27 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	result.Facts = executeWebSocketExchange(ctx, v2.Exchange{Upstream: n.connection, Initial: initial,
 		Decode: decoder,
 		Deliver: func(ctx context.Context, frame v2.Frame) (int, error) {
+			original := len(frame.Data)
+			if storedRound != nil {
+				// A provider terminal remains a known result if its observer went
+				// away. Persist it with a bounded lifetime before publishing it.
+				persisting, stop := context.WithTimeout(context.Background(), 2*time.Second)
+				data, err := storedRound.Observe(persisting, frame.Data, n.target)
+				stop()
+				if err != nil {
+					return 0, err
+				}
+				frame.Data = data
+			}
 			deliveryStarted = true
-			return deliver(ctx, frame)
+			written, err := deliver(ctx, frame)
+			if storedRound != nil && err == nil && written == len(frame.Data) {
+				return original, nil
+			}
+			if storedRound != nil && written > 0 {
+				return 0, errors.New("stored websocket output delivery incomplete")
+			}
+			return written, err
 		},
 	}, decodeUsage, &observed)
 	native := observed.native
@@ -228,4 +275,15 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 		n.previousTotal = &count
 	}
 	return
+}
+
+func finishStoredNativeRound(round stored.StoredRound, dispatched bool) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errors.New("stored websocket history finalization panicked")
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return round.Finish(ctx, dispatched)
 }

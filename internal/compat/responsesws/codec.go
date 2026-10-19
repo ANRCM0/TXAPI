@@ -17,6 +17,7 @@ type Request struct {
 	Model      string
 	PreviousID string
 	PromptText string
+	Store      bool
 	Initial    v2.Frame
 }
 
@@ -43,6 +44,16 @@ func text(raw json.RawMessage) (string, bool) {
 }
 
 func Parse(frame v2.Frame) (Request, error) {
+	return parse(frame, false)
+}
+
+// ParseStored adds explicit local storage only when selected by assembly.
+// The upstream frame still uses store=false; durable parent authorization is L1.
+func ParseStored(frame v2.Frame) (Request, error) {
+	return parse(frame, true)
+}
+
+func parse(frame v2.Frame, persistent bool) (Request, error) {
 	var out Request
 	if frame.Type != 1 || len(frame.Data) > 256<<10 || jsonvalue.Validate(frame.Data) != nil {
 		return out, errors.New("invalid native WS request")
@@ -63,7 +74,13 @@ func Parse(frame v2.Frame) (Request, error) {
 			return out, errors.New("invalid continuation ID")
 		}
 	}
+	if persistent && string(fields["store"]) == "true" {
+		out.Store = true
+	}
 	for key, expected := range map[string]string{"store": "false", "stream_id": "\"main\"", "generate": "true"} {
+		if key == "store" && out.Store {
+			continue
+		}
 		if raw, ok := fields[key]; ok && string(raw) != expected {
 			return out, errors.New("unsupported native WS option")
 		}
@@ -97,7 +114,11 @@ func Parse(frame v2.Frame) (Request, error) {
 			}
 		}
 	}
-	if err := validateInput(fields["input"]); err != nil {
+	if !out.Store {
+		if err := validateInput(fields["input"]); err != nil {
+			return out, err
+		}
+	} else if err := validateStoredItems(fields["input"]); err != nil {
 		return out, err
 	}
 	if raw, ok := fields["tools"]; ok {
