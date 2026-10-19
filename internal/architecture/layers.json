@@ -411,6 +411,10 @@
     "layer": "L2",
     "owner": "tests/upstream/gemini"
   },
+  "minigateway/tests/upstream/nativews": {
+    "layer": "L2",
+    "owner": "tests/upstream/nativews"
+  },
   "minigateway/tests/upstream/openai": {
     "layer": "L2",
     "owner": "tests/upstream/openai"
