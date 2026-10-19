@@ -16,10 +16,22 @@ R00-R07 are not complete.
 
 ## R06b: Recent HTTP Routing Diagnostics
 
-2026-10-19: next independent batch on master/3d55065. The opt-in bounded
-in-memory query consumer and its exact boundaries are recorded before source
-changes in [R06b decision](../REFERENCE-R06B-IMPLEMENTATION.md). No completion
-or acceptance is claimed before its own behavior checks and complete CI.
+2026-10-19: opt-in bounded recent HTTP observations and owner/admin console
+merged through PR #33 as master/deb9e21. Final head d12123d passed complete
+push/PR check/delivery and exactly matches the merged tree. Independent
+post-merge run 39192304586 also passed complete check/delivery, recorded in
+[the evidence log](../REFERENCE-ADOPTION-PROGRESS.md). Scope and retention:
+[R06b decision](../REFERENCE-R06B-IMPLEMENTATION.md) and
+[operating contract](reference/routing-diagnostics.md). R06 remains partial.
+
+## R02: Runtime Cleanup Recovery
+
+2026-10-19: source audit confirms production WS resource ownership/publication
+already exists through R03b, but failed candidate/retired cleanup cannot recover
+through normal Apply. The independent corrective batch on master/deb9e21 is
+defined in [the R02 cleanup decision](../REFERENCE-R02-CLEANUP-IMPLEMENTATION.md).
+Private recovery and join behavior require fresh acceptance; no new public
+contract, charging permission, Provider/SDK result or full R02 freeze is claimed.
 
 ## R03b-2 当前实施批次
 

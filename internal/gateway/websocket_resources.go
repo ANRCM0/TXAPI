@@ -182,16 +182,61 @@ func (o *websocketResources) startCloseLocked(g *websocketGeneration) {
 		o.signalLocked()
 	}()
 }
-func (o *websocketResources) retryClose() {
+
+// Recover only already discarded or retired resources. Each failed generation
+// gets one attempt; the owner retains asynchronous cleanup after caller timeout.
+func (o *websocketResources) recoverCleanup(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("missing websocket cleanup context")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.candidate != nil && o.candidate.closeErr != nil {
-		o.startCloseLocked(o.candidate)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	for _, g := range o.retired {
-		if g.closeErr != nil {
-			o.startCloseLocked(g)
+	if o.draining {
+		return errors.New("websocket resources are draining")
+	}
+	var pending []*websocketGeneration
+	track := func(g *websocketGeneration) {
+		if g != nil && g.refs == 0 && (g.closing || g.closeErr != nil) {
+			pending = append(pending, g)
+			if !g.closing {
+				o.startCloseLocked(g)
+			}
 		}
+	}
+	track(o.candidate)
+	for _, g := range o.retired {
+		track(g)
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if o.draining {
+			return errors.New("websocket resources are draining")
+		}
+		waiting := false
+		for _, g := range pending {
+			if g.closing {
+				waiting = true
+			} else if g.closeErr != nil {
+				return errors.New("websocket cleanup failed; owner retained")
+			}
+		}
+		if !waiting {
+			return nil
+		}
+		changed := o.changed
+		o.mu.Unlock()
+		select {
+		case <-ctx.Done():
+		case <-changed:
+		}
+		o.mu.Lock()
 	}
 }
 func (o *websocketResources) drain(ctx context.Context) error {
