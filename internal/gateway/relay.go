@@ -415,7 +415,16 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	if g.billingMode == billing.ModeStrict {
 		name := a.Name()
 		known := name != ""
-		if !known || billing.ValidatePreparedRequest(input.Body, name, req.Operation() == execution.Embeddings) != nil {
+		var shapeErr error
+		if req.Operation() == execution.Responses {
+			_, shapeErr = billing.ParseResponsesStrictRequest(input.Body)
+			if name != "openai" {
+				shapeErr = billing.ErrUnpricedDimension
+			}
+		} else {
+			shapeErr = billing.ValidatePreparedRequest(input.Body, name, req.Operation() == execution.Embeddings)
+		}
+		if !known || shapeErr != nil {
 			return g.rejectUnpricedAttempt(c, pre)
 		}
 		if req.Operation() == execution.Chat {
