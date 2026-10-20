@@ -655,6 +655,15 @@ P6 本批交付验证范围（2026-10-20）：①仅 `tests/upstream/nativews`�
 - **验收：**覆盖批量输入、完整历史/工具定义、输出/推理/缓存/等级、失败请求收费、税/附加项、途中改价、映射/有限重试、跨 Key 并发、溢出及未知 attempt。界限/依据/拒绝原因可由后端查询，异常实际用量保留 pending；复用适用崩溃证据，新增行为补回归。
 - **协作影响：**可与 P1/P4 独立研究；不因账号闭环或 usage 接线而扩大 strict。只有每个准许组合的完整证据成立才关闭 S5-03，S5 完成也不代表支付平台就绪。
 
+#### FC-P0-OCCUPANCY-001：当前准入与原生 WS 占用指标（2026-10-20）
+
+1. **层级/目录：**L1 access 复用现有 Capacity.Snapshot；L1 gateway 在 NativeWebSocketService 读取现有 sessions/active 状态；叶子 metrics 只输出固定聚合值，cmd/gateway 注入只读提供者。修改上述既有目录、生产入口回归和本方案/OpenAPI，不新增包或后台采集 worker。
+2. **公开依赖与冻结：**新增 metrics.RuntimeStats / SetRuntimeStatsProvider 和 gateway.NativeWebSocketService.Occupancy 组装能力；不改变冻结 observability/v1、control/v1、responsesws/v1 或 L3 功能契约。当前观测不能成为准入、恢复、路由或资金事实。
+3. **地基影响与来源：**L0 不变。主参考 sub2api 固定 f2e5b55f3e8069df1c02a9a27af537b5fdefa64e 的 backend/internal/service/openai_ws_pool.go::accountPoolLoadLocked / AccountPoolLoad（1802–1830）从 owner 当前受锁状态读取连接/在途快照，以及 ops_metrics_collector.go::dbPoolStats（872–878）从资源 owner 读取实际占用。TXAPI 按已有 session/round 与 request/attempt 槽位改写，不引入参考账号池、排队、Redis、持久指标或周期数据库扫描，不复制第三方代码。
+4. **接口、兼容与回退：**既有 /metrics 增加固定无标签 gauges：gateway_admission_requests_active、gateway_admission_attempts_active、gateway_native_ws_enabled、gateway_native_ws_connections_active、gateway_native_ws_rounds_active。连接表示已授权且未完成 Close 的原生 session（不是 TCP FD 或上游池连接）；轮次包含已开始 Execute 的授权/准入/发送/终态收尾，预热同样计入；request/attempt 仍是原两层准入槽位，不能相加当生成总数。跨 owner 快照不保证同一时刻；关闭后仍在释放的资源不能提前报零。没有注入提供者时省略该组；WS 关闭时 enabled=0 且两项 WS 占用为零。无身份、Key、模型、父 ID 或正文标签；保留既有 /metrics 访问边界。删除注入即可回退，无配置/数据库迁移。
+5. **消费者与验收：**真实消费者为生产 main 的 /metrics。定向验证 provider 动态快照/固定输出、未启用行为、空闲连接与活跃轮次分离、busy 拒绝、取消/完成/关闭后的释放及并发抓取；真实 socket 组装回归与实际 main 冒烟证明注入可见，完整 build/vet/Go/精确头 Linux race 与交付集中执行。只声明本切片占用可见，不将其当 CPU/RSS/FD、后台恢复/事件保留指标或长期资源稳定证据。
+6. **其他影响：**无新产品开关、依赖、schema、收费或权限变化；OpenAPI 同步解释指标语义，不增加操作。其余运行验收和真实 Provider 门槛保持待验。
+
 ## 集成验收与后续门槛
 
 P0 与 P1–P8 逐批验收，不能把整个后端阶段积压到最后。产品主线完成还须覆盖以下跨批场景；已有子批证据按精确提交复用，仅为新增/变化范围补证据。

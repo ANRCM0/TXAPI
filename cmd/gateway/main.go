@@ -420,6 +420,7 @@ func main() {
 		configurationService.SetEligibilityRepository(st.InferenceEligibility())
 	}
 	gw.Metrics().SetCredentialStatsProvider(gw.CredentialStats)
+	registerRuntimeMetrics(gw.Metrics(), capacity, nativeResponsesRuntime)
 	gw.Metrics().SetLogStatsProvider(func() metrics.LogQueueStats {
 		stats := st.LogQueueStats()
 		return metrics.LogQueueStats{Depth: stats.Depth, Capacity: stats.Capacity, Dropped: stats.Dropped, Failed: stats.Failed}

@@ -99,6 +99,7 @@ type Registry struct {
 	// 所以这里存快照而不是累加器。
 	credStats        func() []CredentialStat
 	logStats         func() LogQueueStats
+	runtimeStats     func() RuntimeStats
 	attempts         map[string]*counter
 	attemptDurations map[string]*histogram
 	routeSelections  map[string]*counter
@@ -468,6 +469,7 @@ func (r *Registry) Render(w io.Writer) error {
 	var b strings.Builder
 
 	r.renderShadow(&b)
+	r.renderRuntime(&b)
 	writeFamilyHeader(&b, MetricAttemptsTotal, "counter", "Executed upstream attempts, including retries")
 	writeCounters(&b, MetricAttemptsTotal, r.attempts, 1)
 	writeFamilyHeader(&b, MetricAttemptDuration, "histogram", "Upstream attempt duration in seconds")
