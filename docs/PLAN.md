@@ -606,6 +606,17 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 5. **验证：**Windows 独立虚拟环境定向运行已通过；Verify 增加相同固定依赖和回归；PR #50 精确头 `749c591d6284facd2cc00b571f900b8fc4976a40` 的 Linux Verify 成功并已合并。所有账号、Key 与上游均为一次性夹具，无真实 Provider 调用，不代表官方服务、其它 SDK 版本或 Codex/WS/后台已验收。
 6. **协作：**保留已有冒烟、架构、race 和交付门槛；可通过 `make sdk-conformance PYTHON=<虚拟环境解释器>` 单独运行。新前端、收费和账号路线无变化。
 
+#### P4 固定 HTTP SDK embeddings 子批（2026-10-20）
+
+1. **层级/目录：**仅扩展tests/smoke/sdk_conformance.py及本方案，复用既有固定SDK、生产main、真实调用Key/owner、临时加密SQLite与现有Verify，不修改生产协议或增加发送链。
+2. **公开依赖/冻结：**固定openai==2.11.0/httpx==0.28.1，消费既有/v1/embeddings JSON接口、模型映射与拒绝stream语义；无Go公开端口、OpenAPI或冻结范围变化。
+3. **来源/地基：**编码前读取固定new-api 25372e30b1f94255b1f818aeaaf006f042572580的relay/embedding_handler.go::EmbeddingHelper，采用独立操作、模型映射和向量原生响应边界；同时读取已安装固定SDK的resources/embeddings.py::Embeddings.create/parser及types/create_embedding_response.py、embedding.py，核对默认发送base64并客户端转float，显式指定格式不转换。参考项目无本SDK与TXAPI进程组合的回归，独立扩展现有客户端夹具，不移植源码。L0、schema、配置、依赖与计费许可不变。
+4. **行为/回退：**覆盖批量文本/浮点向量、显式base64原样和默认base64的SDK浮点解码；核对输入、dimensions、编码、实际模型映射、向量索引、原生input/total用量与未知扩展。错误Key和stream请求在发送前拒绝；成功三种情况各一次实际发送。SDK关闭重试、环境代理与凭据。回退只删除回归。
+5. **验证/验收：**固定虚拟环境运行完整既有Chat/Responses/工具/终态/截断/取消/准入与新增embeddings回归，Python AST和diff检查；最终精确头完整Verify包含相同SDK脚本、Linux race及交付门槛。不因测试脚本变更重跑未改生产Go的本地全套。
+6. **协作/限制：**已有13种实际上游场景和忙时拒绝断言保留；仅声明固定版本受控客户端组合，不扩大真实Provider、收费、持久原生明细或其它SDK版本范围，不新增依赖与额外CI任务。
+
+本地受控证据：Windows GOARCH=amd64、固定openai2.11.0/httpx0.28.1、实际main/加密SQLite回归通过。新增三种embeddings调用各一次上游发送：两条文本返回两个带原索引的3维浮点向量，显式base64返回原字符串，SDK默认在wire请求base64后将有效float32数据解码为预期浮点值；均保留实际映射模型、input/total各7、向量及顶层未知扩展，没有completion_tokens推断。错误Key 401与stream 400不发送。原13种上游场景、忙时429零发送、关闭/终态后释放断言同时通过，总计16种实际上游场景各一次；Python AST及diff检查通过。仅两个测试/说明文件有变化，无生产Go、OpenAPI、schema、依赖或workflow变化；最终精确头完整CI独立验收，未复用旧头绿灯。
+
 #### P4 固定 HTTP SDK 后台恢复子批（2026-10-20）
 
 1. **层级/目录：**仅tests/smoke/background_sdk_conformance.py、Makefile、现有Verify和本方案；复用生产main、真实API Key鉴权与临时加密SQLite，不增加生产故障入口。
