@@ -192,6 +192,28 @@ jobs:
           tar -xzf "$codex_dir/codex.tar.gz" -C "$codex_dir"
           python3 tests/smoke/native_ws_delivery.py --go go --sdk --codex "$codex_dir/codex-x86_64-unknown-linux-musl"
 
+  strict-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Strict ledger report assertions
+        run: python3 tests/smoke/strict_native_delivery_test.py
+      - name: Shipped HTTP, background and WS financial recovery
+        run: python3 tests/smoke/strict_native_delivery.py --go go --output "$RUNNER_TEMP/strict-native/report.json"
+      - name: Preserve strict ledger and provider transcript
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: strict-native-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/strict-native
+          if-no-files-found: error
+          retention-days: 14
+
   p0-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 60

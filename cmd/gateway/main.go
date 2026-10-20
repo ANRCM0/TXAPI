@@ -349,7 +349,7 @@ func main() {
 		}
 	}()
 
-	responsesRuntime, err := startResponsesRuntime(cfg.Responses, st, gw)
+	responsesRuntime, err := startResponsesRuntime(cfg.Responses, st, gw, engine)
 	if err != nil {
 		slog.Error("Responses initialization failed", "err", err)
 		os.Exit(1)

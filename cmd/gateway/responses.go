@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"minigateway/internal/billing"
 	"minigateway/internal/compat/httpoutput"
 	"minigateway/internal/config"
 	bg "minigateway/internal/foundation/contracts/background/v1"
@@ -35,7 +36,7 @@ type responsesRuntime struct {
 	backgroundOccupancy atomic.Pointer[backgroundOccupancySample]
 }
 
-func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gateway.Gateway) (*responsesRuntime, error) {
+func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gateway.Gateway, engines ...*billing.Engine) (*responsesRuntime, error) {
 	if cfg.Background.Enabled && !cfg.Enabled {
 		return nil, errors.New("background requires the Responses runtime")
 	}
@@ -50,12 +51,12 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 	if err := st.CleanupExpiredBackground(ctx); err != nil {
 		return nil, errors.New("background retention initialization failed")
 	}
-	if gw != nil && gw.BillingMode() != "disabled" {
+	if gw != nil && gw.BillingMode() != "disabled" && (gw.BillingMode() != "strict" || !cfg.Background.Enabled) {
 		guard, end := context.WithTimeout(context.Background(), 2*time.Second)
 		_, err := st.InitializeBackground(guard, "", gw.BillingMode())
 		end()
 		if err != nil {
-			return nil, errors.New("retained background tasks require disabled billing")
+			return nil, errors.New("retained background tasks require their enabled runtime and financial owner")
 		}
 	}
 	if !cfg.Enabled {
@@ -124,7 +125,14 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 			return nil, err
 		}
 		b := cfg.Background
-		backgroundService, err = generation.NewBackgroundService(ctx, generation.BackgroundOptions{Repository: st, Parser: native.BackgroundParser{}, History: historyRepository, Compiler: native.BackgroundHistoryCodec{}, Projector: native.BackgroundHistoryCodec{}, BillingMode: gw.BillingMode(), ActiveKey: keys.Active, Keys: keys.Keys, DigestKey: keys.Digest,
+		var finance bs.Finance
+		if gw.BillingMode() == "strict" {
+			if len(engines) != 1 || engines[0] == nil || !engines[0].StrictReady() {
+				return nil, errors.New("strict background requires its initialized monetary ledger")
+			}
+			finance = engines[0]
+		}
+		backgroundService, err = generation.NewBackgroundService(ctx, generation.BackgroundOptions{Finance: finance, Repository: st, Parser: native.BackgroundParser{}, History: historyRepository, Compiler: native.BackgroundHistoryCodec{}, Projector: native.BackgroundHistoryCodec{}, BillingMode: gw.BillingMode(), ActiveKey: keys.Active, Keys: keys.Keys, DigestKey: keys.Digest,
 			Retention: time.Duration(b.RetentionSeconds) * time.Second, MetadataRetention: time.Duration(b.MetadataSeconds) * time.Second,
 			Limits: bs.Limits{InstanceRecords: b.InstanceRecords, OwnerRecords: b.OwnerRecords, InstanceBytes: b.InstanceBytes, OwnerBytes: b.OwnerBytes, InstanceActive: b.InstanceActive, OwnerActive: b.OwnerActive}})
 		if err != nil {

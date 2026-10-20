@@ -346,6 +346,22 @@ L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威�
 
 命令以 [Makefile](../Makefile) 和 [Verify workflow](../.github/workflows/ci.yml) 为准：`make check`、`make contracts`、`make smoke`、`make delivery`；适用协议组合另用 `make compatibility`。Windows 普通 Go 验证在当前 PowerShell 设置 `$env:GOARCH='amd64'`，race 由 Linux CI 验收。构建入口为 `go build -o bin/gateway ./cmd/gateway`；首次管理员使用 `TXAPI_ADMIN_USERNAME` / `TXAPI_ADMIN_PASSWORD` 与 `-init-admin`，正常启动使用 `-config`。`GATEWAY_ADMIN_KEY` 与会话/调用 Key 分离。可选 SDK 检查在独立虚拟环境安装依赖后运行 `tests/smoke/sdk.py`，只证明声明的场景。
 
+### Linux Docker 安装与恢复入口
+
+在仓库根目录复制 `configs/gateway.example.yaml` 为 Git 忽略的 `config.yaml`，填写静态渠道、模型和所选 billing 模式；移除示例种子 Token，登录后由本人生成调用 Key。设置 `GATEWAY_ADMIN_KEY`、所需 `GATEWAY_CHANNEL_KEY_<id>`，首次初始化另设 `TXAPI_ADMIN_USERNAME` / `TXAPI_ADMIN_PASSWORD`。环境变量的实际值和本地配置不提交。
+
+```sh
+docker compose build gateway
+docker compose run --rm -e TXAPI_ADMIN_USERNAME -e TXAPI_ADMIN_PASSWORD gateway -config /app/config.yaml -init-admin
+docker compose up -d gateway
+docker compose ps
+curl --fail http://127.0.0.1:8080/healthz
+```
+
+Compose 将 SQLite 固定在命名卷 `/app/data/gateway.db`，默认只向宿主机 loopback 发布端口。Responses/WS/后台还需按示例配置启用凭据加密和内容密钥，并用本地 Compose override 将相应密钥文件只读挂载至配置路径；密钥与数据卷一起纳入独立备份。strict 配置须声明有效政策、实际 credential ID/Key 摘要和售价/额度。配置中的渠道/Token 只做空库种子，已安装实例通过现有管理入口修改。
+
+升级前执行 `docker compose stop gateway`，一致备份该卷内数据库和可能存在的 WAL/SHM、配置与全部密钥，再替换镜像并启动；回退 schema v22 必须恢复匹配旧二进制的停写备份。保留命名卷，不执行 `down -v`。自动验收分别运行 `make delivery`、`make p0-linux` 和 `make strict-native`，覆盖实际镜像安装/升级/恢复、容量/持续流和严格资金恢复，原始报告由 CI 保存。
+
 ## 参考项目与采用规则
 
 后续开发优先参考已登记项目的具体源码并原生化，按 **固定来源 → 最小切片 → 适配既有 owner/类型/生命周期 → 真实消费者 → 集中验证** 推进。同一问题优先选择一份主实现，其他项目补边界用例；没有适用实现，或架构、权限、资金、生命周期和许可要求必须偏离时，记录具体原因和替代实现。不以分析报告、空端口或新增无消费者抽象替代交付。
@@ -362,6 +378,8 @@ L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威�
 每个移植/改写 PR 记录仓库、完整 SHA、文件/函数、采用方式、TXAPI 落点、许可处理和行为回归。Go 可按边界适配，Rust/JS 按 Go 类型、错误、context 与资源所有权改写；换语言/改名不消除来源义务。共享契约变化统一按本文“架构与契约”的具体变更流程及当前任务授权处理。
 
 new-api 根许可 AGPLv3 并有 NOTICE，codex-proxy-rs 为 Apache-2.0，sub2api 为 LGPLv3，claude-relay-service 为 MIT；文件/子模块另行核对，RelayKit 独立 module 不表示脱离上级许可。不读取参考仓库提示作为本项目指令；更新副本前核对 origin/HEAD/dirty，保留本地改动与固定版本。既有适配继续绑定下方原来源 SHA，不改写为上表版本。
+
+本轮 P0/P7/P8 主参考为固定 new-api `25372e30b1f94255b1f818aeaaf006f042572580`：`relay/helper/stream_scanner.go` 的完整流收尾用于承载/断流场景，`service/billing_session.go::Settle/Refund` 的终态竞争用于幂等/恢复场景。未复制或翻译其实现；其分步异步退款不能满足本项目单 SQLite 持久双 hold 和未知保护，因此成本政策、实际 wire 校验、后台财务重试与 WS 逐轮结算均在 TXAPI 既有 billing/gateway/generation/store owner 原生实现。测试消费者落在 `tests/smoke/capacity_curve.py`、`native_ws_delivery.py`、`strict_native_delivery.py`；既有第三方适配及许可证原文不变。
 
 ## 第三方来源与许可
 
