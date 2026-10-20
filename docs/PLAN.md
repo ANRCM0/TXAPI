@@ -215,7 +215,7 @@ L2 protocol/compat 负责独立流状态、编解码及有界/去重/脱敏诊�
 
 已交付 L1 generation 共用的加密历史、CAS/TTL/容量、HTTP/WS 双向续链、新连接/重启及权限回归。WS 的 `persistent_history` 默认 false，显式开启且 `store=true` 才走持久历史；默认仍仅连接内最新父 ID。function/custom、单层 namespace、客户端工具加载和不透明 reasoning 仅在已声明的可重建范围保持。
 
-**后台父链尚未实现。** 当前后台仍只受理自包含输入，拒绝 `previous_response_id`/conversation。下一功能切片先接 HTTP/WS 历史进入后台，再按独立方向验收后台结果进入后续生成。沿 generation 历史/后台 owner 与已登记 responsehistory/background 端口接线，不另建历史或发送链；缺契约时记录具体变更、迁移及回退。
+P6-A 本批沿 generation 历史/后台 owner 接入已存 HTTP/显式持久 WS 的 `previous_response_id`，受理时保存完整上下文与固定目标，验收记录见本批 PR；conversation 继续拒绝。后台结果尚不发布为供后续 HTTP/WS 使用的历史，P6-B 按独立方向实施和验收。继续消费已登记 responsehistory/background 端口，不另建历史或发送链；缺契约时记录具体变更、迁移及回退。
 
 验收须覆盖 owner/创建 Key/模型权限、撤销、父链 TTL/缺失、凭据/revision 绑定、存储失败、unknown、受理/事件提交/强杀恢复与重复上下文。原生父 ID 与本地完整上下文只能选一个可信来源，显式重放须可完整重建并重新准入/计价；后台观察断开不取消任务。不能把 HTTP/WS 已通过的证据直接扩展到后台。
 
@@ -242,7 +242,7 @@ L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威�
 | 门槛 | 已有受控证据入口 | 仍开放的范围 |
 |---|---|---|
 | 强杀与恢复 | PR #80 [strict 财务边界](../internal/gateway/strict_crash_test.go)、[后台 dispatch/事件窗口](../internal/generation/background_runtime_test.go)、PR #64 [持久 WS 窗口](../cmd/gateway/responses_ws_crash_test.go) | 不扩展到后台/WS 收费或真实 Provider 受理/计费认证 |
-| 跨模式与权限 | PR #62/#63 [HTTP/WS 历史与权限](../cmd/gateway/responses_ws_history_test.go)及后续工具子批 | 后台父链尚缺；仅支持已声明的完整上下文和单串行轮次 |
+| 跨模式与权限 | PR #62/#63 [HTTP/WS 历史与权限](../cmd/gateway/responses_ws_history_test.go)及后续工具子批；P6-A [后台父输入](../cmd/gateway/background_history_test.go)验收见本批 PR | 后台结果发布仍缺；仅支持已声明的完整上下文和单串行轮次 |
 | 后端操作 | [实际 main 冒烟](../tests/smoke/local.py)、[任务/事件/TTL](../tests/smoke/background.py)、[用量持久化/隔离](../tests/smoke/usage_history.py)，PR #74/#75 占用指标 | 正文读取须有明确授权；生产告警、备份保管及运维演练待部署现场验收 |
 | 镜像与固定客户端 | [安装/升级/备份恢复](../tests/smoke/delivery.py)、[原生 WS 镜像/TLS/Upgrade/重启](../tests/smoke/native_ws_delivery.py)、固定 SDK/Codex 回归 | 只覆盖固定版本与声明操作；任意客户端、真实 Provider、版本化模型目录/compact 等不继承支持 |
 | 性能与承载 | P0 对照、TLS/H2/反代、慢读/取消/过载恢复及 PR #91 的 30 分钟运行 | 完整 soak、最大稳定容量、生产网络/SLO 未验收；采样峰值不证明无泄漏 |
@@ -391,7 +391,7 @@ It never forwards the local parent ID or falls back to an external handle.
 `internal/protocol/responses/background_history.go` provides the pure bounded
 compiler; existing background fencing and recovery remain the execution owner.
 Regressions cover HTTP/WS consumers, target drift, parent CAS, deletion,
-idempotency, current authorization and restart. This slice does not publish
+idempotency, current authorization, restart and five process-death windows. This slice does not publish
 background outputs as history or expand managed inference or billing.
 
 #### codex-proxy-rs Account Authorization Mechanics
