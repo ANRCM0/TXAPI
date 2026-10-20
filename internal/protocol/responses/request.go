@@ -34,9 +34,12 @@ func (r Request) ValidateHTTP() error {
 	return r.validateHTTP(true)
 }
 
-func (r Request) validateHTTP(allowWebSearch bool) error {
+func (r Request) validateHTTP(allowHTTPNative bool) error {
 	if r.Background || r.PreviousResponseID != "" || present(r.Conversation) {
 		return errors.New("Responses background and stored conversation continuation are not supported")
+	}
+	if present(r.fields["context_management"]) {
+		return errors.New("Responses automatic context management is not supported")
 	}
 	if raw, ok := r.fields["max_output_tokens"]; ok {
 		var n int
@@ -56,12 +59,12 @@ func (r Request) validateHTTP(allowWebSearch bool) error {
 		}
 	}
 	if raw := r.fields["tools"]; present(raw) {
-		if err := validateToolsWithWebSearch(raw, allowWebSearch); err != nil {
+		if err := validateToolsWithWebSearch(raw, allowHTTPNative); err != nil {
 			return err
 		}
 	}
 	webSearch := hasWebSearch(r.fields["tools"])
-	if webSearch && (!allowWebSearch || r.Store == nil || *r.Store) {
+	if webSearch && (!allowHTTPNative || r.Store == nil || *r.Store) {
 		return errors.New("Responses web search requires explicit store=false")
 	}
 	if raw := r.fields["tool_choice"]; present(raw) {
@@ -102,7 +105,8 @@ func (r Request) validateHTTP(allowWebSearch bool) error {
 	if json.Unmarshal(r.Input, &items) != nil {
 		return errors.New("Responses input must be text or an item array")
 	}
-	for _, raw := range items {
+	trigger := false
+	for index, raw := range items {
 		var item struct {
 			Type             string          `json:"type"`
 			Role             string          `json:"role"`
@@ -118,8 +122,20 @@ func (r Request) validateHTTP(allowWebSearch bool) error {
 			return errors.New("invalid Responses input item")
 		}
 		switch item.Type {
+		case "compaction_trigger", "compaction":
+			if !allowHTTPNative || r.Store == nil || *r.Store {
+				return errors.New("Responses compaction requires foreground HTTP and explicit store=false")
+			}
+			if item.Type == "compaction_trigger" {
+				if trigger || index != len(items)-1 || validateCompactionTrigger(raw) != nil {
+					return errors.New("Responses compaction trigger must be the unique final input item")
+				}
+				trigger = true
+			} else if err := validateCompactionItem(raw, true); err != nil {
+				return err
+			}
 		case "web_search_call":
-			if !allowWebSearch || r.Store == nil || *r.Store {
+			if !allowHTTPNative || r.Store == nil || *r.Store {
 				return errors.New("Responses web search history requires explicit store=false")
 			}
 			if err := validateWebSearchCall(raw, true); err != nil {
