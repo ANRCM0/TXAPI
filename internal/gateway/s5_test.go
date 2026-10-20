@@ -24,6 +24,23 @@ func TestS5BillingModesAtModelBoundary(t *testing.T) {
 		for _, dependency := range []string{"present", "absent", "broken"} {
 			t.Run(string(mode)+"/"+dependency, func(t *testing.T) {
 				fixture := newTestGateway(t, 1)
+				// Give the embeddings branch an input-only response; the shared
+				// Chat fixture's output tokens are not valid embeddings usage.
+				chatHandler := fixture.upstream.Config.Handler
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/v1/embeddings" {
+						chatHandler.ServeHTTP(w, r)
+						return
+					}
+					atomic.AddInt64(fixture.upstreamHit, 1)
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}, "usage": map[string]int{"prompt_tokens": 18, "total_tokens": 18}})
+				}))
+				defer upstream.Close()
+				channels := fixture.store.Channels()
+				for i := range channels {
+					channels[i].BaseURL = upstream.URL
+				}
 				token, err := fixture.store.GetToken(1)
 				if err != nil {
 					t.Fatal(err)
@@ -39,7 +56,7 @@ func TestS5BillingModesAtModelBoundary(t *testing.T) {
 					engine = billing.New(nil, nil)
 				}
 				var logs []*dbmodel.RequestLog
-				gw, err := newRegisteredGateway(Options{Channels: fixture.store.Channels(), Billing: engine, BillingMode: mode, LogRecorder: func(row *dbmodel.RequestLog) {
+				gw, err := newRegisteredGateway(Options{Channels: channels, Billing: engine, BillingMode: mode, LogRecorder: func(row *dbmodel.RequestLog) {
 					logs = append(logs, row)
 				}})
 				if err != nil {
