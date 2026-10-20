@@ -155,7 +155,7 @@ jobs:
       - name: 有界并发承载与过载恢复（正确性检查，性能仅报告）
         timeout-minutes: 4
         run: |
-          python3 tests/smoke/capacity_baseline.py --workers 4 --requests-per-worker 5 --rounds 2 --output "$RUNNER_TEMP/capacity-baseline.json"
+          python3 tests/smoke/capacity_baseline.py --workers 4 --requests-per-worker 5 --rounds 2 --sustain-seconds 10 --output "$RUNNER_TEMP/capacity-baseline.json"
           python3 -c "import json,os,pathlib; r=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'capacity-baseline.json').read_text()); print(json.dumps({k:r[k] for k in ('source','environment','configuration','summary','resources','planned_measurement_requests','started_measurement_requests','unpaired_distribution_differences_ns')},sort_keys=True)); print(json.dumps([{'held':x['observed_held_requests'],'rejected_status':x['rejected']['http_status'],'rejected_attempts':x['rejected']['upstream_attempts'],'recovery_ns':x['recovery_observed_ns'],'active_after':x['active_after_recovery']} for x in r['overload']])); print(json.dumps([{'planned':x['planned'],'canceled':x['observed_cancellations'],'active_after':x['active_after_cancel'],'cancel_spread_ns':x['cancel_request_spread_ns']} for x in r['cancellations']]))"
 
   windows-resource-query:
