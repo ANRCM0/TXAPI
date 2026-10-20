@@ -292,6 +292,8 @@ P0 扩展有界负载证据（2026-10-20，非长期 soak 验收）：在干净�
 
 2026-10-20 本地受控验证：Windows GOARCH=amd64 build、vet 与全量 Go 回归通过（cmd/gateway95.537s、architecture46.098s、gateway62.335s、generation83.306s、store92.018s）；聚合只读投影/重开/4096行合法与4097行拒绝/非法元数据/取消/DB失效及未知、已知零、失败保留旧值均通过。生产 main 的完整 local.py 通过，含后台SSE/强杀/重启恢复与实际计数核对、取消后3条终态、关闭功能后的TTL保留任务而清零事件/字节/预留、strict已知结算与未知保护及密钥轮换拒绝等既有回归。OpenAPI0.13.11/117、Python语法、差异与格式检查通过。控制任务测试初轮因测试服务未读请求体导致取消后handler未退出，补齐请求读取和释放门闩后通过；不把失败轮计为成功。最终精确头 Linux race、完整兼容和实际镜像交付仍待本批 CI 验收；未执行真实Provider/OAuth，未开放收费。
 
+后台占用已验证树的补充有限负载：干净 `15144d4ea72c0bd3db4bfbe5f1df48baa5782816` 上运行既有 HTTP/1.1 Chat 生产主进程基线，16worker×每worker50请求×4轮、配置事件5ms。直连和网关各3200/3200完成、各41600个完整事件、每请求一次发送；64条协调取消排空，4次429零发送且每轮恢复全部16名额，16个阶段上游活动均归零。1396次网关进程资源查询均可用；四个网关负载阶段采样峰值working set44728320字节、private commit77189120字节、句柄278，阶段排空后句柄均245，四阶段合计CPU26.21875s。网关完整事件观察延迟上界P95为5.3935ms；未做配对前后对照，不宣称采样无开销、性能改善或串行预算通过。使用既有capacity/stream/resources三个harness摘要分别为5ea07723b8c5a05a94c03239889cb400475fee4415fa19664bc28cdf034252c8、210e125279b2039e2b207152c3e7c9d8db4c4886bad23c0cb21fa8c5c78c1a67、40748d8de431e4ce99a221dfb9960bca1ba989d4bea402b7bf4ca61f357961a0；这是单轮有限负载和恢复观察，长期soak/最大容量/TLS-H2性能/真实Provider继续待验。
+
 #### P0 HTTP/2 并发流取消与名额恢复子批（2026-10-20）
 
 1. **层级/目录：**只追加 internal/gateway 的真实 TLS/HTTP2/反代回归与本方案；复用现有 Chat handler、Responses coordinator 和 access.Capacity，不改生产实现或新增包。
