@@ -22,12 +22,12 @@ P6-A/P6-B、P4-A1/P4-A2、P1-A 已通过 PR #92/#93/#94/#95/#96 合入上述主�
 |---|---|---|
 | 公共地基 | A1–A4、S6、FC-001；FC-002 原生后台子集 | 仅按明确批准范围冻结，后续候选入口不推断全量冻结 |
 | 基础推理 | models、Chat JSON/SSE、embeddings、声明范围的文本/function tools；完整事件和原生用量 | 支持按操作、源/目标协议、传输和计费模式判断，不推断跨协议全量支持 |
-| Responses HTTP | 独立模型、JSON/SSE、owner/Key 幂等、加密历史、Conversations/items、续链；声明范围的工具与不透明 reasoning | 默认关闭，legacy/disabled 可用，strict 全部拒绝 |
-| 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复、任务用量元数据；P6-A 父历史输入与 P6-B 显式 store=true 的 completed 文本/function 结果原子历史发布 | 默认关闭且仅 disabled；仅新受理且可重建的文本/function 结果发布，旧任务不补建；收费未实现 |
-| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本与声明工具；显式持久续链、HTTP/WS 跨模式、prewarm/reasoning、固定 SDK/Codex 与受控镜像回归 | 默认关闭且仅 disabled；默认只支持连接内最新父 ID，持久历史须显式开启；后台跨模式仅已发布文本/function 子集，收费与任意多路复用未完成 |
+| Responses HTTP | 独立模型、JSON/SSE、owner/Key 幂等、加密历史、Conversations/items、续链；声明范围的工具与不透明 reasoning | 默认关闭，legacy/disabled 保持；本轮新增 strict 静态、自包含文本/顶层 function 子集，待最终集成验收；其余 strict 组合拒绝 |
+| 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复、任务用量元数据；P6-A 父历史输入与 P6-B 显式 store=true 的 completed 文本/function 结果原子历史发布 | 默认关闭；disabled 保持，新增 strict 自包含文本/function 预留与结算待最终验收，legacy 拒绝；严格模式不接受父输入，旧任务不补收费 |
+| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本与声明工具；显式持久续链、HTTP/WS 跨模式、prewarm/reasoning、固定 SDK/Codex 与受控镜像回归 | 默认关闭；disabled 保持，新增 strict 独立文本/function 轮次结算待最终验收；strict 不允许父链/prewarm/持久历史，legacy 与任意多路复用拒绝 |
 | 执行与路由 | 唯一执行事实、资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow；阶段超时、有限响应头和重放审计 | shadow 默认关闭且不控制路由；无准入等待队列，不代表外部 Runtime |
 | 历史托管账号 | R04a/P1/P1-A/P2/P3 的既有受控实现与加密状态保留兼容 | 已退出当前产品范围；正常二进制不接 OAuth、刷新或托管推理，不作为待完成验收 |
-| 用量与计费 | Responses/Chat/embeddings 原生 Token 明细、不可变售价、定点价格、双 hold、幂等结算、对账/未知保护；WS 每轮明细和后台任务用量 | 缺失与部分用量保持未知；通用用量历史仅 disabled；后台/WS 收费未实现，S5-03 未完成 |
+| 用量与计费 | Responses/Chat/embeddings 原生 Token 明细、不可变售价、定点价格、双 hold、幂等结算、对账/未知保护；WS 每轮明细和后台任务用量 | 缺失与部分用量保持未知；通用用量历史仅 disabled；本轮静态政策、后台/WS 收费已接入，S5-03 以最终集成验收为准 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取、占用指标；固定客户端和实际镜像回归 | 本轮以 Linux Docker 安装、升级、持久化、备份恢复和负载/故障验收为交付条件，不再等待真实账号或另一个未指定现场 |
 
 ### 当前剩余工作
@@ -299,7 +299,7 @@ L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威�
 
 | 门槛 | 已有受控证据入口 | 仍开放的范围 |
 |---|---|---|
-| 强杀与恢复 | PR #80 [strict 财务边界](../internal/gateway/strict_crash_test.go)、[后台 dispatch/事件窗口](../internal/generation/background_runtime_test.go)、PR #64 [持久 WS 窗口](../cmd/gateway/responses_ws_crash_test.go) | 不扩展到后台/WS 收费或真实 Provider 受理/计费认证 |
+| 强杀与恢复 | PR #80 [strict 财务边界](../internal/gateway/strict_crash_test.go)、[后台 dispatch/事件窗口](../internal/generation/background_runtime_test.go)、PR #64 [持久 WS 窗口](../cmd/gateway/responses_ws_crash_test.go)；本轮增加 strict WS/后台的实际 Kill/Wait 财务窗口 | 新增收费窗口按本轮最终集成头验证；不代表真实 Provider 受理/计费认证 |
 | 跨模式与权限 | PR #62/#63 [HTTP/WS 历史与权限](../cmd/gateway/responses_ws_history_test.go)；PR #92 [后台父输入](../cmd/gateway/background_history_test.go)；PR #93 [后台结果 HTTP/WS 消费](../cmd/gateway/background_publication_test.go) | 仅支持已声明的完整上下文、completed 文本/function 发布和单串行轮次；不扩大其他结果或收费 |
 | 后端操作 | [实际 main 冒烟](../tests/smoke/local.py)、[任务/事件/TTL](../tests/smoke/background.py)、[用量持久化/隔离](../tests/smoke/usage_history.py)，PR #74/#75 占用指标 | Linux Docker 安装、持久卷、升级、停写备份恢复与故障演练为本轮交付环境；正文读取仍需明确授权 |
 | 镜像与固定客户端 | [安装/升级/备份恢复](../tests/smoke/delivery.py)、[原生 WS 镜像/TLS/Upgrade/重启](../tests/smoke/native_ws_delivery.py)、固定 SDK/Codex 回归 | 只覆盖固定版本与声明操作；任意客户端、真实 Provider、版本化模型目录/compact 等不继承支持 |
