@@ -26,6 +26,7 @@ type strictFixture struct {
 	rows        []map[string]any
 	jobs        map[string]map[string]any
 	connections int
+	rejections  []map[string]any
 }
 
 func strictInput(body map[string]any) string {
@@ -71,12 +72,24 @@ func (f *strictFixture) record(method, id, input, transport string) {
 func (f *strictFixture) stats(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	_ = json.NewEncoder(w).Encode(map[string]any{"requests": f.rows})
+	_ = json.NewEncoder(w).Encode(map[string]any{"requests": f.rows, "rejections": f.rejections})
+}
+
+func (f *strictFixture) reject(r *http.Request, reason string, body map[string]any, size int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.rejections) >= 32 {
+		return
+	}
+	model, _ := body["model"].(string)
+	f.rejections = append(f.rejections, map[string]any{"method": r.Method, "path": r.URL.Path,
+		"protocol": r.Proto, "reason": reason, "model": model, "body_bytes": size, "declared_body_bytes": r.ContentLength})
 }
 
 func (f *strictFixture) provider(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.URL.Path, "/v1/responses") || r.Header.Get("Authorization") != "Bearer "+upstreamKey ||
 		r.Header.Get("Cookie") != "" || r.Header.Get("X-Forwarded-For") != "" {
+		f.reject(r, "path/auth/private-header boundary", nil, 0)
 		http.Error(w, "strict fixture boundary", 403)
 		return
 	}
@@ -101,6 +114,7 @@ func (f *strictFixture) provider(w http.ResponseWriter, r *http.Request) {
 		}
 		input := job["input"].(string)
 		f.record(r.Method, id, input, "http-control")
+		f.rows[len(f.rows)-1]["protocol"] = r.Proto
 		d := strictDocument(id, input, false)
 		if strings.HasSuffix(r.URL.Path, "/cancel") || job["cancelled"] == true {
 			job["cancelled"] = true
@@ -116,7 +130,19 @@ func (f *strictFixture) provider(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 4097))
 	var body map[string]any
-	if err != nil || len(raw) > 4096 || json.Unmarshal(raw, &body) != nil || body["model"] != "m" {
+	reason := ""
+	switch {
+	case err != nil:
+		reason = "request body read failed"
+	case len(raw) > 4096:
+		reason = "request body size exceeded"
+	case json.Unmarshal(raw, &body) != nil:
+		reason = "request body JSON invalid"
+	case body["model"] != "m":
+		reason = "request model mismatch"
+	}
+	if reason != "" {
+		f.reject(r, reason, body, len(raw))
 		http.Error(w, "strict fixture body", 400)
 		return
 	}
@@ -130,6 +156,7 @@ func (f *strictFixture) provider(w http.ResponseWriter, r *http.Request) {
 	}
 	id := fmt.Sprintf("strict_%d", len(f.rows)+1)
 	f.record(r.Method, id, input, "http")
+	f.rows[len(f.rows)-1]["protocol"] = r.Proto
 	if background {
 		f.jobs[id] = map[string]any{"input": input}
 	}
@@ -151,6 +178,7 @@ func (f *strictFixture) provider(w http.ResponseWriter, r *http.Request) {
 func (f *strictFixture) ws(w http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
+		f.reject(r, "WebSocket upgrade boundary", nil, 0)
 		return
 	}
 	defer c.CloseNow()

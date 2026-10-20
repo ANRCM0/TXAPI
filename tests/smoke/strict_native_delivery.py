@@ -75,6 +75,32 @@ class StrictInstallation(Installation):
                 "SELECT public_id,billing_id,billing_mode,control_calls,stage,native_state FROM background_jobs")]
         return value
 
+    def diagnostics(self):
+        value = {}
+        for name, container in (("gateway", self.gateway), ("provider", self.provider)):
+            if container in self.containers:
+                try:
+                    value[name + "_logs"] = run(["docker", "logs", "--tail", "200", container], capture=True,
+                                                  check=False, timeout=15).stdout[-65536:]
+                except Exception as error:
+                    value[name + "_log_error"] = type(error).__name__
+        if self.provider in self.containers:
+            try:
+                value["provider_transcript"] = self.stats()
+            except Exception as error:
+                value["provider_transcript_error"] = type(error).__name__
+        return value
+
+
+def redact_report(value, installation=None):
+    secrets = [CLIENT_KEY, PROVIDER_KEY, ADMIN["password"]]
+    if installation:
+        secrets += [installation.settings["admin_key"], *installation.key_material]
+    encoded = json.dumps(value)
+    for secret in secrets:
+        encoded = encoded.replace(secret, "[REDACTED]")
+    return json.loads(encoded)
+
 
 def payload(value, *, background=False):
     body = {"model": "alias", "input": value, "max_output_tokens": 32, "store": False}
@@ -273,15 +299,22 @@ def main():
                 i.create()
                 report["image_id"] = i.inspect()["Image"]
                 exercise(i, report)
+            except Exception as error:
+                report["primary_error"] = type(error).__name__ + ": " + str(error)[:1000]
+                raise
             finally:
                 if i:
+                    try:
+                        report["diagnostics"] = i.diagnostics()
+                    except Exception as error:
+                        report["diagnostics_error"] = type(error).__name__
                     i.cleanup()
     except Exception as error:
         report["passed"] = False
         report["error"] = type(error).__name__ + ": " + str(error)[:1000]
         raise
     finally:
-        args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        args.output.write_text(json.dumps(redact_report(report, i), indent=2), encoding="utf-8")
         if docker_ready:
             run(["docker", "image", "rm", image], check=False)
 

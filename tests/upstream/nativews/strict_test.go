@@ -10,6 +10,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"minigateway/internal/core"
+	"minigateway/internal/gateway"
+	"minigateway/internal/protocol"
+	"minigateway/internal/protocol/meta"
 )
 
 func TestStrictFixtureWireAndUsage(t *testing.T) {
@@ -82,6 +87,56 @@ func TestStrictFixtureWireAndUsage(t *testing.T) {
 	r.Body.Close()
 	if r.StatusCode != 400 || len(f.rows) != 7 {
 		t.Fatal("oversize fixture request accepted")
+	}
+}
+
+func TestStrictFixtureAcceptsProductionPreparedHTTP(t *testing.T) {
+	f := &strictFixture{jobs: make(map[string]map[string]any)}
+	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 {
+			t.Errorf("upstream protocol %s", r.Proto)
+		}
+		f.provider(w, r)
+	}))
+	s.EnableHTTP2 = true
+	s.StartTLS()
+	defer s.Close()
+	r, err := protocol.ParseRequest(protocol.Responses, []byte(`{"model":"alias","input":"http-known","max_output_tokens":32,"store":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := protocol.Resolve("openai")
+	if !ok {
+		t.Fatal("openai adaptor unavailable")
+	}
+	p, problem := protocol.PrepareRequest(a, r, &meta.Meta{BaseURL: s.URL, ActualModel: "m", APIKey: upstreamKey, ResponseID: "resp_public"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	method := p.Method
+	if method == "" {
+		method = http.MethodPost
+	}
+	request, err := http.NewRequest(method, p.URL, bytes.NewReader(p.Body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header = p.Header
+	response, err := s.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 {
+		t.Fatalf("status %d prepared=%s response=%s", response.StatusCode, p.Body, body)
+	}
+	e := core.New(core.Options{Client: s.Client()})
+	defer e.Close()
+	w := httptest.NewRecorder()
+	result := e.Execute(context.Background(), w, gateway.ToCoreInput(p))
+	if result.Error != nil || !result.ProtocolComplete || result.StatusCode != 200 {
+		t.Fatalf("core result=%+v body=%s", result, w.Body.String())
 	}
 }
 

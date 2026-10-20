@@ -2,7 +2,7 @@
 import copy
 import unittest
 
-from strict_native_delivery import validate_ledger
+from strict_native_delivery import validate_ledger, redact_report, CLIENT_KEY, PROVIDER_KEY, ADMIN
 
 
 def evidence(usage):
@@ -22,6 +22,15 @@ def evidence(usage):
 
 
 class StrictConsumerEvidenceTest(unittest.TestCase):
+    def test_failure_diagnostics_redact_synthetic_credentials(self):
+        value = {"error": "command -key " + CLIENT_KEY,
+                 "logs": [PROVIDER_KEY, ADMIN["password"]]}
+        result = redact_report(value)
+        self.assertNotIn(CLIENT_KEY, str(result))
+        self.assertNotIn(PROVIDER_KEY, str(result))
+        self.assertNotIn(ADMIN["password"], str(result))
+        self.assertIn("[REDACTED]", result["error"])
+
     def test_known_zero_and_unknown_are_distinct(self):
         for usage in ("known", "zero", "unknown"):
             with self.subTest(usage=usage):
