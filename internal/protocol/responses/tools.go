@@ -34,12 +34,17 @@ func validateNamespace(raw json.RawMessage) error {
 }
 
 func validateTools(raw json.RawMessage) error {
+	return validateToolsWithWebSearch(raw, false)
+}
+
+func validateToolsWithWebSearch(raw json.RawMessage, allowWebSearch bool) error {
 	var tools []json.RawMessage
 	if json.Unmarshal(raw, &tools) != nil {
 		return errors.New("Responses tools must be an array")
 	}
 	groups := map[string]bool{}
 	search := false
+	webSearch := false
 	for _, raw := range tools {
 		var tool struct {
 			Type string `json:"type"`
@@ -52,6 +57,16 @@ func validateTools(raw json.RawMessage) error {
 			if err := validateDeferred(raw); err != nil {
 				return err
 			}
+			continue
+		}
+		if tool.Type == "web_search" && allowWebSearch {
+			if webSearch {
+				return errors.New("Responses permits at most one web_search")
+			}
+			if err := validateWebSearchTool(raw); err != nil {
+				return err
+			}
+			webSearch = true
 			continue
 		}
 		if tool.Type == "custom" {
@@ -128,6 +143,9 @@ func validateOutputToolItem(raw json.RawMessage) error {
 	}
 	if item.Type == "function_call" {
 		return validateNamespace(item.Namespace)
+	}
+	if item.Type == "web_search_call" {
+		return validateWebSearchCall(raw, false)
 	}
 	if item.Type == "custom_tool_call" {
 		return validateCustomCall(raw)

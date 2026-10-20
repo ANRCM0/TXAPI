@@ -40,7 +40,7 @@ func RequirementsFor(operation Operation, body []byte) Requirements {
 				r.Tools = true
 			}
 			for _, item := range items {
-				r.Tools = r.Tools || item.Type == "function_call" || item.Type == "function_call_output"
+				r.Tools = r.Tools || item.Type == "function_call" || item.Type == "function_call_output" || item.Type == "web_search_call"
 			}
 		}
 	}

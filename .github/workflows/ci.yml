@@ -106,6 +106,7 @@ jobs:
           tar -xzf "$codex_dir/codex.tar.gz" -C "$codex_dir"
           python3 tests/smoke/codex_conformance.py --go go --codex "$codex_dir/codex-x86_64-unknown-linux-musl"
           python3 tests/smoke/codex_ws_conformance.py --go go --codex "$codex_dir/codex-x86_64-unknown-linux-musl"
+          python3 tests/smoke/codex_standard_conformance.py --go go --codex "$codex_dir/codex-x86_64-unknown-linux-musl"
 
       - name: 转发性能基线（仅报告）
         run: |
