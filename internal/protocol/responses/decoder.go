@@ -69,6 +69,17 @@ func parseResponse(body []byte) (Response, *execv1.Usage, *usageWire, error) {
 	default:
 		return r, nil, nil, errors.New("unknown Responses state")
 	}
+	if present(r.Output) {
+		var output []json.RawMessage
+		if json.Unmarshal(r.Output, &output) != nil {
+			return r, nil, nil, errors.New("invalid Responses output")
+		}
+		for _, item := range output {
+			if err := validateOutputNamespace(item); err != nil {
+				return r, nil, nil, err
+			}
+		}
+	}
 	if r.Usage == nil {
 		return r, nil, wire.Usage, nil
 	}
@@ -257,6 +268,14 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	}
 	if event.Type == "" || s.event != "" && s.event != event.Type {
 		return nil, errors.New("Responses event type mismatch")
+	}
+	if event.Type == "response.output_item.added" || event.Type == "response.output_item.done" {
+		if item, ok := event.Item.(map[string]any); ok {
+			raw, _ := json.Marshal(item)
+			if err := validateOutputNamespace(raw); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if event.Type == "response.output_text.delta" || event.Type == "response.function_call_arguments.delta" {
 		if _, ok := event.Delta.(string); !ok {

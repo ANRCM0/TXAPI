@@ -220,8 +220,12 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 		output := []any{}
 		if tools, ok := request["tools"].([]any); ok && len(tools) > 0 {
 			call := map[string]any{"type": "function_call", "id": "item_call", "call_id": "call_fixture", "name": "lookup", "arguments": "{}", "status": "completed"}
+			pending := map[string]any{"type": "function_call", "id": "item_call", "call_id": "call_fixture", "name": "lookup", "arguments": "", "status": "in_progress"}
+			if tool, ok := tools[0].(map[string]any); ok && tool["type"] == "namespace" {
+				call["namespace"], pending["namespace"] = tool["name"], tool["name"]
+			}
 			events := []any{
-				map[string]any{"type": "response.output_item.added", "stream_id": "main", "sequence_number": 1, "item": map[string]any{"type": "function_call", "id": "item_call", "call_id": "call_fixture", "name": "lookup", "arguments": "", "status": "in_progress"}},
+				map[string]any{"type": "response.output_item.added", "stream_id": "main", "sequence_number": 1, "item": pending},
 				map[string]any{"type": "response.function_call_arguments.delta", "stream_id": "main", "sequence_number": 2, "delta": "{}"},
 				map[string]any{"type": "response.function_call_arguments.done", "stream_id": "main", "sequence_number": 3, "arguments": "{}"},
 				map[string]any{"type": "response.output_item.done", "stream_id": "main", "sequence_number": 4, "item": call},
