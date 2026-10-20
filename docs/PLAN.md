@@ -23,15 +23,15 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/6aef78f0bbe9df7d03b0b5661f83ed75fb89cdbb`，Verify `39347438757` 已完整成功。namespace 批次 PR #68 精确头 `d1f1afa1b1fc94baa11fe4c9ed4eac09c0099ed6` 的 Verify `39345977371` / `39345912321` 全部六项成功后合并。本批 custom/freeform 增量单列，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/6aef78f0bbe9df7d03b0b5661f83ed75fb89cdbb`，Verify `39347438757` 已完整成功。namespace 批次 PR #68 精确头 `d1f1afa1b1fc94baa11fe4c9ed4eac09c0099ed6` 的 Verify `39345977371` / `39345912321` 全部六项成功后合并。custom/freeform 批次 PR #69 精确头 `fd127abe377399716595b1dcc5084d73859a6f65` 的 Verify `39349320682` / `39349276419` 全部六项成功后，已合并为 `329f1130fccb5e346bac387650155ab8ced5a483`；合并后 Verify `39350655654` 另行跟踪，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
 | 公共地基 | A1–A4、S6、FC-001；FC-002 原生后台子集 | 基础 v1 和 FC-002 已按批准范围冻结，后续候选入口不得推断全量冻结 |
 | 基础推理 | models、Chat JSON/SSE、embeddings、声明范围的文本/function tools | 能力按操作、源/目标协议、传输、计费模式判断 |
 | Responses HTTP | 独立模型、JSON/SSE、owner/Key 幂等、加密历史、Conversations/items、续链 | 默认关闭；legacy/disabled 可用，strict 全部拒绝 |
-| 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复 | 默认关闭；仅 disabled、自包含文本/函数工具；收费和后台父链未完成 |
-| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/函数轮次、连接内最新父 ID | 默认关闭且仅 disabled；显式持久续链/跨模式、受控镜像TLS/反代/重启及固定WS SDK已通过精确头CI并合并；真实Provider部署、收费和任意多路复用未验收 |
+| 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复 | 默认关闭；仅 disabled、自包含文本/function/custom及单层namespace工具；收费和后台父链未完成 |
+| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/function/custom与单层namespace轮次、连接内最新父 ID | 默认关闭且仅 disabled；显式持久续链/跨模式、受控镜像TLS/反代/重启及固定WS SDK已通过精确头CI并合并；真实Provider部署、收费和任意多路复用未验收 |
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；真实账号未验收 |
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
@@ -251,6 +251,21 @@ Go1.26.3/Windows GOARCH=amd64的受控复现先失败后修复：HTTP/1明文/TL
 
 P0 扩展有界负载证据（2026-10-20，非长期 soak 验收）：在干净源码 `26d6d36b944d53480d5c890c73cdac1de14addb0` 上复用既有生产主进程 harness，并发8、每worker100请求、四轮交替直连/网关、13事件且间隔25ms、disabled、真实API Key/SQLite/请求日志保留。两条路径各3200/3200完成，每请求一次attempt；32次有意取消单列，四轮429均零发送、全部8名额复填，16阶段活动上游归零。八个测量波次合计304.615秒，网关阶段累计CPU22.953125秒；5069次网关进程采样均可用，50ms样本峰值working set38084608字节、private commit70152192字节、句柄246，后3轮网关排空后句柄均229。网关首有效输出P50/P95/P99为74.6094/77.5115/88.6355ms，41600个完整事件延迟上界样本P95为2.1751ms。原始报告与三个harness摘要保存在仓库外；Windows工作集/commit/句柄定义及采样下界沿既有声明。初始化后的保留、峰值和排空端点不等于无泄漏证明，不把两条独立分位数之差当配对开销；单机明文HTTP/1.1夹具不覆盖TLS/H2/反代性能、最大容量、长时间运行或真实Provider，未设优化门槛也不声明性能通过。该证据仅覆盖本次未整合新合并提交前的精确源码，后续CI状态另列。
 
+#### P0 原生 Responses SSE 配对基线子批（源码与本地测量完成，精确头 CI 待验）
+
+1. **层级/目录：**仅 tests/smoke/stream_baseline.py、既有 Verify 和本方案；沿现有测试侧完整事件、绝对 deadline、write/flush 观察和只读资源采样增加原生 Responses text SSE 档案，真实运行生产 main。capacity_baseline.py 的 Chat 默认调用保持原形，不新增生产 sender/解析器。
+2. **公开依赖：**消费现有 API Key Responses HTTP、disabled/store=false、配置和进程生命周期；复用当前独立模型权限和 response runtime。仅临时合成内容密钥/SQLite/配置，无公开 Go 端口、冻结、L0、数据库迁移或收费许可变化，无需新 CR。
+3. **行为与限额：**命令追加 --operation chat|responses，默认 chat。Responses 上游提供 heartbeat、created、8段固定Unicode文本、text done及完整 completed/原生usage；按相同固定节奏交错直连与网关，每请求独立时间戳、一次上游attempt、完整事件边界/内容/终态计数。首有效文本单列，不用heartbeat/created缩短TTFT；接受网关合法ID重写，不声称字节透明。
+4. **验证与回退：**现有 self-check 在两种档案分别覆盖错误Key401、截断、合法chunk-extension慢滴的绝对deadline、排空与测量新库；保留所有失败、完成率分母和配对成功数，不把两个独立P99相减。保持1..1000有限样本和并发1、源码/harness摘要、直连/网关同条件、临时进程Kill/Wait及资源查询缺口。已有Chat self-check/容量消费者同批定向回归；最终精确头完整CI，不替代真实Provider、TLS/H2/慢读/长期soak或WS/后台基线。
+5. **验收与预算：**先得到Responses本机重复基线再制定该操作的优化预算，不套用Chat既有预算或根据本轮结果倒设通过阈值。CI只做受控正确性self-check和有限样本，报告配对首正文/首有效文本/完成/事件延迟、CPU/RSS/对象、连接/attempt和恢复，不以减少鉴权、持久化或校验换性能。
+6. **协作：**P0/P4当前纯测量缺口，不扩默认Codex工具、账号池、strict/legacy收费或产品开关；不运行真实Provider/外部网络、不修改用户配置，报告写仓库外。发布/合并/生产验收分别记账，未通过CI前仅称源码及本地证据。
+
+2026-10-20 本地受控基线：Windows GOARCH=amd64、生产主进程、disabled/store=false、loopback HTTP/1.1、每事件配置5ms（实际调度间隔由逐事件时间戳记录）、单并发/每目标持久连接，先后独立运行两轮各100对请求。两轮均为直连100/100、网关100/100完整成功，每请求一次实际上游attempt、每流12个完整事件，测量后上游活动为零；正常/截断/合法chunk-extension慢滴的绝对100ms截止和错误Key401 self-check均通过，失败注入样本独立保留。配对首有效文本增量P50为0.2057/-0.0497ms，P95为1.9369/1.7241ms；首正文增量P95为4.7973/4.9560ms，完成增量P95为5.3950/5.3822ms。网关上游write至下游完整事件观察延迟上界P95为0.7317/0.7687ms，包含测试客户端调度，不解释为纯网关服务时间。未把两个独立P99相减，也未据负配对样本声称网关加速；尚未设Responses优化预算或做性能改动。
+
+两轮网关各553次资源查询全部可用，CPU增量0.90625/0.984375s，50ms采样working set峰值33763328/33402880字节，private commit峰值65159168/64638976字节，handle峰值207/199；排空后的句柄206/198包含保留连接和运行时初始化，不据此判定泄漏或资源稳定。报告基于源码 `fd127abe377399716595b1dcc5084d73859a6f65` 加未提交harness（dirty=true），stream_baseline.py SHA-256 `210e125279b2039e2b207152c3e7c9d8db4c4886bad23c0cb21fa8c5c78c1a67`，资源采样摘要 `40748d8de431e4ce99a221dfb9960bca1ba989d4bea402b7bf4ca61f357961a0`；与PR #69合并后的生产树完全相同。初次夹具初始化因遗漏凭据密钥文件及其digest_key而失败，补齐独立合成配置后才开始测量，不把零样本算通过。CI追加独立Responses self-check/20对有限测量，数值仅报告；最终同一harness的Chat self-check/5对测量通过；原容量消费者并发4、每worker5请求、两轮，直连40/40与网关40/40完成、8个协调取消排空、两次未发送429及全部4名额恢复均通过；Python AST、测量摘要一致性、CI命令保留及diff检查通过。Go生产树不变，不重复已有全量Go本地回归，最终新头完整CI独立验收。此批不扩大TLS/H2、长期soak、真实Provider或收费验收。
+
+补充既有Chat并发持续基线：在干净 `fd127abe` 上，16worker、每worker50请求、4轮、事件配置5ms，独立重复两遍；每遍直连3200/3200、网关3200/3200均完成、每请求一次发送，每目标41600个完整事件。每遍64个协调取消均观察上游结束，4次过载429均未发出，释放后全部16名额恢复；16个阶段结束后活动上游均为零。网关完整事件观察延迟上界P95为2.4742/2.4562ms；working set采样峰值44306432/44433408字节、private commit峰值76632064/76472320字节、handle峰值均270，所有资源查询可用；两遍运行中预热后句柄分别229→237→237→238及229→229→237→237。报告保留完整样本/阶段资源与源码及三个harness摘要，既有capacity源码摘要 `5ea07723b8c5a05a94c03239889cb400475fee4415fa19664bc28cdf034252c8`。这是有限closed-loop和恢复证据，不代表最大容量、长期资源平稳、并发1配对预算通过或真实Provider运行。
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。
@@ -465,7 +480,7 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 </details>
 
 <details>
-<summary>FC-P4-CUSTOM-001：原生 Responses custom/freeform 工具往返（源码与本地受控验证通过，精确头 CI 待验）</summary>
+<summary>FC-P4-CUSTOM-001：原生 Responses custom/freeform 工具往返（精确头完整 CI 通过并合并，合并后 CI 另记）</summary>
 
 1. **层级/目录与缺口：**固定 Codex 0.163.0 的 apply_patch_freeform 默认工具声明为 custom；namespace 子批仍明确拒绝该类型。L2 internal/protocol/responses 处理自定义工具声明、输入/输出项目、原生 JSON/SSE 与背景流，internal/protocol/responses_estimation.go 同步 legacy 输出文本估算；internal/compat/responsesws 增量接同类 WS/持久完整上下文。L3 现有历史、后台、WS 消费者不另建执行链；cmd/gateway 测试、固定 CLI/Python SDK、OpenAPI 和本方案同批更新。
 2. **公开依赖与冻结：**沿已批准 execution、responses、compat/responses/v1、httpoutput、responsehistory/v1、background 等既有入口；公开类型/签名/版本与数据库 schema21 不变。compat/responses/v1.ValidateHTTP 对 self-contained custom 项的新增语义按本具体记录实施，不把已有导出/CI当批准。不新建地基端口、L0 路径或工具执行器。
@@ -478,7 +493,7 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 
 固定客户端边界：0.163.0 bundled `gpt-5.5` 还声明 tool_search，新模型还可提交 additional_tools/Code Mode；当前均在发送前拒绝，不能据本批局部成功宣称默认客户端全量支持。custom 夹具采用文档与固定版本 config.schema.json 登记的 model_catalog_json，测试数据自行构造 synthetic slug/freeform/text 模态档案，不复制上游模型提示或更改用户模型/代理配置。实际 0.163.0 执行器原生解析故意无效且无路径的补丁，错误结果按 custom_tool_call_output 回传；工作目录断言没有新增日志之外的文件。配置依据：`https://developers.openai.com/codex/config-reference/`，固定源码 `codex-rs/protocol/src/openai_models.rs`。
 
-2026-10-20 本批本地受控证据：custom 声明/grammar64KiB/custom名称128 UTF-8字节/重复跨类型成员/已知字段错误/hosted拒绝、HTTP JSON/SSE 跨字节Unicode及函数/custom交错、有效输出、终态不重复估算、后台事件持久回放均通过。真实 socket 的 WS custom→HTTP result→组件重建/新WS完整上下文保持 input/name/namespace/call_id，custom delta 后断开保留 uncertain，查询和父链续接冲突且实际上游只发送一次。固定 Python SDK openai3.8.0/websockets15.0.1 的10个生成通过，含类型化custom delta、终态和HTTP读取；7个已知3Token、3个未知未补零，资金不变。固定 Codex0.163.0 的7场景通过，custom显式档案使用真实freeform声明和原生补丁解析错误往返；共10次实际HTTP发送/独立sealed usage，7次已知3Token、3次未知，工作目录无副作用文件，资金不变。全量 Go 回归通过（cmd/gateway76.492s、architecture91.854s、generation69.787s、Responses15.751s、store62.939s、TLS/Upgrade夹具2.743s）；build/vet和实际main local.py均通过。最终补齐custom输出估算后，protocol全树/gateway/cmd完整包复验通过（gateway33.129s、cmd57.769s），最终存储WS字段校验包复验1.017s通过。OpenAPI0.13.7/117操作和575个引用、Python语法、格式/差异检查通过。尚未执行本批Linux race/实际镜像交付，也未证明真实Provider、默认Codex全部工具或收费；最终精确提交CI另验。
+2026-10-20 本批本地受控证据：custom 声明/grammar64KiB/custom名称128 UTF-8字节/重复跨类型成员/已知字段错误/hosted拒绝、HTTP JSON/SSE 跨字节Unicode及函数/custom交错、有效输出、终态不重复估算、后台事件持久回放均通过。真实 socket 的 WS custom→HTTP result→组件重建/新WS完整上下文保持 input/name/namespace/call_id，custom delta 后断开保留 uncertain，查询和父链续接冲突且实际上游只发送一次。固定 Python SDK openai3.8.0/websockets15.0.1 的10个生成通过，含类型化custom delta、终态和HTTP读取；7个已知3Token、3个未知未补零，资金不变。固定 Codex0.163.0 的7场景通过，custom显式档案使用真实freeform声明和原生补丁解析错误往返；共10次实际HTTP发送/独立sealed usage，7次已知3Token、3次未知，工作目录无副作用文件，资金不变。全量 Go 回归通过（cmd/gateway76.492s、architecture91.854s、generation69.787s、Responses15.751s、store62.939s、TLS/Upgrade夹具2.743s）；build/vet和实际main local.py均通过。最终补齐custom输出估算后，protocol全树/gateway/cmd完整包复验通过（gateway33.129s、cmd57.769s），最终存储WS字段校验包复验1.017s通过。OpenAPI0.13.7/117操作和575个引用、Python语法、格式/差异检查通过。最终精确头 `fd127abe377399716595b1dcc5084d73859a6f65` 的 PR Verify `39349320682` 与 push Verify `39349276419` 全部六项成功，涵盖 Linux race/完整兼容检查、实际非root镜像TLS/反代/重启/强杀恢复和固定WS SDK组合，以及Windows采样；PR #69 已合并为 `329f1130fccb5e346bac387650155ab8ced5a483`，合并后 Verify `39350655654` 独立跟踪。仍未证明真实Provider、默认Codex全部工具或收费。
 
 </details>
 
