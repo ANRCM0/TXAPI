@@ -35,6 +35,7 @@ type baselineRecord struct {
 type baselineRun struct {
 	mu      sync.Mutex
 	records map[string]*baselineRecord
+	delay   time.Duration
 }
 
 type baselineSample struct {
@@ -150,7 +151,11 @@ func (run *baselineRun) stream(w http.ResponseWriter, r *http.Request, tag strin
 		if !write(string(raw)) {
 			return
 		}
-		timer := time.NewTimer(5 * time.Millisecond)
+		delay := run.delay
+		if delay == 0 {
+			delay = 5 * time.Millisecond
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-r.Context().Done():
 			timer.Stop()
@@ -225,7 +230,11 @@ func (f *fixture) measureBaseline(ctx context.Context, direct, gateway *http.Cli
 	return report
 }
 
-func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key, model, tag string) (sample baselineSample) {
+func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key, model, tag string) baselineSample {
+	return run.callProtocol(ctx, client, base, key, model, tag, 2)
+}
+
+func (run *baselineRun) callProtocol(ctx context.Context, client *http.Client, base, key, model, tag string, protocol int) (sample baselineSample) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -283,7 +292,7 @@ func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key
 	if response.TLS != nil {
 		sample.TLS, sample.ALPN = tls.VersionName(response.TLS.Version), response.TLS.NegotiatedProtocol
 	}
-	if response.StatusCode != 200 || response.ProtoMajor != 2 || sample.ALPN != "h2" {
+	if response.StatusCode != 200 || response.ProtoMajor != protocol || protocol == 2 && sample.ALPN != "h2" {
 		sample.Error = "status or verified HTTP2 mismatch"
 		return
 	}

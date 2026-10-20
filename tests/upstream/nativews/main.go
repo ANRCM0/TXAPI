@@ -66,6 +66,8 @@ type fixture struct {
 	chat            []chatObservation
 	baseline        *baselineRun
 	baselineStarted atomic.Bool
+	soakActive      atomic.Bool
+	soakProfiles    atomic.Uint32
 }
 
 type chatObservation struct {
@@ -500,6 +502,11 @@ func serve(directory, target string) error {
 	stats := http.NewServeMux()
 	stats.HandleFunc("/stats", f.stats)
 	stats.HandleFunc("/baseline", baseline)
+	soak, err := f.soakHandler(directory)
+	if err != nil {
+		return err
+	}
+	stats.HandleFunc("/soak", soak)
 	servers := []*http.Server{
 		{Addr: ":443", Handler: http.HandlerFunc(f.provider), ReadHeaderTimeout: 5 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}},
 		{Addr: ":8081", Handler: proxy, ReadHeaderTimeout: 5 * time.Second},
@@ -604,7 +611,7 @@ func wsCall(ctx context.Context, client *http.Client, base, key, payload, until 
 }
 
 func main() {
-	mode := flag.String("mode", "serve", "prepare|serve|http|ws|chat")
+	mode := flag.String("mode", "serve", "prepare|serve|http|ws|chat|soak|resources")
 	directory := flag.String("directory", "/fixtures", "ephemeral fixture directory")
 	target := flag.String("target", "http://gateway:8080", "explicit internal reverse-proxy target")
 	base := flag.String("base", "http://127.0.0.1:8081", "client base URL inside the isolated network")
@@ -613,12 +620,17 @@ func main() {
 	key := flag.String("key", "", "synthetic fixture bearer")
 	payload := flag.String("payload", "", "synthetic JSON request")
 	until := flag.String("until", "terminal", "WS terminal|disconnect|error")
+	timeoutSeconds := flag.Int("timeout-seconds", 30, "bounded fixture command timeout: 1..1900")
 	flag.Parse()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if *timeoutSeconds < 1 || *timeoutSeconds > 1900 {
+		fmt.Fprintln(os.Stderr, "fixture timeout must be 1..1900")
+		os.Exit(2)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeoutSeconds)*time.Second)
 	defer cancel()
 	transport := &http.Transport{Proxy: nil, ResponseHeaderTimeout: 5 * time.Second}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 25 * time.Second}
+	client := &http.Client{Transport: transport, Timeout: time.Duration(max(1, *timeoutSeconds-5)) * time.Second}
 	var err error
 	switch *mode {
 	case "prepare":
@@ -629,6 +641,10 @@ func main() {
 		err = httpCall(ctx, client, *base, *method, *path, *key, *payload)
 	case "ws":
 		err = wsCall(ctx, client, *base, *key, *payload, *until, os.Stdout)
+	case "resources":
+		err = processResources(os.Stdout)
+	case "soak":
+		err = soakCall(ctx, client, *base, *payload, os.Stdout)
 	case "chat":
 		err = chatCall(ctx, client, *base, *key, *payload, os.Stdout)
 	default:

@@ -4,6 +4,7 @@ Runs the production main with synthetic API Keys and a disposable SQLite DB.
 Performance is reported, not gated. Overload rejection and recovery are checked.
 """
 import argparse
+import base64
 import concurrent.futures
 import contextlib
 import hashlib
@@ -294,6 +295,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--go", default="go")
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--operation", choices=("chat", "responses"), default="chat")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--requests-per-worker", type=int, default=25)
     parser.add_argument("--rounds", type=int, default=2)
@@ -323,14 +325,14 @@ def main():
               "configuration": vars(args) | {"output": str(args.output), "http": "HTTP/1.1 loopback plaintext",
                   "auth": "production API Key", "billing": "disabled", "retries": 0,
                   "connection_policy": "persistent per worker/phase; close on failure and at phase end",
-                  "fixture_backlog": 64, "fixture_events": len(events()),
+                  "fixture_backlog": 64, "fixture_events": len(events(args.operation)),
                   "resource_scope": RESOURCE_SCOPE + "; cancel/overload/direct/gateway phase intervals are separate",
                   "cancellation_policy": "one wave per round; all workers observe first text before barrier/socket shutdown; intentional cancellations reported separately",
                   "limits": "bounded baseline plus optional declared continuous interval; not maximum capacity, TLS/H2 or Provider acceptance"},
               "waves": [], "sustained": [], "cancellations": [], "overload": [], "resources": [], "correctness_failures": []}
     report["configuration"]["sustained_counting"] = (
         "time-based interval with every started result retained, separate from alternating baseline planned/started counts")
-    fixture = CapacityFixture(args.event_delay_ms / 1000)
+    fixture = CapacityFixture(args.event_delay_ms / 1000, args.operation)
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
     resources = None
@@ -349,6 +351,17 @@ def main():
                       "channels": [{"name": "baseline", "type": "openai", "base_url": f"http://127.0.0.1:{fixture.server_port}",
                                     "key": UPSTREAM_KEY, "models": ["baseline-model"]}],
                       "tokens": [{"name": "baseline", "key": CLIENT_KEY, "models": ["baseline-model"]}]}
+            if args.operation == "responses":
+                for name in ("content", "credential"):
+                    keys = work / (name + "-keys.json")
+                    keys.write_text(json.dumps({"active_key": "fixture", "keys": {
+                        "fixture": base64.b64encode(os.urandom(32)).decode()},
+                        "digest_key": base64.b64encode(os.urandom(32)).decode()}), encoding="utf-8")
+                    keys.chmod(0o600)
+                    if name == "content":
+                        config["responses"] = {"enabled": True, "keys_file": str(keys)}
+                    else:
+                        config["database"]["credential_keys_file"] = str(keys)
             report["configuration"]["capacity"] = config["server"]["concurrency"]
             path = work / "config.json"
             path.write_text(json.dumps(config), encoding="utf-8")
