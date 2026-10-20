@@ -24,12 +24,82 @@ type backgroundProgressFixture struct {
 	dispatched atomic.Bool
 	observed   atomic.Int64
 	fail       bool
+	target     execution.TargetConstraint
 }
 
 func (p *backgroundProgressFixture) Validate(context.Context, bs.RemoteCall) error { return nil }
-func (p *backgroundProgressFixture) Dispatch(context.Context, execution.TargetConstraint, bs.RateReservation) error {
+func (p *backgroundProgressFixture) Dispatch(_ context.Context, target execution.TargetConstraint, _ bs.RateReservation) error {
+	p.target = target
 	p.dispatched.Store(true)
 	return nil
+}
+
+func TestBackgroundSubmitKeepsStoredTargetAndRejectsDriftBeforeWire(t *testing.T) {
+	for _, mode := range []string{"bound", "channel", "credential", "model", "fingerprint", "disabled", "unregistered", "rotated"} {
+		t.Run(mode, func(t *testing.T) {
+			var hits atomic.Int64
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				if r.Header.Get("Authorization") != "Bearer two" {
+					t.Error("submission changed the pinned credential")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"resp_provider","object":"response","status":"queued","output":[]}`)
+			}))
+			defer upstream.Close()
+			channels := lifecycleChannels(upstream.URL)
+			alternative := channels[0]
+			alternative.ID, alternative.Name = 2, "alternative"
+			channels = append(channels, alternative)
+			g, err := newRegisteredGateway(Options{Channels: channels, BillingMode: billing.ModeDisabled})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.Close()
+			var required execution.TargetConstraint
+			for _, ch := range g.reg.allChannels() {
+				if ch.id == 1 {
+					required = responseTarget(ch, &ch.credentials[1], "m")
+				}
+			}
+			registrations := map[uint]string{1: native.BackgroundRegistrationID, 2: native.BackgroundRegistrationID}
+			switch mode {
+			case "channel":
+				required.ChannelID = 99
+			case "credential":
+				required.CredentialID = 99
+			case "model":
+				required.ActualModel = "different"
+			case "fingerprint":
+				required.Fingerprint = "different"
+			case "disabled":
+				channels[0].Status = model.StatusDisabled
+			case "unregistered":
+				delete(registrations, 1)
+			case "rotated":
+				channels[0].Credentials[1].APIKey = "rotated"
+			}
+			remote, err := NewBackgroundRemote(g, BackgroundRemoteOptions{Registrations: []bg.Registration{native.BackgroundRegistration()}, Channels: registrations})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "disabled" || mode == "rotated" {
+				if err := g.Publish(channels); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx := access.WithPrincipal(context.Background(), access.Principal{UserID: 1, TokenID: 1, Policy: access.Policy{Mode: access.All}})
+			progress := &backgroundProgressFixture{}
+			err = remote.Execute(ctx, bs.RemoteCall{Action: bg.RemoteSubmit, Operation: execution.Responses, Model: "m", PublicID: "resp_local", Body: []byte(`{"model":"m","background":true,"input":"snapshot"}`), Target: &required}, progress)
+			if mode == "bound" {
+				if err != nil || hits.Load() != 1 || !progress.dispatched.Load() || progress.target != required {
+					t.Fatalf("bound submission lost target: %v hits=%d target=%+v", err, hits.Load(), progress.target)
+				}
+			} else if err == nil || hits.Load() != 0 || progress.dispatched.Load() {
+				t.Fatalf("invalid pin escaped to another target: %v hits=%d", err, hits.Load())
+			}
+		})
+	}
 }
 func (p *backgroundProgressFixture) Observe(context.Context, bg.Observation) error {
 	p.observed.Add(1)
