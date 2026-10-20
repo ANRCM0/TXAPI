@@ -15,6 +15,8 @@ func validateInputBoundProfile(c ProviderCostContract) error {
 	switch c.InputBoundProfile {
 	case "":
 		return nil
+	case OperatorResponsesV1, OperatorChatV1, OperatorEmbeddingsV1:
+		return validateOperatorPolicy(c)
 	case OpenAIChatV1:
 		if c.Protocol != "openai" || c.Operation != "chat" || c.BaseURL != "https://api.openai.com" ||
 			c.ActualModel != "gpt-4o-mini-2024-07-18" || c.InputTokenCeiling < 128_000 ||
@@ -38,6 +40,9 @@ func validateInputBoundProfile(c ProviderCostContract) error {
 }
 
 func checkProfileRequest(c ProviderCostContract, preparedURL string, body []byte) error {
+	if c.InputBoundProfile == OperatorResponsesV1 || c.InputBoundProfile == OperatorChatV1 || c.InputBoundProfile == OperatorEmbeddingsV1 {
+		return checkOperatorRequest(c, preparedURL, body)
+	}
 	if c.InputBoundProfile == OpenAIChatV1 {
 		if preparedURL != "https://api.openai.com/v1/chat/completions" {
 			return ErrProviderLimit

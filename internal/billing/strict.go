@@ -116,6 +116,7 @@ func (e *Engine) prepareReservation(tokenID, userID uint, origin string) (model.
 	providerCosts := e.providerCosts.Load()
 	if providerCosts != nil {
 		row.ProviderBudgetUnits = providerCosts.budget
+		row.ProviderPolicyVersion = providerCosts.version
 	}
 	pre := &PreDeduct{prices: prices, reservation: &Reservation{id: row.ID, prices: prices, origin: origin, providerCosts: providerCosts}}
 	return row, pre, nil
