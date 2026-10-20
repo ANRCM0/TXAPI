@@ -58,6 +58,7 @@ ws-sdk-conformance:
 # Supply an official Codex 0.163.0 binary; CI checks the release archive digest.
 codex-conformance:
 	$(PYTHON) tests/smoke/codex_conformance.py --go "$(GO)" --codex "$(CODEX)"
+	$(PYTHON) tests/smoke/codex_ws_conformance.py --go "$(GO)" --codex "$(CODEX)"
 
 # Requires Playwright and a local Chromium executable, like the browser checks.
 compatibility:

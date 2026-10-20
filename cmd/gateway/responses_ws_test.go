@@ -94,6 +94,7 @@ type wsAssemblyFixture struct {
 	failPrepare                          atomic.Bool
 	attempts, httpCalls, connections     atomic.Int64
 	observations                         chan wsAssemblyObservation
+	nativeOverride                       atomic.Pointer[http.HandlerFunc]
 	blocked                              chan struct{}
 	release                              chan struct{}
 }
@@ -107,6 +108,10 @@ func wsAssemblyEvent(typ, id, status string, seq int, output any) []byte {
 	return wsAssemblyJSON(map[string]any{"type": typ, "stream_id": "main", "sequence_number": seq, "response": response})
 }
 func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Request) {
+	if handler := f.nativeOverride.Load(); handler != nil {
+		(*handler)(w, r)
+		return
+	}
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		f.httpCalls.Add(1)
 		if f.persistentHistory {
@@ -217,6 +222,20 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 				return
 			}
 		}
+		if request["generate"] == false {
+			event := wsAssemblyEvent("response.completed", responseID, "completed", 1, []any{})
+			var envelope map[string]any
+			_ = json.Unmarshal(event, &envelope)
+			doc := envelope["response"].(map[string]any)
+			doc["usage"] = map[string]int{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+			if input == "unknown" {
+				doc["usage"] = nil
+			}
+			if connection.Write(ctx, transport.Text, wsAssemblyJSON(envelope)) != nil {
+				return
+			}
+			continue
+		}
 		output := []any{}
 		if tools, ok := request["tools"].([]any); ok && len(tools) > 0 {
 			call := map[string]any{"type": "function_call", "id": "item_call", "call_id": "call_fixture", "name": "lookup", "arguments": "{}", "status": "completed"}
@@ -276,6 +295,9 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 			}
 			if f.persistentHistory {
 				output = []any{map[string]any{"id": fmt.Sprintf("msg_%d_%d", id, round), "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": "hello", "annotations": []any{}}}}}
+				if input == "reasoning" {
+					output = append([]any{map[string]any{"id": fmt.Sprintf("rs_%d_%d", id, round), "type": "reasoning", "encrypted_content": "fixture-history-opaque", "summary": []any{map[string]any{"type": "summary_text", "text": "summary"}}, "future": true}}, output...)
+				}
 			}
 		}
 		status := "completed"

@@ -58,7 +58,7 @@ func parse(frame v2.Frame, persistent bool) (Request, error) {
 	if frame.Type != 1 || len(frame.Data) > 256<<10 || jsonvalue.Validate(frame.Data) != nil {
 		return out, errors.New("invalid native WS request")
 	}
-	fields, err := object(frame.Data, "type model input instructions previous_response_id tools tool_choice parallel_tool_calls max_output_tokens temperature top_p metadata generate stream_id store")
+	fields, err := object(frame.Data, "type model input instructions previous_response_id tools tool_choice parallel_tool_calls max_output_tokens temperature top_p metadata generate stream_id store stream include reasoning text prompt_cache_key client_metadata")
 	if err != nil {
 		return out, err
 	}
@@ -77,7 +77,10 @@ func parse(frame v2.Frame, persistent bool) (Request, error) {
 	if persistent && string(fields["store"]) == "true" {
 		out.Store = true
 	}
-	for key, expected := range map[string]string{"store": "false", "stream_id": "\"main\"", "generate": "true"} {
+	if err := validateNativeOptions(fields, out.Store); err != nil {
+		return out, err
+	}
+	for key, expected := range map[string]string{"store": "false", "stream_id": "\"main\""} {
 		if key == "store" && out.Store {
 			continue
 		}
@@ -156,7 +159,7 @@ func parse(frame v2.Frame, persistent bool) (Request, error) {
 	if err = parsed.ValidateHTTP(); err != nil {
 		return out, err
 	}
-	out.PromptText = parsed.PromptText()
+	out.PromptText = parsed.PromptText() + reasoningPrompt(fields["input"])
 	body, err = json.Marshal(fields)
 	out.Initial = v2.Frame{Type: 1, Data: body}
 	return out, err
@@ -171,9 +174,34 @@ func validateInput(raw json.RawMessage) error {
 		return errors.New("input must be text or items")
 	}
 	for _, raw := range items {
-		var probe struct{ Type string }
+		var probe struct {
+			Type string
+			ID   json.RawMessage
+		}
 		if json.Unmarshal(raw, &probe) != nil {
 			return errors.New("invalid input item")
+		}
+		if probe.ID != nil {
+			id, valid := text(probe.ID)
+			if !valid || !storedItemID(id) {
+				return errors.New("invalid native WS item ID")
+			}
+		}
+		if probe.Type == "reasoning" {
+			if err := validateReasoningItem(raw, true, true); err != nil {
+				return err
+			}
+			continue
+		}
+		if probe.Type == "function_call" || probe.Type == "custom_tool_call" {
+			allowed := "type id status encrypted_content call_id name namespace arguments"
+			if probe.Type == "custom_tool_call" {
+				allowed = "type id status encrypted_content call_id name namespace input"
+			}
+			if _, err := object(raw, allowed); err != nil {
+				return err
+			}
+			continue // The shared validator checks the self-contained call.
 		}
 		if probe.Type == "tool_search_output" || probe.Type == "additional_tools" || probe.Type == "tool_search_call" {
 			allowed := "type id execution call_id status tools"
@@ -193,10 +221,10 @@ func validateInput(raw json.RawMessage) error {
 			}
 			continue // The shared native validator checks call/status/schema.
 		}
-		allowed := "type role content"
+		allowed := "type id status phase role content"
 		contentKey := "content"
 		if probe.Type == "function_call_output" || probe.Type == "custom_tool_call_output" {
-			allowed = "type call_id output name namespace"
+			allowed = "type id call_id output name namespace"
 			contentKey = "output"
 		} else if probe.Type != "" && probe.Type != "message" {
 			return errors.New("unsupported input item")
@@ -204,6 +232,14 @@ func validateInput(raw json.RawMessage) error {
 		item, err := object(raw, allowed)
 		if err != nil {
 			return err
+		}
+		if probe.Type == "" || probe.Type == "message" {
+			if status, present := item["status"]; present && !oneOf(status, "in_progress", "completed", "incomplete") {
+				return errors.New("invalid native WS message status")
+			}
+			if phase, present := item["phase"]; present && !oneOf(phase, "commentary", "final_answer") {
+				return errors.New("invalid native WS message phase")
+			}
 		}
 		content := item[contentKey]
 		if _, ok := text(content); ok {
@@ -312,7 +348,7 @@ func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
 		return empty, errors.New("duplicate native WS response")
 	}
 	switch event.Type {
-	case "response.created", "response.in_progress", "response.completed", "response.incomplete", "response.failed", "response.cancelled", "response.output_text.delta", "response.output_text.done", "response.output_item.added", "response.output_item.done", "response.content_part.added", "response.content_part.done", "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done", "error":
+	case "response.created", "response.in_progress", "response.completed", "response.incomplete", "response.failed", "response.cancelled", "response.output_text.delta", "response.output_text.done", "response.output_item.added", "response.output_item.done", "response.content_part.added", "response.content_part.done", "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_text.delta", "response.reasoning_text.done", "error":
 	default:
 		return empty, errors.New("unsupported native WS event")
 	}
@@ -321,11 +357,11 @@ func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
 		if len(event.Response) == 0 || bytes.Equal(event.Response, []byte("null")) {
 			return empty, errors.New("native WS lifecycle event requires a response")
 		}
-	case "response.output_text.delta", "response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
+	case "response.output_text.delta", "response.function_call_arguments.delta", "response.custom_tool_call_input.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		if _, valid := text(root["delta"]); !valid {
 			return empty, errors.New("native WS delta must be text")
 		}
-	case "response.output_text.done":
+	case "response.output_text.done", "response.reasoning_summary_text.done", "response.reasoning_text.done":
 		if _, valid := text(root["text"]); !valid {
 			return empty, errors.New("native WS output must be text")
 		}
@@ -344,6 +380,10 @@ func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
 	case "response.content_part.added", "response.content_part.done":
 		if _, present := root["part"]; !present {
 			return empty, errors.New("native WS content event requires a part")
+		}
+	case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+		if err := reasoningPart(root["part"], true, false); err != nil {
+			return empty, err
 		}
 	}
 	if len(event.Response) > 0 {
@@ -369,7 +409,7 @@ func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
 			return empty, err
 		}
 	}
-	if raw, ok := root["part"]; ok {
+	if raw, ok := root["part"]; ok && event.Type != "response.reasoning_summary_part.added" && event.Type != "response.reasoning_summary_part.done" {
 		if err := validateOutputPart(raw); err != nil {
 			return empty, err
 		}
@@ -420,6 +460,9 @@ func validateOutputItem(raw json.RawMessage) error {
 	if json.Unmarshal(raw, &item) != nil {
 		return errors.New("invalid native WS output item")
 	}
+	if item.Type == "reasoning" {
+		return validateReasoningItem(raw, false, false)
+	}
 	if item.Type == "tool_search_call" {
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(raw, &fields)
@@ -453,8 +496,11 @@ func validateOutputItem(raw json.RawMessage) error {
 }
 func validateOutputPart(raw json.RawMessage) error {
 	var part struct{ Type string }
-	if json.Unmarshal(raw, &part) != nil || part.Type != "output_text" && part.Type != "refusal" {
+	if json.Unmarshal(raw, &part) != nil || part.Type != "output_text" && part.Type != "refusal" && part.Type != "reasoning_text" {
 		return errors.New("unsupported native WS content part")
+	}
+	if part.Type == "reasoning_text" {
+		return reasoningPart(raw, false, false)
 	}
 	return nil
 }

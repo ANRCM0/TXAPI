@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/329f1130fccb5e346bac387650155ab8ced5a483`，合并后 Verify `39350655654` 已完整成功。custom/freeform 批次 PR #69 精确头 `fd127abe377399716595b1dcc5084d73859a6f65` 的 Verify `39349320682` / `39349276419` 全部六项成功。Responses 配对基线 PR #70 精确头 `f968cfa3b22e8b557f83bfeb4ad8a4ee38f1df07` 全部六项成功后，已合并为 `752d2d1fc8d42188aad2e16edf91d161037bbeae`；合并后 Verify `39352347725` 另行跟踪。本批客户端搜索增量单列，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/bdd04377e29c34d7a6a4474b727097884408650a`，客户端搜索 PR #71 精确头 `cf35875b15b911d25bfe6bc9a518af72b21e2841` 的 Verify `39353159474` / `39353151168` 全部六项成功，合并后 Verify `39354583737` 亦完整成功。Responses 配对基线 PR #70 合并后 Verify `39352347725` 已完整成功；custom/freeform PR #69 的精确头及合并后证据保留在对应 PR。本批固定 Codex WS/预热增量单列，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.8` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.9` / 117 操作；数据库保持 schema v21，FC-P4-CODEX-WS-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -513,6 +513,28 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 
 </details>
 
+<details>
+<summary>FC-P4-CODEX-WS-001：原生非生成预热与固定客户端 WS 字段（源码及本地受控验证完成，精确头 CI 待验收）</summary>
+
+2026-10-20。按本任务后续同类契约变更的既有授权记录后实施。固定官方 Codex0.163.0 的隔离 loopback 观察确认：supports_websockets=true 时先发送 generate=false，再以该响应ID发送正式轮次；create还含stream=true、include、reasoning、prompt_cache_key、client_metadata。仅打开客户端WS配置不能证明网关走WS，预热失败可触发客户端HTTP回退。
+
+1. **层级与消费者：**L2 internal/compat/responsesws 在原解析/映射/事件/完整上下文中支持这些具体原生字段与不透明reasoning项；cmd/gateway原生产组装、既有gateway唯一native session/exchange/准入/usage/历史直接消费。新增固定CLI WS回归和真实socket夹具，保留原HTTP CLI、SDK和实际镜像交付。L0、发送器、连接池、reader与资金owner不变。
+2. **公开依赖/冻结：**消费既有execution v2/v3、responsesws/v1、responsehistory/v1和usagehistory/v1；仅扩现有L2 Parse/ParseStored/NewDecoder语义，不新增类型、签名、配置、schema、依赖或冻结端口。generate=false是发送到原生上游并等待其真实终态的独立请求轮次，不由网关合成预热成功。每轮仍当前Key/模型重查、RPM/TPM估算与原两层容量准入、同目标/凭据、单串行exchange和原有deadline；不得绕过限流或创建第二种执行。原usage按轮记录实际发送/已知或未知usage，包含预热；不是独立收费，WS仍disabled-only。
+3. **具体字段和限制：**stream省略或true；generate省略/true/false，false仅store=false或省略（拒绝预热持久化/伪历史）。include省略或至多一个reasoning.encrypted_content。reasoning闭合对象仅effort（none/minimal/low/medium/high/xhigh）及summary（auto/concise/detailed），值为字符串；text闭合对象仅verbosity低/中/高及format.type=text，不开放JSON schema/媒体。prompt_cache_key非空UTF-8文本至多512字节；client_metadata为至多16个文本值的对象，键1..128字节、值至多2048字节，合计JSON至多16KiB；只当Provider元数据，不用于权限/owner/路由。WS原已知字段null拒绝保留。消息可携带可打印1..256字节id、status=in_progress/completed/incomplete与phase=commentary/final_answer，原样作为Provider内容字段，不当作本地授权引用。初次prewarm的input沿原文本/工具能力；不会放开background/conversation/媒体/hosted/多路复用。
+4. **推理与寿命：**只携带自包含、不透明encrypted_content及可选文本summary/content，不解密或执行。输入reasoning需非空opaque文本至多128KiB，最多64个summary_text与reasoning_text/text组成项，各文本至多64KiB，完整消息/重建上下文仍256KiB/1024项；输入已知字段闭合，已保存输出的未来字段沿原raw历史保留。输出reasoning added/done与summary/text part/delta/done保持原生JSON，允许合法进行中encrypted_content=null，终态不强行编造密文。摘要/思考事件不算首有效回答，沿原完整事件计idle。历史只有可自包含的reasoning才可作为下一轮输入；缺密文不能凭Provider item ID重建。WS TPM估算包含opaque/summary原始JSON，不声称是真实计量或strict成本证明。预热父ID仍只接受当前连接最新ID；既有TPM>0且父usage未知时拒绝延续规则保留，不能补0绕过。persistent历史/HTTP↔WS采用同一owner/Key、target fingerprint、加密和容量，不另建缓存。
+5. **验证/退出：**精确字段类型/值/字节/数量/null/未知字段、false预热+store拒绝、reasoning自包含/不完整/未知输出与完整上下文；真实socket预热→文本/函数/custom/search多轮，前后各自授权/准入/一次create、未知usage不补零、预热取消/Key撤销/模型改变、非成功终态及现有关闭/恢复；固定CLI实际WS握手与上游create计数独立于客户端turn.completed，明确零HTTP fallback，当前默认bundled模型与必要明确档案分列。客户端在失败后主动HTTP回退不作为网关重放许可或WS成功，取消/截断另用既有协议客户端验证。适用全量Go/build/vet/main smoke、固定SDK/CLI、OpenAPI和最终精确头Linux race/交付CI。
+6. **兼容/协作：**既有store=false/true文本/function/custom/search路径保留；关闭WS仍沿已有拒绝，回退旧二进制会拒绝本批字段/历史但不删除数据/未知事实，受schema21停写备份规则约束。OpenAPI下一小版本/117操作同步。受控原生上游与真实固定客户端是本批证据；不冒充官方服务、任意默认工具/模型、客户端自动恢复、性能提升、完整账号池或收费，Provider授权与P8成本门槛不变。
+
+主参考采用 codex-proxy-rs 固定 `60570883007febebe732597a9881397098d724f5` 的 `backend/crates/providers/openai/src/transport/protocol/websocket.rs`：`websocket_response_create_payload` / `ResponseCreateFrame` 保留请求对象与原生内容，映射和旁路观察分别处理；`responses.rs::transport_requirement` 将 `generate=false + store=false` 绑定原生 WS，`tests/transport/websocket_pool.rs` 的独立 downstream warmup/connection-local parent 场景用于补 TXAPI 回归。按 TXAPI 现有 RawMessage、Parse/MapModel/Decoder 和唯一 NativeSession 改写，保留本项目声明的字段、资源、权限和计费边界；未复制 Rust 代码、连接池或新增发送流程。许可 Apache-2.0，来源沿本文登记。
+
+补充对照 sub2api 固定 `f2e5b55f3e8069df1c02a9a27af537b5fdefa64e` 的 `backend/internal/service/openai_ws_forwarder_support.go::performOpenAIWSGeneratePrewarm`、`openai_ws_forwarder_ingress.go::parseClientPayload` 与 `openai_ws_v2_passthrough_adapter.go::openAIWSPolicyEnforcingFrameConn`：预热读取真实终态、后续帧逐轮策略检查、只对必要字段做映射并保留其余原生内容。该项目的自动预热/HTTP 回退、恢复重试及账号池不移植；这里只参考行为与边界，不复制其 LGPLv3 实现。工具结果项的有界 `id` 与消息 ID 一同保留，均不用于权限或父链查询。
+
+官方依据：固定rust-v0.163.0 core client的provider supports_websockets、generate=false prewarm及增量父ID逻辑，OpenAI WebSocket mode与Reasoning指南；仅对照线协议/配置，不复制实现。固定真实CLI仍独立验证线协议结果，参考程序本身未运行。
+
+2026-10-20 本批本地受控验证：固定 Codex0.163.0 实际 WS 的文本/function/custom/client-search 四场景全部完成，独立上游观测共11个 response.create（4个真实预热及7个生成），每场景仅1条上游连接、零HTTP fallback；每轮一条sealed用量，预热已知0/生成已知3分别保留，store=false不生成永久历史或资金记录。已知零/未知预热父usage、跨连接父ID、Key撤销与模型权限改变、预热断开后的unknown和准入释放、reasoning经WS→HTTP→新WS的完整加密历史均通过定向真实socket回归。原固定CLI HTTP八场景、Python openai3.8.0/websockets15.0.1的12个WS生成、build/vet/全量Go与实际main冒烟通过；OpenAPI0.13.9/117操作/595引用及Python语法检查通过。现有Linux race、实际镜像TLS/Upgrade/重启/强杀与SDK交付保留在完整CI，当前尚未记为本批通过；实际镜像中的固定Codex WS组合、真实Provider、完整默认工具/模型、长期容量和收费仍未验收。本批同时将“优先参考具体源码并原生化”提升为AGENTS入口和本方案的后续开发约束。
+
+</details>
+
 ### P5：账号信号与调度评估
 
 - **层级/目录：**L1 scheduler/gateway；L3 routes 查询。
@@ -656,7 +678,7 @@ P0 与 P1–P8 逐批验收，不能把整个后端阶段积压到最后。产�
 
 ### 原生化实施方式
 
-默认采用“**固定来源 → 选最小可用切片 → 适配既有 owner/类型/生命周期 → 接真实消费者 → 集中验证交付**”。同一问题优先选一份最适合的主实现，其他项目只补边界用例，避免拼接数套同职责流程。
+**后续开发约束（用户于 2026-10-20 明确要求）：优先参考已登记参考项目的具体源码并实现原生化。** 编码前先确认主参考的仓库、固定 SHA、文件/函数及可采用实现；按“**固定来源 → 选最小可用切片 → 适配既有 owner/类型/生命周期 → 接真实消费者 → 集中验证交付**”推进。同一问题优先选一份最适合的主实现，其他项目只补边界用例。交付须记录采用部分、TXAPI 改写落点和行为回归；没有适用实现，或因架构、权限、资金、生命周期、许可等具体约束需要偏离时，在本方案或 PR 中说明原因和替代实现。参考和改写必须落到实际调用链，不以源码分析报告替代功能交付。
 
 | 切片 | 主参考及原生化内容 | TXAPI 落点与交付顺序 |
 |---|---|---|
