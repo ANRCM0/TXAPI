@@ -568,6 +568,17 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 5. **验证：**Windows 独立虚拟环境定向运行已通过；Verify 增加相同固定依赖和回归；PR #50 精确头 `749c591d6284facd2cc00b571f900b8fc4976a40` 的 Linux Verify 成功并已合并。所有账号、Key 与上游均为一次性夹具，无真实 Provider 调用，不代表官方服务、其它 SDK 版本或 Codex/WS/后台已验收。
 6. **协作：**保留已有冒烟、架构、race 和交付门槛；可通过 `make sdk-conformance PYTHON=<虚拟环境解释器>` 单独运行。新前端、收费和账号路线无变化。
 
+#### P4 固定 HTTP SDK 后台恢复子批（2026-10-20）
+
+1. **层级/目录：**仅tests/smoke/background_sdk_conformance.py、Makefile、现有Verify和本方案；复用生产main、真实API Key鉴权与临时加密SQLite，不增加生产故障入口。
+2. **公开依赖：**固定现有openai==2.11.0/httpx==0.28.1，消费已批准的disabled原生后台create/retrieve/cancel/delete和starting_after事件接口；无公开Go端口、冻结或新依赖。
+3. **来源/地基：**主参考为官方Background mode文档及已安装固定SDK的responses.py::create/retrieve/cancel/delete；核对retrieve(stream=True, starting_after=...)的实际版本签名，不把文档中未来高层stream助手示例作为已支持行为。已登记参考项目没有适用于TXAPI持久claim与本SDK组合的验收实现，复用现有background.py生产进程恢复场景并独立编写客户端夹具；不移植第三方源码。L0、schema、权限、资金与配置语义不变。
+4. **行为/回退：**SDK关闭自动重试、环境凭据与代理；类型化创建事件后关闭观察，再Kill/Wait实际main，重开同库并等待真实claim租约恢复。仅恢复事件不重发生成；检索完成和按序号排除旧事件；JSON创建、显式取消与重复取消、删除后不可读；另一有效Key检索/取消/流观察均404且不发送。回退只删除回归。
+5. **验证/验收：**独立上游记录精确create/cancel、恢复cursor与鉴权，SQLite只读核对任务/事件及用量元数据；两个生成各一次上游create，取消仅一次远端RPC。每SDK请求与轮询、子进程及fixture清理均有界；Windows实际main定向回归及原HTTP SDK回归，最终精确头完整CI另验。
+6. **协作/限制：**保留原HTTP/WS SDK环境和全部既有门槛。只证明固定HTTP SDK与本地受控上游的生产main组合，不声明真实Provider、其它版本、自动重连、main镜像、收费或长期容量通过。
+
+本地受控证据：Windows GOARCH=amd64 运行固定openai2.11.0/httpx0.28.1通过。实际main在首个类型化created事件后被Kill/Wait，重开同一加密SQLite并等待真实30秒claim恢复，SDK仅收到sequence1完成事件，sequence0没有重放，末尾cursor返回空流。两次新生成各仅一次远端create，取消JSON任务并重复cancel仅一次远端cancel；另一有效Key在重启前后检索/取消/事件观察均404。终态再次重启后完整SDK响应及两行任务用量完全一致，删除任务不可读取；2/1/3、缓存1、推理0、缓存写入未知保留，恰好两条持久事件。首轮只在测试以随机任务ID排序推断创建次序的断言失败，改为按public_id精确关联后复验通过，无生产修复。原HTTP SDK前台JSON/SSE、工具、截断、终态和取消回归同时通过。本批没有生产Go变更，既有完整Go证据按对应基线保留，最终新头完整Verify另记。
+
 #### P4 固定 Python WS SDK 子批（2026-10-20）
 
 1. **层级/目录：**仅 cmd/gateway 的可选测试子进程、tests/smoke/ws_sdk_conformance.py、独立固定依赖、Makefile、既有 CI 与本方案；复用现有真实双端 socket/SQLite 的生产组件组装夹具。
