@@ -213,7 +213,12 @@ def control_workflow(base, upstream_url, routing_env=None, quotation_enabled=Fal
     api(f"/api/admin/credentials/{credential['id']}", admin,
         {"name": "renamed", "weight": 2}, method="PUT")
     api("/api/admin/config-status/apply", admin, method="POST")
-    assert "gateway_attempts_total" in request(base + "/metrics")[1].decode()
+    exposition = request(base + "/metrics")[1].decode()
+    assert "gateway_attempts_total" in exposition
+    for name in ("gateway_admission_requests_active", "gateway_admission_attempts_active",
+                 "gateway_native_ws_enabled", "gateway_native_ws_connections_active",
+                 "gateway_native_ws_rounds_active"):
+        assert f"{name} 0\n" in exposition, (name, exposition)
     api("/api/auth/logout", session, method="POST", expected=204)
     api("/api/me", session, expected=401)
     return key

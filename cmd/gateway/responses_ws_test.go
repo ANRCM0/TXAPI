@@ -433,6 +433,7 @@ func (f *wsAssemblyFixture) startPublicRuntimes(t *testing.T, limiter access.Lim
 		return f.runtime.Publish(channels)
 	}, nil)
 	engine := server.NewEngine(server.Deps{Generation: gateway.NewHTTPExecutor(f.gw), TokenAuth: identity.NewTokenAuthenticator(f.st), Control: controlplane.New(persistence.Control(f.st)), Configuration: f.configuration, Metrics: f.gw.Metrics(), UsageHistory: usageconsole.New(f.st.UsageHistory(recordUsage, 3600), controlplane.New(persistence.Control(f.st)), limiter), Responses: f.httpRuntime.Handler(), ResponsesWS: f.runtime.Handler(), AdminAuth: middleware.AdminAuth("assembly-admin-fixture"), RateLimiter: limiter, RateGate: access.NewRateGate(limiter)})
+	registerRuntimeMetrics(f.gw.Metrics(), f.capacity, f.runtime)
 	f.front = httptest.NewServer(engine)
 }
 func (f *wsAssemblyFixture) close() {
