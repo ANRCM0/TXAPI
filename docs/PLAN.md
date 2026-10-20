@@ -1,6 +1,6 @@
 # TXAPI 后端开发方案
 
-更新日期：2026-10-20。本文是当前唯一开发方案，记录当前能力、剩余工作、架构约束和验收门槛。批次过程、精确提交与运行证据保留在对应 PR/提交记录，本文只保留必要索引，不另建平行方案或进度文档。第三方来源与许可证保留在文末。
+更新日期：2026-10-21。本文是当前唯一开发方案，记录当前能力、剩余工作、架构约束和验收门槛。批次过程、精确提交与运行证据保留在对应 PR/提交记录，本文只保留必要索引，不另建平行方案或进度文档。第三方来源与许可证保留在文末。
 
 ## 目标与范围
 
@@ -12,19 +12,19 @@
 
 ## 当前基线与能力边界
 
-最近已核对主线为 `master/b8d7916c890fb49ba0a98e68f63230f9b7f89b3a`（PR #92）。最终功能头 `dd60fade678f3a257c38e542d775c9d63d63863d` 的 push Verify `39441062675`、PR Verify `39441075893` 全六项成功；实际合并主线的独立 Verify `39443822478` 也已完整成功，包含 check、delivery、windows-resource-query。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
+最近已核对主线为 `master/7a09452205222748f721ddbcbfb96e9d04855147`（PR #93）。最终功能头 `4cc337e35b8970e8bebe7a4043228476403031fc` 的 push Verify `39452518004`、PR Verify `39452530349` 全六项成功；实际合并主线的独立 Verify `39455268889` 也已完整成功。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
 
-[OpenAPI](openapi.json) 为 `0.13.16` / 117 操作，数据库 schema v21。接口数、测试数和已完成子批数不换算为项目完成百分比。0.13.16 为 P6-B 本批接口说明，后续能力的验收状态不继承上述主线 CI。
+[OpenAPI](openapi.json) 为 `0.13.17` / 117 操作，数据库 schema v21。接口数、测试数和已完成子批数不换算为项目完成百分比。0.13.17 为 P4-A1 本批接口说明，新增能力的验收状态不继承上述主线 CI。
 
-此前文档清理与 P6-A 已通过 PR #92 合入上述主线；当前切片为 P6-B。参考项目仍按文末固定 SHA 读取；未升级参考版本，未新增参考程序、真实 Provider 或性能运行证据。
+P6-A/P6-B 已通过 PR #92/#93 合入上述主线；当前切片为 P4-A1 标准 Codex HTTP 配置与缓存搜索声明。参考项目仍按文末固定 SHA 读取；未升级参考版本，未新增参考程序或真实 Provider 运行证据。
 
 | 能力 | 已验收范围 | 当前限制 |
 |---|---|---|
 | 公共地基 | A1–A4、S6、FC-001；FC-002 原生后台子集 | 仅按明确批准范围冻结，后续候选入口不推断全量冻结 |
 | 基础推理 | models、Chat JSON/SSE、embeddings、声明范围的文本/function tools；完整事件和原生用量 | 支持按操作、源/目标协议、传输和计费模式判断，不推断跨协议全量支持 |
 | Responses HTTP | 独立模型、JSON/SSE、owner/Key 幂等、加密历史、Conversations/items、续链；声明范围的工具与不透明 reasoning | 默认关闭，legacy/disabled 可用，strict 全部拒绝 |
-| 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复、任务用量元数据；P6-A 已存 HTTP/持久 WS 父历史输入 | 默认关闭且仅 disabled；P6-B 本批增加新受理显式 store=true 的 completed 文本/function 结果历史发布，验收以本批 PR 为准；收费未实现 |
-| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本与声明工具；显式持久续链、HTTP/WS 跨模式、prewarm/reasoning、固定 SDK/Codex 与受控镜像回归 | 默认关闭且仅 disabled；默认只支持连接内最新父 ID，持久历史须显式开启；后台跨模式、收费、任意多路复用未完成 |
+| 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复、任务用量元数据；P6-A 父历史输入与 P6-B 显式 store=true 的 completed 文本/function 结果原子历史发布 | 默认关闭且仅 disabled；仅新受理且可重建的文本/function 结果发布，旧任务不补建；收费未实现 |
+| 原生 WS | 双端原生连接、逐轮授权/准入、串行文本与声明工具；显式持久续链、HTTP/WS 跨模式、prewarm/reasoning、固定 SDK/Codex 与受控镜像回归 | 默认关闭且仅 disabled；默认只支持连接内最新父 ID，持久历史须显式开启；后台跨模式仅已发布文本/function 子集，收费与任意多路复用未完成 |
 | 执行与路由 | 唯一执行事实、资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow；阶段超时、有限响应头和重放审计 | shadow 默认关闭且不控制路由；无准入等待队列，不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新、P3 资格反馈/人工恢复的受控闭环 | 无完整账号池；reset 未知，不自动推断恢复；真实 OAuth、过期/轮换和限流未验收 |
 | 用量与计费 | Responses/Chat/embeddings 原生 Token 明细、不可变售价、定点价格、双 hold、幂等结算、对账/未知保护；WS 每轮明细和后台任务用量 | 缺失与部分用量保持未知；通用用量历史仅 disabled；后台/WS 收费未实现，S5-03 未完成 |
@@ -34,12 +34,12 @@
 
 | 工作 | 已具备的基础 | 未完成及下一步 |
 |---|---|---|
-| P6 后台父链与跨模式 | HTTP/WS 共用加密历史、持久续链及重启恢复；P6-A 已合并并通过独立主线 CI | P6-B 本批验证 completed 文本/function 结果的原子历史发布、HTTP/WS 消费、删除和独立 TTL；conversation、托管账号与其他结果类型不继承支持 |
+| P6 后台父链与跨模式 | P6-A/P6-B 已合并并通过独立主线 CI；completed 文本/function 结果原子发布、HTTP/WS 消费、删除和独立 TTL | conversation、托管账号与其他结果类型不继承支持，未知执行不假续接；更广重连和池化仍按需求排期 |
 | P7 后台/WS 收费 | 每轮 WS 明细、后台任务用量与状态元数据 | 逐生成预留、结算、取消/未知恢复和成本准入未接通；依赖各操作 P8 证明，继续仅 disabled |
 | P8 完整成本证明 | 已登记 strict Chat/embeddings 档案、双预算与恢复账本 | 缺逐凭据最高适用费率、失败收费、税/附加项、未来改价假设和完整计量证明；S5-03 不能关闭 |
 | P0 完整性能与承载 | HTTP/1.1、TLS/H2、受控反代、慢读/取消/过载恢复、一次 30 分钟 Windows 持续流 | 完整长时 soak、最大稳定容量、目标部署网络/SLO 和完整性能验收仍开放 |
 | P4 真实兼容 | 固定 HTTP/WS SDK、Codex、工具和受控 Provider 回归 | 至少一个声明范围内的真实 Provider/客户端完整组合未验收；按当前指示跳过真实调用 |
-| P4 默认客户端接入 | 标准 `/v1/models`、固定 Codex 文本/工具/WS 回归 | 当前没有 Codex 专用版本化目录或 compact 操作；部分回归使用本地模型目录配置，须另验标准用户配置与长会话，不能外推默认全面兼容 |
+| P4 默认客户端接入 | 标准 `/v1/models`、固定 Codex 文本/工具/WS 回归 | P4-A1 本批验证标准配置 HTTP 文本/function 与缓存搜索轮次，验收见本批 PR；没有 Codex 专用版本化目录或 compact 操作，长会话与默认全面兼容仍未验收 |
 | P1/P2/P3 真实账号生命周期 | 单 SIWC 文本流、刷新、资格反馈及人工恢复受控验收 | 真实 OAuth、过期、Token 轮换、账号限流和恢复缺外部证据；不扩展为完整账号池 |
 | P1 托管账号消费者扩展 | 静态 Key 已有工具能力，托管账号有实时 AcquireAccess 和单绑定文本流 | 托管账号的封闭正文校验仍拒绝工具及工具结果；先做单账号 HTTP function 工具轮次，不直接扩大到 WS、后台或账号池 |
 | 生产可操作性 | 受控镜像安装/升级、停写备份恢复、任务/账本查询和占用指标 | 告警阈值、备份保管、生产网络及运维演练需目标部署环境验收 |
@@ -163,6 +163,17 @@ P0–P8 按可独立验收的切片推进，已验收子集保留，不重复立
 - **契约/迁移/回退：**历史保留期从首次发布计算，独立于后台临时内容；同一公开 ID 在临时内容有效时归后台读取，过期后可读取仍有效历史。input_items 读取已发布历史，cancel/events 不伪装成前台操作；显式删除原子删除两份内容，自动临时 TTL 清理保留已发布历史，重放不复活删除或重设 TTL。新字段在加密 input/snapshot 中可选，schema 不变；旧程序不理解预留/发布标记，回退前须停止受理并排空本批任务，或恢复匹配停写备份。
 - **测试/验收：**真实 HTTP/持久 WS/固定 SDK 消费，完成前拒绝续链，跨 owner/Key/模型及撤销，容量与 CAS，终态提交前后强杀、重启/事件恢复仅发布一次，后台 TTL 与历史 TTL 分离，显式删除不复活，旧/省略/false/失败/unknown/不支持输出不生成 ready 历史。
 - **其他模块影响与来源：**沿用 P6-A 同目标约束和当前授权，仅 disabled、静态 Key、文本/function；现有其他后台工具仍可执行但本批不发布为历史。主参考固定 codex-proxy-rs 60570883007febebe732597a9881397098d724f5 的 NativeContinuationScope/NativeContinuationPin；参考无本项目 SQLite 原子发布机制，此部分在既有 store 内原生实现。托管账号、conversation、收费、池化与其他结果类型继续单列。
+
+### P4-A1 具体变更请求：标准 Codex HTTP 与缓存搜索声明
+
+2026-10-21 按当前任务同类契约调整直接实施的授权登记。固定官方 Codex 0.163.0 的必要自定义 Provider 配置探测只请求 POST /v1/responses，不请求模型目录；默认包含 external_web_access=false 的 web_search。此批验证该实际路径，不从目录缺失推导默认客户端不可用。
+
+- **层级/目录：**L2 protocol/responses，L1 gateway 费用范围保护；tests/smoke 固定 CLI 真实消费者，现有 CI 组装。L0、模型目录和数据库不变。
+- **公开依赖：**沿用冻结 execution/v1、compat/responses/v1 签名和现有纯编解码；仅扩展 HTTP Body 的明确子集，不新增冻结声明、通用工具平台或未消费端口。
+- **地基影响：**顶层 web_search 仅接受显式 external_web_access=false、可选 text/image search_content_types；原始未知输出元数据、annotations 和事件保留。完整 web_search_call 可作为自包含下一轮输入，不能把 bare ID 变成远端读取；搜索进度不冒充首有效输出，终态/断流规则保持。namespace 与客户端 tool_search 加载不获得 hosted 工具许可。
+- **契约/迁移/回退：**仅原生 HTTP、静态 Key、disabled、显式 store=false；收费模式在任何上游发送前拒绝本批搜索能力。后台、WS、持久历史、托管账号和跨协议继续拒绝；不支持 live/preview 搜索、compact 或全默认模型保证。无配置或 schema 迁移，旧版本可继续拒绝新增请求，回退不改写历史与账本。
+- **测试/验收：**固定 CLI 标准配置下别名与内置模型的文本/function 轮次，不使用本地目录或关闭能力开关；协议声明/搜索结果重发、JSON/SSE/annotations/部分 usage/失败与截断，legacy/strict 零发送，后台/WS/加载工具拒绝回归。集中验证后完成精确头 CI 与合并，真实 Provider 继续按用户指示跳过。
+- **其他模块影响与来源：**主参考固定 codex-proxy-rs 60570883007febebe732597a9881397098d724f5 的 providers/openai/src/transport/request.rs::encode_generate_request 原生包络保留，以及 gateway-api/src/openai/responses/validation.rs 的 OutputItemIdentity/StreamState；在 TXAPI 现有 codec、费用 owner 和同步流生命周期内原生实现，保留来源与 Apache-2.0 许可。标准列表和已有特定目录回归继续保留，长会话 compact 另立切片。
 
 ### P0：核心转发保真、稳定性与性能
 
@@ -381,6 +392,23 @@ Regression files are `internal/protocol/chat_sse_test.go`,
 `internal/protocol/sse_estimation_test.go` and
 `internal/gateway/p0_sse_socket_test.go`. This notice does not expand protocol,
 strict-billing or real-Provider acceptance.
+
+#### P4-A1 Standard Codex HTTP Cached Search
+
+Primary mechanism reference: zyycn/codex-proxy-rs at fixed revision
+60570883007febebe732597a9881397098d724f5,
+`backend/crates/providers/openai/src/transport/request.rs::encode_generate_request`
+and `backend/crates/gateway-api/src/openai/responses/validation.rs`
+(`OutputItemIdentity`, `StreamState`, `validate_terminal_response`).
+TXAPI independently adapts native-body preservation and known hosted-item
+validation in `internal/protocol/responses/web_search.go` and the existing
+request/decoder path. Search is performed by the upstream. The existing gateway
+owner rejects unpriced hosted search in charged modes before admission. This
+limited HTTP/static-key/disabled/store=false capability does not expand WS,
+background, persistence, managed-account or live-search support. No reference
+function is copied or translated, and no new-api implementation is copied.
+The primary reference is Apache-2.0, has no root NOTICE, and the complete license
+copy below is retained. Fixed CLI smoke uses only disposable loopback fixtures.
 
 #### P6-B Native Background History Publication
 

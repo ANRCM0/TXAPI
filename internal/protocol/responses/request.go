@@ -31,6 +31,10 @@ func (r Request) MaxOutputTokens() int {
 // ValidateHTTP bounds the synchronous, stateless native surface. Unknown
 // extension fields remain intact; recognized hosted capabilities fail closed.
 func (r Request) ValidateHTTP() error {
+	return r.validateHTTP(true)
+}
+
+func (r Request) validateHTTP(allowWebSearch bool) error {
 	if r.Background || r.PreviousResponseID != "" || present(r.Conversation) {
 		return errors.New("Responses background and stored conversation continuation are not supported")
 	}
@@ -52,9 +56,13 @@ func (r Request) ValidateHTTP() error {
 		}
 	}
 	if raw := r.fields["tools"]; present(raw) {
-		if err := validateTools(raw); err != nil {
+		if err := validateToolsWithWebSearch(raw, allowWebSearch); err != nil {
 			return err
 		}
+	}
+	webSearch := hasWebSearch(r.fields["tools"])
+	if webSearch && (!allowWebSearch || r.Store == nil || *r.Store) {
+		return errors.New("Responses web search requires explicit store=false")
 	}
 	if raw := r.fields["tool_choice"]; present(raw) {
 		var choice string
@@ -68,7 +76,14 @@ func (r Request) ValidateHTTP() error {
 				Name      string          `json:"name"`
 				Namespace json.RawMessage `json:"namespace"`
 			}
-			if json.Unmarshal(raw, &choice) != nil || choice.Type != "function" && choice.Type != "custom" || choice.Name == "" || choice.Type == "custom" && !toolName(choice.Name) {
+			if json.Unmarshal(raw, &choice) != nil {
+				return errors.New("unsupported Responses tool choice")
+			}
+			if choice.Type == "web_search" {
+				if !webSearch || validateWebSearchChoice(raw) != nil {
+					return errors.New("unsupported Responses web search choice")
+				}
+			} else if choice.Type != "function" && choice.Type != "custom" || choice.Name == "" || choice.Type == "custom" && !toolName(choice.Name) {
 				return errors.New("unsupported Responses tool choice")
 			}
 			if err := validateNamespace(choice.Namespace); err != nil {
@@ -103,6 +118,13 @@ func (r Request) ValidateHTTP() error {
 			return errors.New("invalid Responses input item")
 		}
 		switch item.Type {
+		case "web_search_call":
+			if !allowWebSearch || r.Store == nil || *r.Store {
+				return errors.New("Responses web search history requires explicit store=false")
+			}
+			if err := validateWebSearchCall(raw, true); err != nil {
+				return err
+			}
 		case "", "message":
 			if item.Role != "user" && item.Role != "assistant" && item.Role != "system" && item.Role != "developer" {
 				return errors.New("invalid Responses message role")

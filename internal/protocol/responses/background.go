@@ -45,7 +45,7 @@ func (BackgroundParser) ParseRequest(op execution.Operation, body []byte) (execu
 	}
 	check := r
 	check.Background = false
-	if e = check.ValidateHTTP(); e != nil {
+	if e = check.validateHTTP(false); e != nil {
 		return nil, e
 	}
 	return backgroundRequest{native: r, body: bytes.Clone(body)}, nil
