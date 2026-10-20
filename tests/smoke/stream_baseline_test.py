@@ -28,9 +28,9 @@ class StreamTLSFixtureTests(unittest.TestCase):
                        check=True, timeout=15)
 
     def test_verified_tls_streams_and_absolute_receive_deadline(self):
-        for operation in ("chat", "responses"):
-            with self.subTest(operation=operation):
-                fixture = Fixture(.005, operation)
+        for operation, nodelay in (("chat", False), ("responses", False), ("chat", True), ("responses", True)):
+            with self.subTest(operation=operation, tcp_nodelay=nodelay):
+                fixture = Fixture(.005, operation, nodelay)
                 fixture.tls_context, client = fixture_tls(self.certificates)
                 thread = threading.Thread(target=fixture.serve_forever, daemon=True)
                 thread.start()
@@ -53,6 +53,9 @@ class StreamTLSFixtureTests(unittest.TestCase):
                     self.assertEqual(normal["upstream_attempts"], 1)
                     self.assertEqual(normal["client_tls"]["alpn"], "http/1.1")
                     self.assertEqual(normal["upstream_transport"][0]["tls"], normal["client_tls"]["version"])
+                    self.assertEqual(normal["upstream_transport"][0]["tcp_nodelay"], int(nodelay))
+                    self.assertIs(normal["upstream_transport"][0]["tls_session_reused"], False)
+                    self.assertTrue(normal["upstream_transport"][0]["peer"].startswith("127.0.0.1:"))
                     self.assertGreater(normal["first_effective_text_ns"], normal["first_body_byte_ns"])
                     truncated = call(connection, UPSTREAM_KEY, fixture, 2, "truncated")
                     self.assertFalse(truncated["success"], truncated)
