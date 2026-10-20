@@ -62,7 +62,7 @@ def events(operation="chat", tag="0" * 32):
 class Fixture(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, delay, operation="chat"):
+    def __init__(self, delay, operation="chat", tcp_nodelay=False):
         super().__init__(("127.0.0.1", 0), FixtureHandler)
         self.delay = delay
         self.operation = operation
@@ -72,6 +72,7 @@ class Fixture(ThreadingHTTPServer):
         self.connections = 0
         self.release_held = threading.Event()
         self.tls_context = None
+        self.tcp_nodelay = tcp_nodelay
 
     def get_request(self):
         pair = super().get_request()
@@ -80,6 +81,7 @@ class Fixture(ThreadingHTTPServer):
         if self.tls_context is not None:
             connection, address = pair
             try:
+                connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, int(self.tcp_nodelay))
                 connection.settimeout(3)
                 connection = self.tls_context.wrap_socket(connection, server_side=True)
                 connection.settimeout(None)
@@ -120,7 +122,10 @@ class FixtureHandler(BaseHTTPRequestHandler):
         record = {"events": [], "finished": False, "error": None, "mode": mode,
                   "http": self.request_version,
                   "tls": self.connection.version() if isinstance(self.connection, ssl.SSLSocket) else None,
-                  "alpn": self.connection.selected_alpn_protocol() if isinstance(self.connection, ssl.SSLSocket) else None}
+                  "alpn": self.connection.selected_alpn_protocol() if isinstance(self.connection, ssl.SSLSocket) else None,
+                  "tcp_nodelay": self.connection.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY),
+                  "tls_session_reused": self.connection.session_reused if isinstance(self.connection, ssl.SSLSocket) else None,
+                  "peer": f"{self.client_address[0]}:{self.client_address[1]}"}
         with self.server.lock:
             self.server.records.setdefault(tag, []).append(record)
         path = "/v1/responses" if self.server.operation == "responses" else "/v1/chat/completions"
@@ -349,7 +354,7 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
                 and not attempts[0].get("cancel_wait_expired", False)
                 and attempts[0]["error"] is not None)
         sent = list(attempts[0]["events"]) if len(attempts) == 1 else []
-        sample["upstream_transport"] = [{key: attempt[key] for key in ("http", "tls", "alpn")} for attempt in attempts]
+        sample["upstream_transport"] = [{key: attempt[key] for key in ("http", "tls", "alpn", "tcp_nodelay", "tls_session_reused", "peer")} for attempt in attempts]
     sample["upstream_events"] = sent
     if sample["drain_failure"]:
         sample["success"], sample["failure"] = False, "drain_failure"
@@ -360,6 +365,7 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
         sample["success"], sample["failure"] = False, "attempt_count_mismatch"
     if sample["success"] and fixture.tls_context is not None and any(
             item["tls"] not in ("TLSv1.2", "TLSv1.3") or item["http"] != "HTTP/1.1" or item["alpn"] != "http/1.1"
+            or item["tcp_nodelay"] != int(fixture.tcp_nodelay)
             for item in sample["upstream_transport"]):
         sample["success"], sample["failure"] = False, "upstream_tls_mismatch"
     return sample
@@ -391,6 +397,8 @@ def summarize(samples):
             "completion_rate": len(successful) / len(samples) if samples else None, "failures": failures,
             "upstream_attempts": sum(s["upstream_attempts"] for s in samples),
             "observed_client_connections": len({s["client_local_port"] for s in samples if "client_local_port" in s}),
+            "observed_upstream_peers": len({a["peer"] for s in samples for a in s["upstream_transport"]}),
+            "upstream_requests_on_resumed_tls_session": sum(a["tls_session_reused"] is True for s in samples for a in s["upstream_transport"]),
             "successful_event_latency_ns": event_latency,
             "successful_latency_ns": {key: quantiles([s[key] for s in successful]) for key in
                                       ("headers_ns", "first_body_byte_ns", "first_effective_text_ns", "elapsed_ns")}}
@@ -411,14 +419,18 @@ def main():
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--operation", choices=("chat", "responses"), default="chat")
     parser.add_argument("--tls-upstream", action="store_true", help="Linux: verified ephemeral TLS upstream; gateway edge remains plaintext")
+    parser.add_argument("--connection-policy", choices=("persistent", "fresh"), default="persistent")
+    parser.add_argument("--fixture-tcp-nodelay", type=int, choices=(0, 1), default=0, help="TLS fixture accepted sockets only; never changes gateway transport")
     args = parser.parse_args()
     if not (1 <= args.samples <= 1000 and 0 <= args.warmup <= 20 and 1 <= args.event_delay_ms <= 100 and .2 <= args.deadline_seconds <= 30):
         parser.error("samples 1..1000, warmup 0..20, delay 1..100ms, deadline .2..30s")
     if args.tls_upstream and platform.system() != "Linux":
         parser.error("TLS production baseline requires Linux process-scoped SSL_CERT_FILE; no host trust changes")
+    if args.fixture_tcp_nodelay and not args.tls_upstream:
+        parser.error("fixture-tcp-nodelay requires the TLS upstream profile")
     clean = {k: v for k, v in os.environ.items() if not k.upper().startswith(("GATEWAY_", "TXAPI_"))}
     clean["GOARCH"] = "amd64"
-    fixture = Fixture(args.event_delay_ms / 1000, args.operation)
+    fixture = Fixture(args.event_delay_ms / 1000, args.operation, bool(args.fixture_tcp_nodelay))
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
     report = {"schema": 2, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
@@ -429,7 +441,10 @@ def main():
                               "go": subprocess.check_output([args.go, "version"], env=clean, text=True).strip(), "goarch": "amd64"},
               "configuration": {"samples": args.samples, "warmup": args.warmup, "event_delay_ms": args.event_delay_ms,
                                 "deadline_seconds": args.deadline_seconds, "http": "HTTP/1.1 loopback; verified TLS upstream, plaintext gateway edge" if args.tls_upstream else "HTTP/1.1 loopback plaintext", "concurrency": 1,
-                                "connection_policy": "persistent per target; close on failure", "billing": "disabled",
+                                "connection_policy": args.connection_policy,
+                                "connection_timing_scope": "connect included; previous close excluded; persistent sockets close on failure",
+                                "fixture_tcp_nodelay": args.fixture_tcp_nodelay if args.tls_upstream else "unchanged",
+                                "billing": "disabled",
                                 "tls_upstream": args.tls_upstream,
                                 "certificate_policy": "verified ephemeral CA and loopback IP; process-scoped SSL_CERT_FILE" if args.tls_upstream else None,
                                 "auth": "production API Key middleware", "request_logging": "production defaults",
@@ -486,6 +501,8 @@ def main():
                                "gateway": http.client.HTTPConnection("127.0.0.1", port)}
                 resources = None
                 def run(target, mode="normal", deadline=None, pair=None):
+                    if args.connection_policy == "fresh":
+                        connections[target].close()
                     result = call(connections[target], UPSTREAM_KEY if target == "direct" else CLIENT_KEY,
                                   fixture, deadline or args.deadline_seconds, mode)
                     result["target"] = target

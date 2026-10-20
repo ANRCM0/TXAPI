@@ -138,6 +138,19 @@ jobs:
             python3 -c "import json,pathlib,sys; r=json.loads(pathlib.Path(sys.argv[1]).read_text()); print(json.dumps({k:r[k] for k in ('source','environment','configuration','resources','summary','planned_measurement_requests','started_measurement_requests','paired_success_count','paired_success_differences_ns','fixture_active_requests_after_measurement','drain_failures')},sort_keys=True))" "$RUNNER_TEMP/tls-$operation-stream-baseline.json"
           done
 
+      - name: TLS 连接与 TCP 条件对照（正确性检查，性能仅报告）
+        timeout-minutes: 4
+        run: |
+          for operation in chat responses; do
+            for profile in fresh-0 persistent-1 fresh-1; do
+              policy="${profile%-*}"
+              nodelay="${profile##*-}"
+              report="$RUNNER_TEMP/tls-$operation-$profile-stream-baseline.json"
+              python3 tests/smoke/stream_baseline.py --operation "$operation" --tls-upstream --connection-policy "$policy" --fixture-tcp-nodelay "$nodelay" --self-check --samples 20 --output "$report"
+              python3 -c "import json,pathlib,sys; r=json.loads(pathlib.Path(sys.argv[1]).read_text()); print(json.dumps({k:r[k] for k in ('source','environment','configuration','resources','summary','planned_measurement_requests','started_measurement_requests','paired_success_count','paired_success_differences_ns','fixture_connections_opened_during_measurement','fixture_active_requests_after_measurement','drain_failures')},sort_keys=True))" "$report"
+            done
+          done
+
       - name: 有界并发承载与过载恢复（正确性检查，性能仅报告）
         timeout-minutes: 4
         run: |
