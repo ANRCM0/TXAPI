@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
+	execv2 "minigateway/internal/foundation/contracts/execution/v2"
+	execv3 "minigateway/internal/foundation/contracts/execution/v3"
 	execv4 "minigateway/internal/foundation/contracts/execution/v4"
 	"minigateway/internal/protocol/adaptor"
 	"minigateway/internal/protocol/adaptor/anthropic"
@@ -103,7 +105,11 @@ func NewDecoder(a adaptor.Adaptor, m *meta.Meta) execv1.Decoder {
 	if m != nil && m.Mode == meta.ModeEmbeddings {
 		return embeddingsDecoder{}
 	}
-	return &decoder{a: a, target: *m}
+	d := &decoder{a: a, target: *m}
+	if pa, ok := a.(adaptor.ProtocolAdaptor); ok && pa.Name() == "openai" {
+		return nativeChatDecoder{decoder: d}
+	}
+	return d
 }
 func (d *decoder) Decode(b []byte) ([]byte, *execv1.Usage, error) {
 	return ConvertResponseBody(d.a, b, &d.target)
@@ -121,15 +127,19 @@ func (d *decoder) NewStream() execv1.StreamDecoder {
 }
 
 type streamDecoder struct {
-	decoder   *decoder
-	session   adaptor.StreamSession
-	name      string
-	raw       bool
-	finish    bool
-	done      bool
-	chat      chatSSEEvent
-	converted convertedSSEEvent
-	progress  execv4.Progress
+	decoder          *decoder
+	session          adaptor.StreamSession
+	name             string
+	raw              bool
+	finish           bool
+	done             bool
+	chat             chatSSEEvent
+	converted        convertedSSEEvent
+	progress         execv4.Progress
+	captureChatUsage bool
+	chatUsageChanged bool
+	chatUsage        *execv3.UsageObservation
+	chatBaseUsage    *execv2.UsageObservation
 }
 
 func (s *streamDecoder) Progress() execv4.Progress { return s.progress }

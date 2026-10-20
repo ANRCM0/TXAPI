@@ -43,7 +43,9 @@ def usage_history_workflow(gateway, work, env, service, ready, request):
                     state["posts"] += 1
                     assert state["posts"] <= 4, "unexpected upstream replay"
                 slow = body["messages"][0]["content"] == "block-after-first-chunk"
-                usage = {"prompt_tokens": 4, "completion_tokens": 1, "total_tokens": 5}
+                usage = {"prompt_tokens": 4, "completion_tokens": 1, "total_tokens": 5,
+                         "prompt_tokens_details": {"cached_tokens": 2},
+                         "completion_tokens_details": {"reasoning_tokens": 0}}
                 document = {"id": "chatcmpl-usage-smoke", "object": "chat.completion", "created": 1,
                             "model": "actual-history-model", "choices": [{"index": 0,
                             "message": {"role": "assistant", "content": "smoke-output"},
@@ -230,10 +232,9 @@ def usage_history_workflow(gateway, work, env, service, ready, request):
                          "cache_write_input_tokens", "reasoning_output_tokens")
                 assert all(name in quantities and (quantities[name] is None or
                            isinstance(quantities[name], str) and quantities[name].isdigit()) for name in names), quantities
-                if quantities["completeness"] == "unknown":
-                    assert all(quantities[name] is None for name in names), quantities
-                else:
-                    assert [quantities[name] for name in names[:3]] == ["4", "1", "5"], quantities
+                assert quantities["completeness"] == "complete" and quantities["source"] == "provider_reported", quantities
+                assert quantities["profile"] == "chat_native_tokens_v1", quantities
+                assert [quantities[name] for name in names] == ["4", "1", "5", "2", None, "0"], quantities
                 own = api("/api/me/usage-records/" + identifier, owner_session)["data"]
                 assert "quotation_version" not in own["record"]
                 assert not any(name in own["attempts"][0] for name in
@@ -288,5 +289,5 @@ def usage_history_workflow(gateway, work, env, service, ready, request):
         assert financial() == before
     result = {"kill_point": "after_first_sse_chunk_before_observe",
               "not_covered": ["accepted_before_dispatch", "returned_usage_before_terminal_write"]}
-    print("PASS: actual main usage JSON/SSE, session isolation, sealed restart, first-chunk kill/interrupted recovery without replay, disabled capture and unchanged financial state")
+    print("PASS: actual main Chat native JSON/SSE quantities/cache/zero reasoning, session isolation, sealed restart, first-chunk kill/interrupted recovery without replay, disabled capture and unchanged financial state")
     return result

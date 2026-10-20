@@ -16,6 +16,8 @@ import (
 	"minigateway/internal/core"
 	v1 "minigateway/internal/foundation/contracts/execution/v1"
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
+	"minigateway/internal/protocol"
+	"minigateway/internal/protocol/meta"
 )
 
 func TestFactsExecutorPreservesNativeDeliveryAndUsageCompleteness(t *testing.T) {
@@ -111,10 +113,17 @@ func TestFactsKeepProtocolTerminalWhenDownstreamWriteFails(t *testing.T) {
 	}
 }
 
+type legacyFactsOnlyDecoder struct{ v1.Decoder }
+
 func TestFactsDoNotInventProvenanceForLegacyDecoder(t *testing.T) {
-	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))}, nil
-	})}})
+	implementation, _ := protocol.Resolve("openai")
+	// Native Chat now opts into v3. Keep exercising a genuine v1-only port
+	// instead of treating every OpenAI decoder as an implicit legacy codec.
+	legacy := legacyFactsOnlyDecoder{protocol.NewDecoder(implementation, &meta.Meta{})}
+	g, err := newRegisteredGateway(Options{Channels: lifecycleChannels("http://upstream.test"),
+		Protocols: []v1.ProtocolRegistration{{ID: "openai", Version: v1.Version, Adapter: factAdapter{legacy}}}, Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))}, nil
+		})}})
 	if err != nil {
 		t.Fatal(err)
 	}

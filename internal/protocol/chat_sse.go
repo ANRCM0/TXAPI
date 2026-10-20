@@ -86,6 +86,15 @@ func (s *streamDecoder) dispatchChatEvent() ([]execv1.Frame, error) {
 		e.terminal = raw // End releases the actual terminal only after finish validation.
 		return []execv1.Frame{{Complete: true}}, nil
 	}
+	if s.captureChatUsage {
+		base, usage, present, err := nativeChatUsage(data)
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			s.chatBaseUsage, s.chatUsage, s.chatUsageChanged = base, usage, true
+		}
+	}
 	var envelope struct {
 		Error   *json.RawMessage `json:"error"`
 		Type    string           `json:"type"`

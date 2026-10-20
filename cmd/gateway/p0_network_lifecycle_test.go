@@ -46,6 +46,34 @@ type p0NetworkAttempt struct {
 	proto  atomic.Int64
 }
 
+type p0NetworkWriteListener struct {
+	net.Listener
+	started, finished atomic.Int64
+}
+
+func (l *p0NetworkWriteListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	if err := c.(*net.TCPConn).SetWriteBuffer(1024); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return p0NetworkWriteConn{Conn: c, listener: l}, nil
+}
+
+type p0NetworkWriteConn struct {
+	net.Conn
+	listener *p0NetworkWriteListener
+}
+
+func (c p0NetworkWriteConn) Write(p []byte) (int, error) {
+	c.listener.started.Add(1)
+	defer c.listener.finished.Add(1)
+	return c.Conn.Write(p)
+}
+
 type p0NetworkFixture struct {
 	upstream, gateway, proxy *httptest.Server
 	client                   *http.Client
@@ -55,6 +83,7 @@ type p0NetworkFixture struct {
 	attempts                 map[string]*p0NetworkAttempt
 	stop                     chan struct{}
 	gatewayH2, proxyH2       atomic.Int64
+	proxyWrites              *p0NetworkWriteListener
 }
 
 func p0NetworkWait(t *testing.T, why string, condition func() bool) {
@@ -208,12 +237,20 @@ func newP0NetworkFixture(t *testing.T, total time.Duration, keySlots int) *p0Net
 	proxy.Transport = f.gateway.Client().Transport
 	proxy.FlushInterval = -1
 	proxy.ErrorLog = log.New(io.Discard, "", 0)
-	f.proxy = p0NetworkTLS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	f.proxy = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 {
 			f.proxyH2.Add(1)
 		}
 		proxy.ServeHTTP(w, r)
 	}))
+	// Bound the last hop's actual socket send buffer. Checking its in-flight
+	// Write proves pressure without requiring all intermediate H2 windows to
+	// fill faster than instrumented JSON validation under -race.
+	f.proxyWrites = &p0NetworkWriteListener{Listener: f.proxy.Listener}
+	f.proxy.Listener = f.proxyWrites
+	f.proxy.EnableHTTP2 = true
+	f.proxy.Config.ErrorLog = log.New(io.Discard, "", 0)
+	f.proxy.StartTLS()
 	t.Cleanup(f.proxy.Close)
 	f.client = f.proxy.Client()
 	f.client.Timeout = 12 * time.Second
@@ -333,19 +370,19 @@ func TestP0NetworkSlowSocketTotalDeadlineDrains(t *testing.T) {
 					}
 				}()
 			}
-			// Observe an actual stalled upstream write while the socket remains
-			// open and the gateway has not reached its deadline. No in-memory sink.
+			// Observe a blocked real TCP write below TLS while the upstream is
+			// active. Decode throughput is not a proxy for socket backpressure.
 			stalled := false
 			for deadline := time.Now().Add(1800 * time.Millisecond); time.Now().Before(deadline); {
-				before := a.writes.Load()
+				started, finished := f.proxyWrites.started.Load(), f.proxyWrites.finished.Load()
 				time.Sleep(100 * time.Millisecond)
-				if before > 4 && before == a.writes.Load() && a.active.Load() == 1 {
+				if started > finished && started == f.proxyWrites.started.Load() && finished == f.proxyWrites.finished.Load() && a.active.Load() == 1 {
 					stalled = true
 					break
 				}
 			}
 			if !stalled {
-				t.Fatal("socket did not demonstrate backpressure before deadline")
+				t.Fatalf("socket did not demonstrate backpressure before deadline: writes=%d active=%d socket=%d/%d", a.writes.Load(), a.active.Load(), f.proxyWrites.started.Load(), f.proxyWrites.finished.Load())
 			}
 			f.drained(t, id)
 			if a.writes.Load() >= 1024 {

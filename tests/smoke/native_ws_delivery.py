@@ -479,19 +479,28 @@ def exercise(installation, sdk_image=None, codex_image=None, codex=None):
     records = i.usage(session, count)
     chat = [row for row in records if row["operation"] == "chat"]
     assert len(chat) == 23 and all(row["state"] == "sealed" for row in chat), chat
-    baseline_receipts = 0
+    baseline_receipts, original_complete, original_unknown = 0, 0, 0
     for row in chat:
         detail = i.api("/api/me/usage-records/" + row["id"], session)["data"]
         assert len(detail["attempts"]) == 1 and detail["attempts"][0]["may_dispatch"], detail
         usage = detail["attempts"][0]["usage"]
+        names = ("input_tokens", "output_tokens", "total_tokens", "cached_input_tokens",
+                 "cache_write_input_tokens", "reasoning_output_tokens")
         if row["id"] in baseline_ids:
-            # Legacy Chat does not implement v3 detailed-usage facts. Native
-            # 2/8/10 is checked on the wire; persisted unknown stays unknown.
-            assert usage["completeness"] == usage["source"] == "unknown", usage
-            assert all(usage[name] is None for name in ("input_tokens", "output_tokens", "total_tokens",
-                        "cached_input_tokens", "cache_write_input_tokens", "reasoning_output_tokens")), usage
+            assert usage["completeness"] == "complete" and usage["source"] == "provider_reported", usage
+            assert usage["profile"] == "chat_native_tokens_v1", usage
+            assert [usage[name] for name in names] == ["2", "8", "10", None, None, None], usage
             baseline_receipts += 1
+        elif usage["completeness"] == "complete":
+            assert usage["source"] == "provider_reported" and usage["profile"] == "chat_native_tokens_v1", usage
+            assert [usage[name] for name in names] == ["2", "1", "3", None, None, None], usage
+            original_complete += 1
+        else:
+            assert usage["completeness"] == usage["source"] == "unknown" and usage["profile"] == "", usage
+            assert all(usage[name] is None for name in names), usage
+            original_unknown += 1
     assert baseline_receipts == 20, baseline_receipts
+    assert (original_complete, original_unknown) == (2, 1), (original_complete, original_unknown)
     i.final_snapshot(unknowns, count, history_count)
 
 
