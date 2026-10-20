@@ -346,6 +346,8 @@ TLS测量最终头的完整CI已成功并合并。Linux PR运行中Chat/Response
 
 本地受控验证：Windows GOARCH=amd64 的Chat/Responses × TCP_NODELAY=0/1四种TLS夹具组合通过证书、完整事件、截断与慢滴绝对截止检查，逐请求核对真实socket选项、TLS会话复用标记和peer。新增fresh客户端策略在两个生产main明文档案均完成直连3/3与网关3/3、每目标观察到3个客户端端口、每请求一次发送、上游活动归零且drain失败为0；这只是消费者回归，不是Linux TLS条件对照或性能预算通过。共享harness的既有capacity消费者也通过并发4×每worker2请求：直连/网关各8/8、4条协调取消、满额429未发送、全部4名额恢复。Python语法/差异检查通过。运行基于bcce1fc且harness未提交（dirty=true），stream摘要fe062f0518953776d31e1e498b26c4125a26957c6bfc7067209f69921932aba3；最终精确头完整CI与Linux TLS四条件结果另记。
 
+最终精确头 `0451712ca656b3a1e6234a7ff5ad22c66272892a` 的 push Verify `39369288522` 与 PR Verify `39369334805` 全部六项成功，PR #79已合并为 `189eaef53ccf058acd5cae2e7795a99983e69a1d`。两套Linux运行各含两操作×四条件，每条件直连20/20、网关20/20、20个成功配对且每请求一次发送，上游活动归零、drain失败为0。PR运行的配对首正文P95（Chat/Responses）为：persistent/NODELAY=0的42.3643/44.3820ms，fresh/0的1.4326/2.7738ms，persistent/1的2.5007/4.4698ms，fresh/1的1.5501/3.2844ms。两套运行中NODELAY=0的新连接直连也出现约40ms事件观察延迟；NODELAY=1的网关事件观察上界P95为0.1519..0.2455ms。每条件网关观察20个上游peer，直连persistent为1、fresh为20，TLS恢复会话请求数均0；这证明本夹具条件和连接画像影响比较，不提供纯网关开销或底层Nagle/ACK包级归因。push运行persistent/0的Chat首正文P95仍有135.0432ms长尾，fresh/1的Responses首正文/首有效文本P95为10.8820/10.7992ms，未隐去或宣布TLS性能整体通过。报告保留dirty=true、各自产物SHA和Linux原始字节摘要；完整数值及限制在PR记录，合并后CI独立跟踪，生产传输参数未改。
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。
