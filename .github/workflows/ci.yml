@@ -121,6 +121,12 @@ jobs:
           python3 tests/smoke/stream_baseline.py --self-check --samples 20 --output "$RUNNER_TEMP/stream-baseline.json"
           python3 -c "import json,os,pathlib; r=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'stream-baseline.json').read_text()); print(json.dumps({k:r[k] for k in ('source','environment','configuration','resources','paired_success_count','paired_success_differences_ns','fixture_active_requests_after_measurement','drain_failures')},sort_keys=True))"
 
+      - name: 原生 Responses 完整网关流基线（正确性检查，性能仅报告）
+        timeout-minutes: 4
+        run: |
+          python3 tests/smoke/stream_baseline.py --operation responses --self-check --samples 20 --output "$RUNNER_TEMP/responses-stream-baseline.json"
+          python3 -c "import json,os,pathlib; r=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'responses-stream-baseline.json').read_text()); print(json.dumps({k:r[k] for k in ('source','environment','configuration','resources','summary','planned_measurement_requests','started_measurement_requests','paired_success_count','paired_success_differences_ns','fixture_active_requests_after_measurement','drain_failures')},sort_keys=True))"
+
       - name: 有界并发承载与过载恢复（正确性检查，性能仅报告）
         timeout-minutes: 4
         run: |

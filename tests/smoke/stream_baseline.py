@@ -4,6 +4,7 @@ Only synthetic keys/configuration and disposable SQLite state are used. This is
 an observation baseline, not a performance acceptance gate or Provider test.
 """
 import argparse
+import base64
 import contextlib
 import hashlib
 import http.client
@@ -31,8 +32,24 @@ def clock():
     return time.perf_counter_ns()
 
 
-def events():
+def events(operation="chat", tag="0" * 32):
     values = [b": heartbeat\n\n"]
+    if operation == "responses":
+        response = {"id": "resp_" + tag, "object": "response", "model": "baseline-model",
+                    "status": "in_progress", "output": [], "usage": None}
+        chunks = [{"type": "response.created", "sequence_number": 0, "response": response}]
+        chunks += [{"type": "response.output_text.delta", "sequence_number": index + 1,
+                    "item_id": "msg_" + tag, "output_index": 0, "content_index": 0, "delta": text}
+                   for index, text in enumerate(TEXT)]
+        chunks.append({"type": "response.output_text.done", "sequence_number": 9,
+                       "item_id": "msg_" + tag, "output_index": 0, "content_index": 0, "text": "".join(TEXT)})
+        completed = dict(response, status="completed", output=[{
+            "id": "msg_" + tag, "type": "message", "role": "assistant", "status": "completed",
+            "content": [{"type": "output_text", "text": "".join(TEXT), "annotations": []}]}],
+            usage={"input_tokens": 11, "output_tokens": 7, "total_tokens": 18})
+        chunks.append({"type": "response.completed", "sequence_number": 10, "response": completed})
+        return values + [("event: " + c["type"] + "\ndata: " +
+                          json.dumps(c, ensure_ascii=False, separators=(",", ":")) + "\n\n").encode() for c in chunks]
     chunks = [{"choices": [{"delta": {"role": "assistant"}}]}]
     chunks += [{"choices": [{"delta": {"content": text}}]} for text in TEXT]
     chunks += [{"choices": [{"delta": {}, "finish_reason": "stop"}]},
@@ -44,9 +61,10 @@ def events():
 class Fixture(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, delay):
+    def __init__(self, delay, operation="chat"):
         super().__init__(("127.0.0.1", 0), FixtureHandler)
         self.delay = delay
+        self.operation = operation
         self.records = {}
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -74,11 +92,13 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
-        tag, mode = payload["messages"][0]["content"].split(":", 1)
+        text = payload["input"] if self.server.operation == "responses" else payload["messages"][0]["content"]
+        tag, mode = text.split(":", 1)
         record = {"events": [], "finished": False, "error": None, "mode": mode}
         with self.server.lock:
             self.server.records.setdefault(tag, []).append(record)
-        if self.path != "/v1/chat/completions" or self.headers.get("Authorization") != "Bearer " + UPSTREAM_KEY:
+        path = "/v1/responses" if self.server.operation == "responses" else "/v1/chat/completions"
+        if self.path != path or self.headers.get("Authorization") != "Bearer " + UPSTREAM_KEY:
             self.send_error(401)
             return
         if mode == "hold" and not self.server.release_held.wait(5):
@@ -90,7 +110,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
         try:
-            for index, event in enumerate(events()):
+            wire_events = events(self.server.operation, tag)
+            for index, event in enumerate(wire_events):
                 if mode == "truncated" and index == 5:
                     break
                 start = clock()
@@ -120,7 +141,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
                         self.wfile.write(b"10\r\n: cancel-probe\n\n\r\n")
                         self.wfile.flush()
                     return
-                if index < len(events()) - 1 and self.server.stop_event.wait(self.server.delay):
+                if index < len(wire_events) - 1 and self.server.stop_event.wait(self.server.delay):
                     break
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
@@ -136,8 +157,10 @@ class ClientCanceled(Exception):
 
 def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barrier=None):
     tag = uuid.uuid4().hex
+    native = fixture.operation == "responses"
     payload = json.dumps({"model": "baseline-model", "stream": True,
-                          "messages": [{"role": "user", "content": tag + ":" + mode}]})
+                          **({"input": tag + ":" + mode, "store": False} if native else
+                             {"messages": [{"role": "user", "content": tag + ":" + mode}]})})
     started = clock()
     deadline = started + int(deadline_seconds * 1e9)
     sample = {"fixture_id": tag, "mode": mode, "success": False, "failure": None,
@@ -148,6 +171,8 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
     watcher_stop = threading.Event()
     deadline_expired = threading.Event()
     text, finish, usage, done = [], False, None, 0
+    native_created, native_text_done = 0, 0
+    native_response_id = None
     buffer = b""
     try:
         connection.timeout = deadline_seconds
@@ -166,7 +191,7 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
                 request_socket.close()
         watcher = threading.Thread(target=expire_request, daemon=True)
         watcher.start()
-        connection.request("POST", "/v1/chat/completions", payload,
+        connection.request("POST", "/v1/responses" if native else "/v1/chat/completions", payload,
                            {"Authorization": "Bearer " + key, "Content-Type": "application/json"})
         if connection.sock is not None:
             sample["client_local_port"] = connection.sock.getsockname()[1]
@@ -205,8 +230,34 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
                     done += 1
                     continue
                 chunk = json.loads(data)
-                for choice in chunk.get("choices", []):
-                    delta = choice.get("delta", {}).get("content", "")
+                if native:
+                    typ = chunk.get("type")
+                    if typ == "response.created":
+                        document = chunk["response"]
+                        if document["status"] != "in_progress" or document["model"] != "baseline-model" or not document["id"].startswith("resp_"):
+                            raise ValueError("invalid_created_response")
+                        native_created += 1
+                        native_response_id = document["id"]
+                    elif typ == "response.output_text.done":
+                        if chunk["text"] != "".join(TEXT):
+                            raise ValueError("invalid_done_text")
+                        native_text_done += 1
+                    elif typ == "response.completed":
+                        document = chunk["response"]
+                        if document["status"] != "completed" or document["model"] != "baseline-model" or document["id"] != native_response_id or document["output"][0]["content"][0]["text"] != "".join(TEXT):
+                            raise ValueError("invalid_terminal_response")
+                        finish, usage = True, document["usage"]
+                        done += 1
+                    elif typ != "response.output_text.delta":
+                        raise ValueError("unexpected_responses_event")
+                    deltas = [chunk.get("delta", "")] if typ == "response.output_text.delta" else []
+                else:
+                    deltas = [choice.get("delta", {}).get("content", "") for choice in chunk.get("choices", [])]
+                    if any(choice.get("finish_reason") == "stop" for choice in chunk.get("choices", [])):
+                        finish = True
+                    if "usage" in chunk:
+                        usage = chunk["usage"]
+                for delta in deltas:
                     if delta:
                         if sample["first_effective_text_ns"] is None:
                             sample["first_effective_text_ns"] = received - started
@@ -221,13 +272,10 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
                             request_socket.close()
                             connection.close()
                             raise ClientCanceled()
-                    if choice.get("finish_reason") == "stop":
-                        finish = True
-                if "usage" in chunk:
-                    usage = chunk["usage"]
-        if buffer or text != TEXT or not finish or done != 1 or usage != {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}:
+        expected_usage = {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18} if native else {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+        if buffer or text != TEXT or not finish or done != 1 or usage != expected_usage or native and (native_created != 1 or native_text_done != 1):
             raise ValueError("protocol_incomplete_or_content_mismatch")
-        if len(sample["events"]) != len(events()):
+        if len(sample["events"]) != len(events(fixture.operation)):
             raise ValueError("event_count_mismatch")
         sample["success"] = True
     except ClientCanceled:
@@ -235,7 +283,7 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
     except threading.BrokenBarrierError:
         sample["failure"] = "cancel_barrier"
         connection.close()
-    except (OSError, ValueError, http.client.HTTPException) as error:
+    except (OSError, ValueError, KeyError, TypeError, IndexError, http.client.HTTPException) as error:
         sample["failure"] = "timeout" if isinstance(error, (TimeoutError, socket.timeout)) else str(error)[:160]
         connection.close()
     finally:
@@ -328,12 +376,13 @@ def main():
     parser.add_argument("--event-delay-ms", type=int, default=5)
     parser.add_argument("--deadline-seconds", type=float, default=3)
     parser.add_argument("--self-check", action="store_true")
+    parser.add_argument("--operation", choices=("chat", "responses"), default="chat")
     args = parser.parse_args()
     if not (1 <= args.samples <= 1000 and 0 <= args.warmup <= 20 and 1 <= args.event_delay_ms <= 100 and .2 <= args.deadline_seconds <= 30):
         parser.error("samples 1..1000, warmup 0..20, delay 1..100ms, deadline .2..30s")
     clean = {k: v for k, v in os.environ.items() if not k.upper().startswith(("GATEWAY_", "TXAPI_"))}
     clean["GOARCH"] = "amd64"
-    fixture = Fixture(args.event_delay_ms / 1000)
+    fixture = Fixture(args.event_delay_ms / 1000, args.operation)
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
     report = {"schema": 2, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
@@ -345,7 +394,8 @@ def main():
                                 "deadline_seconds": args.deadline_seconds, "http": "HTTP/1.1 loopback plaintext", "concurrency": 1,
                                 "connection_policy": "persistent per target; close on failure", "billing": "disabled",
                                 "auth": "production API Key middleware", "request_logging": "production defaults",
-                                "fixture_events": len(events()), "fixture_payload_bytes": sum(map(len, events())),
+                                "operation": args.operation, "responses_store": False if args.operation == "responses" else None,
+                                "fixture_events": len(events(args.operation)), "fixture_payload_bytes": sum(map(len, events(args.operation))),
                                 "resource_scope": RESOURCE_SCOPE + "; serial phase combines direct/gateway and retains idle HTTP connections",
                                 "event_latency_scope": "complete-event observation latency includes client scheduling and reading waits; lower/upper bounds use upstream write/flush interval"},
               "samples": [], "self_check": [], "drain_failures": []}
@@ -362,6 +412,19 @@ def main():
                       "channels": [{"name": "baseline", "type": "openai", "base_url": f"http://127.0.0.1:{fixture.server_port}",
                                     "key": UPSTREAM_KEY, "models": ["baseline-model"]}],
                       "tokens": [{"name": "baseline", "key": CLIENT_KEY, "models": ["baseline-model"]}]}
+            if args.operation == "responses":
+                content_keys = work / "content-keys.json"
+                content_keys.write_text(json.dumps({"active_key": "fixture", "keys": {
+                    "fixture": base64.b64encode(os.urandom(32)).decode()},
+                    "digest_key": base64.b64encode(os.urandom(32)).decode()}), encoding="utf-8")
+                content_keys.chmod(0o600)
+                config["responses"] = {"enabled": True, "keys_file": str(content_keys)}
+                credential_keys = work / "credential-keys.json"
+                credential_keys.write_text(json.dumps({"active_key": "fixture", "keys": {
+                    "fixture": base64.b64encode(os.urandom(32)).decode()},
+                    "digest_key": base64.b64encode(os.urandom(32)).decode()}), encoding="utf-8")
+                credential_keys.chmod(0o600)
+                config["database"]["credential_keys_file"] = str(credential_keys)
             config_path = work / "config.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")
             command = [str(binary), "-config", str(config_path)]
@@ -445,6 +508,10 @@ def main():
                         connection.close()
     except Exception as error:
         report["fatal_error"] = type(error).__name__ + ": " + str(error)[:500]
+        report["error_chain"] = []
+        while error is not None and len(report["error_chain"]) < 4:
+            report["error_chain"].append({"type": type(error).__name__, "message": str(error)[:500]})
+            error = error.__cause__ or error.__context__
     finally:
         fixture.stop_event.set()
         fixture.shutdown()
@@ -460,10 +527,13 @@ def main():
     report["paired_success_differences_ns"] = {key: quantiles([s[key] for s in paired]) for key in
                                              ("headers_ns", "first_body_byte_ns", "first_effective_text_ns", "elapsed_ns")}
     report["paired_success_count"] = len(paired)
+    report["planned_measurement_requests"] = 2 * args.samples
+    report["started_measurement_requests"] = len(report["samples"])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"output": str(args.output.resolve()), "summary": report["summary"], "self_check_targets": len(report["self_check"])}, ensure_ascii=False))
-    if report.get("fatal_error") or report["drain_failures"] or any(not sample["success"] for sample in report["samples"]):
+    if (report.get("fatal_error") or report["drain_failures"] or len(report["samples"]) != 2 * args.samples
+            or len(paired) != args.samples or any(not sample["success"] for sample in report["samples"])):
         raise SystemExit(1)
 
 
