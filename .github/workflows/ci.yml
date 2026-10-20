@@ -227,6 +227,7 @@ jobs:
           cache: true
       - name: 容量预算与容器采样判定回归
         run: |
+          python3 tests/smoke/capacity_baseline_test.py
           python3 tests/smoke/capacity_curve_test.py
           python3 tests/smoke/docker_resources_test.py
       - name: Chat 与 Responses 分档容量、取消与全槽位恢复

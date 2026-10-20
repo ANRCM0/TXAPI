@@ -50,6 +50,7 @@ delivery:
 # Linux Docker only. P0_OUTPUT must name a new report directory.
 P0_OUTPUT ?= .local/p0-linux
 p0-linux:
+	$(PYTHON) tests/smoke/capacity_baseline_test.py
 	$(PYTHON) tests/smoke/capacity_curve_test.py
 	$(PYTHON) tests/smoke/docker_resources_test.py
 	$(PYTHON) tests/smoke/capacity_curve.py --go "$(GO)" --levels 1,4,8,16 --sustain-seconds 60 --output "$(P0_OUTPUT)/capacity-curve.json"

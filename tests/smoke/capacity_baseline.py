@@ -23,6 +23,19 @@ from stream_baseline import (CLIENT_KEY, UPSTREAM_KEY, Fixture, call,
 from local import ROOT, ports, ready, service
 from process_resources import RESOURCE_SCOPE, Resources, resource
 
+SUSTAINED_REQUEST_CAP = 32768
+RECOVERY_PROBE_CAP = 201
+
+
+def responses_limits(workers, requests, rounds, sustained):
+    # Each phase can create cancellation/holder/rejection/probe receipts before
+    # gateway admission. Retain all of them for this disposable test process.
+    phases = rounds + bool(sustained)
+    records = workers * requests * rounds + phases * (3 * workers + 1 + RECOVERY_PROBE_CAP)
+    records += SUSTAINED_REQUEST_CAP if sustained else 0
+    return {"owner_records": records, "instance_records": records + 1,
+            "owner_requests": workers + 1, "active_requests": workers + 2}
+
 
 class CapacityFixture(Fixture):
     # Keep the test server's listen backlog from being the 1..16 client limit.
@@ -83,7 +96,7 @@ def wave(target, port, fixture, workers, requests, deadline):
 def sustained_wave(port, fixture, workers, seconds, deadline, pid, results):
     start = threading.Barrier(workers + 1, timeout=5)
     lock, stop = threading.Lock(), threading.Event()
-    result = {"requested_seconds": seconds, "request_cap": 32768, "started": 0,
+    result = {"requested_seconds": seconds, "request_cap": SUSTAINED_REQUEST_CAP, "started": 0,
               "samples": [], "worker_errors": [], "checkpoints": []}
     results.append(result)
     started = clock()
@@ -262,7 +275,7 @@ def overload(fixture, port, limit, deadline, results):
         if probe["success"]:
             break
         if (probe["http_status"] != 429 or probe["upstream_attempts"] != 0
-                or time.monotonic() >= until):
+                or time.monotonic() >= until or len(result["recovery_probes"]) >= RECOVERY_PROBE_CAP):
             raise RuntimeError("capacity did not recover after releasing holders")
         time.sleep(.01)
     result["post_drain_probe_latency_ns"] = clock() - started
@@ -359,10 +372,14 @@ def main():
                         "digest_key": base64.b64encode(os.urandom(32)).decode()}), encoding="utf-8")
                     keys.chmod(0o600)
                     if name == "content":
-                        config["responses"] = {"enabled": True, "keys_file": str(keys)}
+                        config["responses"] = {"enabled": True, "keys_file": str(keys),
+                            **responses_limits(args.workers, args.requests_per_worker, args.rounds, args.sustain_seconds)}
                     else:
                         config["database"]["credential_keys_file"] = str(keys)
             report["configuration"]["capacity"] = config["server"]["concurrency"]
+            if args.operation == "responses":
+                report["configuration"]["responses_capacity"] = {
+                    k: v for k, v in config["responses"].items() if k not in ("enabled", "keys_file")}
             path = work / "config.json"
             path.write_text(json.dumps(config), encoding="utf-8")
             command = [str(binary), "-config", str(path)]
