@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import platform
 import socket
+import ssl
 import subprocess
 import threading
 import time
@@ -70,12 +71,34 @@ class Fixture(ThreadingHTTPServer):
         self.stop_event = threading.Event()
         self.connections = 0
         self.release_held = threading.Event()
+        self.tls_context = None
 
     def get_request(self):
         pair = super().get_request()
         with self.lock:
             self.connections += 1
+        if self.tls_context is not None:
+            connection, address = pair
+            try:
+                connection.settimeout(3)
+                connection = self.tls_context.wrap_socket(connection, server_side=True)
+                connection.settimeout(None)
+            except BaseException:
+                connection.close()
+                raise
+            pair = connection, address
         return pair
+
+
+def fixture_tls(directory):
+    server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server.minimum_version = ssl.TLSVersion.TLSv1_2
+    server.set_alpn_protocols(["http/1.1"])
+    server.load_cert_chain(directory / "server.pem", directory / "server-key.pem")
+    client = ssl.create_default_context(cafile=str(directory / "ca.pem"))
+    client.minimum_version = ssl.TLSVersion.TLSv1_2
+    client.set_alpn_protocols(["http/1.1"])
+    return server, client
 
 
 class FixtureHandler(BaseHTTPRequestHandler):
@@ -94,7 +117,10 @@ class FixtureHandler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         text = payload["input"] if self.server.operation == "responses" else payload["messages"][0]["content"]
         tag, mode = text.split(":", 1)
-        record = {"events": [], "finished": False, "error": None, "mode": mode}
+        record = {"events": [], "finished": False, "error": None, "mode": mode,
+                  "http": self.request_version,
+                  "tls": self.connection.version() if isinstance(self.connection, ssl.SSLSocket) else None,
+                  "alpn": self.connection.selected_alpn_protocol() if isinstance(self.connection, ssl.SSLSocket) else None}
         with self.server.lock:
             self.server.records.setdefault(tag, []).append(record)
         path = "/v1/responses" if self.server.operation == "responses" else "/v1/chat/completions"
@@ -183,6 +209,8 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
         # Capture this exact socket, never the reusable connection object.
         # shutdown interrupts recv even if HTTPResponse retains a socket file.
         request_socket = connection.sock
+        if isinstance(request_socket, ssl.SSLSocket):
+            sample["client_tls"] = {"version": request_socket.version(), "alpn": request_socket.selected_alpn_protocol()}
         def expire_request():
             if not watcher_stop.wait(max(0, (deadline - clock()) / 1e9)):
                 deadline_expired.set()
@@ -321,6 +349,7 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
                 and not attempts[0].get("cancel_wait_expired", False)
                 and attempts[0]["error"] is not None)
         sent = list(attempts[0]["events"]) if len(attempts) == 1 else []
+        sample["upstream_transport"] = [{key: attempt[key] for key in ("http", "tls", "alpn")} for attempt in attempts]
     sample["upstream_events"] = sent
     if sample["drain_failure"]:
         sample["success"], sample["failure"] = False, "drain_failure"
@@ -329,6 +358,10 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
         event["latency_upper_ns"] = event["received_ns"] - upstream["write_start_ns"]
     if sample["success"] and sample["upstream_attempts"] != 1:
         sample["success"], sample["failure"] = False, "attempt_count_mismatch"
+    if sample["success"] and fixture.tls_context is not None and any(
+            item["tls"] not in ("TLSv1.2", "TLSv1.3") or item["http"] != "HTTP/1.1" or item["alpn"] != "http/1.1"
+            for item in sample["upstream_transport"]):
+        sample["success"], sample["failure"] = False, "upstream_tls_mismatch"
     return sample
 
 
@@ -377,9 +410,12 @@ def main():
     parser.add_argument("--deadline-seconds", type=float, default=3)
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--operation", choices=("chat", "responses"), default="chat")
+    parser.add_argument("--tls-upstream", action="store_true", help="Linux: verified ephemeral TLS upstream; gateway edge remains plaintext")
     args = parser.parse_args()
     if not (1 <= args.samples <= 1000 and 0 <= args.warmup <= 20 and 1 <= args.event_delay_ms <= 100 and .2 <= args.deadline_seconds <= 30):
         parser.error("samples 1..1000, warmup 0..20, delay 1..100ms, deadline .2..30s")
+    if args.tls_upstream and platform.system() != "Linux":
+        parser.error("TLS production baseline requires Linux process-scoped SSL_CERT_FILE; no host trust changes")
     clean = {k: v for k, v in os.environ.items() if not k.upper().startswith(("GATEWAY_", "TXAPI_"))}
     clean["GOARCH"] = "amd64"
     fixture = Fixture(args.event_delay_ms / 1000, args.operation)
@@ -387,12 +423,15 @@ def main():
     thread.start()
     report = {"schema": 2, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
                                      "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                                     "tls_fixture_harness_sha256": hashlib.sha256((ROOT / "tests/upstream/nativews/main.go").read_bytes()).hexdigest() if args.tls_upstream else None,
                                      "resources_harness_sha256": hashlib.sha256((ROOT / "tests/smoke/process_resources.py").read_bytes()).hexdigest()},
               "environment": {"platform": platform.platform(), "python": platform.python_version(), "logical_cpus": os.cpu_count(),
                               "go": subprocess.check_output([args.go, "version"], env=clean, text=True).strip(), "goarch": "amd64"},
               "configuration": {"samples": args.samples, "warmup": args.warmup, "event_delay_ms": args.event_delay_ms,
-                                "deadline_seconds": args.deadline_seconds, "http": "HTTP/1.1 loopback plaintext", "concurrency": 1,
+                                "deadline_seconds": args.deadline_seconds, "http": "HTTP/1.1 loopback; verified TLS upstream, plaintext gateway edge" if args.tls_upstream else "HTTP/1.1 loopback plaintext", "concurrency": 1,
                                 "connection_policy": "persistent per target; close on failure", "billing": "disabled",
+                                "tls_upstream": args.tls_upstream,
+                                "certificate_policy": "verified ephemeral CA and loopback IP; process-scoped SSL_CERT_FILE" if args.tls_upstream else None,
                                 "auth": "production API Key middleware", "request_logging": "production defaults",
                                 "operation": args.operation, "responses_store": False if args.operation == "responses" else None,
                                 "fixture_events": len(events(args.operation)), "fixture_payload_bytes": sum(map(len, events(args.operation))),
@@ -403,13 +442,21 @@ def main():
         import tempfile
         with tempfile.TemporaryDirectory(prefix="txapi-stream-baseline-") as directory:
             work = Path(directory)
+            tls_client = None
+            if args.tls_upstream:
+                helper = work / "tls-fixture"
+                subprocess.run([args.go, "build", "-o", str(helper), "./tests/upstream/nativews"], cwd=ROOT, env=clean, check=True, timeout=120)
+                certificates = work / "certificates"
+                subprocess.run([str(helper), "-mode", "prepare", "-directory", str(certificates)], env=clean, check=True, timeout=15)
+                fixture.tls_context, tls_client = fixture_tls(certificates)
+                clean["SSL_CERT_FILE"] = str(certificates / "ca.pem")
             binary = work / ("gateway.exe" if os.name == "nt" else "gateway")
             subprocess.run([args.go, "build", "-o", str(binary), "./cmd/gateway"], cwd=ROOT, env=clean, check=True, timeout=240)
             port = ports()[0]
             config = {"server": {"addr": f"127.0.0.1:{port}", "retry_times": 0, "timeout_seconds": 5, "total_timeout_seconds": 5},
                       "admin_key": "sk-baseline-admin-only", "billing": {"mode": "disabled"},
                       "database": {"driver": "sqlite", "path": str(work / "gateway.db")},
-                      "channels": [{"name": "baseline", "type": "openai", "base_url": f"http://127.0.0.1:{fixture.server_port}",
+                      "channels": [{"name": "baseline", "type": "openai", "base_url": f"{'https' if args.tls_upstream else 'http'}://127.0.0.1:{fixture.server_port}",
                                     "key": UPSTREAM_KEY, "models": ["baseline-model"]}],
                       "tokens": [{"name": "baseline", "key": CLIENT_KEY, "models": ["baseline-model"]}]}
             if args.operation == "responses":
@@ -435,7 +482,7 @@ def main():
             with contextlib.ExitStack() as services:
                 process = services.enter_context(service(command, work / "gateway.log", clean))
                 ready(process, port)
-                connections = {"direct": http.client.HTTPConnection("127.0.0.1", fixture.server_port),
+                connections = {"direct": http.client.HTTPSConnection("127.0.0.1", fixture.server_port, context=tls_client) if args.tls_upstream else http.client.HTTPConnection("127.0.0.1", fixture.server_port),
                                "gateway": http.client.HTTPConnection("127.0.0.1", port)}
                 resources = None
                 def run(target, mode="normal", deadline=None, pair=None):
