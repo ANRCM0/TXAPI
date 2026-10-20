@@ -77,5 +77,12 @@ func (s *BackgroundService) openPayload(row bs.Record) (backgroundPayload, error
 	} else if !completeBackgroundTarget(*payload.Target) || !strings.HasPrefix(payload.ParentID, "resp_") || len(payload.ParentID) > 80 || payload.ParentVersion == 0 {
 		return backgroundPayload{}, bg.ErrUnavailable
 	}
+	if payload.PublishHistory {
+		var fields map[string]json.RawMessage
+		var store bool
+		if payload.Operation != execv1.Responses || json.Unmarshal(payload.Body, &fields) != nil || json.Unmarshal(fields["store"], &store) != nil || !store {
+			return backgroundPayload{}, bg.ErrUnavailable
+		}
+	}
 	return payload, nil
 }

@@ -156,7 +156,16 @@ func (s *Store) ApplyResponseHistory(ctx context.Context, binding access.Binding
 func (s *Store) RecoverResponseHistory(ctx context.Context) error {
 	// An interrupted conversation is blocked until explicit deletion: never append
 	// a new turn over a generation whose outcome may be unknown.
-	return s.db.WithContext(ctx).Model(&model.ResponseHistory{}).Where("busy <> '' AND busy <> ?", "uncertain").Update("busy", "uncertain").Error
+	return s.db.WithContext(ctx).Model(&model.ResponseHistory{}).Where("busy <> '' AND busy <> ?", "uncertain").Where(`NOT EXISTS (
+		SELECT 1 FROM background_jobs b WHERE b.public_id = response_histories.id
+		AND b.user_id = response_histories.user_id AND b.token_id = response_histories.token_id
+		AND b.model = response_histories.model AND b.store = 1 AND b.deleted = 0
+		AND b.stage IN ('queued','dispatching','remote_active') AND b.content_expires_at > ?
+		AND response_histories.kind = 'response' AND response_histories.version = 1
+		AND response_histories.deleted = 0 AND response_histories.expires_at = b.content_expires_at
+		AND response_histories.created_at = b.created_at
+		AND response_histories.reserved_bytes = ?
+		AND response_histories.busy = 'bg_' || substr(b.id,1,32))`, time.Now().UnixMilli(), model.ResponseHistoryMaxBytes).Update("busy", "uncertain").Error
 }
 
 func (s *Store) CleanupResponseHistory(ctx context.Context, limit int) (int64, error) {

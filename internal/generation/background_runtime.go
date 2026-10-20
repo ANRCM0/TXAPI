@@ -31,6 +31,7 @@ type backgroundSnapshot struct {
 	EventUnavailable bool                     `json:"event_unavailable,omitempty"`
 	RateFinalized    bool                     `json:"rate_finalized,omitempty"`
 	DetailedUsage    *execv3.UsageObservation `json:"detailed_usage,omitempty"`
+	HistoryFinalized bool                     `json:"history_finalized,omitempty"`
 }
 
 func (s *BackgroundService) openSnapshot(r bs.Record) (backgroundSnapshot, error) {

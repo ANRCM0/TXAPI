@@ -87,6 +87,8 @@ func (h *responseHistory) Fresh(id, kind, name string, b identity.Binding) state
 	return state.ResponseHistory{ID: id, UserID: b.UserID, TokenID: b.TokenID, Kind: kind, Model: name, Version: 1, CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(h.retention).UnixMilli()}
 }
 
+func (h *responseHistory) Limits() state.HistoryLimits { return h.limits }
+
 func (h *responseHistory) Apply(ctx context.Context, b identity.Binding, changes []state.HistoryChange, guards ...state.HistoryGuard) error {
 	return h.store.ApplyResponseHistory(ctx, b, changes, guards, h.limits)
 }

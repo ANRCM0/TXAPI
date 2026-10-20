@@ -125,6 +125,18 @@ func (c *callV2) Handle(command appv2.Command, delivery app.Delivery) {
 			return
 		}
 		if kind == bg.BackgroundResource {
+			if base.Action == app.ListInputItems {
+				if command.Stream || command.StartingAfter != nil || base.InvalidVersion {
+					problem(delivery, "invalid_request_error", "unsupported background resource options")
+					return
+				}
+				if missing(s.history) {
+					backgroundProblem(delivery, bg.ErrNotFound)
+					return
+				}
+				s.historyCommand(call.ctx, delivery, base, call.binding)
+				return
+			}
 			if base.Page.Invalid || base.InvalidVersion || base.Action != app.GetResponse && base.HasQuery || base.Action == appv2.CancelResponse && base.ExpectedVersion != nil {
 				problem(delivery, "invalid_request_error", "unsupported background resource options")
 				return

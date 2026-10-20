@@ -57,7 +57,19 @@ class Fixture:
                     if self.command == "POST" and url.path == "/v1/responses":
                         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                         assert body["model"] == "m" and "previous_response_id" not in body
-                        if not body.get("background"):
+                        if body.get("background") and body.get("store") is True:
+                            assert body["input"] == "sdk-published-background"
+                            with owner.lock:
+                                owner.calls["published-background"] += 1
+                            data = document("resp_remote_published", "completed")
+                        elif not body.get("background") and "sdk-published-next" in json.dumps(body["input"]):
+                            assert len(body["input"]) == 3
+                            assert "sdk-published-background" in json.dumps(body["input"][0])
+                            assert body["input"][1]["role"] == "assistant"
+                            with owner.lock:
+                                owner.calls["published-next"] += 1
+                            data = document("resp_remote_published_next", "completed")
+                        elif not body.get("background"):
                             assert not body.get("stream")
                             assert len(body["input"]) == 1
                             assert "sdk-history-parent" in json.dumps(body["input"][0])
@@ -286,9 +298,32 @@ def exercise(binary, work, env, fixture):
             assert terminal.id == task.id and terminal.output_text == complete.output_text
             assert sql("SELECT COUNT(*) FROM response_histories WHERE id=?", (task.id,)) == [(0,)], \
                 "background result was published as permanent history"
+
+            published = owner.responses.create(model="m", input="sdk-published-background",
+                                               background=True, store=True)
+            wait_for(lambda: owner.responses.retrieve(published.id),
+                     lambda value: value.status == "completed", "SDK saved background did not complete")
+            assert sql("SELECT COUNT(*) FROM response_histories WHERE id=? AND deleted=0",
+                       (published.id,)) == [(1,)]
+            inputs = owner.responses.input_items.list(published.id, limit=1, order="asc")
+            assert len(inputs.data) == 1 and "sdk-published-background" in inputs.data[0].model_dump_json()
+            denied(lambda: other.responses.input_items.list(published.id), 404)
+            saved_child = dict(model="m", input="sdk-published-next", previous_response_id=published.id)
+            denied(lambda: other.responses.create(**saved_child), 404)
+            assert owner.responses.create(**saved_child).status == "completed"
+            owner.responses.delete(published.id)
+            denied(lambda: owner.responses.retrieve(published.id), 404)
+            denied(lambda: owner.responses.input_items.list(published.id), 404)
+            denied(lambda: owner.responses.create(**saved_child), 404)
+        with gateway_process(binary, config_file, work / "publication-deleted-restart.log", env) as process:
+            ready(process, port)
+            denied(lambda: owner.responses.retrieve(published.id), 404)
+            denied(lambda: owner.responses.input_items.list(published.id), 404)
+            denied(lambda: owner.responses.create(**saved_child), 404)
         with fixture.lock:
             assert fixture.calls["create-sse"] == fixture.calls["create-json"] == fixture.calls["cancel"] == 1
             assert fixture.calls["parent"] == fixture.calls["background-history"] == 1
+            assert fixture.calls["published-background"] == fixture.calls["published-next"] == 1
             assert fixture.calls["resume"] >= 1 and not fixture.errors, fixture.errors
         for path in work.glob("*.log"):
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -314,7 +349,7 @@ def main():
         fixture = Fixture()
         stack.callback(fixture.close)
         exercise(binary, work, env, fixture)
-    print("PASS: pinned HTTP SDK background typed create/retrieve/cursor, observer close, Kill/Wait recovery, cancel/delete, Key isolation and exact persisted usage; two original creates/one cancel plus one saved parent/one history background, parent deletion/idempotent replay and no permanent background history; loopback only")
+    print("PASS: pinned HTTP SDK background typed create/retrieve/cursor, observer close, Kill/Wait recovery, cancel/delete, Key isolation and exact persisted usage; saved-parent input/idempotent replay, explicit store publication, input pagination and HTTP continuation, cross-Key denial and delete without revival; loopback only")
 
 
 if __name__ == "__main__":

@@ -12,18 +12,18 @@
 
 ## 当前基线与能力边界
 
-已核对主线为 `master/b5519a5f7a2e802e9f18034a8d2f8a01861761ef`（PR #91）。最终功能头 `0d5f03f3e2148ce8a1efa1162c92ed349628a804` 的 push Verify `39401522023`、PR Verify `39401528001` 全六项成功；实际合并主线的独立 Verify `39404357439` 也已完整成功，包含 check、delivery、windows-resource-query。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
+最近已核对主线为 `master/b8d7916c890fb49ba0a98e68f63230f9b7f89b3a`（PR #92）。最终功能头 `dd60fade678f3a257c38e542d775c9d63d63863d` 的 push Verify `39441062675`、PR Verify `39441075893` 全六项成功；实际合并主线的独立 Verify `39443822478` 也已完整成功，包含 check、delivery、windows-resource-query。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
 
-[OpenAPI](openapi.json) 为 `0.13.15` / 117 操作，数据库 schema v21。接口数、测试数和已完成子批数不换算为项目完成百分比。0.13.15 为 P6-A 本批接口说明，后续能力的验收状态不继承上述主线 CI。
+[OpenAPI](openapi.json) 为 `0.13.16` / 117 操作，数据库 schema v21。接口数、测试数和已完成子批数不换算为项目完成百分比。0.13.16 为 P6-B 本批接口说明，后续能力的验收状态不继承上述主线 CI。
 
-本轮规划复核基于 `docs/current-plan-cleanup/14dafa7685910e3f615038c71a267fad00633a7b`，该分支已推送，尚未合入上述主线；与主线的差异仅为文档及配置注释。参考项目按文末四个固定 SHA 读取，四份本地副本均无未提交改动；未升级参考版本，未新增参考程序、真实 Provider 或性能运行证据。
+此前文档清理与 P6-A 已通过 PR #92 合入上述主线；当前切片为 P6-B。参考项目仍按文末固定 SHA 读取；未升级参考版本，未新增参考程序、真实 Provider 或性能运行证据。
 
 | 能力 | 已验收范围 | 当前限制 |
 |---|---|---|
 | 公共地基 | A1–A4、S6、FC-001；FC-002 原生后台子集 | 仅按明确批准范围冻结，后续候选入口不推断全量冻结 |
 | 基础推理 | models、Chat JSON/SSE、embeddings、声明范围的文本/function tools；完整事件和原生用量 | 支持按操作、源/目标协议、传输和计费模式判断，不推断跨协议全量支持 |
 | Responses HTTP | 独立模型、JSON/SSE、owner/Key 幂等、加密历史、Conversations/items、续链；声明范围的工具与不透明 reasoning | 默认关闭，legacy/disabled 可用，strict 全部拒绝 |
-| 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复、任务用量元数据 | 默认关闭且仅 disabled；P6-A 本批增加已存 HTTP/持久 WS 父历史输入，验收以本批 PR 为准；结果发布为历史与收费未实现 |
+| 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复、任务用量元数据；P6-A 已存 HTTP/持久 WS 父历史输入 | 默认关闭且仅 disabled；P6-B 本批增加新受理显式 store=true 的 completed 文本/function 结果历史发布，验收以本批 PR 为准；收费未实现 |
 | 原生 WS | 双端原生连接、逐轮授权/准入、串行文本与声明工具；显式持久续链、HTTP/WS 跨模式、prewarm/reasoning、固定 SDK/Codex 与受控镜像回归 | 默认关闭且仅 disabled；默认只支持连接内最新父 ID，持久历史须显式开启；后台跨模式、收费、任意多路复用未完成 |
 | 执行与路由 | 唯一执行事实、资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow；阶段超时、有限响应头和重放审计 | shadow 默认关闭且不控制路由；无准入等待队列，不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新、P3 资格反馈/人工恢复的受控闭环 | 无完整账号池；reset 未知，不自动推断恢复；真实 OAuth、过期/轮换和限流未验收 |
@@ -34,7 +34,7 @@
 
 | 工作 | 已具备的基础 | 未完成及下一步 |
 |---|---|---|
-| P6 后台父链与跨模式 | HTTP/WS 共用加密历史、持久续链及重启恢复；P6-A 本批实现已有历史进入后台 | 本批验证同 owner/Key/模型完整快照、固定目标、幂等及强杀恢复；conversation 继续拒绝，后台结果供后续生成续链留给 P6-B |
+| P6 后台父链与跨模式 | HTTP/WS 共用加密历史、持久续链及重启恢复；P6-A 已合并并通过独立主线 CI | P6-B 本批验证 completed 文本/function 结果的原子历史发布、HTTP/WS 消费、删除和独立 TTL；conversation、托管账号与其他结果类型不继承支持 |
 | P7 后台/WS 收费 | 每轮 WS 明细、后台任务用量与状态元数据 | 逐生成预留、结算、取消/未知恢复和成本准入未接通；依赖各操作 P8 证明，继续仅 disabled |
 | P8 完整成本证明 | 已登记 strict Chat/embeddings 档案、双预算与恢复账本 | 缺逐凭据最高适用费率、失败收费、税/附加项、未来改价假设和完整计量证明；S5-03 不能关闭 |
 | P0 完整性能与承载 | HTTP/1.1、TLS/H2、受控反代、慢读/取消/过载恢复、一次 30 分钟 Windows 持续流 | 完整长时 soak、最大稳定容量、目标部署网络/SLO 和完整性能验收仍开放 |
@@ -153,6 +153,17 @@ P0–P8 按可独立验收的切片推进，已验收子集保留，不重复立
 - **测试/验收：**HTTP/显式持久 WS 父与工具上下文；跨 owner/Key/模型、撤销、非 ready/unknown/busy、TTL、父 CAS；父删除后的幂等重放与冲突；展开正文/项目/私有包络上限；固定目标失效零替代发送；受理后删除父及重启、dispatch 强杀窗口。集中执行契约、受影响行为及现有检查，CI/合并/真实环境另记。
 - **其他模块影响：**原 BackgroundParser/远端 Codec 继续只收完整自包含正文，不能直接透传本地父 ID；store/stream 按客户端请求保留。此批不发布后台结果为历史，不扩展 P6-B、managed、WS 池或收费；未知发送仍保持 uncertain，不自动重发。
 
+### P6-B 具体变更请求：后台终态历史发布
+
+2026-10-20 按当前任务同类契约调整直接实施的授权登记，集中验证与交付证据写入本批 PR。
+
+- **层级/目录：**L1 generation/backgroundstate、store，L2 protocol/responses，L3 responses 及 cmd/gateway 组装；沿用唯一后台任务与加密历史 owner，L0 不变。
+- **公开依赖：**候选 responsehistory/v1 增加纯 BackgroundHistoryProjector 的输入准备/完成投影和 Repository.Limits；冻结 background/v1 签名不变。私有 backgroundstate.Record 携带受理事务使用的历史容量预留，Update 携带同事务的历史 CAS；不另建发布 worker 或数据库权威。
+- **地基影响：**新受理、显式 store=true 且在文本/function 可重建子集内的请求，同事务预留完整历史槽与字节；completed 结果、事件、后台终态和历史 ready 同事务提交。失败、未知、不可重建、撤销或未发出的任务释放预留，不补零、不重发未知生成。省略/false、旧任务及已有幂等命中不补建历史。
+- **契约/迁移/回退：**历史保留期从首次发布计算，独立于后台临时内容；同一公开 ID 在临时内容有效时归后台读取，过期后可读取仍有效历史。input_items 读取已发布历史，cancel/events 不伪装成前台操作；显式删除原子删除两份内容，自动临时 TTL 清理保留已发布历史，重放不复活删除或重设 TTL。新字段在加密 input/snapshot 中可选，schema 不变；旧程序不理解预留/发布标记，回退前须停止受理并排空本批任务，或恢复匹配停写备份。
+- **测试/验收：**真实 HTTP/持久 WS/固定 SDK 消费，完成前拒绝续链，跨 owner/Key/模型及撤销，容量与 CAS，终态提交前后强杀、重启/事件恢复仅发布一次，后台 TTL 与历史 TTL 分离，显式删除不复活，旧/省略/false/失败/unknown/不支持输出不生成 ready 历史。
+- **其他模块影响与来源：**沿用 P6-A 同目标约束和当前授权，仅 disabled、静态 Key、文本/function；现有其他后台工具仍可执行但本批不发布为历史。主参考固定 codex-proxy-rs 60570883007febebe732597a9881397098d724f5 的 NativeContinuationScope/NativeContinuationPin；参考无本项目 SQLite 原子发布机制，此部分在既有 store 内原生实现。托管账号、conversation、收费、池化与其他结果类型继续单列。
+
 ### P0：核心转发保真、稳定性与性能
 
 L0 `internal/core` 只持有机械发送/读写事实；L1 gateway/scheduler 决定路由与重试，L2 protocol/compat/transport 决定协议与输出。已完成完整 SSE、阶段超时、有限响应头、传输自动重放修正、真实网络释放、TLS/H2/反代、并发/过载恢复与有限持续流子批。继续复用唯一 executor、资源代次和已批准 execution 端口，不先重写内核。
@@ -215,7 +226,7 @@ L2 protocol/compat 负责独立流状态、编解码及有界/去重/脱敏诊�
 
 已交付 L1 generation 共用的加密历史、CAS/TTL/容量、HTTP/WS 双向续链、新连接/重启及权限回归。WS 的 `persistent_history` 默认 false，显式开启且 `store=true` 才走持久历史；默认仍仅连接内最新父 ID。function/custom、单层 namespace、客户端工具加载和不透明 reasoning 仅在已声明的可重建范围保持。
 
-P6-A 本批沿 generation 历史/后台 owner 接入已存 HTTP/显式持久 WS 的 `previous_response_id`，受理时保存完整上下文与固定目标，验收记录见本批 PR；conversation 继续拒绝。后台结果尚不发布为供后续 HTTP/WS 使用的历史，P6-B 按独立方向实施和验收。继续消费已登记 responsehistory/background 端口，不另建历史或发送链；缺契约时记录具体变更、迁移及回退。
+P6-A 已通过 PR #92 接入已存 HTTP/显式持久 WS 的 `previous_response_id`，受理时保存完整上下文与固定目标。P6-B 本批在同一 owner 增加后台 completed 文本/function 结果的原子历史发布，供后续 HTTP/WS 使用；仅新受理显式 store=true，可重建的明确空 output 数组也属于已知完成。缺失/null、失败及未知结果不发布；conversation 继续拒绝。继续消费已登记 responsehistory/background 端口，不另建历史或发送链；验收以本批 PR 为准。
 
 验收须覆盖 owner/创建 Key/模型权限、撤销、父链 TTL/缺失、凭据/revision 绑定、存储失败、unknown、受理/事件提交/强杀恢复与重复上下文。原生父 ID 与本地完整上下文只能选一个可信来源，显式重放须可完整重建并重新准入/计价；后台观察断开不取消任务。不能把 HTTP/WS 已通过的证据直接扩展到后台。
 
@@ -242,7 +253,7 @@ L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威�
 | 门槛 | 已有受控证据入口 | 仍开放的范围 |
 |---|---|---|
 | 强杀与恢复 | PR #80 [strict 财务边界](../internal/gateway/strict_crash_test.go)、[后台 dispatch/事件窗口](../internal/generation/background_runtime_test.go)、PR #64 [持久 WS 窗口](../cmd/gateway/responses_ws_crash_test.go) | 不扩展到后台/WS 收费或真实 Provider 受理/计费认证 |
-| 跨模式与权限 | PR #62/#63 [HTTP/WS 历史与权限](../cmd/gateway/responses_ws_history_test.go)及后续工具子批；P6-A [后台父输入](../cmd/gateway/background_history_test.go)验收见本批 PR | 后台结果发布仍缺；仅支持已声明的完整上下文和单串行轮次 |
+| 跨模式与权限 | PR #62/#63 [HTTP/WS 历史与权限](../cmd/gateway/responses_ws_history_test.go)；PR #92 [后台父输入](../cmd/gateway/background_history_test.go)；P6-B [后台结果 HTTP/WS 消费](../cmd/gateway/background_publication_test.go)验收见本批 PR | 仅支持已声明的完整上下文、completed 文本/function 发布和单串行轮次；不扩大其他结果或收费 |
 | 后端操作 | [实际 main 冒烟](../tests/smoke/local.py)、[任务/事件/TTL](../tests/smoke/background.py)、[用量持久化/隔离](../tests/smoke/usage_history.py)，PR #74/#75 占用指标 | 正文读取须有明确授权；生产告警、备份保管及运维演练待部署现场验收 |
 | 镜像与固定客户端 | [安装/升级/备份恢复](../tests/smoke/delivery.py)、[原生 WS 镜像/TLS/Upgrade/重启](../tests/smoke/native_ws_delivery.py)、固定 SDK/Codex 回归 | 只覆盖固定版本与声明操作；任意客户端、真实 Provider、版本化模型目录/compact 等不继承支持 |
 | 性能与承载 | P0 对照、TLS/H2/反代、慢读/取消/过载恢复及 PR #91 的 30 分钟运行 | 完整 soak、最大稳定容量、生产网络/SLO 未验收；采样峰值不证明无泄漏 |
@@ -370,6 +381,19 @@ Regression files are `internal/protocol/chat_sse_test.go`,
 `internal/protocol/sse_estimation_test.go` and
 `internal/gateway/p0_sse_socket_test.go`. This notice does not expand protocol,
 strict-billing or real-Provider acceptance.
+
+#### P6-B Native Background History Publication
+
+Mechanism reference: zyycn/codex-proxy-rs, fixed revision
+60570883007febebe732597a9881397098d724f5,
+`backend/crates/gateway-core/src/engine/continuation.rs`,
+`NativeContinuationScope` and `NativeContinuationPin` client/target matching.
+TXAPI independently applies those scope/binding principles to completed
+background results. The reference has no equivalent SQLite transaction for
+TXAPI task/history publication. The native implementation uses the existing
+generation and store owners for bounded admission reservations, atomic terminal
+publication, deletion and independent retention. No reference function is copied
+or translated; the Apache-2.0 license copy and prior notices remain below.
 
 #### P6-A Native Background History Snapshot
 
