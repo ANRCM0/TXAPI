@@ -33,6 +33,10 @@ func validateStoredItems(raw json.RawMessage) error {
 		}
 		switch item.Type {
 		case "", "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output":
+		case "reasoning":
+			if err := validateReasoningItem(raw, true, false); err != nil {
+				return err
+			}
 		case "tool_search_call", "tool_search_output", "additional_tools":
 			// Preserve future fields in stored context, but enforce WS known
 			// null and loaded-tool policies before the shared HTTP validation.

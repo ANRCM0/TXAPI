@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.13.8",
-    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events and disabled billing. By default store=false or omitted keeps continuation connection-local. Optional responses_ws.persistent_history plus explicit per-round store=true uses shared owner/key-scoped encrypted local history, public local response IDs and complete-context new generations across HTTP/WS or new connections. It requires the Responses runtime; upstream store=false and native-parent removal avoid double context. Unknown executions cannot be resumed or replayed. Hosted tools, media, multiplexing, prewarm and automatic replay are unsupported. FC-P1-001 adds opt-in disabled-billing single SIWC account/owner/key/model Responses text streaming. Managed bindings use real persisted credentials and CAS revisions. No real-account acceptance is implied. FC-P3-001 adds persisted, version-fenced eligibility feedback and administrator CAS resume for the single managed binding. Unknown resets require manual review; credentials are retained. FC-P7-WS-USAGE-001 adds opt-in disabled native WS-round usage observations to the existing metadata query, with transport and native protocol status distinct from mechanical termination. It does not authorize WS billing. Schema21 requires a matching stopped-write backup for rollback. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Client tool_search is supported only with execution=client, at most one declaration, opaque object parameters/arguments capped at 65536 JSON bytes, and visible ASCII call_id of 1..64 bytes. tool_search_output requires client execution, completed status and 0..128 loaded tools; additional_tools requires developer role. Loaded definitions are restricted to the same bounded function/custom/one-level namespace types, with optional boolean defer_loading on members. Search items survive native events, background replay and encrypted full-context history. Server search, hosted tools, Code Mode/programmatic execution and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile; the client search case uses bundled gpt-5.5 metadata. Complete default model compatibility remains unverified."
+    "version": "0.13.9",
+    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events and disabled billing. By default store=false or omitted keeps continuation connection-local. Optional responses_ws.persistent_history plus explicit per-round store=true uses shared owner/key-scoped encrypted local history, public local response IDs and complete-context new generations across HTTP/WS or new connections. It requires the Responses runtime; upstream store=false and native-parent removal avoid double context. Unknown executions cannot be resumed or replayed. Hosted tools, media, multiplexing and automatic replay are unsupported. FC-P1-001 adds opt-in disabled-billing single SIWC account/owner/key/model Responses text streaming. Managed bindings use real persisted credentials and CAS revisions. No real-account acceptance is implied. FC-P3-001 adds persisted, version-fenced eligibility feedback and administrator CAS resume for the single managed binding. Unknown resets require manual review; credentials are retained. FC-P7-WS-USAGE-001 adds opt-in disabled native WS-round usage observations to the existing metadata query, with transport and native protocol status distinct from mechanical termination. It does not authorize WS billing. Schema21 requires a matching stopped-write backup for rollback. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Client tool_search is supported only with execution=client, at most one declaration, opaque object parameters/arguments capped at 65536 JSON bytes, and visible ASCII call_id of 1..64 bytes. tool_search_output requires client execution, completed status and 0..128 loaded tools; additional_tools requires developer role. Loaded definitions are restricted to the same bounded function/custom/one-level namespace types, with optional boolean defer_loading on members. Search items survive native events, background replay and encrypted full-context history. Server search, hosted tools, Code Mode/programmatic execution and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile; the client search case uses bundled gpt-5.5 metadata. Complete default model compatibility remains unverified. FC-P4-CODEX-WS-001 adds bounded native client fields: stream=true, include reasoning.encrypted_content, reasoning effort/summary, text verbosity/plain text format, prompt_cache_key and client_metadata; message IDs/status/phase and tool-result IDs survive mapping. generate=false with store=false/omitted uses the same native WS authority and real provider terminal; usage is recorded for each prewarm, never defaulted to zero. Only the latest completed connection-local parent is accepted; unknown prior usage rejects TPM-limited continuation. Opaque reasoning with nonempty encrypted_content and bounded summary/content survives full-context history; bare reasoning references fail. Reasoning events do not fabricate answer progress or completion. Native WS remains disabled-only, one main lane, 256 KiB messages; no automatic provider replay, background/media/hosted tools or persistent prewarm. Pinned Codex 0.163.0 WS conformance independently checks real handshakes, prewarm, tool-result creates, connection reuse and zero HTTP fallback. This is a controlled provider fixture, not real-provider acceptance or complete default-model support."
   },
   "servers": [
     {
@@ -6839,7 +6839,7 @@
       "get": {
         "operationId": "connectNativeResponsesWebSocket",
         "summary": "Connect a bounded native Responses WebSocket session",
-        "description": "Default disabled. Requires Authorization, billing disabled, explicit actual-model allowlist and activated credential encryption. No query/cookie credentials. One active main lane, pending=0. Omitted store or store=false uses only the latest connection-local native parent. Optional responses_ws.persistent_history requires responses.enabled and the same history owner; only explicit store=true selects local persisted history. Local parents must be ready, fully reconstructable, currently authorized and match the original target/credential fingerprint. HTTP/WS and new-connection continuation sends the complete bounded text/function context once as a new generation, omitting the native parent and forcing upstream store=false. Public local response IDs support existing GET/DELETE/input_items. Terminal history commits before terminal delivery; failed/incomplete/cancelled remain distinct, and unknown or failed persistence never fabricates completion. Limits: 1024 context items and 256 KiB wire messages. No HTTP fallback, automatic reconnect replay, background, conversation, reasoning/media, hosted tools or generate:false. TPM is estimated, not a strict financial guarantee. A transport failure may prevent an error JSON or close handshake from reaching the peer. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Client tool_search is supported only with execution=client, at most one declaration, opaque object parameters/arguments capped at 65536 JSON bytes, and visible ASCII call_id of 1..64 bytes. tool_search_output requires client execution, completed status and 0..128 loaded tools; additional_tools requires developer role. Loaded definitions are restricted to the same bounded function/custom/one-level namespace types, with optional boolean defer_loading on members. Search items survive native events, background replay and encrypted full-context history. Server search, hosted tools, Code Mode/programmatic execution and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile; the client search case uses bundled gpt-5.5 metadata. Complete default model compatibility remains unverified.",
+        "description": "Default disabled. Requires Authorization, billing disabled, explicit actual-model allowlist and activated credential encryption. No query/cookie credentials. One active main lane, pending=0. Omitted store or store=false uses only the latest connection-local native parent. Optional responses_ws.persistent_history requires responses.enabled and the same history owner; only explicit store=true selects local persisted history. Local parents must be ready, fully reconstructable, currently authorized and match the original target/credential fingerprint. HTTP/WS and new-connection continuation sends the complete bounded text/function context once as a new generation, omitting the native parent and forcing upstream store=false. Public local response IDs support existing GET/DELETE/input_items. Terminal history commits before terminal delivery; failed/incomplete/cancelled remain distinct, and unknown or failed persistence never fabricates completion. Limits: 1024 context items and 256 KiB wire messages. No HTTP fallback, automatic reconnect replay, background, conversation, media or hosted tools. TPM is estimated, not a strict financial guarantee. A transport failure may prevent an error JSON or close handshake from reaching the peer. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Client tool_search is supported only with execution=client, at most one declaration, opaque object parameters/arguments capped at 65536 JSON bytes, and visible ASCII call_id of 1..64 bytes. tool_search_output requires client execution, completed status and 0..128 loaded tools; additional_tools requires developer role. Loaded definitions are restricted to the same bounded function/custom/one-level namespace types, with optional boolean defer_loading on members. Search items survive native events, background replay and encrypted full-context history. Server search, hosted tools, Code Mode/programmatic execution and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile; the client search case uses bundled gpt-5.5 metadata. Complete default model compatibility remains unverified. FC-P4-CODEX-WS-001 adds bounded native client fields: stream=true, include reasoning.encrypted_content, reasoning effort/summary, text verbosity/plain text format, prompt_cache_key and client_metadata; message IDs/status/phase and tool-result IDs survive mapping. generate=false with store=false/omitted uses the same native WS authority and real provider terminal; usage is recorded for each prewarm, never defaulted to zero. Only the latest completed connection-local parent is accepted; unknown prior usage rejects TPM-limited continuation. Opaque reasoning with nonempty encrypted_content and bounded summary/content survives full-context history; bare reasoning references fail. Reasoning events do not fabricate answer progress or completion. Native WS remains disabled-only, one main lane, 256 KiB messages; no automatic provider replay, background/media/hosted tools or persistent prewarm. Pinned Codex 0.163.0 WS conformance independently checks real handshakes, prewarm, tool-result creates, connection reuse and zero HTTP fallback. This is a controlled provider fixture, not real-provider acceptance or complete default-model support.",
         "tags": [
           "Responses"
         ],
@@ -13244,6 +13244,29 @@
                 }
               }
             ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "commentary",
+              "final_answer"
+            ]
           }
         }
       },
@@ -13306,6 +13329,14 @@
           "name": {
             "type": "string",
             "description": "Optional function name retained when provided by the client."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
           }
         }
       },
@@ -13388,6 +13419,15 @@
                     },
                     {
                       "$ref": "#/components/schemas/NativeWSAdditionalTools"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeWSFunctionCall"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeWSCustomCall"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeWSReasoningItem"
                     }
                   ]
                 }
@@ -13492,9 +13532,8 @@
           },
           "generate": {
             "type": "boolean",
-            "enum": [
-              true
-            ]
+            "default": true,
+            "description": "false sends a real native WS prewarm through current authorization, admission, target and usage recording, awaiting its actual terminal. false requires store=false or omitted; cannot create permanent history. Known zero and unknown usage remain distinct. No automatic warmup, synthetic completion or HTTP replay."
           },
           "stream_id": {
             "type": "string",
@@ -13505,10 +13544,97 @@
           },
           "store": {
             "type": "boolean",
+            "default": false,
+            "description": "true requires responses_ws.persistent_history and selects current-authorized encrypted local history. Upstream store=false; local parent is replaced by full context. generate=false with store=true is rejected."
+          },
+          "stream": {
+            "type": "boolean",
             "enum": [
-              false
-            ],
-            "default": false
+              true
+            ]
+          },
+          "include": {
+            "type": "array",
+            "maxItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          },
+          "reasoning": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "effort": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh"
+                ]
+              },
+              "summary": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "concise",
+                  "detailed"
+                ]
+              }
+            }
+          },
+          "text": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "verbosity": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "format": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "text"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "prompt_cache_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "x-max-utf8-bytes": 512
+          },
+          "client_metadata": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 2048,
+              "x-max-utf8-bytes": 2048
+            },
+            "x-max-json-bytes": 16384,
+            "description": "Provider metadata only: keys 1..128 UTF-8 bytes, values <=2048 UTF-8 bytes, encoded object <=16 KiB. Never supplies trusted identity, authorization or routing."
           }
         }
       },
@@ -13594,7 +13720,13 @@
               "response.function_call_arguments.delta",
               "response.function_call_arguments.done",
               "response.custom_tool_call_input.delta",
-              "response.custom_tool_call_input.done"
+              "response.custom_tool_call_input.done",
+              "response.reasoning_summary_part.added",
+              "response.reasoning_summary_part.done",
+              "response.reasoning_summary_text.delta",
+              "response.reasoning_summary_text.done",
+              "response.reasoning_text.delta",
+              "response.reasoning_text.done"
             ]
           },
           "stream_id": {
@@ -15461,6 +15593,14 @@
             "maxLength": 128,
             "x-max-utf8-bytes": 128,
             "description": "1..128 UTF-8 bytes, without edge whitespace or control characters."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
           }
         }
       },
@@ -15696,7 +15836,12 @@
             ]
           },
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
           },
           "execution": {
             "type": "string",
@@ -15743,7 +15888,12 @@
             ]
           },
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
           },
           "execution": {
             "type": "string",
@@ -15800,7 +15950,12 @@
             ]
           },
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
           },
           "role": {
             "type": "string",
@@ -15828,6 +15983,210 @@
             "description": "Only existing bounded function/custom and one-level namespace tools. Search, hosted and nested tools are rejected. Known loaded function parameters must be objects of at most 65536 JSON bytes."
           }
         }
+      },
+      "NativeWSFunctionCall": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "call_id",
+          "name",
+          "arguments"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "function_call"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-max-utf8-bytes": 128
+          },
+          "namespace": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-max-utf8-bytes": 128
+          },
+          "arguments": {
+            "type": "string"
+          },
+          "encrypted_content": {
+            "type": "string"
+          }
+        },
+        "description": "Explicit self-contained prior client tool call, validated as input. Does not authorize provider lookup or replay."
+      },
+      "NativeWSCustomCall": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "call_id",
+          "name",
+          "input"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "custom_tool_call"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-max-utf8-bytes": 128
+          },
+          "namespace": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-max-utf8-bytes": 128
+          },
+          "input": {
+            "type": "string"
+          },
+          "encrypted_content": {
+            "type": "string"
+          }
+        },
+        "description": "Explicit self-contained prior client tool call, validated as input. Does not authorize provider lookup or replay."
+      },
+      "NativeWSReasoningItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "encrypted_content"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "reasoning"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-max-utf8-bytes": 256,
+            "pattern": "^[!-~]+$",
+            "description": "Opaque printable ASCII provider item ID. Never authorizes a local lookup or parent continuation."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          },
+          "encrypted_content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 131072,
+            "x-max-utf8-bytes": 131072
+          },
+          "summary": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "text"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "summary_text"
+                  ]
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 65536,
+                  "x-max-utf8-bytes": 65536
+                }
+              }
+            }
+          },
+          "content": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "text"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "reasoning_text",
+                    "text"
+                  ]
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 65536,
+                  "x-max-utf8-bytes": 65536
+                }
+              }
+            }
+          }
+        },
+        "description": "Self-contained opaque reasoning. No decryption or execution. Explicit input fields reject null; inherited encrypted history preserves validated future output fields. Messages remain within 256 KiB; reconstructed stored context additionally allows at most 1024 items."
       }
     }
   }

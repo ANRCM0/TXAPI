@@ -39,7 +39,7 @@ func TestParseNormalizesExplicitStatelessMainLane(t *testing.T) {
 }
 func TestParseFailsClosedBeforeDispatch(t *testing.T) {
 	for _, extra := range []map[string]any{
-		{"store": true}, {"store": nil}, {"stream_id": "other"}, {"stream_id": nil}, {"generate": false}, {"generate": nil}, {"background": false}, {"stream": false}, {"unknown": 1}, {"model": ""}, {"input": nil},
+		{"store": true}, {"store": nil}, {"stream_id": "other"}, {"stream_id": nil}, {"generate": "false"}, {"generate": nil}, {"background": false}, {"stream": false}, {"unknown": 1}, {"model": ""}, {"input": nil},
 		{"input": []any{map[string]any{"type": "item_reference", "id": "foreign"}}}, {"input": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_image", "image_url": "x"}}}}},
 		{"input": []any{map[string]any{"role": "user", "content": "hi", "hidden": true}}}, {"tools": []any{map[string]any{"type": "web_search"}}}, {"tools": []any{map[string]any{"type": "function", "name": "f", "hidden": true}}}, {"temperature": 3}, {"top_p": -1}, {"parallel_tool_calls": "true"},
 	} {

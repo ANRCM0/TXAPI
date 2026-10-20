@@ -55,9 +55,10 @@ func TestStoredHistoryCompilePreservesCompleteFunctionContext(t *testing.T) {
 	if !bytes.Equal(parent[0], json.RawMessage(`{"id":"item_input","type":"message","role":"user","content":[{"type":"input_text","text":"old-question"}]}`)) {
 		t.Fatal("compile mutated parent content")
 	}
-	// Stored and connection-local branches do not infer each other's context.
-	if _, err := MapModel(v2.Frame{Type: 1, Data: compiled.JSON}, "actual"); err == nil {
-		t.Fatal("stateless codec accepted historical function input")
+	// An explicitly supplied self-contained context is also valid without
+	// local storage. It does not authorize any lookup by the embedded IDs.
+	if mapped, err := MapModel(v2.Frame{Type: 1, Data: compiled.JSON}, "actual"); err != nil || !bytes.Contains(mapped.Data, []byte(`"call_id":"call_1"`)) {
+		t.Fatal("explicit self-contained context rejected", err)
 	}
 	if _, err := MapStoredModel(v2.Frame{Type: 1, Data: parsed.Initial.Data}, "actual"); err == nil {
 		t.Fatal("full context also retained native parent")
@@ -71,11 +72,11 @@ func TestStoredHistoryContextLimitsAndTerminalProjection(t *testing.T) {
 		t.Fatal("known empty input is valid", err)
 	}
 	for name, inherited := range map[string][]json.RawMessage{
-		"missing-id":       {json.RawMessage(`{"type":"message","role":"user","content":"x"}`)},
-		"control-id":       {json.RawMessage(`{"id":"bad\u0000id","type":"message","role":"user","content":"x"}`)},
-		"reference":        {json.RawMessage(`{"id":"ref","type":"item_reference"}`)},
-		"opaque-reasoning": {json.RawMessage(`{"id":"reason","type":"reasoning","encrypted_content":"opaque"}`)},
-		"duplicate":        {json.RawMessage(`{"id":"same","type":"message","role":"user","content":"x"}`), json.RawMessage(`{"id":"same","type":"message","role":"user","content":"y"}`)},
+		"missing-id":     {json.RawMessage(`{"type":"message","role":"user","content":"x"}`)},
+		"control-id":     {json.RawMessage(`{"id":"bad\u0000id","type":"message","role":"user","content":"x"}`)},
+		"reference":      {json.RawMessage(`{"id":"ref","type":"item_reference"}`)},
+		"bare-reasoning": {json.RawMessage(`{"id":"reason","type":"reasoning","summary":[]}`)},
+		"duplicate":      {json.RawMessage(`{"id":"same","type":"message","role":"user","content":"x"}`), json.RawMessage(`{"id":"same","type":"message","role":"user","content":"y"}`)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := codec.Compile(raw, inherited, "resp_new"); err == nil {

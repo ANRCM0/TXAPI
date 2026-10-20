@@ -104,6 +104,7 @@ jobs:
           echo "beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4  $codex_dir/codex.tar.gz" | sha256sum --check
           tar -xzf "$codex_dir/codex.tar.gz" -C "$codex_dir"
           python3 tests/smoke/codex_conformance.py --go go --codex "$codex_dir/codex-x86_64-unknown-linux-musl"
+          python3 tests/smoke/codex_ws_conformance.py --go go --codex "$codex_dir/codex-x86_64-unknown-linux-musl"
 
       - name: 转发性能基线（仅报告）
         run: |
