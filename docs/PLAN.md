@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最新已合并且精确功能头完整通过CI的基线为 `master/0b7283f14da363093ad5233b03488eef4e56b603`：embeddings原生部分用量PR #88最终头 `44808beb9c6224433200f2022fc4b6809eadf08b` 的 push Verify `39394458606` 与 PR Verify `39394521939` 全部六项成功，测试合并文件树 `ddf8e0a6360bda406a8aea2e02ac93bb13848eda` 与该头完全相同；合并后独立 Verify `39396394811` 仍在运行。固定参考普通Chat JSON对照PR #86最终头 `6b87e81cc1e7b121cd6ae905ad1f0d2c93fae023` 已通过 push Verify `39389441410` 与 PR Verify `39389499926` 全部六项，额外Reference Comparison `39389499746` 的SSE/JSON两操作也成功；PR测试合并文件树 `2abda6657d259b398e5f17ee260feb97d1b3caea` 与该头相同。合并后独立 Verify `39391135666` 已成功。验收说明PR #87最终头 `d4c323bb47a0960a3970b0268a74ff6b9f151f01` 的 push/PR Verify `39391568362` / `39391612872` 全六项成功，测试合并树相同，已合并为 `49cce3405f418f546dc75be347e492ea232f6f37`；其合并后独立 Verify `39393640387` 已完整成功。固定参考SSE PR #85的合并后 Verify `39389028714`、固定HTTP SDK后台PR #84的 Verify `39384461090`、embeddings修复PR #83的 Verify `39382614575`、Chat原生用量PR #82的 Verify `39380819400`、双端TLS/H2基线PR #81的 Verify `39375474361`、strict强杀PR #80的 Verify `39373920654`、PR #79的 Verify `39370670996` 已成功。更早证据保留对应PR，批次中的本地/待CI段落保留当时状态；当前集成状态以本段和各批最终验收记录为准。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最新已合并且精确功能头完整通过CI的基线为 `master/432371a19236fc9b275d148c7311e873b1a00085`：固定HTTP SDK embeddings PR #89最终头 `e037ec058a8560b95fb63e2a3839f821575cd082` 的 push Verify `39396780531`、PR Verify `39396787444` 全六项及 Reference Comparison `39396787432` 均成功，测试合并树及实际合并主线的完整文件树与该头相同；合并后独立 Verify `39398820036` 仍在运行。此前embeddings原生部分用量PR #88最终头 `44808beb9c6224433200f2022fc4b6809eadf08b` 的 push Verify `39394458606` 与 PR Verify `39394521939` 全部六项成功，测试合并文件树 `ddf8e0a6360bda406a8aea2e02ac93bb13848eda` 与该头完全相同；合并后独立 Verify `39396394811` 已完整成功。固定参考普通Chat JSON对照PR #86最终头 `6b87e81cc1e7b121cd6ae905ad1f0d2c93fae023` 已通过 push Verify `39389441410` 与 PR Verify `39389499926` 全部六项，额外Reference Comparison `39389499746` 的SSE/JSON两操作也成功；PR测试合并文件树 `2abda6657d259b398e5f17ee260feb97d1b3caea` 与该头相同。合并后独立 Verify `39391135666` 已成功。验收说明PR #87最终头 `d4c323bb47a0960a3970b0268a74ff6b9f151f01` 的 push/PR Verify `39391568362` / `39391612872` 全六项成功，测试合并树相同，已合并为 `49cce3405f418f546dc75be347e492ea232f6f37`；其合并后独立 Verify `39393640387` 已完整成功。固定参考SSE PR #85的合并后 Verify `39389028714`、固定HTTP SDK后台PR #84的 Verify `39384461090`、embeddings修复PR #83的 Verify `39382614575`、Chat原生用量PR #82的 Verify `39380819400`、双端TLS/H2基线PR #81的 Verify `39375474361`、strict强杀PR #80的 Verify `39373920654`、PR #79的 Verify `39370670996` 已成功。更早证据保留对应PR，批次中的本地/待CI段落保留当时状态；当前集成状态以本段和各批最终验收记录为准。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -173,6 +173,19 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 两轮各目标78/78进程采样可用，TXAPI累计CPU0.34375s、working set/private commit峰值30,294,016/62,406,656字节、handle197；new-api累计CPU2.453125s，对应100,864,000/124,018,688字节、handle245。采样与harness开销、各自日志/计费/后台任务差异仍沿SSE对照的非等价声明，不作产品排名或无泄漏证明。实测来源e0ce586加未提交JSON harness（dirty=true），比较脚本SHA-256 `2d682a3fa1f60c27e44c4826d7944c69c4a62666ea3fb03b47ccf8c990afafca`、JSON夹具 `b6f082ddca395d1a102ba25268a1d6721314f8f30563a137ceceef3ad0e52b7d`，原SSE/资源采样器摘要未变；随后只增加JSON夹具5秒连接读预算及非daemon worker join，最终JSON/默认SSE各3对真实main预检通过，Python AST与diff检查通过。生产Go/API/schema/依赖不变，本地不重复生产全量Go；最终精确头完整Verify及Linux两操作参考运行独立验收。
 
 JSON对照最终验收：`6b87e81cc1e7b121cd6ae905ad1f0d2c93fae023` 的 push Verify `39389441410`、PR Verify `39389499926` 全六项及 Reference Comparison `39389499746` 均成功，PR #86合并为 `2f42ef5b7637e959741bdd771d6d9a3339e0e304`。Linux干净测试合并头 `2abda6657d259b398e5f17ee260feb97d1b3caea` 完整文件树与最终头相同；SSE/JSON每操作均启动全部120样本、三路径各40/40和每请求一次发送、两网关各42条日志、有限参考额度不变、401零发送、活动上游0。JSON完整文档配对P95相对直连为TXAPI36.5685ms、new-api36.7546ms，首正文为41.5870/41.7763ms；SSE的TXAPI首正文/首有效文本配对P95为1.3897/1.2819ms。保留这组有限观察与原始摘要，不套用Windows或SSE预算，不宣称JSON延迟、产品排名或包级原因已证明；完整数值/资源和限制记录在PR #86。PR #85合并后独立CI已成功，本批合并后CI另记。
+
+#### P0 固定参考 JSON 上游 TCP 条件对照（2026-10-20）
+
+1. **层级/目录：**仅tests/smoke/reference_json.py、reference_comparison.py、现有Reference Comparison workflow及本方案，复用实际TXAPI/new-api主进程与同一受控上游，不改变生产连接池/写入或原SSE夹具。
+2. **公开依赖/冻结：**消费既有Chat JSON API、固定new-api 25372e30b1f94255b1f818aeaaf006f042572580的实际构建与公开bootstrap；无新Go端口、配置、依赖、schema或收费范围。
+3. **来源/地基：**编码前核对现有已验收reference_json Handler的分片写入及StreamFixture.get_request socket处理；前者未记录实际TCP_NODELAY，后者仅TLS显式设置。主参考仍为固定new-api的relay/channel/openai/relay-openai.go::OpenaiHandler整文档消费者；参考实现无本机三路径socket条件对照，独立扩展既有夹具，不移植源码。不根据约36ms的Linux观察推断生产代码根因。
+4. **行为/兼容/回退：**JSON默认在已接受socket显式关闭TCP_NODELAY，与此前本机系统默认off场景对照；新增JSON-only CLI开关显式开启，对每条上游请求读取真实socket值并校验、纳入样本/汇总/配置。SSE入口不接受该JSON专用选项，原行为不改。三路径必须共享同一条件；不同条件分别报告，不把独立P99相减、事后套阈值或称产品优化。
+5. **验证/验收：**两条件各复验完整客户端自检、鉴权零发送、两轮三路径完整文档/未知字段/用量、一次发送、日志/有限参考额度和排空；默认SSE预检保留。Linux同一Reference job在已有默认JSON之外增加开启TCP_NODELAY的JSON运行，保留两个报告及实际条件；完整Verify仍为合并门槛。
+6. **协作/限制：**只补可复现实验和条件记录，不改生产性能、预算或接受阈值。Windows外部诊断在干净SDK测试头57e0dd3上每条件三路径各60/60、完成文档配对P95为TXAPI1.9393/1.8644ms、new-api1.6155/1.3872ms，未复现Linux约36ms；不借此宣称根因已证明。原报告保持，新增CI按最终精确头独立验收。
+
+本地受控证据：新增正式夹具的两轮默认off/显式on各启动全部120样本，三路径各40/40成功，每请求一次发送，真实socket选项分别全为0/1、各复用一个上游peer；两网关各42条日志落盘、参考有限额度不变、鉴权拒绝零发送和最终active=0均通过。配对完整文档P95相对直连为TXAPI2.5834/2.4062ms、new-api1.7328/1.6618ms；40个样本不足P99，不宣称开关性能收益或Linux根因。默认SSE三路径各3/3预检通过，JSON-only选项用于SSE时CLI明确拒绝。整合已验收原生用量主线0b7283f后，两JSON条件各三路径3/3再验通过，实际socket、原始文档/用量、单次发送及排空均符合；正式JSON/SSE客户端与workflow代码摘要未改。Python AST、YAML、PLAN链接与diff检查通过。原生用量生产Go沿PR #88精确头完整CI，不重复未改生产本地全套；最终新头完整Verify及Linux三组参考运行另验。
+
+Linux连接条件对照 `39397050999` 在干净测试合并树 `732e7d1275cdd828dceb2b8f96e4e3951ba0c8e2` 成功：默认SSE、JSON-off、JSON-on各启动全部120样本、三路径各40/40、每请求一次发送且活动上游0；JSON实际socket选项分别全为0/1，各路径仅一个上游peer。完整文档配对P95相对直连为TXAPI off/on 36.554720/1.707143ms、new-api 36.891924/1.898130ms，说明观察差异对该受控Provider socket条件敏感；不据此断言包级或网关内部根因、生产优化或产品性能门槛，40对不足P99。整合已合并SDK主线后的最终新头和完整CI仍独立验收。 整合PR #89合并主线432371a后，JSON off/on和默认SSE三组最终预检均通过，每组三路径各3/3、一次上游发送、日志/有限额度/鉴权与排空符合；依赖的clean_environment/gateway_process函数AST与原基线相同，正式harness/workflow未改，生产Go/API/schema与已验SDK主线逐字相同。集成范围复核仅更新本方案末尾的既有证据与开放门槛。最终新提交完整CI单列，不沿用整合前4bc2abe的绿灯。
 
 #### P0 真实网络与资源收尾子批
 
@@ -632,6 +645,8 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 
 本地受控证据：Windows GOARCH=amd64、固定openai2.11.0/httpx0.28.1、实际main/加密SQLite回归通过。新增三种embeddings调用各一次上游发送：两条文本返回两个带原索引的3维浮点向量，显式base64返回原字符串，SDK默认在wire请求base64后将有效float32数据解码为预期浮点值；均保留实际映射模型、input/total各7、向量及顶层未知扩展，没有completion_tokens推断。错误Key 401与stream 400不发送。原13种上游场景、忙时429零发送、关闭/终态后释放断言同时通过，总计16种实际上游场景各一次；Python AST及diff检查通过。仅两个测试/说明文件有变化，无生产Go、OpenAPI、schema、依赖或workflow变化；原生用量PR #88合并主线0b7283f14da363093ad5233b03488eef4e56b603已整合，完整固定SDK脚本再次运行通过，生产Go与该已验主线逐字相同。最终集成精确头完整CI独立验收，未复用旧头绿灯。
 
+固定SDK embeddings最终精确头 `e037ec058a8560b95fb63e2a3839f821575cd082` 的 push/PR Verify `39396780531` / `39396787444` 全六项与 Reference Comparison `39396787432` 均成功，PR #89已合并为 `432371a19236fc9b275d148c7311e873b1a00085`；新头与测试合并/实际合并文件树完全一致，合并后CI另记。
+
 #### P4 固定 HTTP SDK 后台恢复子批（2026-10-20）
 
 1. **层级/目录：**仅tests/smoke/background_sdk_conformance.py、Makefile、现有Verify和本方案；复用生产main、真实API Key鉴权与临时加密SQLite，不增加生产故障入口。
@@ -882,12 +897,19 @@ P6 本批交付验证范围（2026-10-20）：①仅 `tests/upstream/nativews`�
 
 P0 与 P1–P8 逐批验收，不能把整个后端阶段积压到最后。产品主线完成还须覆盖以下跨批场景；已有子批证据按精确提交复用，仅为新增/变化范围补证据。
 
-- [ ] 强杀矩阵：受理未发送、上游受理未保存 ID、完成未结算、事件提交未送达、取消/完成竞争；恢复不重发未知生成、不重复追加历史、不重复扣费。
-- [ ] 跨模式与权限：HTTP→WS、WS→HTTP、WS 重连、父链过期、Key 撤销、内容密钥缺失、数据库失败和 worker 关停；终止后可区分完成、取消和未知。
-- [ ] 后端可操作性：本人任务/历史/存储期限/账本关联，管理员脱敏诊断与 pending 处理，连接/轮次/在途/恢复/事件占用指标；正文读取需单独明确授权，前端新页面后续再排期。
-- [ ] 交付与真实兼容：容器/反代 Upgrade、长连接、重启及内容恢复；指定版本 SDK/Codex 的 HTTP、工具、检索、后台恢复与 WS，客户端缺能力时补独立协议客户端。辅助接口如 models/compact 按实际需求登记，不伪造成功。
-- [ ] 至少一个声明范围内的真实 Provider/客户端完整组合通过；真实测试具备明确账号、预算和数据授权。受控上游不能证明官方服务兼容，不支持组合显式拒绝也不能代替主线完成。
-- [ ] 最新集成基线的最终功能头通过完整现有 CI，已有 API 无回归；分别记录本地验证、精确头 CI、合并、发布和运维状态，不互相替代。
+2026-10-20 集成范围复核如下。表内复用各批最终精确头的受控证据；源码链接用于定位断言，不额外构成一次运行验收。后续功能改变对应边界时补验受影响范围。
+
+| 跨批门槛 | 已有受控证据 | 仍开放的边界 |
+|---|---|---|
+| 强杀与恢复 | 前台 strict JSON/SSE 的11个资金边界见 PR #80 和 [strict_crash_test.go](../internal/gateway/strict_crash_test.go)；disabled 后台五种 dispatch/事件提交窗口见 [background_runtime_test.go](../internal/generation/background_runtime_test.go)；持久 WS 四种窗口见 PR #64 和 [responses_ws_crash_test.go](../cmd/gateway/responses_ws_crash_test.go)。核对真实 Kill/Wait、同库重复恢复、实际发送数及 unknown 不重放 | 不把前台财务证据扩展到后台/WS收费；真实 Provider 的受理与计费事实仍未认证 |
+| 跨模式与权限 | PR #63及后续工具子批覆盖 HTTP→WS、WS→HTTP、新连接/重启、父链TTL、跨owner/Key、撤销、模型权限、凭据变化、保存失败与unknown；断言入口见 [responses_ws_history_test.go](../cmd/gateway/responses_ws_history_test.go)。后台缺内容密钥及worker关闭见 [background_test.go](../cmd/gateway/background_test.go) | 仅声明已支持的完整上下文和单串行轮次；账号池、任意多路复用、WS连接池须有独立需求及验收 |
+| 后端可操作性 | 实际main的 [local.py](../tests/smoke/local.py) 覆盖本人账本、管理员pending详情/幂等waive、脱敏、配置发布及关闭后占用；任务/事件/TTL见 [background.py](../tests/smoke/background.py)，用量隔离/持久化见 [usage_history.py](../tests/smoke/usage_history.py)。PR #79补当前准入与WS占用指标 | 生产告警阈值、备份保管和运维演练需部署现场验证；正文读取仍受明确授权约束，新前端继续后置 |
+| 镜像与固定客户端 | 既有完整delivery执行安装/升级/停写备份恢复；PR #65/#66/#78及后续CI执行实际main镜像、受控TLS、Upgrade反代、持久续链、重启/SIGKILL和固定SDK/Codex。脚本为 [delivery.py](../tests/smoke/delivery.py)、[native_ws_delivery.py](../tests/smoke/native_ws_delivery.py) | 仅覆盖记录中的固定版本与声明工具/操作；未发布版本、任意默认客户端组合和真实Provider部署不继承验收；models/compact等按需求登记 |
+| 性能与承载 | P0已记录HTTP/1.1、TLS/H2、受控反代、配对流/JSON、并发/取消/过载恢复及有限慢流的具体基线；JSON连接条件按本批最终头独立验收 | 完整长时soak、最大稳定容量、生产网络与数值性能预算仍开放；描述性分位数和采样资源峰值不替代这些门槛 |
+| 真实Provider | 用户明确没有真实Key，按当前任务指示跳过真实Provider/OAuth，不请求或发起付费调用 | 至少一个声明范围内的真实Provider/客户端完整组合仍未验收；受控成功和显式拒绝都不能代替该结果 |
+| 最新集成与交付状态 | 基线及各批记录分别列源码、本地验证、精确头CI和合并事实；PR #89/#90最终集成及合并后Verify另行跟踪 | 最终新头必须通过完整现有CI后合并；CI、合并、制品发布与生产运行状态分别记账，不相互替代 |
+
+P1/P2/P3的受控账号生命周期与P6/P7已声明子集按各批结果保留。P5目前缺多账号可信窗口与负载数据，连接池/等待队列缺收益依据，继续按条件后置。P7后台/WS收费取决于逐操作P8证明；S5-03仍缺逐凭据最高适用费率、失败收费、税/附加项、未来改价假设和完整计量证明，不能用新增模拟用例关闭。当前没有从这份复核导出的必需生产接口或新运行平台。
 
 准入等待队列只在容量/拒绝数据证明必要后单独设计 L1 admission CR，明确队列上限、最长等待/总 deadline、取消、公平性、槽位只释放一次和关闭 drain；HTTP/WS/后台不自动共用。外部 Runtime/R07 继续等待至少两个可独立安装升级的真实消费者，并证明编译期注册不足，再确认进程信任、回调权限/副作用、制品验证、代次和升级/回退契约。
 
