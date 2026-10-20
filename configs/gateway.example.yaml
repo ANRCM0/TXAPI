@@ -1,4 +1,4 @@
-# S2：新客户端 Key 建议登录后通过 /api/me/keys 生成；下方 YAML token 属于旧种子导入，默认无主，必须显式认领后才能调用。
+# 新客户端 Key 建议登录后通过 /api/me/keys 生成；下方 YAML token 用于兼容种子导入，默认无主，必须显式认领后才能调用。
 # Copy to config.yaml (ignored by Git) and edit locally.
 # Relative database paths are resolved from the process working directory.
 server:
@@ -27,7 +27,7 @@ server:
   # IP 级限流的每分钟请求数上限，0 表示不限。
   # 自用（本机/内网访问）保持 0；暴露到公网时务必配上，比如 120。
   ip_rpm_limit: 0
-  # S3：单进程转发并发上限。0/省略使用下列默认值，不表示无限。
+  # 单进程转发并发上限。0/省略使用下列默认值，不表示无限。
   # 要求 key <= user < instance，确保单用户不能占满所有实例名额。
   concurrency:
     instance: 256
