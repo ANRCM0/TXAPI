@@ -197,6 +197,7 @@ def call(connection, key, fixture, seconds=5, mode="normal"):
 def summary(samples, json_mode=False):
     successful = [item for item in samples if item["success"]]
     return {"started": len(samples), "completed": len(successful),
+            "observed_upstream_tcp_nodelay": sorted({option for sample in samples for option in sample.get("upstream_tcp_nodelay", [])}),
             "failures": [item["failure"] for item in samples if not item["success"]],
             "upstream_attempts": sum(item["upstream_attempts"] for item in samples),
             "observed_client_connections": len({item["client_local_port"] for item in samples if "client_local_port" in item}),
@@ -221,7 +222,7 @@ def run(args, report):
         [args.go, "env", "-json", "GOOS", "GOARCH", "CGO_ENABLED", "GOEXPERIMENT", "GOTOOLCHAIN", "GOAMD64"],
         cwd=ROOT, env=env, text=True, timeout=20))
     json_mode = args.operation == "chat-json"
-    fixture = JSONFixture(.005) if json_mode else Fixture(.005)
+    fixture = JSONFixture(.005, tcp_nodelay=args.json_fixture_tcp_nodelay) if json_mode else Fixture(.005)
     request_call = call_json if json_mode else call
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
@@ -357,6 +358,8 @@ def main():
     parser.add_argument("--reference", type=Path, required=True, help="Completed reference_build.py output directory")
     parser.add_argument("--go", default="go")
     parser.add_argument("--operation", choices=("chat-sse", "chat-json"), default="chat-sse")
+    parser.add_argument("--json-fixture-tcp-nodelay", action="store_true",
+                        help="Explicitly enable TCP_NODELAY on accepted JSON fixture sockets; default is off")
     parser.add_argument("--samples", type=int, default=20)
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--output", type=Path, required=True)
@@ -364,6 +367,8 @@ def main():
     if not (1 <= args.samples <= 1000 and 1 <= args.rounds <= 10):
         parser.error("samples 1..1000, rounds 1..10")
     json_mode = args.operation == "chat-json"
+    if args.json_fixture_tcp_nodelay and not json_mode:
+        parser.error("--json-fixture-tcp-nodelay requires --operation chat-json")
     report = {"schema": 1, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
               "harness_sha256": digest(Path(__file__)), "stream_fixture_sha256": digest(ROOT / "tests/smoke/stream_baseline.py"),
               "json_fixture_sha256": digest(ROOT / "tests/smoke/reference_json.py"),
@@ -372,6 +377,7 @@ def main():
               "configuration": {"operation": "Chat text JSON" if json_mode else "Chat text SSE", "http": "HTTP/1.1 loopback plaintext", "concurrency": 1,
               "samples_per_target_per_round": args.samples, "rounds": args.rounds, "warmup_per_target": 2,
               "event_delay_ms": 5, "client_policy": "persistent, close on failure", "request_deadline_seconds": 5,
+              "json_fixture_tcp_nodelay": args.json_fixture_tcp_nodelay if json_mode else "not_applicable",
               "resource_scope": RESOURCE_SCOPE, "auth": "production API Key middleware; public bootstrap only",
               "retry_times": 0, "txapi_billing": "disabled", "reference_billing": "explicit zero model ratio; finite token quota",
               "reference_background_monitoring": "channel testing disabled; batch balance updates disabled",
