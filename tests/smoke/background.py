@@ -91,6 +91,22 @@ def background_workflow(gateway, work, env, service, ready, request):
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         base = f"http://127.0.0.1:{port}"
+
+        def occupancy(expected):
+            deadline = time.monotonic() + 10
+            while True:
+                status, raw = request(base + "/metrics")
+                assert status == 200, (status, raw)
+                samples = {parts[0]: int(parts[1]) for line in raw.decode().splitlines()
+                           if line.startswith("gateway_background_") and len(parts := line.split()) == 2}
+                if (samples.get("gateway_background_snapshot_success") == 1
+                        and samples.get("gateway_background_snapshot_timestamp_seconds", 0) > 0
+                        and all(samples.get(name) == value for name, value in expected.items())):
+                    assert samples["gateway_background_snapshot_timestamp_seconds"] <= time.time() + 1
+                    return samples
+                assert time.monotonic() < deadline, (expected, samples)
+                time.sleep(0.05)
+
         database, config_file = work / "background.db", work / "config.json"
         credential_keys, content_keys = work / "credential.json", work / "content.json"
         for path in (credential_keys, content_keys):
@@ -112,6 +128,8 @@ def background_workflow(gateway, work, env, service, ready, request):
         payload = {"model": "m", "input": "private-background-smoke-input", "background": True, "store": False, "stream": True}
         with service([str(gateway), "-config", str(config_file)], work / "disabled.log", env) as process:
             ready(process, port)
+            occupancy({"gateway_background_enabled": 0, 'gateway_background_jobs{stage="terminal"}': 0,
+                       "gateway_background_events_retained": 0, "gateway_background_reserved_bytes": 0})
             assert request(base + "/v1/responses", token, payload)[0] == 400
             assert state["posts"] == 0
         config["responses"]["background"] = {"enabled": True, "channel_ids": [1]}
@@ -207,6 +225,9 @@ def background_workflow(gateway, work, env, service, ready, request):
                 time.sleep(0.05)
             with lock:
                 assert state["posts"] == 3, "Console fixture did not dispatch exactly once"
+            occupancy({"gateway_background_enabled": 1, 'gateway_background_jobs{stage="terminal"}': 2,
+                       'gateway_background_jobs{stage="remote_active"}': 1, "gateway_background_replay_pending": 0,
+                       "gateway_background_events_retained": 2})
             if env.get("TXAPI_TASK_BROWSER"):
                 browser_env = dict(env, TXAPI_BASE_URL=base, TXAPI_TEST_ADMIN_USERNAME="bg-smoke-admin",
                                    TXAPI_TEST_ADMIN_PASSWORD="bg-smoke-password-only", TXAPI_TEST_TASK_ID=console_id)
@@ -225,6 +246,12 @@ def background_workflow(gateway, work, env, service, ready, request):
                 time.sleep(0.1)
             with lock:
                 assert state["posts"] == 3 and state["cancels"] == 2, "Console cancellation replayed or skipped remote cleanup"
+            with contextlib.closing(sqlite3.connect(database)) as db:
+                events, event_bytes, reserved = db.execute(
+                    "SELECT SUM(event_count),SUM(stored_bytes),SUM(reserved_bytes) FROM background_jobs").fetchone()
+            occupancy({"gateway_background_enabled": 1, 'gateway_background_jobs{stage="terminal"}': 3,
+                       "gateway_background_replay_pending": 0, "gateway_background_events_retained": events,
+                       "gateway_background_event_bytes": event_bytes, "gateway_background_reserved_bytes": reserved})
 
         for mode in ("legacy", "strict"):
             config["billing"]["mode"] = mode
@@ -240,6 +267,10 @@ def background_workflow(gateway, work, env, service, ready, request):
         config_file.write_text(json.dumps(config))
         with service([str(gateway), "-config", str(config_file)], work / "privacy-disabled.log", env) as process:
             ready(process, port)
+            occupancy({"gateway_background_enabled": 0, "gateway_background_controls_active": 0,
+                       'gateway_background_jobs{stage="terminal"}': 3, "gateway_background_replay_pending": 0,
+                       "gateway_background_events_retained": 0, "gateway_background_event_bytes": 0,
+                       "gateway_background_reserved_bytes": 0})
             with contextlib.closing(sqlite3.connect(database)) as db:
                 assert db.execute("SELECT COUNT(*) FROM background_events").fetchone() == (0,)
                 assert db.execute("SELECT SUM(length(ciphertext)+length(snapshot)+reserved_bytes+replay_pending) FROM background_jobs").fetchone() == (0,)

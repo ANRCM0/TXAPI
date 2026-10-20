@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.10` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合已通过精确头 CI 并合并；占用指标增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.11` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合及准入/原生 WS 占用指标已通过精确头 CI 并合并；后台占用增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -276,6 +276,19 @@ P0 扩展有界负载证据（2026-10-20，非长期 soak 验收）：在干净�
 6. **其他影响：**无新产品开关、依赖、schema、收费或权限变化；OpenAPI 同步解释指标语义，不增加操作。其余运行验收和真实 Provider 门槛保持待验。
 
 本地受控验证：provider 未注入时省略、动态快照与固定无标签 gauge 输出、WS 关闭时 enabled=0、真实 request/attempt 槽位变化均通过；原生 session 的 busy 拒绝、活跃轮次取消与 Close join、并发读取通过。真实 socket 完成与断开两种路径分别观察空闲 1连接/0轮次、执行 1/1、完成保留连接及关闭后全部释放，且只有1次实际上游发送、零HTTP回退。Windows GOARCH=amd64 build、vet、全量 Go 回归通过；生产 main 的完整 local.py 冒烟通过，包含本批关闭 WS 的 /metrics 注入断言与既有 strict 拒绝、结算、密钥轮换、后台/用量强杀恢复及 shadow。OpenAPI0.13.10/117、Python语法、差异/局部格式及方案链接检查通过。未执行本地 Docker/race；最终精确头 Linux 完整 CI/交付仍待验收。
+
+#### FC-P0-BACKGROUND-OCCUPANCY-001：后台控制、恢复与事件占用（2026-10-20）
+
+前一批 FC-P0-OCCUPANCY-001 的精确头 `080a8d97c08a5445d7931772ae17de501f8abc63` 已通过 push Verify `39360990700` 与 PR Verify `39360997575` 的全部六项检查，PR #74 已合并为 `abb10d91d32181d3267ee92831ca8e43150e1833`；合并后主线 Verify 独立记录，不外推为本批证据。
+
+1. **层级/目录：**L1 store 增加后台元数据聚合读取，generation.BackgroundRunner 记录本进程已 claim 控制任务的执行占用，cmd/gateway 复用 Responses 原有保留期维护循环采样，metrics 输出缓存值；修改上述既有目录、受控生产入口冒烟及本方案/OpenAPI，不新增包、采集 worker、管理页面或恢复流程。
+2. **依赖与冻结：**新增 Store.BackgroundOccupancy、BackgroundRunner.ActiveControls 及 metrics.BackgroundStats/SetBackgroundStatsProvider 组装能力；不修改 background/v1/v2、observability/v1、control/v1 等冻结/已批准功能契约或私有 backgroundstate.Repository。只读聚合不授予调用者任务、事件正文或资金权限。
+3. **来源与地基影响：**主参考 sub2api 固定 f2e5b55f3e8069df1c02a9a27af537b5fdefa64e 的 backend/internal/service/ops_metrics_collector.go::collectAndPersist（254 起）把 DB 查询和系统采样放在后台采集阶段、分别保留可用性；沿用本项目 store 单一数据权威和现有维护循环，改为有时限的内存快照而非新增持久指标、Redis/leader/外部采集器。控制占用沿 accountPoolLoadLocked 的 owner 当前实际执行/释放状态观察原则改写，不复制第三方源码。L0、SQLite schema 与既有发送/恢复顺序不变。
+4. **行为、兼容与回退：**固定聚合 gauge 包括 background enabled、active controls、snapshot success/最后成功 Unix 秒、jobs 按 queued/dispatching/remote_active/terminal/uncertain/other 六种固定 stage、replay pending、retained events/event bytes/reserved bytes。store 单条只读 SQL 投影元数据，最多读4097行；超过4096合法上限或负计数视为不可用，不读取/解密正文、凭据、snapshot 或事件 blob，不按 owner/Key/ID/model 标签展开。沿原保留期循环启动即采样、每次后台清理后以独立500ms deadline 采样；/metrics 抓取只读内存。未有成功采样时省略持久计数；失败保留上次计数与时间且 success=0，不伪装为零；时间戳供消费者判断新鲜度。后台功能关闭仍观察保留元数据和正常隐私清理。控制占用从 claim 成功到 release 尝试结束，含取消/失败收尾，不能当远端生成数或有效 lease 数。无新配置/迁移；移除注入即可回退，快照不成为恢复/路由/账本权威。
+5. **验证与真实消费者：**生产 main 的 /metrics 消费缓存；定向验证空库、五类阶段和未知阶段、持久事件/预留聚合、独立重开、负值/超限/取消/DB失败、初始未知和失败保留旧值、后台关闭仍可见、active control 完成/取消释放。真实生产 main 的后台SSE/强杀重启、事件恢复、删除和关闭功能后的TTL路径同时核对聚合及实际发送次数；集中 build/vet/全量Go与适用精确头完整Linux CI/交付。不以采样计数证明长期资源稳定、数据库字节上限、财务恢复或真实Provider。
+6. **协作影响：**维护循环只有一次有界只读查询，失败不阻断原清理或新请求；Close 原有 cancel/join 后再关闭共享 store。OpenAPI 同步固定指标、采样失败和新鲜度语义，操作数量不变；收费、授权、配置默认值和前端保持原范围。
+
+实现时发现既有 CleanupBackground 在同一事务删除过期事件、清空字节占用时遗漏清零 event_count，导致保留任务元数据仍记着已删除事件。本批在原 store 清理事务补齐 event_count=0；不新增清理路径、迁移或执行权限。定向回归通过真实清理路径同时核对事件表为空、保留任务仍存在且事件/字节/预留/恢复计数归零；控制任务完成/取消均验证 release 收尾结束前保持占用、结束后归零。完整集成验证仍待本批集中执行。
 
 ### P1：最小托管账号推理
 

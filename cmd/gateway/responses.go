@@ -8,6 +8,7 @@ import (
 	"minigateway/internal/foundation/persistence"
 	"minigateway/internal/secrets"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"minigateway/internal/compat/httpoutput"
@@ -26,11 +27,12 @@ import (
 )
 
 type responsesRuntime struct {
-	worker  *generation.BackgroundRunner
-	handler http.Handler
-	history history.Repository
-	cancel  context.CancelFunc
-	done    chan struct{}
+	worker              *generation.BackgroundRunner
+	handler             http.Handler
+	history             history.Repository
+	cancel              context.CancelFunc
+	done                chan struct{}
+	backgroundOccupancy atomic.Pointer[backgroundOccupancySample]
 }
 
 func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gateway.Gateway) (*responsesRuntime, error) {
@@ -188,6 +190,7 @@ func (r *responsesRuntime) History() history.Repository {
 
 func (r *responsesRuntime) retention(ctx context.Context, st *store.Store, foreground bool) {
 	defer close(r.done)
+	r.sampleBackgroundOccupancy(ctx, st)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -203,6 +206,7 @@ func (r *responsesRuntime) retention(ctx context.Context, st *store.Store, foreg
 			if err != nil && ctx.Err() == nil {
 				slog.Warn("background retention cleanup did not finish")
 			}
+			r.sampleBackgroundOccupancy(ctx, st)
 			if !foreground {
 				continue
 			}
