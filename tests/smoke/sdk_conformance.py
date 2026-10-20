@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import select
 import socket
+import struct
 import subprocess
 import tempfile
 import threading
@@ -26,6 +27,13 @@ CASES = ["chat-json", "responses-json", "chat-text-open-terminal", "chat-tools-o
          "responses-completed-open-terminal", "responses-failed-open-terminal", "responses-incomplete-open-terminal"]
 CASES += [operation + suffix for operation in ("chat", "responses")
           for suffix in ("-truncated", "-cancel", "-while-busy", "-after-close")]
+EMBEDDING_CASES = ("embeddings-float", "embeddings-base64", "embeddings-default")
+CASES += list(EMBEDDING_CASES)
+EMBEDDING_VECTORS = [[0.25, -0.5, 1.0], [-1.0, 0.0, 2.0]]
+
+
+def embedding_base64(vector):
+    return base64.b64encode(struct.pack("<3f", *vector)).decode("ascii")
 
 
 def clean_environment():
@@ -84,12 +92,39 @@ class Fixture:
             def do_POST(self):
                 case = "unknown"
                 try:
+                    self.connection.settimeout(5)
                     assert self.headers.get("Authorization") == "Bearer " + owner.key
-                    assert self.path in ("/v1/chat/completions", "/v1/responses")
-                    body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                    case = body.get("input") or body["messages"][0]["content"]
+                    assert self.path in ("/v1/chat/completions", "/v1/responses", "/v1/embeddings")
+                    length = int(self.headers["Content-Length"])
+                    assert 0 < length < 16384
+                    body = json.loads(self.rfile.read(length))
+                    inputs = body.get("input") or body.get("messages", [{}])[0].get("content")
+                    case = inputs[0] if isinstance(inputs, list) else inputs
                     with owner.lock:
                         owner.hits[case] += 1
+                    if self.path == "/v1/embeddings":
+                        assert case in EMBEDDING_CASES and body["model"] == "sdk-embedding-actual"
+                        assert body["dimensions"] == 3 and not body.get("stream")
+                        floating = case == "embeddings-float"
+                        assert body["encoding_format"] == ("float" if floating else "base64")
+                        assert inputs == ([case, "second input"] if floating else case)
+                        vectors = EMBEDDING_VECTORS if floating else EMBEDDING_VECTORS[:1]
+                        value = {"object": "list", "model": "sdk-embedding-actual",
+                                 "data": [{"object": "embedding", "index": index,
+                                           "embedding": vector if floating else embedding_base64(vector),
+                                           "extension": {"preserved": True}}
+                                          for index, vector in enumerate(vectors)],
+                                 "usage": {"prompt_tokens": 7, "total_tokens": 7},
+                                 "extension": {"preserved": True}}
+                        raw = json.dumps(value, separators=(",", ":")).encode()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(raw)))
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        self.close_connection = True
+                        self.wfile.write(raw)
+                        return
                     chat = self.path.endswith("chat/completions")
                     streaming = body.get("stream", False)
                     self.send_response(200)
@@ -177,6 +212,8 @@ def exercise(client, fixture):
     import openai
     from openai.types.chat import ChatCompletion, ChatCompletionChunk
     from openai.types.responses import Response, ResponseTextDeltaEvent
+    from openai.types.create_embedding_response import CreateEmbeddingResponse
+    from openai.types.embedding import Embedding
 
     def chat(case, stream=False, **kwargs):
         return client.chat.completions.create(model=case, messages=[{"role": "user", "content": case}],
@@ -189,6 +226,34 @@ def exercise(client, fixture):
     assert isinstance(result, ChatCompletion) and result.choices[0].message.content == "你好🌏"
     result = responses("responses-json")
     assert isinstance(result, Response) and result.status == "completed" and result.output_text == "你好🌏"
+    for case in EMBEDDING_CASES:
+        kwargs = {"dimensions": 3}
+        if case != "embeddings-default":
+            kwargs["encoding_format"] = "float" if case == "embeddings-float" else "base64"
+        inputs = [case, "second input"] if case == "embeddings-float" else case
+        result = client.embeddings.create(model=case, input=inputs, **kwargs)
+        assert isinstance(result, CreateEmbeddingResponse) and result.object == "list"
+        assert result.model == "sdk-embedding-actual"
+        assert result.usage.prompt_tokens == 7 and result.usage.total_tokens == 7
+        assert not hasattr(result.usage, "completion_tokens")
+        assert result.extension == {"preserved": True}
+        expected = EMBEDDING_VECTORS if case == "embeddings-float" else EMBEDDING_VECTORS[:1]
+        assert len(result.data) == len(expected)
+        for index, (item, vector) in enumerate(zip(result.data, expected)):
+            assert isinstance(item, Embedding) and item.object == "embedding" and item.index == index
+            assert item.extension == {"preserved": True}
+            assert item.embedding == (embedding_base64(vector) if case == "embeddings-base64" else vector)
+        until(lambda: fixture.closed[case] == 1, "embeddings did not release upstream")
+    for supplied in ({"extra_body": {"stream": True}}, {"invalid_key": True}):
+        caller = client.with_options(api_key="sk-sdk-invalid-call-key") if supplied.get("invalid_key") else client
+        try:
+            caller.embeddings.create(model="embeddings-float", input="embeddings-float",
+                                     **({"extra_body": supplied["extra_body"]} if "extra_body" in supplied else {}))
+        except openai.APIStatusError as error:
+            assert error.status_code == (401 if supplied.get("invalid_key") else 400)
+        else:
+            raise AssertionError("invalid embeddings request reached provider")
+    assert all(fixture.hits[case] == 1 for case in EMBEDDING_CASES), "rejected embeddings call was sent"
     for case in ("chat-text-open-terminal", "chat-tools-open-terminal"):
         kwargs = {}
         if "tools" in case:
@@ -294,6 +359,9 @@ def main():
                                 "key": fixture.key, "models": [case]} for case in CASES],
                   "tokens": [{"name": "sdk-client", "key": key, "models": CASES}],
                   "responses": {"enabled": True, "keys_file": str(content_keys)}}
+        for channel in config["channels"]:
+            if channel["name"] in EMBEDDING_CASES:
+                channel["model_mapping"] = {channel["name"]: "sdk-embedding-actual"}
         config_file = work / "config.json"
         config_file.write_text(json.dumps(config))
         for flags, command_env in [(["-init-admin"], dict(env, TXAPI_ADMIN_USERNAME="sdk-admin", TXAPI_ADMIN_PASSWORD="sdk-password-only")),
@@ -307,7 +375,7 @@ def main():
                 exercise(client, fixture)
         process_log = (work / "gateway.log").read_text(encoding="utf-8", errors="replace")
         assert key not in process_log and fixture.key not in process_log, "synthetic credential appeared in service log"
-    print("PASS: pinned Python SDK typed Chat/Responses JSON/SSE, tools/UTF-8, terminals, truncation, close and admission release; loopback only")
+    print("PASS: pinned Python SDK typed Chat/Responses JSON/SSE, embeddings float/base64/default decoding and model mapping, tools/UTF-8, terminals, truncation, close and admission release; loopback only")
 
 
 if __name__ == "__main__":

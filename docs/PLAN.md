@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最新已合并且完整通过CI的功能头为 `master/2f42ef5b7637e959741bdd771d6d9a3339e0e304`：固定参考普通Chat JSON对照PR #86最终头 `6b87e81cc1e7b121cd6ae905ad1f0d2c93fae023` 已通过 push Verify `39389441410` 与 PR Verify `39389499926` 全部六项，额外Reference Comparison `39389499746` 的SSE/JSON两操作也成功；PR测试合并文件树 `2abda6657d259b398e5f17ee260feb97d1b3caea` 与该头相同。合并后独立 Verify `39391135666` 已成功。验收说明PR #87最终头 `d4c323bb47a0960a3970b0268a74ff6b9f151f01` 的 push/PR Verify `39391568362` / `39391612872` 全六项成功，测试合并树相同，已合并为 `49cce3405f418f546dc75be347e492ea232f6f37`；其合并后独立 Verify `39393640387` 仍在运行。固定参考SSE PR #85的合并后 Verify `39389028714`、固定HTTP SDK后台PR #84的 Verify `39384461090`、embeddings修复PR #83的 Verify `39382614575`、Chat原生用量PR #82的 Verify `39380819400`、双端TLS/H2基线PR #81的 Verify `39375474361`、strict强杀PR #80的 Verify `39373920654`、PR #79的 Verify `39370670996` 已成功。更早证据保留对应PR，批次中的本地/待CI段落保留当时状态；当前集成状态以本段和各批最终验收记录为准。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最新已合并且精确功能头完整通过CI的基线为 `master/0b7283f14da363093ad5233b03488eef4e56b603`：embeddings原生部分用量PR #88最终头 `44808beb9c6224433200f2022fc4b6809eadf08b` 的 push Verify `39394458606` 与 PR Verify `39394521939` 全部六项成功，测试合并文件树 `ddf8e0a6360bda406a8aea2e02ac93bb13848eda` 与该头完全相同；合并后独立 Verify `39396394811` 仍在运行。固定参考普通Chat JSON对照PR #86最终头 `6b87e81cc1e7b121cd6ae905ad1f0d2c93fae023` 已通过 push Verify `39389441410` 与 PR Verify `39389499926` 全部六项，额外Reference Comparison `39389499746` 的SSE/JSON两操作也成功；PR测试合并文件树 `2abda6657d259b398e5f17ee260feb97d1b3caea` 与该头相同。合并后独立 Verify `39391135666` 已成功。验收说明PR #87最终头 `d4c323bb47a0960a3970b0268a74ff6b9f151f01` 的 push/PR Verify `39391568362` / `39391612872` 全六项成功，测试合并树相同，已合并为 `49cce3405f418f546dc75be347e492ea232f6f37`；其合并后独立 Verify `39393640387` 已完整成功。固定参考SSE PR #85的合并后 Verify `39389028714`、固定HTTP SDK后台PR #84的 Verify `39384461090`、embeddings修复PR #83的 Verify `39382614575`、Chat原生用量PR #82的 Verify `39380819400`、双端TLS/H2基线PR #81的 Verify `39375474361`、strict强杀PR #80的 Verify `39373920654`、PR #79的 Verify `39370670996` 已成功。更早证据保留对应PR，批次中的本地/待CI段落保留当时状态；当前集成状态以本段和各批最终验收记录为准。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -34,10 +34,10 @@
 | 原生 WS | 双端原生连接、逐轮授权/准入、串行文本/function/custom与单层namespace轮次、连接内最新父 ID | 默认关闭且仅 disabled；显式持久续链/跨模式、受控镜像TLS/反代/重启及固定WS SDK已通过精确头CI并合并；真实Provider部署、收费和任意多路复用未验收 |
 | 执行与路由 | 唯一执行事实、原生资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow | shadow 默认关闭且不控制路由；无准入等待队列；不代表外部 Runtime |
 | 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新已完成受控验收；P3 资格反馈/人工恢复已合并 | 无完整账号池，reset 未知不自动恢复；真实账号未验收 |
-| 用量与计费 | Responses/Chat 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | embeddings 原生部分明细本地已验证、精确头 CI 待验；用量历史仅 disabled；WS 每轮明细与后台任务元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
+| 用量与计费 | Responses/Chat/embeddings 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 缺失原生量保持未知；用量历史仅 disabled；WS 每轮明细与后台任务元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.14` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合及准入/原生 WS 占用指标已通过精确头 CI 并合并；Chat原生用量、embeddings费用回执修复、固定HTTP SDK后台和固定参考Chat SSE/JSON对照已合并。embeddings 原生部分明细本地完整 Go/main 已验证，最终精确头 CI 单列。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.14` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合及准入/原生 WS 占用指标已通过精确头 CI 并合并；Chat原生用量、embeddings费用回执修复、固定HTTP SDK后台和固定参考Chat SSE/JSON对照已合并。embeddings 原生部分明细已通过精确头完整 CI 并合并，固定SDK向量格式和JSON连接条件对照分别按各批最终头验收。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -450,6 +450,8 @@ Windows GOARCH=amd64完整build/vet通过；全量Go首轮只在旧S5模式测�
 
 生产main完整local.py受控冒烟通过：新增7种embeddings部分/显式零/空/null/精确9007199254740993经实际调用Key、模型映射、向量base64/未知字段输出、SQLite封存及管理/本人查询，均只发送一次；错误Key零发送、其他owner 404、调用Key不可读管理历史，未声明细分量保持null。7条embeddings与原Chat封存记录在强杀/恢复及关闭capture再启动后不变，原Chat中断不重放和财务状态不变断言保留。仅文档变化的PR #87主线49cce34已快进合入，生产Go/脚本与上述验证一致；差异/格式、Python AST和OpenAPI检查同批完成。最终精确头Linux race、SDK、交付与完整Verify独立验收，不用本地结果替代。
 
+原生部分用量最终验收：PR #88最终头44808beb9c6224433200f2022fc4b6809eadf08b的push/PR Verify 39394458606/39394521939全六项成功，包含Linux race、生产main/固定SDK、架构与镜像交付；测试合并ddf8e0a6360bda406a8aea2e02ac93bb13848eda的完整文件树与该头一致。已合并为0b7283f14da363093ad5233b03488eef4e56b603，合并后Verify 39396394811独立跟踪。固定SDK向量格式和JSON连接条件对照分别按后续最终集成提交验收。
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。
@@ -618,6 +620,17 @@ P1 使用 R04a 新签发的受控来源记录和资源标记，并将它们绑�
 4. **行为与回退：**SDK 禁用自动重试、代理环境和环境凭据；loopback 上游使用逐字节 UTF-8 和多行事件。检查类型化 JSON、文本/函数参数、completed/failed/incomplete、终态后保持连接、截断、取消和单 Key 名额释放；13 个实际上游场景各一条请求，忙时请求不发送。SDK 该版本在干净 EOF 截断时不会自行报错，断言只得到部分内容且没有成功终态，不能把 EOF 当完成。
 5. **验证：**Windows 独立虚拟环境定向运行已通过；Verify 增加相同固定依赖和回归；PR #50 精确头 `749c591d6284facd2cc00b571f900b8fc4976a40` 的 Linux Verify 成功并已合并。所有账号、Key 与上游均为一次性夹具，无真实 Provider 调用，不代表官方服务、其它 SDK 版本或 Codex/WS/后台已验收。
 6. **协作：**保留已有冒烟、架构、race 和交付门槛；可通过 `make sdk-conformance PYTHON=<虚拟环境解释器>` 单独运行。新前端、收费和账号路线无变化。
+
+#### P4 固定 HTTP SDK embeddings 子批（2026-10-20）
+
+1. **层级/目录：**仅扩展tests/smoke/sdk_conformance.py及本方案，复用既有固定SDK、生产main、真实调用Key/owner、临时加密SQLite与现有Verify，不修改生产协议或增加发送链。
+2. **公开依赖/冻结：**固定openai==2.11.0/httpx==0.28.1，消费既有/v1/embeddings JSON接口、模型映射与拒绝stream语义；无Go公开端口、OpenAPI或冻结范围变化。
+3. **来源/地基：**编码前读取固定new-api 25372e30b1f94255b1f818aeaaf006f042572580的relay/embedding_handler.go::EmbeddingHelper，采用独立操作、模型映射和向量原生响应边界；同时读取已安装固定SDK的resources/embeddings.py::Embeddings.create/parser及types/create_embedding_response.py、embedding.py，核对默认发送base64并客户端转float，显式指定格式不转换。参考项目无本SDK与TXAPI进程组合的回归，独立扩展现有客户端夹具，不移植源码。L0、schema、配置、依赖与计费许可不变。
+4. **行为/回退：**覆盖批量文本/浮点向量、显式base64原样和默认base64的SDK浮点解码；核对输入、dimensions、编码、实际模型映射、向量索引、原生input/total用量与未知扩展。错误Key和stream请求在发送前拒绝；成功三种情况各一次实际发送。SDK关闭重试、环境代理与凭据。回退只删除回归。
+5. **验证/验收：**固定虚拟环境运行完整既有Chat/Responses/工具/终态/截断/取消/准入与新增embeddings回归，Python AST和diff检查；最终精确头完整Verify包含相同SDK脚本、Linux race及交付门槛。不因测试脚本变更重跑未改生产Go的本地全套。
+6. **协作/限制：**已有13种实际上游场景和忙时拒绝断言保留；仅声明固定版本受控客户端组合，不扩大真实Provider、收费、持久原生明细或其它SDK版本范围，不新增依赖与额外CI任务。
+
+本地受控证据：Windows GOARCH=amd64、固定openai2.11.0/httpx0.28.1、实际main/加密SQLite回归通过。新增三种embeddings调用各一次上游发送：两条文本返回两个带原索引的3维浮点向量，显式base64返回原字符串，SDK默认在wire请求base64后将有效float32数据解码为预期浮点值；均保留实际映射模型、input/total各7、向量及顶层未知扩展，没有completion_tokens推断。错误Key 401与stream 400不发送。原13种上游场景、忙时429零发送、关闭/终态后释放断言同时通过，总计16种实际上游场景各一次；Python AST及diff检查通过。仅两个测试/说明文件有变化，无生产Go、OpenAPI、schema、依赖或workflow变化；原生用量PR #88合并主线0b7283f14da363093ad5233b03488eef4e56b603已整合，完整固定SDK脚本再次运行通过，生产Go与该已验主线逐字相同。最终集成精确头完整CI独立验收，未复用旧头绿灯。
 
 #### P4 固定 HTTP SDK 后台恢复子批（2026-10-20）
 
