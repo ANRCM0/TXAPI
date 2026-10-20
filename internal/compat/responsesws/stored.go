@@ -26,18 +26,24 @@ func validateStoredItems(raw json.RawMessage) error {
 		var item struct {
 			Type      string
 			Namespace json.RawMessage
+			Name      json.RawMessage
 		}
 		if json.Unmarshal(raw, &item) != nil {
 			return errors.New("invalid stored input item")
 		}
 		switch item.Type {
-		case "", "message", "function_call", "function_call_output":
+		case "", "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output":
 		default:
 			return errors.New("stored WS input supports self-contained text and functions")
 		}
-		if (item.Type == "function_call" || item.Type == "function_call_output") && item.Namespace != nil {
+		if (item.Type == "function_call" || item.Type == "function_call_output" || item.Type == "custom_tool_call" || item.Type == "custom_tool_call_output") && item.Namespace != nil {
 			if _, valid := text(item.Namespace); !valid {
 				return errors.New("invalid stored function namespace")
+			}
+		}
+		if item.Type == "custom_tool_call_output" && item.Name != nil {
+			if _, valid := text(item.Name); !valid {
+				return errors.New("invalid stored custom tool name")
 			}
 		}
 	}

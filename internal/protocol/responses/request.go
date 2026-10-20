@@ -68,7 +68,7 @@ func (r Request) ValidateHTTP() error {
 				Name      string          `json:"name"`
 				Namespace json.RawMessage `json:"namespace"`
 			}
-			if json.Unmarshal(raw, &choice) != nil || choice.Type != "function" || choice.Name == "" {
+			if json.Unmarshal(raw, &choice) != nil || choice.Type != "function" && choice.Type != "custom" || choice.Name == "" || choice.Type == "custom" && !toolName(choice.Name) {
 				return errors.New("unsupported Responses tool choice")
 			}
 			if err := validateNamespace(choice.Namespace); err != nil {
@@ -125,6 +125,14 @@ func (r Request) ValidateHTTP() error {
 				return errors.New("Responses function output requires call_id")
 			}
 			if err := validateTextContent(item.Output); err != nil {
+				return err
+			}
+		case "custom_tool_call":
+			if err := validateCustomCall(raw); err != nil {
+				return err
+			}
+		case "custom_tool_call_output":
+			if err := validateCustomOutput(raw); err != nil {
 				return err
 			}
 		case "reasoning":
@@ -201,6 +209,9 @@ func (r Request) PromptText() string {
 		return text.String()
 	}
 	var items []struct {
+		Type      string          `json:"type"`
+		Input     string          `json:"input"`
+		Namespace string          `json:"namespace"`
 		Content   json.RawMessage `json:"content"`
 		Output    json.RawMessage `json:"output"`
 		Arguments string          `json:"arguments"`
@@ -212,6 +223,10 @@ func (r Request) PromptText() string {
 		appendText(item.Output)
 		text.WriteString(item.Name)
 		text.WriteString(item.Arguments)
+		if item.Type == "custom_tool_call" {
+			text.WriteString(item.Input)
+		}
+		text.WriteString(item.Namespace)
 	}
 	if present(r.fields["tools"]) {
 		text.WriteByte('\n')

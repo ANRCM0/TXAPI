@@ -65,13 +65,13 @@ func TestFunctionNamespaceInvalidDeclarationsAndReferences(t *testing.T) {
 		members[i] = fmt.Sprintf(`{"type":"function","name":"f%d"}`, i)
 	}
 	bad := []string{
-		`[{"type":"custom","name":"x"}]`, `[{"type":"web_search"}]`,
+		`[{"type":"computer","name":"x"}]`, `[{"type":"web_search"}]`,
 		`[` + group(`""`, good) + `]`, `[` + group(`" x"`, good) + `]`, `[` + group(`"x\u0000"`, good) + `]`,
 		`[` + group(fmt.Sprintf("%q", strings.Repeat("雪", 43)), good) + `]`,
 		`[` + group(`"x"`, `null`) + `]`, `[` + group(`"x"`, `[]`) + `]`, `[` + group(`"x"`, `{}`) + `]`,
 		`[` + group(`"x"`, `[{"type":"function","name":"f"},{"type":"function","name":"f"}]`) + `]`,
 		`[` + group(`"x"`, `[{"type":"function","name":"f "}]`) + `]`,
-		`[` + group(`"x"`, `[{"type":"custom","name":"f"}]`) + `]`,
+		`[` + group(`"x"`, `[{"type":"web_search","name":"f"}]`) + `]`,
 		`[` + group(`"x"`, `[{"type":"namespace","name":"nested","tools":`+good+`}]`) + `]`,
 		`[` + group(`"x"`, good) + `,` + group(`"x"`, good) + `]`, `[` + strings.Join(groups, ",") + `]`,
 		`[` + group(`"x"`, `[`+strings.Join(members, ",")+`]`) + `]`,

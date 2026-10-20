@@ -68,6 +68,28 @@ func (s *backgroundStreamDecoder) flush() ([]execution.Frame, error) {
 	if json.Unmarshal(data, &event) != nil || event.Sequence == nil || *event.Sequence < 0 || *event.Sequence < s.lastSequence || !validBackgroundEventType(event.Type) || s.event != "" && s.event != event.Type {
 		return nil, errors.New("invalid background event sequence or type")
 	}
+	// Custom tool input is text, never an executable grammar or function JSON.
+	// Apply the same known-field checks before persisting replayable events.
+	if event.Type == "response.output_item.added" || event.Type == "response.output_item.done" {
+		var itemEvent struct {
+			Item json.RawMessage `json:"item"`
+		}
+		_ = json.Unmarshal(data, &itemEvent)
+		if present(itemEvent.Item) {
+			if err := validateOutputToolItem(itemEvent.Item); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if event.Type == "response.custom_tool_call_input.delta" || event.Type == "response.custom_tool_call_input.done" {
+		var custom struct {
+			Delta *string `json:"delta"`
+			Input *string `json:"input"`
+		}
+		if json.Unmarshal(data, &custom) != nil || event.Type == "response.custom_tool_call_input.delta" && custom.Delta == nil || event.Type == "response.custom_tool_call_input.done" && custom.Input == nil {
+			return nil, errors.New("invalid background custom input event")
+		}
+	}
 	remoteID := s.remoteID
 	observation := bg.Observation{}
 	var enriched *usagev3.UsageObservation

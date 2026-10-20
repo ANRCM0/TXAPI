@@ -40,3 +40,23 @@ func TestResponsesCompletionEstimateUsesCompleteSSEEvents(t *testing.T) {
 		t.Fatalf("partial event contributed output: %q", got)
 	}
 }
+
+func TestResponsesCustomCompletionEstimateRetainsInputWithoutDoneDuplication(t *testing.T) {
+	body := `{"output":[{"type":"custom_tool_call","input":"raw 雪🌏\nsecond"},{"type":"function_call","arguments":"{}"}]}`
+	if got := responsesCompletionText(false, []byte(body)); got != "raw 雪🌏\nsecond{}" {
+		t.Fatal("native custom JSON omitted from legacy estimate", got)
+	}
+	delta := "data: {\"type\":\"response.custom_tool_call_input.delta\",\n" +
+		"data: \"delta\":\"raw 雪🌏\\nsecond\"}\n\n"
+	done := "data: {\"type\":\"response.custom_tool_call_input.done\",\"input\":\"raw 雪🌏\\nsecond\"}\n\n"
+	if got := responsesCompletionText(true, []byte(delta+done)); got != "raw 雪🌏\nsecond" {
+		t.Fatal("custom done duplicated delta estimate", got)
+	}
+	terminal := "data: {\"type\":\"response.completed\",\"response\":" + body + "}\n\n"
+	if got := responsesCompletionText(true, []byte(delta+done+terminal)); got != "raw 雪🌏\nsecond{}" {
+		t.Fatal("custom terminal estimate did not replace deltas", got)
+	}
+	if got := responsesCompletionText(true, []byte(delta+`data: {"type":"response.custom_tool_call_input.delta","delta":"partial"}`)); got != "raw 雪🌏\nsecond" {
+		t.Fatal("partial custom event counted", got)
+	}
+}

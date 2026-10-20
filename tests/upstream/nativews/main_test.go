@@ -133,6 +133,40 @@ func TestIsolatedFixtureTLSAndProxy(t *testing.T) {
 	}
 	// Simulate only the provider wire contract so the fixture client and proxy
 	// can be checked on Windows before the real Linux image is available.
+	custom, _, err := websocket.Dial(ctx, "wss://api.openai.com/v1/responses", &websocket.DialOptions{HTTPClient: client,
+		HTTPHeader: http.Header{"Authorization": {"Bearer " + upstreamKey}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := custom.Write(ctx, websocket.MessageText, []byte(`{"type":"response.create","model":"m","input":[{"role":"user","content":"custom"}],"store":false,"stream_id":"main","tools":[{"type":"namespace","name":"text","tools":[{"type":"custom","name":"edit"}]}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	var deltas strings.Builder
+	for {
+		_, raw, err := custom.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var event struct {
+			Type, Delta string
+			Response    struct {
+				Output []struct{ Type, Input, Namespace, Name string }
+			}
+		}
+		if json.Unmarshal(raw, &event) != nil {
+			t.Fatal("invalid custom fixture event")
+		}
+		if event.Type == "response.custom_tool_call_input.delta" {
+			deltas.WriteString(event.Delta)
+		}
+		if event.Type == "response.completed" {
+			if len(event.Response.Output) != 1 || event.Response.Output[0].Type != "custom_tool_call" || event.Response.Output[0].Input != deltas.String() || deltas.String() != "raw 雪🌏\nsecond" || event.Response.Output[0].Namespace != "text" || event.Response.Output[0].Name != "edit" {
+				t.Fatal("custom TLS fixture changed native input", string(raw))
+			}
+			break
+		}
+	}
+	_ = custom.CloseNow()
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("Cookie")
 		r.Header.Del("X-Forwarded-For")
@@ -160,7 +194,7 @@ func TestIsolatedFixtureTLSAndProxy(t *testing.T) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.requests) != 5 || len(f.errors) != 0 || f.requests[0].InputKind != "array" || !f.requests[0].Store || f.requests[1].Store {
+	if len(f.requests) != 6 || len(f.errors) != 0 || f.requests[0].InputKind != "array" || !f.requests[0].Store || f.requests[1].Store {
 		t.Fatal("fixture observations did not match controlled requests", f.errors)
 	}
 }

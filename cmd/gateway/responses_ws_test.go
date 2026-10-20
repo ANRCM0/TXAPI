@@ -221,8 +221,12 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 		if tools, ok := request["tools"].([]any); ok && len(tools) > 0 {
 			call := map[string]any{"type": "function_call", "id": "item_call", "call_id": "call_fixture", "name": "lookup", "arguments": "{}", "status": "completed"}
 			pending := map[string]any{"type": "function_call", "id": "item_call", "call_id": "call_fixture", "name": "lookup", "arguments": "", "status": "in_progress"}
-			if tool, ok := tools[0].(map[string]any); ok && tool["type"] == "namespace" {
+			tool, _ := tools[0].(map[string]any)
+			if tool["type"] == "namespace" {
 				call["namespace"], pending["namespace"] = tool["name"], tool["name"]
+				if members, ok := tool["tools"].([]any); ok && len(members) > 0 {
+					tool, _ = members[0].(map[string]any)
+				}
 			}
 			events := []any{
 				map[string]any{"type": "response.output_item.added", "stream_id": "main", "sequence_number": 1, "item": pending},
@@ -230,9 +234,34 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 				map[string]any{"type": "response.function_call_arguments.done", "stream_id": "main", "sequence_number": 3, "arguments": "{}"},
 				map[string]any{"type": "response.output_item.done", "stream_id": "main", "sequence_number": 4, "item": call},
 			}
+			if tool["type"] == "custom" {
+				call["type"], pending["type"] = "custom_tool_call", "custom_tool_call"
+				call["name"], pending["name"] = tool["name"], tool["name"]
+				delete(call, "arguments")
+				delete(pending, "arguments")
+				call["input"], pending["input"] = "raw 雪🌏\nsecond", ""
+				events = []any{
+					map[string]any{"type": "response.output_item.added", "sequence_number": 1, "item": pending},
+					map[string]any{"type": "response.custom_tool_call_input.delta", "sequence_number": 2, "delta": "raw 雪🌏\n"},
+					map[string]any{"type": "response.custom_tool_call_input.delta", "sequence_number": 3, "delta": "second"},
+					map[string]any{"type": "response.custom_tool_call_input.done", "sequence_number": 4, "input": call["input"]},
+					map[string]any{"type": "response.output_item.done", "sequence_number": 5, "item": call},
+				}
+			}
 			for _, event := range events {
 				if connection.Write(ctx, transport.Text, wsAssemblyJSON(event)) != nil {
 					return
+				}
+				if input == "block-custom" && event.(map[string]any)["sequence_number"] == 2 {
+					select {
+					case f.blocked <- struct{}{}:
+					default:
+					}
+					select {
+					case <-f.release:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 			output = []any{call}
@@ -248,7 +277,7 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 		if f.persistentHistory && (input == "failed" || input == "incomplete" || input == "cancelled") {
 			status = input
 		}
-		if connection.Write(ctx, transport.Text, wsAssemblyEvent("response."+status, responseID, status, 5, output)) != nil {
+		if connection.Write(ctx, transport.Text, wsAssemblyEvent("response."+status, responseID, status, 6, output)) != nil {
 			return
 		}
 	}
@@ -262,6 +291,10 @@ func newWSAssemblyFixtureWithUsage(t *testing.T, recordUsage bool) *wsAssemblyFi
 }
 
 func newWSAssemblyFixtureWithHistory(t *testing.T, recordUsage, persistentHistory bool) *wsAssemblyFixture {
+	return newWSAssemblyFixtureWithRecordLimit(t, recordUsage, persistentHistory, 8)
+}
+
+func newWSAssemblyFixtureWithRecordLimit(t *testing.T, recordUsage, persistentHistory bool, records int) *wsAssemblyFixture {
 	t.Helper()
 	dir := t.TempDir()
 	credentialKeys := runtimeKeyFile(t, "native-credentials", 21, 25)
@@ -317,7 +350,7 @@ func newWSAssemblyFixtureWithHistory(t *testing.T, recordUsage, persistentHistor
 		})}
 	}
 	if recordUsage {
-		gatewayOptions.UsageHistory = f.st.UsageRecorder(model.UsageHistoryLimits{InstanceRecords: 8, OwnerRecords: 8, RetentionSeconds: 3600})
+		gatewayOptions.UsageHistory = f.st.UsageRecorder(model.UsageHistoryLimits{InstanceRecords: records, OwnerRecords: records, RetentionSeconds: 3600})
 	}
 	f.gw, err = gateway.New(gatewayOptions)
 	if err != nil {
@@ -330,6 +363,12 @@ func newWSAssemblyFixtureWithHistory(t *testing.T, recordUsage, persistentHistor
 	f.upstream = httptest.NewServer(http.HandlerFunc(f.upstreamHandler))
 	if persistentHistory {
 		f.historyConfig = responsesRuntimeConfig(runtimeKeyFile(t, "stored-history", 51, 52))
+		if int64(records) > f.historyConfig.OwnerRecords {
+			f.historyConfig.OwnerRecords = int64(records)
+		}
+		if f.historyConfig.InstanceRecords <= f.historyConfig.OwnerRecords {
+			f.historyConfig.InstanceRecords = 2 * f.historyConfig.OwnerRecords
+		}
 	}
 	f.startPublicRuntimes(t, limiter, recordUsage)
 	return f
