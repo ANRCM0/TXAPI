@@ -37,23 +37,29 @@ import (
 const upstreamKey = "nativews-deployment-provider-fixture-only"
 
 type observation struct {
-	Transport string          `json:"transport"`
-	Input     json.RawMessage `json:"input"`
-	InputKind string          `json:"input_kind"`
-	Model     string          `json:"model"`
-	Previous  string          `json:"previous"`
-	Store     bool            `json:"store"`
-	Tools     json.RawMessage `json:"tools,omitempty"`
+	Transport  string          `json:"transport"`
+	Input      json.RawMessage `json:"input"`
+	InputKind  string          `json:"input_kind"`
+	Model      string          `json:"model"`
+	Previous   string          `json:"previous"`
+	Store      bool            `json:"store"`
+	Tools      json.RawMessage `json:"tools,omitempty"`
+	Generate   *bool           `json:"generate,omitempty"`
+	Connection int64           `json:"connection"`
+	ResponseID string          `json:"response_id"`
 }
 
 type fixture struct {
-	root     context.Context
-	mu       sync.Mutex
-	requests []observation
-	errors   []string
-	active   atomic.Int64
-	serial   atomic.Int64
-	upgrades atomic.Int64
+	root        context.Context
+	mu          sync.Mutex
+	requests    []observation
+	errors      []string
+	active      atomic.Int64
+	serial      atomic.Int64
+	upgrades    atomic.Int64
+	connections atomic.Int64
+	httpPosts   atomic.Int64
+	proxyPosts  atomic.Int64
 }
 
 func (f *fixture) reject(message string) {
@@ -68,10 +74,10 @@ func (f *fixture) stats(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	_ = json.NewEncoder(w).Encode(map[string]any{"requests": f.requests, "errors": f.errors,
-		"active": f.active.Load(), "proxy_upgrades": f.upgrades.Load()})
+		"active": f.active.Load(), "proxy_upgrades": f.upgrades.Load(), "http_posts": f.httpPosts.Load(), "proxy_posts": f.proxyPosts.Load()})
 }
 
-func (f *fixture) observe(raw []byte, transport string) (map[string]any, string, error) {
+func (f *fixture) observe(raw []byte, transport string, connection int64, responseID string) (map[string]any, string, error) {
 	var body map[string]any
 	if len(raw) > 256<<10 || json.Unmarshal(raw, &body) != nil {
 		return nil, "", errors.New("invalid fixture request")
@@ -80,7 +86,8 @@ func (f *fixture) observe(raw []byte, transport string) (map[string]any, string,
 	previous, _ := body["previous_response_id"].(string)
 	stored, ok := body["store"].(bool)
 	items, array := body["input"].([]any)
-	if model != "m" || !ok || previous != "" || stored != (transport == "http") {
+	codex := codexModel(model)
+	if model != "m" && !codex || !ok || !codex && previous != "" || stored != (transport == "http") || codex && transport != "ws" {
 		return nil, "", errors.New("mapped model, local parent and transport-specific store required")
 	}
 	kind := "array"
@@ -113,7 +120,11 @@ func (f *fixture) observe(raw []byte, transport string) (map[string]any, string,
 	}
 	input, _ := json.Marshal(items)
 	tools, _ := json.Marshal(body["tools"])
-	f.requests = append(f.requests, observation{Transport: transport, Input: input, InputKind: kind, Model: model, Previous: previous, Store: stored, Tools: tools})
+	var generate *bool
+	if value, present := body["generate"].(bool); present {
+		generate = &value
+	}
+	f.requests = append(f.requests, observation{Transport: transport, Input: input, InputKind: kind, Model: model, Previous: previous, Store: stored, Tools: tools, Generate: generate, Connection: connection, ResponseID: responseID})
 	return body, text, nil
 }
 
@@ -136,16 +147,17 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost {
+		f.httpPosts.Add(1)
+		id := fmt.Sprintf("native_%d", f.serial.Add(1))
 		raw, err := io.ReadAll(io.LimitReader(r.Body, (256<<10)+1))
 		if err == nil {
-			_, _, err = f.observe(raw, "http")
+			_, _, err = f.observe(raw, "http", 0, id)
 		}
 		if err != nil {
 			f.reject("HTTP fixture: " + err.Error())
 			http.Error(w, "fixture request", 400)
 			return
 		}
-		id := fmt.Sprintf("native_%d", f.serial.Add(1))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(document(id, textOutput(id)))
 		return
@@ -159,6 +171,8 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(f.root, 40*time.Second)
 	stop := context.AfterFunc(ctx, func() { _ = connection.CloseNow() })
 	f.active.Add(1)
+	connectionID := f.connections.Add(1)
+	lastID := ""
 	defer func() { cancel(); stop(); _ = connection.CloseNow(); f.active.Add(-1) }()
 	write := func(value any) error {
 		raw, err := json.Marshal(value)
@@ -172,7 +186,8 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		body, text, err := f.observe(raw, "ws")
+		id := fmt.Sprintf("native_%d", f.serial.Add(1))
+		body, text, err := f.observe(raw, "ws", connectionID, id)
 		if err != nil || typ != websocket.MessageText {
 			if err != nil {
 				f.reject("WS fixture: " + err.Error())
@@ -181,7 +196,13 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		id := fmt.Sprintf("native_%d", f.serial.Add(1))
+		if codexModel(body["model"].(string)) {
+			if !f.codexRound(body, lastID, id, write) {
+				return
+			}
+			lastID = id
+			continue
+		}
 		created := document(id, []any{})
 		created["status"] = "in_progress"
 		if write(map[string]any{"type": "response.created", "stream_id": "main", "sequence_number": 0, "response": created}) != nil {
@@ -292,6 +313,13 @@ func proxyFor(target string, f *fixture) (*httputil.ReverseProxy, error) {
 		return nil, errors.New("explicit internal proxy target required")
 	}
 	proxy := httputil.NewSingleHostReverseProxy(u)
+	direct := proxy.Director
+	proxy.Director = func(request *http.Request) {
+		if request.Method == http.MethodPost && request.URL.Path == "/v1/responses" {
+			f.proxyPosts.Add(1)
+		}
+		direct(request)
+	}
 	proxy.Transport = &http.Transport{Proxy: nil, ResponseHeaderTimeout: 5 * time.Second}
 	proxy.ModifyResponse = func(response *http.Response) error {
 		if response.StatusCode == http.StatusSwitchingProtocols {

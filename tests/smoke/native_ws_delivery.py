@@ -65,6 +65,12 @@ class Installation:
             "tokens": [{"name": "nativews-client", "key": CLIENT_KEY, "models": ["alias"]}],
         }
         self.key_material = []
+        for model in ("cli-text", "cli-function-result", "cli-custom", "gpt-5.5"):
+            native = "native-" + ("cli-tool-search" if model == "gpt-5.5" else model)
+            self.settings["channels"][0]["models"].append(model)
+            self.settings["channels"][0]["model_mapping"][model] = native
+            self.settings["tokens"][0]["models"].append(model)
+            self.settings["responses_ws"]["models"].append(native)
         work.chmod(0o755)
         for name in ("credentials.json", "content.json"):
             active, digest = (base64.b64encode(os.urandom(32)).decode() for _ in range(2))
@@ -253,14 +259,68 @@ class Installation:
         assert search[3]["type"] == "additional_tools" and search[2]["tools"] == search[3]["tools"]
         return report["unknown"]
 
-    def final_snapshot(self, unknowns, count):
+    def codex(self, image, executable, before):
+        settings = self.work / "codex.json"
+        settings.write_text(json.dumps({"base": "http://nativews-fixture:8081", "key": CLIENT_KEY}))
+        settings.chmod(0o644)
+        name = self.name + "-codex"
+        previous = self.wait_sends(before)
+        # The shared client imports modules whose root is two parents up.
+        run(["docker", "create", "--name", name, "--label", self.label,
+             "--network", self.network, "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=64m",
+             "--mount", f"type=bind,source={ROOT / 'tests' / 'smoke'},target=/workspace/tests/smoke,readonly",
+             "--mount", f"type=bind,source={self.work},target=/fixtures,readonly",
+             "--mount", f"type=bind,source={executable},target=/codex,readonly",
+             image, "/workspace/tests/smoke/codex_ws_conformance.py", "--codex", "/codex", "--deployed", "/fixtures/codex.json"])
+        self.containers.append(name)
+        state = json.loads(run(["docker", "inspect", name], capture=True).stdout)[0]
+        assert set(state["NetworkSettings"]["Networks"]) == {self.network}
+        assert state["Config"]["User"] == "65532:65532" and state["HostConfig"]["ReadonlyRootfs"]
+        result = run(["docker", "start", "--attach", name], capture=True, timeout=100)
+        state = json.loads(run(["docker", "inspect", name], capture=True).stdout)[0]
+        assert not state["State"]["Running"] and state["State"]["ExitCode"] == 0, result.stdout
+        print(result.stdout.strip(), flush=True)
+        assert json.loads(result.stdout.splitlines()[-1])["cases"] == ["text", "function", "custom", "search"]
+        state = self.wait_sends(before + 11)
+        assert (not state["errors"] and state["http_posts"] == previous["http_posts"]
+                and state["proxy_posts"] == previous["proxy_posts"]), "HTTP fallback or fixture boundary failure"
+        assert state["proxy_upgrades"] - previous["proxy_upgrades"] == 4
+        requests = state["requests"][before:]
+        groups = []
+        for model, size in (("native-cli-text", 2), ("native-cli-function-result", 3),
+                            ("native-cli-custom", 3), ("native-cli-tool-search", 3)):
+            group, requests = requests[:size], requests[size:]
+            assert len(group) == size and all(row["model"] == model and row["transport"] == "ws" and not row["store"] for row in group)
+            assert len({row["connection"] for row in group}) == 1
+            assert group[0]["generate"] is False and not group[0]["previous"]
+            for index, row in enumerate(group[1:], 1):
+                assert row.get("generate") is not False and row["previous"] == group[index - 1]["response_id"]
+            if size == 3:
+                expected = {"native-cli-function-result": "function_call_output", "native-cli-custom": "custom_tool_call_output", "native-cli-tool-search": "tool_search_output"}[model]
+                assert any(item.get("type") == expected and item.get("call_id") == "call_codex_fixture" for item in group[-1]["input"])
+                assert not any(item.get("type") == "reasoning" for item in group[-1]["input"]), "native continuation duplicated context"
+            groups.append(group)
+        assert not requests and len({group[0]["connection"] for group in groups}) == 4
+        session = self.api("/api/auth/login", body=ADMIN, method="POST")["session_token"]
+        records = self.usage(session, before + 11)
+        rows = [row for row in records if row["model"] in ("cli-text", "cli-function-result", "cli-custom", "gpt-5.5")]
+        assert len(rows) == 11 and all(row["state"] == "sealed" and row["transport"] == "websocket" for row in rows)
+        totals = []
+        for row in rows:
+            attempts = self.api("/api/me/usage-records/" + row["id"], session)["data"]["attempts"]
+            assert len(attempts) == 1 and attempts[0]["may_dispatch"]
+            totals.append(attempts[0]["usage"]["total_tokens"])
+        assert sorted(totals) == ["0"] * 4 + ["3"] * 7
+        print("PASS: deployed observer requires 11 native creates, 4 prewarms/connections, no HTTP fallback, exact parents and 11 usage receipts", flush=True)
+
+    def final_snapshot(self, unknowns, count, history_count=None):
         run(["docker", "stop", "--time", "15", self.gateway])
         assert self.inspect()["State"]["ExitCode"] == 0
         copy = self.work / "snapshot"
         copy.mkdir()
         run(["docker", "cp", self.gateway + ":/app/data/.", str(copy)])
         with contextlib.closing(sqlite3.connect(copy / "gateway.db")) as db:
-            assert db.execute("SELECT COUNT(*) FROM response_histories").fetchone() == (count,)
+            assert db.execute("SELECT COUNT(*) FROM response_histories").fetchone() == (count if history_count is None else history_count,)
             assert db.execute("SELECT COUNT(*) FROM usage_invocations").fetchone() == (count,)
             assert db.execute("SELECT state,COUNT(*) FROM usage_invocations GROUP BY state ORDER BY state").fetchall() == [("interrupted", 1), ("sealed", count - 1)]
             assert db.execute("SELECT COUNT(*) FROM response_histories WHERE busy='uncertain'").fetchone() == (len(unknowns),)
@@ -286,7 +346,7 @@ class Installation:
             run(["docker", "network", "rm", self.network])
 
 
-def exercise(installation, sdk_image=None):
+def exercise(installation, sdk_image=None, codex_image=None, codex=None):
     i = installation
     session = i.api("/api/auth/login", body=ADMIN, method="POST")["session_token"]
     first = i.api("/v1/responses", CLIENT_KEY, {"model": "alias", "input": "http-root", "store": True}, "POST")
@@ -332,6 +392,10 @@ def exercise(installation, sdk_image=None):
     if sdk_image:
         unknowns.append(i.sdk(sdk_image))
         count = 18
+    history_count = count
+    if codex:
+        i.codex(codex_image, codex, count)
+        count += 11
     i.settings["responses_ws"]["persistent_history"] = False
     i.save()
     i.restart()
@@ -340,18 +404,22 @@ def exercise(installation, sdk_image=None):
     i.ws(sixth["id"], "persistent-disabled", refused=True)
     i.usage(session, count)
     assert len(i.wait_sends(count)["requests"]) == count
-    i.final_snapshot(unknowns, count)
+    i.final_snapshot(unknowns, count, history_count)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--go", default="go")
     parser.add_argument("--sdk", action="store_true", help="also run the fixed official Python SDK inside the isolated network")
+    parser.add_argument("--codex", type=Path, help="also run official Codex0.163.0 Linux musl in the isolated network")
     args = parser.parse_args()
     assert os.name != "nt", "requires Linux Docker; local harness tests are separate evidence"
     assert run(["docker", "info", "--format", "{{.OSType}}"], capture=True).stdout.strip() == "linux"
     image = "txapi-nativews-smoke:" + uuid.uuid4().hex[:12]
-    sdk_image = image + "-sdk" if args.sdk else None
+    sdk_image = image + "-sdk" if args.sdk or args.codex else None
+    codex = args.codex.resolve() if args.codex else None
+    if codex:
+        assert codex.is_file() and os.access(codex, os.X_OK), "explicit executable fixed Codex binary required"
     with tempfile.TemporaryDirectory(prefix="txapi-nativews-") as temporary:
         work = Path(temporary)
         helper = work / "nativews"
@@ -371,7 +439,7 @@ def main():
                                      'USER 65532:65532\nENTRYPOINT ["python"]\n')
                 run(["docker", "build", "--file", str(dockerfile), "--tag", sdk_image, str(ROOT)], timeout=600)
             installation.create()
-            exercise(installation, sdk_image)
+            exercise(installation, sdk_image if args.sdk else None, sdk_image if codex else None, codex)
             print("PASS: actual non-root image, verified fixture TLS, reverse-proxy Upgrade, HTTP/WS tool history, restart, in-flight SIGKILL unknown protection and durable usage; isolated Docker only", flush=True)
         except BaseException:
             with contextlib.suppress(Exception):
