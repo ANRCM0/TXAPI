@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最新已合并功能头为 `master/bcce1fcf6f075020917dc542a1cd430ec7761e42`：TLS上游测量PR #78的精确头 `45a9f020bf2530331a3bd5c9a2fba60bc5657817` 已通过 push Verify `39367225913` 与 PR Verify `39367270683` 全部六项，PR测试合并树与该头文件树相同；合并后独立 Verify `39368635708` 运行中。最近完整通过合并后CI的基线为 `24ec655fdd278e38fec34efbd4fa80ec0e2d0bbe` / Verify `39367073953`（实际镜像默认H2 PR #77）。HTTP/2并发隔离PR #76的精确头六项成功，其合并后 `39366021776` 已取消，不称独立通过。更早证据保留在对应PR，本批TLS连接条件对照不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最新已合并功能头为 `master/189eaef53ccf058acd5cae2e7795a99983e69a1d`：TLS连接条件PR #79的精确头 `0451712ca656b3a1e6234a7ff5ad22c66272892a` 已通过 push Verify `39369288522` 与 PR Verify `39369334805` 全部六项；PR测试合并SHA `53d864260349d348f21e3fd9b9989f176e937581` 的完整文件树与该头相同，合并后独立 Verify `39370670996` 运行中。最近完整通过合并后CI的基线为TLS测量PR #78的 `bcce1fcf6f075020917dc542a1cd430ec7761e42` / Verify `39368635708`。PR #77合并后 `24ec655fdd278e38fec34efbd4fa80ec0e2d0bbe` / Verify `39367073953` 同样独立成功；PR #76合并后 `39366021776` 已取消，不称独立通过。更早证据保留在对应PR，本批strict强杀增量不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -345,6 +345,8 @@ TLS测量最终头的完整CI已成功并合并。Linux PR运行中Chat/Response
 6. **协作/限制：**约40ms增量目前只是待解释观察，本机有限新TLS连接实验未隔离根因，不将Nagle假说当已证明结论。此批只准备同环境受控对照，不承诺解决延迟；网关边缘仍明文、上游TLS H1，H2配对/双端TLS/反代/长期soak/S5-03与真实Provider跳过边界保持原状。
 
 本地受控验证：Windows GOARCH=amd64 的Chat/Responses × TCP_NODELAY=0/1四种TLS夹具组合通过证书、完整事件、截断与慢滴绝对截止检查，逐请求核对真实socket选项、TLS会话复用标记和peer。新增fresh客户端策略在两个生产main明文档案均完成直连3/3与网关3/3、每目标观察到3个客户端端口、每请求一次发送、上游活动归零且drain失败为0；这只是消费者回归，不是Linux TLS条件对照或性能预算通过。共享harness的既有capacity消费者也通过并发4×每worker2请求：直连/网关各8/8、4条协调取消、满额429未发送、全部4名额恢复。Python语法/差异检查通过。运行基于bcce1fc且harness未提交（dirty=true），stream摘要fe062f0518953776d31e1e498b26c4125a26957c6bfc7067209f69921932aba3；最终精确头完整CI与Linux TLS四条件结果另记。
+
+最终精确头 `0451712ca656b3a1e6234a7ff5ad22c66272892a` 的 push Verify `39369288522` 与 PR Verify `39369334805` 全部六项成功，PR #79已合并为 `189eaef53ccf058acd5cae2e7795a99983e69a1d`。两套Linux运行各含两操作×四条件，每条件直连20/20、网关20/20、20个成功配对且每请求一次发送，上游活动归零、drain失败为0。PR运行的配对首正文P95（Chat/Responses）为：persistent/NODELAY=0的42.3643/44.3820ms，fresh/0的1.4326/2.7738ms，persistent/1的2.5007/4.4698ms，fresh/1的1.5501/3.2844ms。两套运行中NODELAY=0的新连接直连也出现约40ms事件观察延迟；NODELAY=1的网关事件观察上界P95为0.1519..0.2455ms。每条件网关观察20个上游peer，直连persistent为1、fresh为20，TLS恢复会话请求数均0；这证明本夹具条件和连接画像影响比较，不提供纯网关开销或底层Nagle/ACK包级归因。push运行persistent/0的Chat首正文P95仍有135.0432ms长尾，fresh/1的Responses首正文/首有效文本P95为10.8820/10.7992ms，未隐去或宣布TLS性能整体通过。报告保留dirty=true、各自产物SHA和Linux原始字节摘要；完整数值及限制在PR记录，合并后CI独立跟踪，生产传输参数未改。
 
 ### P1：最小托管账号推理
 
@@ -736,6 +738,19 @@ P6 本批交付验证范围（2026-10-20）：①仅 `tests/upstream/nativews`�
 - **协作影响：**可与 P1/P4 独立研究；不因账号闭环或 usage 接线而扩大 strict。只有每个准许组合的完整证据成立才关闭 S5-03，S5 完成也不代表支付平台就绪。
 
 ## 集成验收与后续门槛
+
+#### strict 前台网关强杀与恢复子批（2026-10-20）
+
+1. **层级/目录：**仅internal/gateway的独立进程集成回归与本方案；真实SQLite、鉴权中间件、有限准入、完整Chat JSON/SSE handler、既有唯一executor及strict Engine组成被强杀子进程，不增加生产故障钩子。
+2. **公开依赖：**复用gateway.StrictBilling现有Reserve/StartPreparedAttempt/EndAttempt/Finish端口和既有身份、执行、账本查询/恢复入口。测试包装器只在原调用前后暂停，不构造费用凭据或绕过最终URL/body/Header证明；无公开地基变更或新冻结。
+3. **来源/地基：**对照new-api固定25372e30b1f94255b1f818aeaaf006f042572580的service/billing_session.go::Settle/Refund，采用其“资金步骤已提交后不得再全退”的故障场景；该实现的进程内标记、分步余额更新及异步退款不满足TXAPI持久双hold/未知执行规则，因此不移植实现，继续使用现有事务账本与恢复owner。L0、迁移、配置与strict许可不变。
+4. **行为/回退：**在持久预留后未记attempt、已记成本attempt但未发送、上游实际受理未返回、完整输出已交付但receipt未提交、receipt已提交未结算、结算已提交未退出边界执行Process.Kill并Wait。同一库重新打开并等待真实lease到期，重复恢复及再次重开恢复；未知保留hold，已知只按旧报价结算一次，未记attempt才可无费用释放。测试transport只将经过原成本准入的官方目标改送显式loopback受控上游，禁止真实Provider访问。
+5. **验证/验收：**核对独立上游发送次数、JSON/SSE客户端观察、不可变attempt/成本快照、user与Key两侧余额、历史累计Provider成本准入、旧价格版本、重复恢复无新请求/重复扣费；重启前更新当前价格，以区分历史报价与现价。局部矩阵稳定后执行完整gateway及billing回归/vet，最终精确头完整CI另记。
+6. **协作/限制：**本批只补前台strict现有档案的受控恢复证据，不声称实际main镜像的故障注入、真实费用认证、后台/WS收费或S5-03完整成本证明；不以已交付的协议终态推断金融记录已经提交。回退仅删除测试，无数据/接口回退。
+
+本地受控结果：Windows GOARCH=amd64 的11个Process.Kill+Wait场景全部通过，共7次实际上游发送，4个发送前边界为零发送；每个场景均等待真实lease到期、恢复两次、关闭/重开同一SQLite再恢复两次。两侧余额在无attempt时全部释放，prepared/受理后未知以及客户端完整SSE已交付但receipt未写入时均保留各20000000000单位hold；四个已知回执场景每次只收5850000单位。恢复前现价改为输入/输出各1每千Token，当前报价18000000单位，旧请求仍用原价；attempt与其成本快照不改，历史累计Provider成本准入19219200单位保留，不冒充当前余额或已付账单。完整gateway包60.669s、billing包22.602s及两包vet通过；最终补强无后台goroutine残留/失败路径有界与原始状态断言后，完整11场景复验29.718s通过。生产Go与schema/OpenAPI保持基线，最终精确头完整CI待验收。
+
+本批CI修复范围：PR Verify 39370871889在既有tests/smoke/background.py的单次控制台取消断言失败，原断言缺少状态/正文诊断；源码task_control.go::Cancel明确要求revision CAS，worker可在GET与POST之间合法推进revision。仅在该真实main冒烟消费者补已知旧revision必拒绝409及最多5次重新读取后显式取消意图，其他响应立即失败并带诊断；保留3次生成发送、2次远端取消、用量/事件及TTL断言，不改生产CAS/客户端自动重试策略或新增接口。该回归复用现有任务owner与已固定来源的取消竞争场景，不引入第三方实现。Windows GOARCH=amd64 完整实际main冒烟集中复验已通过，包括新旧revision、资金/后台/用量/重启/TTL链；旧头push Verify 39370820574成功但不能抹去PR失败，最终修复头完整CI重新验收。
 
 P0 与 P1–P8 逐批验收，不能把整个后端阶段积压到最后。产品主线完成还须覆盖以下跨批场景；已有子批证据按精确提交复用，仅为新增/变化范围补证据。
 
