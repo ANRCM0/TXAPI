@@ -12,8 +12,8 @@ import (
 	"minigateway/internal/protocol/jsonutil"
 )
 
-// Only native Chat implements the optional observation port. Converted Chat
-// keeps its existing decoder and provider-specific usage semantics.
+// Native Chat exposes its own observation profile. Converted Chat keeps its
+// existing decoder and provider-specific usage semantics.
 type nativeChatDecoder struct{ *decoder }
 
 func (d nativeChatDecoder) DecodeUsageEnvelope(body []byte) (v3.Envelope, error) {

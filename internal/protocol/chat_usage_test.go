@@ -192,10 +192,15 @@ func TestNativeChatUsageSnapshotLifetimeProgressAndIsolation(t *testing.T) {
 }
 
 func TestNativeChatUsageOptionalPortDoesNotChangeConvertedOrLegacyDecoders(t *testing.T) {
-	for _, decoder := range []v1.Decoder{NewDecoder(&anthropic.Adaptor{}, &meta.Meta{}), NewDecoder(&gemini.Adaptor{}, &meta.Meta{}), NewDecoder(&openai.Adaptor{}, &meta.Meta{Mode: meta.ModeEmbeddings})} {
+	for _, decoder := range []v1.Decoder{NewDecoder(&anthropic.Adaptor{}, &meta.Meta{}), NewDecoder(&gemini.Adaptor{}, &meta.Meta{})} {
 		if _, rich := decoder.(v3.Decoder); rich {
 			t.Fatal("unrelated decoder acquired native Chat semantics")
 		}
+	}
+	embeddings := NewDecoder(&openai.Adaptor{}, &meta.Meta{Mode: meta.ModeEmbeddings}).(v3.Decoder)
+	observation, err := embeddings.DecodeUsageEnvelope([]byte(`{"usage":{"prompt_tokens":1,"total_tokens":1}}`))
+	if err != nil || observation.Usage.Profile != "embeddings_native_tokens_v1" || observation.Usage.Counts.OutputTokens != nil {
+		t.Fatal("embeddings acquired native Chat provenance or inferred output", observation, err)
 	}
 	body := []byte(`{"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"prompt_tokens_details":{"cached_tokens":"invalid"}}}`)
 	legacy := NewDecoder(&openai.Adaptor{}, &meta.Meta{})

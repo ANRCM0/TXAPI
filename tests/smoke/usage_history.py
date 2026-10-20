@@ -23,8 +23,18 @@ def usage_history_workflow(gateway, work, env, service, ready, request):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     release, blocked = threading.Event(), threading.Event()
     lock = threading.Lock()
-    state = {"posts": 0, "errors": []}
+    state = {"posts": 0, "embedding_posts": 0, "errors": []}
     upstream_key, client_key = "sk-isolated-usage-upstream-only", "sk-isolated-usage-client-only"
+    embedding_cases = {
+        "input-only": ({"prompt_tokens": 11, "total_tokens": 11}, ["11", None, "11"], "partial"),
+        "known-zero": ({"prompt_tokens": 0, "total_tokens": 0}, ["0", None, "0"], "partial"),
+        "explicit-output-zero": ({"prompt_tokens": 11, "completion_tokens": 0, "total_tokens": 11}, ["11", "0", "11"], "complete"),
+        "input-missing": ({"total_tokens": 11}, [None, None, "11"], "partial"),
+        "unknown": (None, [None, None, None], "unknown"),
+        "empty": ({}, [None, None, None], "unknown"),
+        "large-exact": ({"prompt_tokens": 9007199254740993, "total_tokens": 9007199254740993},
+                        ["9007199254740993", None, "9007199254740993"], "partial"),
+    }
 
     class Upstream(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -33,12 +43,26 @@ def usage_history_workflow(gateway, work, env, service, ready, request):
         def do_POST(self):
             try:
                 self.connection.settimeout(5)
-                assert self.path == "/v1/chat/completions", self.path
+                assert self.path in ("/v1/chat/completions", "/v1/embeddings"), self.path
                 assert self.headers.get("Authorization") == "Bearer " + upstream_key
                 length = int(self.headers.get("Content-Length", "0"))
                 assert 0 < length < 16384
                 body = json.loads(self.rfile.read(length))
                 assert body["model"] == "actual-history-model"
+                if self.path == "/v1/embeddings":
+                    assert body["input"] in embedding_cases and not body.get("stream")
+                    with lock:
+                        state["embedding_posts"] += 1
+                        assert state["embedding_posts"] <= len(embedding_cases), "unexpected embeddings replay"
+                    document = {"object": "list", "model": body["model"], "data": [{"index": 0, "embedding": "AQID"}],
+                                "usage": embedding_cases[body["input"]][0], "extension": {"keep": True}}
+                    raw = json.dumps(document, separators=(",", ":")).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
                 with lock:
                     state["posts"] += 1
                     assert state["posts"] <= 4, "unexpected upstream replay"
@@ -243,6 +267,42 @@ def usage_history_workflow(gateway, work, env, service, ready, request):
                 api("/api/me/usage-records/" + identifier, client_key, expected=401)
                 sealed[identifier] = detail
             assert posts() == 2 and history_count() == 2
+            rejected, _ = request(base + "/v1/embeddings", "sk-invalid-embedding-key",
+                                  {"model": "history-alias", "input": "input-only"})
+            assert rejected == 401 and state["embedding_posts"] == 0
+            for mode, (_, quantities, completeness) in embedding_cases.items():
+                body = {"model": "history-alias", "input": mode}
+                call = urllib.request.Request(base + "/v1/embeddings", data=json.dumps(body).encode(),
+                    headers={"Authorization": "Bearer " + client_key, "Content-Type": "application/json"})
+                with opener.open(call, timeout=12) as result:
+                    identifier = result.headers.get("X-TXAPI-Usage-ID", "")
+                    assert re.fullmatch(r"usage_[a-f0-9]{32}", identifier) and identifier not in sealed
+                    value = json.loads(result.read())
+                    assert value["data"] == [{"index": 0, "embedding": "AQID"}] and value["extension"] == {"keep": True}
+                deadline = time.monotonic() + 5
+                while True:
+                    detail = api("/api/admin/usage-records/" + identifier, admin)["data"]
+                    if detail["record"]["state"] == "sealed":
+                        break
+                    assert time.monotonic() < deadline, detail
+                    time.sleep(.02)
+                assert detail["record"]["operation"] == "embeddings" and detail["record"]["stream"] is False
+                assert len(detail["attempts"]) == 1 and detail["attempts"][0]["may_dispatch"] is True
+                usage = detail["attempts"][0]["usage"]
+                names = ("input_tokens", "output_tokens", "total_tokens", "cached_input_tokens",
+                         "cache_write_input_tokens", "reasoning_output_tokens")
+                assert [usage[name] for name in names] == quantities + [None, None, None], usage
+                assert usage["completeness"] == completeness, usage
+                assert usage["source"] == ("unknown" if completeness == "unknown" else "provider_reported"), usage
+                assert usage.get("profile", "") == ("" if completeness == "unknown" else "embeddings_native_tokens_v1"), usage
+                own = api("/api/me/usage-records/" + identifier, owner_session)["data"]
+                assert own["attempts"][0]["usage"] == usage
+                assert not any(name in own["attempts"][0] for name in ("actual_model", "group", "protocol", "channel_id", "credential_id")), own
+                api("/api/me/usage-records/" + identifier, other_session, expected=404)
+                api("/api/me/usage-records/" + identifier, client_key, expected=401)
+                sealed[identifier] = detail
+            assert state["embedding_posts"] == len(embedding_cases) and history_count() == 2 + len(embedding_cases)
+            assert posts() == 2 and financial() == before
             response = opener.open(generation(True, True), timeout=12)
             try:
                 crashed_id = response.headers.get("X-TXAPI-Usage-ID", "")
@@ -271,23 +331,23 @@ def usage_history_workflow(gateway, work, env, service, ready, request):
             assert recovered["attempts"][0]["usage"]["input_tokens"] is None
             for identifier, detail in sealed.items():
                 assert api("/api/admin/usage-records/" + identifier, admin)["data"] == detail
-            assert posts() == 3 and history_count() == 3 and financial() == before
+            assert posts() == 3 and history_count() == 3 + len(embedding_cases) and financial() == before
         config["usage_history"]["enabled"] = False
         write_config()
         with start("disabled.log") as process:
             ready(process, port)
             listing = api("/api/me/usage-records", owner_session)
-            assert listing["enabled"] is False and len(listing["data"]) == 3
+            assert listing["enabled"] is False and len(listing["data"]) == 3 + len(embedding_cases)
             for identifier, detail in sealed.items():
                 assert api("/api/admin/usage-records/" + identifier, admin)["data"] == detail
             with opener.open(generation(False), timeout=12) as response:
                 assert response.headers.get("X-TXAPI-Usage-ID") is None
                 assert response.read().count(b"smoke-output") == 1
-            assert posts() == 4 and history_count() == 3 and financial() == before
+            assert posts() == 4 and state["embedding_posts"] == len(embedding_cases) and history_count() == 3 + len(embedding_cases) and financial() == before
         with lock:
             assert state["errors"] == [], state["errors"]
         assert financial() == before
     result = {"kill_point": "after_first_sse_chunk_before_observe",
               "not_covered": ["accepted_before_dispatch", "returned_usage_before_terminal_write"]}
-    print("PASS: actual main Chat native JSON/SSE quantities/cache/zero reasoning, session isolation, sealed restart, first-chunk kill/interrupted recovery without replay, disabled capture and unchanged financial state")
+    print("PASS: actual main Chat/embeddings native quantities including partial/zero/unknown/exact integers, session isolation, sealed restart, first-chunk kill/interrupted recovery without replay, disabled capture and unchanged financial state")
     return result
