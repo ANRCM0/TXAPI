@@ -75,7 +75,7 @@ func parseResponse(body []byte) (Response, *execv1.Usage, *usageWire, error) {
 			return r, nil, nil, errors.New("invalid Responses output")
 		}
 		for _, item := range output {
-			if err := validateOutputToolItem(item); err != nil {
+			if err := validateOutputToolItemComplete(item, terminalStatus(r.Status)); err != nil {
 				return r, nil, nil, err
 			}
 		}
@@ -100,15 +100,21 @@ type Observation struct {
 }
 
 type Decoder struct {
-	publicID    string
-	mu          sync.Mutex
-	observation Observation
-	failure     authv3.FailureSignal
-	hasFailure  bool
+	publicID          string
+	mu                sync.Mutex
+	observation       Observation
+	failure           authv3.FailureSignal
+	hasFailure        bool
+	requireCompaction bool
 }
 
 func NewDecoder() *Decoder                      { return NewDecoderWithID("") }
 func NewDecoderWithID(publicID string) *Decoder { return &Decoder{publicID: publicID} }
+
+// A successful trigger round must return usable state, not just an HTTP 200.
+func NewCompactionDecoderWithID(publicID string) *Decoder {
+	return &Decoder{publicID: publicID, requireCompaction: true}
+}
 func (d *Decoder) Observation() Observation {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -146,6 +152,18 @@ func (d *Decoder) observeFailure(data []byte) {
 func terminalStatus(status string) bool {
 	return status == "completed" || status == "incomplete" || status == "failed" || status == "cancelled"
 }
+func compactionOutputCount(output json.RawMessage) int {
+	var items []struct{ Type string }
+	_ = json.Unmarshal(output, &items)
+	count := 0
+	for _, item := range items {
+		if item.Type == "compaction" {
+			count++
+		}
+	}
+	return count
+}
+
 func (d *Decoder) Decode(body []byte) ([]byte, *execv1.Usage, error) {
 	envelope, usage, err := d.decode(body, false)
 	return envelope.Data, usage, err
@@ -164,6 +182,9 @@ func (d *Decoder) decodeUsage(body []byte, facts, enriched bool) (execv3.Envelop
 	}
 	if !terminalStatus(r.Status) {
 		return execv3.Envelope{}, nil, errors.New("Responses synchronous response is not terminal")
+	}
+	if d.requireCompaction && r.Status == "completed" && compactionOutputCount(r.Output) != 1 {
+		return execv3.Envelope{}, nil, errors.New("Responses compaction result is missing")
 	}
 	envelope := execv2.Envelope{ProtocolTerminal: true, Native: &execv1.NativeCompletion{ID: r.ID, Status: r.Status}, Failed: r.Status == "failed" || r.Status == "cancelled"}
 	if facts {
@@ -194,19 +215,20 @@ func (d *Decoder) NewStream() execv1.StreamDecoder {
 
 // SSE framing and mutable protocol state belong to exactly one attempt.
 type streamDecoder struct {
-	owner         *Decoder
-	upstreamID    string
-	wire          bytes.Buffer
-	data          []string
-	event         string
-	lastSequence  int64
-	terminal      bool
-	captureFacts  bool
-	captureUsage  bool
-	enrichedUsage *execv3.UsageObservation
-	factUsage     *execv2.UsageObservation
-	factNative    *execv1.NativeCompletion
-	progress      execv4.Progress
+	owner          *Decoder
+	upstreamID     string
+	wire           bytes.Buffer
+	data           []string
+	event          string
+	lastSequence   int64
+	terminal       bool
+	compactionDone int
+	captureFacts   bool
+	captureUsage   bool
+	enrichedUsage  *execv3.UsageObservation
+	factUsage      *execv2.UsageObservation
+	factNative     *execv1.NativeCompletion
+	progress       execv4.Progress
 }
 
 func (s *streamDecoder) Progress() execv4.Progress { return s.progress }
@@ -272,8 +294,11 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	if event.Type == "response.output_item.added" || event.Type == "response.output_item.done" {
 		if item, ok := event.Item.(map[string]any); ok {
 			raw, _ := json.Marshal(item)
-			if err := validateOutputToolItem(raw); err != nil {
+			if err := validateOutputToolItemComplete(raw, event.Type == "response.output_item.done"); err != nil {
 				return nil, err
+			}
+			if item["type"] == "compaction" && event.Type == "response.output_item.done" {
+				s.compactionDone++
 			}
 		}
 	}
@@ -345,6 +370,9 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	if strings.HasPrefix(event.Type, "response.") && terminalStatus(status) {
 		if "response."+response.Status != event.Type {
 			return nil, errors.New("Responses terminal state mismatch")
+		}
+		if s.owner.requireCompaction && response.Status == "completed" && (s.compactionDone != 1 || compactionOutputCount(response.Output) > 1) {
+			return nil, errors.New("Responses compaction result is missing")
 		}
 		s.terminal = true
 		frame.Complete = true

@@ -88,6 +88,9 @@ func prepare(a adaptor.Adaptor, body []byte, m *meta.Meta) (execv1.Input, *execv
 	replayable := true
 	if target.Mode == meta.ModeResponses {
 		decoder = responses.NewDecoderWithID(target.ResponseID)
+		if native, err := responses.ParseRequest(out); err == nil && native.HasCompactionTrigger() {
+			decoder = responses.NewCompactionDecoderWithID(target.ResponseID)
+		}
 		replayable = false
 	}
 	return execv1.Input{URL: url, Header: req.Header, Body: out, Stream: target.IsStream, Replayable: replayable, Decoder: decoder}, nil

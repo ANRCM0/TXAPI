@@ -134,12 +134,22 @@ func validateToolsWithWebSearch(raw json.RawMessage, allowWebSearch bool) error 
 }
 
 func validateOutputToolItem(raw json.RawMessage) error {
+	return validateOutputToolItemComplete(raw, true)
+}
+
+func validateOutputToolItemComplete(raw json.RawMessage, complete bool) error {
 	var item struct {
 		Type      string          `json:"type"`
 		Namespace json.RawMessage `json:"namespace"`
 	}
 	if json.Unmarshal(raw, &item) != nil {
 		return errors.New("invalid Responses output item")
+	}
+	if item.Type == "compaction_trigger" {
+		return errors.New("Responses compaction trigger is input-only")
+	}
+	if item.Type == "compaction" {
+		return validateCompactionItem(raw, complete)
 	}
 	if item.Type == "function_call" {
 		return validateNamespace(item.Namespace)

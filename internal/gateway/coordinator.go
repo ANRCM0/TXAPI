@@ -123,6 +123,10 @@ func (g *Gateway) execute(c *executionScope, in Execution) {
 		writeError(c, http.StatusBadRequest, "Responses hosted search requires disabled billing", "unsupported_billing_dimension")
 		return
 	}
+	if g.billingMode != billing.ModeDisabled && hasCompaction(request) {
+		writeError(c, http.StatusBadRequest, "Responses compaction requires disabled billing", "unsupported_billing_dimension")
+		return
+	}
 	g.executeScope(c, request)
 }
 
