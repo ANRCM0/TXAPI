@@ -41,6 +41,15 @@ func (r publicationCrashRepository) pause() {
 }
 
 func (r publicationCrashRepository) UpdateBackground(ctx context.Context, c bs.Claim, revision uint64, u bs.Update) (bs.Record, error) {
+	if u.Stage == bg.StageRemoteActive {
+		row, err := r.Repository.ReadClaimedBackground(ctx, c)
+		if err != nil {
+			return bs.Record{}, err
+		}
+		// Keep the poll schedule later than the short claim so recovery must
+		// honor both persisted eligibility conditions on every platform.
+		u.DueAt = max(u.DueAt, row.ClaimUntil+500)
+	}
 	if u.History != nil && r.mode == "before" {
 		r.pause()
 	}
@@ -158,11 +167,11 @@ func TestBackgroundPublicationProcessDeathCommitsHistoryAndTerminalTogether(t *t
 				if row.Busy != bs.HistoryBusy(job.ID) {
 					t.Fatal("restart reclassified live background reservation as uncertain", row.Busy)
 				}
-				if remaining := time.Until(time.UnixMilli(job.ClaimUntil)); remaining > 0 {
+				if remaining := time.Until(time.UnixMilli(max(job.ClaimUntil, job.DueAt))); remaining > 0 {
 					time.Sleep(remaining + 30*time.Millisecond)
 				}
 				if err = f.runner.runOne(context.Background()); err != nil {
-					t.Fatal(err)
+					t.Fatal("eligible recovery failed", err, job.ClaimUntil, job.DueAt, time.Now().UnixMilli())
 				}
 				row, saved, err = repo.Read(f.ctx, binding, receipt.ID)
 			}
