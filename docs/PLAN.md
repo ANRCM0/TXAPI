@@ -138,6 +138,15 @@ P0/P4 按功能切片交付：选定参考实现和行为差异 → 在现有 ow
 
 性能分别测机械 executor 与完整网关，完整路径固定鉴权、计费模式、日志/持久化、亲和和重试设置；必需能力不可为跑分关闭，不等价配置单列。用重复轮次和配对样本差值估计网关增量，不直接相减两个独立 P99。不同项目缺少共同操作或不能连同一受控上游时记录不可比，不伪造对等能力。现有 `BenchmarkExecutor` 只覆盖五种合成场景、5ms 上游延迟、内存 writer、并发 1/4 和整调用耗时，不能证明真实 TTFT、HTTP/2、网络背压或生产容量。
 
+#### P0 固定参考项目 Chat SSE 运行对照子批（2026-10-20）
+
+1. **层级/目录：**仅tests/smoke的固定new-api启动/对照脚本、独立参考运行workflow和本方案；复用既有受控上游及只读进程资源采样，运行真实TXAPI main与参考项目main，不修改生产转发代码。
+2. **公开依赖：**消费现有Chat HTTP API、参考项目公开setup/login/channel/token/option接口和临时SQLite；主参考固定new-api 25372e30b1f94255b1f818aeaaf006f042572580，编码前核对controller/setup.go::PostSetup、user.go::Login/writeLoginResponse、channel.go::AddChannel、token.go::AddToken/GetTokenKey及其路由。无公开地基变更或新生产依赖。
+3. **来源/构建：**固定源归档导出到仓库外，保留来源SHA、源码与二进制摘要、完整前端构建及工具版本；不修改阅读副本、不运行安装hook、不复制第三方实现入TXAPI。参考程序仍适用其AGPLv3/NOTICE，测试部署不声明为TXAPI产物；构建/运行失败保留明确不可比证据，不改参考生产源码或制造伪输出求通过。
+4. **行为/配置：**同机、同一loopback明文HTTP/1.1模拟上游、Chat文本/原生usage、固定5ms事件节奏和有限串行轮次，交替直连/TXAPI/new-api顺序。保留各自生产鉴权、日志和SQLite；TXAPI disabled与参考零价模型均不产生实际收费，但参考quota/缓存/预留机制不等价，逐项记录，不作产品排名。各自只建一条显式受控渠道，重试关闭；无真实Provider调用。客户端按语义片段关联事件，不将参考的额外/合并事件错配到原始帧时延。
+5. **验证/验收：**先跑通参考公开bootstrap和真实Key鉴权/无效Key零发送，再使用同一有限上游/客户端验证UTF-8内容、usage、finish/DONE、单attempt和排空；样本失败保留，不将截断当成功。记录全部计划/实际样本、配对差、首正文/首有效文本/完成及独立进程CPU/内存/对象；Windows定向验证，独立Linux受控CI运行，现有完整Verify保留。
+6. **协作/边界：**报告、依赖、参考二进制/数据库/密钥均在仓库外；所有进程/读取/连接有deadline且清理join。此批只交付一份参考项目共同SSE子集的可重复运行证据，不关闭TLS/H2/反代、JSON、多上游/并发、长期容量、真实Provider或S5成本门槛；未修改TXAPI热路径，不声称优化收益。
+
 #### P0 真实网络与资源收尾子批
 
 1. **层级与目录：**仅新增 `cmd/gateway/p0_network_lifecycle_test.go`，组装真实 store、owner/调用 Key、准入、production engine、gateway 与唯一 executor；不以测试内存 writer 代替网络。
