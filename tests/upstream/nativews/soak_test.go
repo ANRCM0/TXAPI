@@ -44,7 +44,7 @@ func TestSoakRetainsEveryConcurrentResultAndNegotiatesEdgeProtocols(t *testing.T
 				t.Fatalf("soak: %+v", report)
 			}
 			for _, sample := range report.Samples {
-				if sample.Protocol != protocol || sample.ProviderProtocol != 2 || sample.Attempts != 1 || !sample.Drained || len(sample.EventUpperNS) != 10 {
+				if sample.Protocol != protocol || sample.ProviderProtocol != 2 || sample.Attempts != 1 || !sample.Drained || !sample.HTTPBodyComplete || len(sample.EventUpperNS) != 10 {
 					t.Fatalf("sample: %+v", sample)
 				}
 				if report.ElapsedNS-sample.CompleteNS < int64(150*time.Millisecond) {

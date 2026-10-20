@@ -58,6 +58,7 @@ type baselineSample struct {
 	EventLowerNS     []int64 `json:"event_lower_ns"`
 	EventUpperNS     []int64 `json:"event_upper_ns"`
 	Drained          bool    `json:"drained"`
+	HTTPBodyComplete bool    `json:"http_body_complete"`
 }
 
 type baselineReport struct {
@@ -334,6 +335,7 @@ func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http
 				sample.Error = "trailing stream data or incomplete HTTP body"
 				return
 			}
+			sample.HTTPBodyComplete = waitEOF
 			break
 		}
 		var event struct {

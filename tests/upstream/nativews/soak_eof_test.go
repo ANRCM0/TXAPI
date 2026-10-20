@@ -91,7 +91,7 @@ func TestSoakEOFRejectsTrailingExhaustedAndUnclosedBodies(t *testing.T) {
 				t.Fatalf("bad HTTP completion accepted or retried: %+v", report)
 			}
 			sample := report.Samples[0]
-			if sample.Error == "" || sample.Attempts != 1 || sample.CompleteNS <= 0 || len(sample.EventUpperNS) != 10 {
+			if sample.Error == "" || sample.Attempts != 1 || sample.HTTPBodyComplete || sample.CompleteNS <= 0 || len(sample.EventUpperNS) != 10 {
 				t.Fatalf("terminal event or attempt evidence lost: %+v", sample)
 			}
 		})
@@ -112,7 +112,7 @@ func TestDirectBaselineCancelsAtTerminalWithoutWaitingForHTTPClosure(t *testing.
 	defer client.CloseIdleConnections()
 	started := time.Now()
 	sample := run.callProtocol(ctx, client, provider.URL, upstreamKey, "m", tag, 2)
-	if sample.Error != "" || sample.Attempts != 1 || !sample.Drained || time.Since(started) >= time.Second {
+	if sample.Error != "" || sample.Attempts != 1 || !sample.Drained || sample.HTTPBodyComplete || time.Since(started) >= time.Second {
 		t.Fatalf("direct terminal did not promptly cancel and drain: %+v", sample)
 	}
 }

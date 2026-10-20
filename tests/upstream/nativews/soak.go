@@ -89,7 +89,7 @@ func (f *fixture) soakHandler(directory string) (http.HandlerFunc, error) {
 
 func (f *fixture) measureSoak(ctx context.Context, client *http.Client, base string, input soakInput, duration time.Duration) soakReport {
 	report := soakReport{Configuration: input, RequestCap: soakRequestCap,
-		TimingScope: "all started requests retained; monotonic client/provider event intervals; actual gateway and TLS reverse proxy; provider HTTP2 required; 100ms fixture event pacing"}
+		TimingScope: "all started requests retained; monotonic client/provider event intervals; DONE completion latency; worker reuse waits for real gateway HTTP EOF within 2s/64KiB; actual gateway and TLS reverse proxy; provider HTTP2 required; 100ms fixture event pacing"}
 	if input.Workers < 1 || input.Workers > 2 || input.Protocol < 1 || input.Protocol > 2 || duration <= 0 || duration > 1800*time.Second {
 		report.Errors = []string{"invalid bounded soak configuration"}
 		return report

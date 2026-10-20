@@ -49,7 +49,7 @@ def assess_protocol_soak(phase):
         errors.append("started/completed/interval/drain mismatch")
     if not valid_events or any(row["protocol"] != phase["protocol"] or row["provider_protocol"] != 2
             or row["provider_alpn"] != "h2" or not row["tls"] or not row["provider_tls"]
-            or row["attempts"] != 1 or not row["drained"] or row.get("error")
+            or row["attempts"] != 1 or not row["drained"] or row.get("http_body_complete") is not True or row.get("error")
             or any(not isinstance(row.get(field), int) or isinstance(row[field], bool)
                    for field in ("first_text_ns", "complete_ns")) for row in rows):
         errors.append("TLS/protocol/attempt/event correctness failed")
@@ -644,6 +644,7 @@ def main():
                          ("tests/upstream/nativews/main.go", "tests/upstream/nativews/baseline.go",
                           "tests/upstream/nativews/soak.go", "tests/smoke/native_ws_delivery.py")}},
               "configuration": {"soak_seconds_per_protocol": args.soak_seconds, "workers": args.soak_workers,
+                  "soak_completion_policy": "latency ends at DONE; worker reuse waits for real gateway HTTP EOF within original 2s/64KiB",
                   "billing": "disabled", "usage_history_during_soak": False,
                   "auth": "production static API Key and admission", "retries": 0,
                   "gateway_container_limits": {"cpus": 2, "memory_bytes": 512 * 1024 * 1024, "pids": 128} if args.soak_seconds else "unchanged",

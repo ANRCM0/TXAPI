@@ -56,7 +56,7 @@ class ProtocolSoakEvidenceTest(unittest.TestCase):
                            "elapsed_ns": 900_000_000_000,
                            "samples": [{"protocol": 2, "provider_protocol": 2, "provider_alpn": "h2",
                                         "tls": "TLS 1.3", "provider_tls": "TLS 1.3", "attempts": 1,
-                                        "drained": True, "first_text_ns": 100, "complete_ns": 200,
+                                        "drained": True, "http_body_complete": True, "first_text_ns": 100, "complete_ns": 200,
                                         "event_upper_ns": [10] * 10}]}}
 
     def test_complete_evidence_passes(self):
@@ -77,6 +77,15 @@ class ProtocolSoakEvidenceTest(unittest.TestCase):
                 self.assertIn("TLS/protocol/attempt/event correctness failed", phase["errors"])
                 self.assertIsNone(phase["observed_p95_ns"]["event_upper_p95_ns"])
                 self.assertEqual(phase["report"]["errors"], ["original failure"])
+
+    def test_done_without_proven_http_eof_never_passes(self):
+        for completion in (None, False, 1, "true"):
+            with self.subTest(completion=completion):
+                phase = self.phase()
+                phase["report"]["samples"][0]["http_body_complete"] = completion
+                assess_protocol_soak(phase)
+                self.assertFalse(phase["passed"])
+                self.assertIn("TLS/protocol/attempt/event correctness failed", phase["errors"])
 
 
 if __name__ == "__main__":
