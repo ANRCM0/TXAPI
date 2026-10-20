@@ -116,9 +116,10 @@ func (f *usageFacts) accept(base *protocolFacts, in v3.Envelope) (core.Frame, er
 }
 
 type usageDecoderBridge struct {
-	decoder v3.Decoder
-	facts   *protocolFacts
-	usage   *usageFacts
+	decoder   v3.Decoder
+	facts     *protocolFacts
+	usage     *usageFacts
+	operation v1.Operation
 }
 
 func (d usageDecoderBridge) Decode(body []byte) ([]byte, *core.Usage, error) {
@@ -130,7 +131,23 @@ func (d usageDecoderBridge) Decode(body []byte) ([]byte, *core.Usage, error) {
 		return nil, nil, errors.New("synchronous protocol response is not terminal")
 	}
 	frame, err := d.usage.accept(d.facts, envelope)
+	if err == nil && frame.Usage == nil && !envelope.Execution.Failed {
+		frame.Usage = inputOnlyAccountingUsage(d.operation, envelope.Usage)
+	}
 	return frame.Data, frame.Usage, err
+}
+
+// Embeddings already bills input only. Keep that operation's legacy financial
+// projection separate from the unmodified v2/v3 provider-reported quantities.
+func inputOnlyAccountingUsage(operation v1.Operation, usage *v3.UsageObservation) *core.Usage {
+	if operation != v1.Embeddings || usage == nil || usage.Profile != "embeddings_native_tokens_v1" || usage.Source != v2.ProviderReported {
+		return nil
+	}
+	input, output, total := usage.Counts.InputTokens, usage.Counts.OutputTokens, usage.Counts.TotalTokens
+	if input == nil || total == nil || *input < 0 || *input > math.MaxInt || *input != *total || output != nil && *output != 0 {
+		return nil
+	}
+	return &core.Usage{PromptTokens: int(*input), TotalTokens: int(*total)}
 }
 
 func (d usageDecoderBridge) NewStream() core.StreamDecoder {

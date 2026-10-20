@@ -376,7 +376,7 @@ func (g *Gateway) doRelay(c *executionScope, m *execution.Target, req execution.
 	hasFacts := false
 	if richDecoder, ok := prepared.Decoder.(executionv3.Decoder); ok && !nilInterface(richDecoder) {
 		hasFacts = true
-		input.Decoder = usageDecoderBridge{decoder: richDecoder, facts: facts, usage: usage}
+		input.Decoder = usageDecoderBridge{decoder: richDecoder, facts: facts, usage: usage, operation: req.Operation()}
 	} else if richDecoder, ok := prepared.Decoder.(executionv2.Decoder); ok && !nilInterface(richDecoder) {
 		hasFacts = true
 		input.Decoder = factsDecoderBridge{decoder: richDecoder, facts: facts}
