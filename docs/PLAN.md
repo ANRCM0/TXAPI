@@ -357,6 +357,8 @@ TLS测量最终头的完整CI已成功并合并。Linux PR运行中Chat/Response
 
 本地集中验证：Windows GOARCH=amd64 的完整nativews夹具包2.184s通过，含3对实际H2/TLS直连/反代测量（本地反代为夹具映射，并非生产main）、完整事件/usage与时间区间、截断/缺终态/错误usage拒绝、绝对截止与排空，以及原CA/HTTP/WS消费者。包vet、Python语法和差异检查通过。测量不以纳秒数非零判断有效输出，允许Windows时钟分辨率范围的零间隔。生产Go树保持现状；本地无Docker，实际非root镜像20对及原32条用量与20条新增回执、固定SDK/Codex和强杀链必须由最终精确头完整CI独立验收。
 
+首次Linux交付测量完成40/40、20个成功配对，逐请求1次发送与排空均通过，但随后夹具仍用默认50条分页等候52条记录，持续轮询后触发120次/分钟查询限流，故交付整体失败。修复仅显式请求允许的limit=100，并要求has_more=false，不扩大生产查询/留存容量、取消限流或丢弃旧记录断言；最终修复头完整CI重新验收，首轮数据仅为有限观察，不能把测量成功当交付通过。
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。

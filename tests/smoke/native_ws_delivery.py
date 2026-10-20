@@ -244,7 +244,9 @@ class Installation:
 
     def usage(self, session, number):
         def read():
-            rows = self.api("/api/me/usage-records", session)["data"]
+            page = self.api("/api/me/usage-records?limit=100", session)
+            assert not page["has_more"], "fixture usage exceeds one explicitly bounded page"
+            rows = page["data"]
             return rows if len(rows) == number and all(row["state"] in ("sealed", "interrupted") for row in rows) else None
         return until(read, "durable usage did not finish")
 
