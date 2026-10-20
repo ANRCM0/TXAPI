@@ -309,7 +309,7 @@ func (g *Gateway) modelGrantVisible(ch *channel, owner, token uint) bool {
 	return false
 }
 
-// validateManagedBody is the approved self-contained text-only SIWC subset.
+// validateManagedBody is the approved self-contained text/function SIWC subset.
 // Unknown fields fail closed; standard API Key Requests keep their own codec.
 func validateManagedBody(body []byte, slug string) error {
 	invalid := errors.New("unsupported managed inference request")
@@ -322,7 +322,7 @@ func validateManagedBody(body []byte, slug string) error {
 	}
 	for field := range fields {
 		switch field {
-		case "model", "input", "instructions", "store", "stream":
+		case "model", "input", "instructions", "store", "stream", "tools", "tool_choice", "parallel_tool_calls":
 		default:
 			return invalid
 		}
@@ -337,11 +337,25 @@ func validateManagedBody(body []byte, slug string) error {
 			return invalid
 		}
 	}
+	if !validateManagedFunctions(fields) {
+		return invalid
+	}
 	var items []map[string]json.RawMessage
 	if json.Unmarshal(fields["input"], &items) != nil || len(items) == 0 {
 		return invalid
 	}
+	calls := map[string]bool{}
 	for _, item := range items {
+		var itemType string
+		if raw, ok := item["type"]; ok && json.Unmarshal(raw, &itemType) != nil {
+			return invalid
+		}
+		if itemType == "function_call" || itemType == "function_call_output" {
+			if !validateManagedFunctionItem(item, itemType, calls) {
+				return invalid
+			}
+			continue
+		}
 		for key := range item {
 			if key != "role" && key != "type" && key != "content" {
 				return invalid
@@ -375,6 +389,11 @@ func validateManagedBody(body []byte, slug string) error {
 			if json.Unmarshal(part[field], &text) != nil || bytes.Equal(bytes.TrimSpace(part[field]), []byte("null")) {
 				return invalid
 			}
+		}
+	}
+	for _, resolved := range calls {
+		if !resolved {
+			return invalid
 		}
 	}
 	return nil
