@@ -384,6 +384,15 @@ Windows GOARCH=amd64 build与全量vet通过；全量Go首轮仅旧TestFactsDoNo
 
 两处测试修正后的Windows GOARCH=amd64集中复验：全部P0真实网络子组10.999s、WS预热权限/用量子组5轮12.082s通过，最终完整cmd/gateway包67.045s及包vet通过。首轮CI其他包与两套实际镜像交付均通过；因测试修正产生新头，最终完整CI仍重新验收。两轮清洁231fd947头各100对完整main HTTP/1.1明文串行测量均100%完成、一次attempt、排空无失败；首正文配对P95为3.5151/3.4699ms、首有效文本1.9550/1.7954ms、网关事件上界P95为1.1023/1.2727ms，满足原5/5/2ms预算。原始报告/摘要与资源数写入PR，测试修正不改变所测生产与harness源码；不外推TLS/H2、容量或长期稳定性。
 
+#### P4-EMBEDDINGS-USAGE-001：embeddings 费用回执存在性保护（2026-10-20）
+
+1. **层级/目录：**仅L2 internal/protocol 的既有 embeddings JSON 解码、协议/网关回归、本方案与OpenAPI说明。实际gateway与原strict/legacy账本是消费者，不新增发送链或观察记录。
+2. **公开依赖/冻结：**沿用execution/v1 Decoder/Usage，不新增签名、冻结范围或v3观察实现。embeddings的输入专用聚合计费仍使用prompt_tokens/total_tokens与零输出的既有操作语义；原生明细仍unknown，不把财务投影冒充Provider显式输出Token。
+3. **来源/地基：**主参考new-api固定25372e30b1f94255b1f818aeaaf006f042572580的relay/channel/openai/relay-openai.go::OpenaiHandler，采用解析错误和Provider error先拒绝再处理用量的顺序；其零值估算/补总量不满足本项目未知保护，因此独立改写存在性校验。既有decodeEmbeddings忽略Unmarshal错误且缺失字段归零，可能将usage:{}结算为已知零费用。L0、账本、配置、schema与成本许可不变。
+4. **行为/兼容/回退：**保留向量/base64/未知字段原始JSON字节；缺失/null/空usage或缺少prompt_tokens/total_tokens时返回未知聚合用量，strict保留pending及双hold，legacy沿原未知估算路径。只有两个字段显式存在、非负精确整数、相等且适合既有int范围时形成已知输入专用回执；可选completion_tokens只能缺失/null/显式零。非法JSON、重复键、非对象error响应、非法类型/溢出/负值/矛盾数量拒绝解码；已发送事实不清零，保持原重试/提交策略。回退旧二进制会恢复该缺陷，无数据迁移。
+5. **验证/验收：**先复现空usage/部分/null被当成零或完整回执，再覆盖有效非零与显式零、未知/大小写别名、重复/非法/矛盾及原始wire。实际loopback上游与strict账本验证一次发送、正常只按输入计费、未知/非法均保留双hold与成本attempt；保留原legacy缺失用量估算、Chat/Responses和拒绝stream消费者。集中协议/gateway及适用完整Go/main/SDK回归，最终精确头完整CI后合并。
+6. **协作影响：**与Chat原生观察分批，不改其解码器或历史记录，不新增embeddings原生明细承诺。OpenAPI仅声明费用回执的已知/未知条件；S5-03、真实Provider及后台/WS收费继续开放。
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。
