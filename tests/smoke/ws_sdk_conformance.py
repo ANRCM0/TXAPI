@@ -34,7 +34,7 @@ def client_phase(path, deployed=False):
                                         extra_headers={"Cookie": "sdk-private-cookie",
                                                        "X-Forwarded-For": "192.0.2.11"})
 
-    def finish(connection, status="completed", tools=False, custom=False):
+    def finish(connection, status="completed", tools=False, custom=False, search=False):
         text, arguments, custom_input, created = "", "", "", None
         for _ in range(32):
             event = connection.recv()
@@ -54,7 +54,12 @@ def client_phase(path, deployed=False):
                 response = event.response
                 assert event.type == "response." + status and response.status == status
                 assert created == response.id and response.model == "alias" and response.id.startswith("resp_")
-                if custom:
+                if search:
+                    from openai.types.responses import ResponseToolSearchCall
+                    assert isinstance(response.output[0], ResponseToolSearchCall)
+                    assert response.output[0].execution == "client" and response.output[0].arguments == {"query": "雪🌏"}
+                    assert response.output[0].call_id
+                elif custom:
                     assert custom_input == "raw 雪🌏\nsecond" and response.output[0].input == custom_input
                     assert response.output[0].type == "custom_tool_call" and response.output[0].namespace == "text"
                     assert response.output[0].name == tool_name
@@ -119,10 +124,22 @@ def client_phase(path, deployed=False):
                 input=[{"type": "custom_tool_call_output", "call_id": custom_response.output[0].call_id,
                         "namespace": "text", "name": tool_name, "output": "custom-result"}])
             finish(connection)
-    assert len(public_ids) == 10
-    print("PASS: openai 3.8.0 typed WS text/function/custom tools, same/new connections, HTTP retrieval, failed/incomplete and cancellation", flush=True)
+        with connect(client) as connection:
+            connection.response.create(model="alias", input="SDK search", store=True,
+                tools=[{"type": "tool_search", "execution": "client", "parameters": {"type": "object"}}])
+            found = finish(connection, search=True)
+            assert client.responses.retrieve(found.id).output[0].arguments == {"query": "雪🌏"}
+            loaded = [{"type": "namespace", "name": "crm", "tools": [{"type": "function", "name": tool_name,
+                       "defer_loading": True, "parameters": {"type": "object"}}]}]
+            connection.response.create(model="alias", store=True, previous_response_id=found.id, input=[
+                {"type": "tool_search_output", "execution": "client", "status": "completed",
+                 "call_id": found.output[0].call_id, "tools": loaded},
+                {"type": "additional_tools", "role": "developer", "tools": loaded}])
+            finish(connection)
+    assert len(public_ids) == 12
+    print("PASS: openai 3.8.0 typed WS text/function/custom/client search, same/new connections, HTTP retrieval, failed/incomplete and cancellation", flush=True)
     if deployed:
-        print(json.dumps({"cases": 10, "unknown": unknown, "ids": public_ids}), flush=True)
+        print(json.dumps({"cases": 12, "unknown": unknown, "ids": public_ids}), flush=True)
 
 
 def main():

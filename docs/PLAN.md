@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/6aef78f0bbe9df7d03b0b5661f83ed75fb89cdbb`，Verify `39347438757` 已完整成功。namespace 批次 PR #68 精确头 `d1f1afa1b1fc94baa11fe4c9ed4eac09c0099ed6` 的 Verify `39345977371` / `39345912321` 全部六项成功后合并。custom/freeform 批次 PR #69 精确头 `fd127abe377399716595b1dcc5084d73859a6f65` 的 Verify `39349320682` / `39349276419` 全部六项成功后，已合并为 `329f1130fccb5e346bac387650155ab8ced5a483`；合并后 Verify `39350655654` 另行跟踪，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/329f1130fccb5e346bac387650155ab8ced5a483`，合并后 Verify `39350655654` 已完整成功。custom/freeform 批次 PR #69 精确头 `fd127abe377399716595b1dcc5084d73859a6f65` 的 Verify `39349320682` / `39349276419` 全部六项成功。Responses 配对基线 PR #70 精确头 `f968cfa3b22e8b557f83bfeb4ad8a4ee38f1df07` 全部六项成功后，已合并为 `752d2d1fc8d42188aad2e16edf91d161037bbeae`；合并后 Verify `39352347725` 另行跟踪。本批客户端搜索增量单列，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.7` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.8` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -494,6 +494,22 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 固定客户端边界：0.163.0 bundled `gpt-5.5` 还声明 tool_search，新模型还可提交 additional_tools/Code Mode；当前均在发送前拒绝，不能据本批局部成功宣称默认客户端全量支持。custom 夹具采用文档与固定版本 config.schema.json 登记的 model_catalog_json，测试数据自行构造 synthetic slug/freeform/text 模态档案，不复制上游模型提示或更改用户模型/代理配置。实际 0.163.0 执行器原生解析故意无效且无路径的补丁，错误结果按 custom_tool_call_output 回传；工作目录断言没有新增日志之外的文件。配置依据：`https://developers.openai.com/codex/config-reference/`，固定源码 `codex-rs/protocol/src/openai_models.rs`。
 
 2026-10-20 本批本地受控证据：custom 声明/grammar64KiB/custom名称128 UTF-8字节/重复跨类型成员/已知字段错误/hosted拒绝、HTTP JSON/SSE 跨字节Unicode及函数/custom交错、有效输出、终态不重复估算、后台事件持久回放均通过。真实 socket 的 WS custom→HTTP result→组件重建/新WS完整上下文保持 input/name/namespace/call_id，custom delta 后断开保留 uncertain，查询和父链续接冲突且实际上游只发送一次。固定 Python SDK openai3.8.0/websockets15.0.1 的10个生成通过，含类型化custom delta、终态和HTTP读取；7个已知3Token、3个未知未补零，资金不变。固定 Codex0.163.0 的7场景通过，custom显式档案使用真实freeform声明和原生补丁解析错误往返；共10次实际HTTP发送/独立sealed usage，7次已知3Token、3次未知，工作目录无副作用文件，资金不变。全量 Go 回归通过（cmd/gateway76.492s、architecture91.854s、generation69.787s、Responses15.751s、store62.939s、TLS/Upgrade夹具2.743s）；build/vet和实际main local.py均通过。最终补齐custom输出估算后，protocol全树/gateway/cmd完整包复验通过（gateway33.129s、cmd57.769s），最终存储WS字段校验包复验1.017s通过。OpenAPI0.13.7/117操作和575个引用、Python语法、格式/差异检查通过。最终精确头 `fd127abe377399716595b1dcc5084d73859a6f65` 的 PR Verify `39349320682` 与 push Verify `39349276419` 全部六项成功，涵盖 Linux race/完整兼容检查、实际非root镜像TLS/反代/重启/强杀恢复和固定WS SDK组合，以及Windows采样；PR #69 已合并为 `329f1130fccb5e346bac387650155ab8ced5a483`，合并后 Verify `39350655654` 独立跟踪。仍未证明真实Provider、默认Codex全部工具或收费。
+
+</details>
+
+<details>
+<summary>FC-P4-TOOL-SEARCH-001：客户端 tool_search 与显式工具加载（源码与本地验证完成，精确头CI待验）</summary>
+
+1. **层级/目录与消费者：**固定 Codex0.163.0 bundled模型已观察到提交 client tool_search；当前原生校验在发送前拒绝。L2 internal/protocol/responses 校验声明、tool_search_call/output 与 additional_tools、JSON/SSE/后台投影；internal/compat/responsesws 接入同类事件与完整上下文；现有 HTTP/WS/后台/历史 owner 原生消费，不新增搜索服务、执行器或工具注册中心。cmd/gateway、固定 CLI/Python SDK、OpenAPI及本方案同步验证。
+2. **公开入口与冻结：**消费现有 compat/responses/v1、execution、responsehistory、background 与输出端口；既有 ValidateHTTP 的附加客户端语义按本具体记录实施。无公开类型/签名、L0、迁移、依赖和产品配置变化，不推断候选端口冻结。关闭/回退旧二进制会拒绝这些新声明及历史，保留原加密内容和未知事实。
+3. **声明与限额：**只接受显式 execution=client 的顶层 tool_search，至多一个；可选description为文本，parameters省略/null或至多64KiB JSON对象，保留原schema不编译。原有function/custom可选defer_loading须boolean，namespace对象不承接该字段；组内仍限function/custom。tool_search_call 必须client、1..64字节非空可打印call_id、至多64KiB JSON对象arguments，status省略/null或in_progress/completed/incomplete；tool_search_output 必须client、相同格式call_id、status=completed和非null tools数组（0..128）。additional_tools仅role=developer和同样有界tools数组。已加载工具只接受已有named function/custom和单层namespace，沿既有64组/128成员/128UTF-8字节名称/grammar64KiB限额，已知description/parameters/strict/defer_loading字段正确；禁止递归tool_search/hosted/MCP/CodeMode，防止经历史绕过发送前能力限制。调用关联原样保留，不以客户端字段作为授权或执行权威。
+4. **流、历史与估算：**不新增专用delta协议；通过既有output_item.added/done、完整终态传递search call/output，已校验call算有效工具输出，空对象/心跳不伪造文本TTFT。完整JSON参数/加载定义保留，不转成function字符串或丢字段；旧文本/function/custom/未知可保留扩展行为保留。HTTP/后台复用同一原生解析，WS已知字段沿闭合/null规则；持久历史和HTTP↔WS/重连复用同一owner/Key/当前模型/目标fingerprint/配额/加密，上游仍发送完整上下文，不叠加native父ID。PromptText/legacy输出估算包括search参数和加载定义，done/终态不重复计数；strict Responses仍全部拒绝。
+5. **验证与退出：**合法/缺失/client-vs-server/null/错误类型/精确限额/重复/嵌套/非法返回工具、JSON/SSE分片及search与function/custom交错、有效输出、截断/failed/incomplete；真实HTTP JSON/SSE结果→工具定义→已加载调用/结果、后台持久回放、WS/跨模式/组件重建和取消unknown不重放，使用现有真实消费者。固定官方CLI额外用例启用其真实search声明和客户端本地发现，仅搜索固定不存在工具（或本地无副作用已声明工具）并往返结果，保留既有七场景；无真实服务/账号/代理配置、无文件/命令/agent副作用。固定SDK类型化HTTP/WS组合，最终精确头完整CI/race/镜像交付；失败集中修复，不以纯schema通过宣称客户端兼容。
+6. **协作与许可：**本批补已观察到的客户端能力，支持additional_tools中已有工具类型是同一加载链；不开放服务端搜索、CodeMode/programmatic/async执行、媒体或任意多路复用，managed SIWC仍限文本，WS/后台仅disabled，收费许可不变。官方Provider/完整默认Codex/真实长时容量仍独立验收，性能不作提升声明；原历史证据仅覆盖各自精确提交。OpenAPI下个小版本/操作数不变。
+
+官方核对（2026-10-20）：OpenAI Tool search 的client execution/call_id、object arguments、返回tools及additional_tools developer输入，Function calling/Responses已声明工具；固定rust-v0.163.0协议ToolSearchCall/ToolSearchOutput保留JSON arguments/tools与可选opaque metadata。依据：`https://developers.openai.com/api/docs/guides/tools-tool-search`。不复制上游实现，不把官方支持范围解释为本项目已通过真实验收。
+
+2026-10-20 本批受控验证：client声明/重复拒绝/defer_loading类型、64字节call_id与64KiB对象精确边界、0..128加载定义、hosted/递归/错误角色及类型拒绝通过。HTTP JSON/SSE搜索→加载定义→namespace函数→结果完整三轮保留JSON参数、call_id和未知扩展，后台重开后的序号回放不重发；真实WS→HTTP→组件重建/新WS保留加载定义与同一加密历史，搜索调用后取消保留uncertain且查询/父链均拒绝重放。固定Codex0.163.0八场景通过，搜索用bundled gpt-5.5元数据和客户端原生本地发现，固定不存在工具返回tools数组并完成后续文本；共12次实际上游发送/独立sealed用量，9次已知3Token、3次未知不补零，资金不变且无工具副作用文件。固定PythonSDK openai3.8.0/websockets15.0.1 的12个WS生成通过，类型化ResponseToolSearchCall及HTTP读取保留对象arguments，tool_search_output与additional_tools进入完整上下文；9次已知3Token、3次未知，历史/attempt各12条。全量Go回归、build/vet通过；最终交错completed/failed/incomplete/截断、未知usage与protocol全树/WS/server完整包复验通过，实际main local.py通过。OpenAPI0.13.8/117操作与592个引用、Python语法和差异检查通过。实际镜像TLS/Upgrade/重启/SIGKILL/SDK组合已扩展本批搜索场景，尚待最终精确头Linux CI执行；本地未运行Docker，不宣称真实Provider、完整默认Codex、收费或性能提升。
 
 </details>
 

@@ -60,3 +60,19 @@ func TestResponsesCustomCompletionEstimateRetainsInputWithoutDoneDuplication(t *
 		t.Fatal("partial custom event counted", got)
 	}
 }
+
+func TestSearchCompletionEstimatePreservesJSONArgumentsAndDeduplicatesSnapshots(t *testing.T) {
+	item := `{"type":"tool_search_call","call_id":"one","arguments":{"query":"雪🌏"}}`
+	body := `{"output":[` + item + `,{"type":"function_call","arguments":"{}"},{"type":"message","content":[{"text":"answer"}]}]}`
+	if got := responsesCompletionText(false, []byte(body)); got != `{"query":"雪🌏"}{}answer` {
+		t.Fatal("object search arguments hid ordinary output", got)
+	}
+	wire := "data: {\"type\":\"response.output_item.added\",\"item\":" + item + "}\n\n" +
+		"data: {\"type\":\"response.output_item.done\",\"item\":" + item + "}\n\n"
+	if got := responsesCompletionText(true, []byte(wire)); got != `{"query":"雪🌏"}` {
+		t.Fatal("search snapshots double counted", got)
+	}
+	if got := responsesCompletionText(true, []byte(wire+"data: {\"type\":\"response.completed\",\"response\":"+body+"}\n\n")); got != `{"query":"雪🌏"}{}answer` {
+		t.Fatal("search terminal did not replace snapshots", got)
+	}
+}

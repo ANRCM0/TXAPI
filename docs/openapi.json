@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TXAPI HTTP contracts",
-    "version": "0.13.7",
-    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events and disabled billing. By default store=false or omitted keeps continuation connection-local. Optional responses_ws.persistent_history plus explicit per-round store=true uses shared owner/key-scoped encrypted local history, public local response IDs and complete-context new generations across HTTP/WS or new connections. It requires the Responses runtime; upstream store=false and native-parent removal avoid double context. Unknown executions cannot be resumed or replayed. Hosted tools, media, multiplexing, prewarm and automatic replay are unsupported. FC-P1-001 adds opt-in disabled-billing single SIWC account/owner/key/model Responses text streaming. Managed bindings use real persisted credentials and CAS revisions. No real-account acceptance is implied. FC-P3-001 adds persisted, version-fenced eligibility feedback and administrator CAS resume for the single managed binding. Unknown resets require manual review; credentials are retained. FC-P7-WS-USAGE-001 adds opt-in disabled native WS-round usage observations to the existing metadata query, with transport and native protocol status distinct from mechanical termination. It does not authorize WS billing. Schema21 requires a matching stopped-write backup for rollback. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Hosted tools, tool_search, Code Mode additional_tools and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile, not bundled default model compatibility."
+    "version": "0.13.8",
+    "description": "TXAPI control console and S5 first-batch billing contracts. Management uses session Bearer; model calls use API-key Bearer. Publication revisions are per-process and scoped by epoch. billing.mode=legacy retains availability-first quota behavior, disabled bypasses monetary quota/charging, and strict requires immutable price history, durable balances and a configured per-request user-fee ceiling. Strict reserves the entire ceiling atomically for user and key, settles known final usage once, and retains uncertain/over-ceiling charges for reconciliation. The ceiling bounds collected user charges, not absolute provider spend. Ordinary logs remain droppable and are not the strict ledger. Strict currently supports text chat (explicit single output limit, n=1, no paid tools/media/unknown extensions) and text embeddings only. Administrator-session-only ledger queries and audited resolution of expired pending holds are available. A repeated identical resolution is idempotent; a conflicting one returns 409. Known excess cost requires an explicit cap_usage decision; unknown cost may only be explicitly waived with evidence. Disabled billing permits read-only inspection. Monetary ledger units are decimal strings (1e9 units per currency). Opt-in native foreground Responses supports text/function tools over JSON or SSE through the shared execution chain; strict rejects Responses before reservation. Idempotency-Key is durable and owner/key scoped. Stored foreground responses and Conversations have owner/key-scoped encrypted local history with finite retention, CAS revisions, current authorization and full-context continuation. Private replay remains separate. store=false retains receipt metadata only and cannot use history. Opt-in disabled-billing background tasks support durable native submit/inspect/cancel with temporary encrypted content, including store=false. This is not permanent history or a zero-retention promise. Opt-in native Responses WebSocket uses a single main lane, text/function events and disabled billing. By default store=false or omitted keeps continuation connection-local. Optional responses_ws.persistent_history plus explicit per-round store=true uses shared owner/key-scoped encrypted local history, public local response IDs and complete-context new generations across HTTP/WS or new connections. It requires the Responses runtime; upstream store=false and native-parent removal avoid double context. Unknown executions cannot be resumed or replayed. Hosted tools, media, multiplexing, prewarm and automatic replay are unsupported. FC-P1-001 adds opt-in disabled-billing single SIWC account/owner/key/model Responses text streaming. Managed bindings use real persisted credentials and CAS revisions. No real-account acceptance is implied. FC-P3-001 adds persisted, version-fenced eligibility feedback and administrator CAS resume for the single managed binding. Unknown resets require manual review; credentials are retained. FC-P7-WS-USAGE-001 adds opt-in disabled native WS-round usage observations to the existing metadata query, with transport and native protocol status distinct from mechanical termination. It does not authorize WS billing. Schema21 requires a matching stopped-write backup for rollback. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Client tool_search is supported only with execution=client, at most one declaration, opaque object parameters/arguments capped at 65536 JSON bytes, and visible ASCII call_id of 1..64 bytes. tool_search_output requires client execution, completed status and 0..128 loaded tools; additional_tools requires developer role. Loaded definitions are restricted to the same bounded function/custom/one-level namespace types, with optional boolean defer_loading on members. Search items survive native events, background replay and encrypted full-context history. Server search, hosted tools, Code Mode/programmatic execution and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile; the client search case uses bundled gpt-5.5 metadata. Complete default model compatibility remains unverified."
   },
   "servers": [
     {
@@ -6722,7 +6722,7 @@
             "CallBearer": []
           }
         ],
-        "description": "Requires responses.enabled and mounted content/credential keys. Limit 1 MiB. Supports text, instructions, native function tools/history and reasoning items; no Chat conversion. Native foreground SSE dispatches only blank-line-delimited LF/CRLF events with a 1 MiB wire-event limit including the delimiter. An unterminated EOF tail is discarded and cannot establish completion. Defaults store=true without injecting that field upstream. Local response IDs are stable across replay; upstream IDs are metadata only. Idempotency-Key (1-256 visible ASCII bytes) is scoped to current owner and API key. Object key order/JSON whitespace do not affect the digest; numeric lexical representations and omitted/defaulted fields remain distinct. A known terminal receipt expires after configured retention (default 24h), allowing reuse; dispatching/unknown receipts do not expire automatically. Stored replay expires earlier (default 1h) or may be unavailable after an output failure; store=false never retains response bodies. A retry in those states returns 409 and never re-executes. Replays reauthorize identity/model and do not create attempts, consume generation RPM or charge again. Stored responses support GET/delete/input_items and local previous_response_id or conversation continuation, mutually exclusive. Expanded stored context is capped at 256 KiB and 1024 items, pinned to the original target and reauthorized per turn; no native parent ID is sent. store=false cannot reference history. background=true additionally requires responses.background.enabled, explicit channel_ids and billing.mode=disabled; legacy/strict reject before acceptance or network I/O. The background input limit is 256 KiB including the private envelope; self-contained text/function tools only, no previous_response_id/conversation. Original stream=true background requests are observed as durable native sequence-numbered SSE and can resume on GET with stream=true and optional starting_after; nil and zero cursors differ. Only original stream=true jobs support event replay. Native task terminal and terminal event persistence are separate facts. Incomplete, unavailable or expired logs never fabricate DONE/completion. A queued local receipt does not prove remote acceptance or completion. Workers persist their target before POST, bind an accepted remote ID, then inspect/cancel/resume only that exact target. Disconnect does not cancel work; unknown dispatch is never blindly resubmitted. Background content (also store=false) has fixed temporary retention (default 10 minutes); idempotency tombstones default to 24h and uncertainty stays protected. Background is not promoted to A02 long-term history. Native WS remains unsupported. Strict returns 400 unsupported_billing_dimension before any monetary reservation. Optional startup server.forward_upstream_metadata (default false) exposes only a validated final foreground attempt request ID as X-TXAPI-Upstream-Request-ID, plus Retry-After on matching upstream/final 429 or 503. Local metadata takes precedence; other upstream headers are excluded. Background, claimed execution and WS are unchanged. Nonempty model POST bodies are not automatically replayed by the standard HTTP transport via Request.GetBody; any allowed Chat/embeddings retry remains a separate gateway attempt with fresh admission and applicable cumulative cost accounting. Dispatching still does not prove non-execution, and a permitted retry may execute twice at a Provider. Responses remains non-replayable; custom transports must preserve these boundaries. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Hosted tools, tool_search, Code Mode additional_tools and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile, not bundled default model compatibility.",
+        "description": "Requires responses.enabled and mounted content/credential keys. Limit 1 MiB. Supports text, instructions, native function tools/history and reasoning items; no Chat conversion. Native foreground SSE dispatches only blank-line-delimited LF/CRLF events with a 1 MiB wire-event limit including the delimiter. An unterminated EOF tail is discarded and cannot establish completion. Defaults store=true without injecting that field upstream. Local response IDs are stable across replay; upstream IDs are metadata only. Idempotency-Key (1-256 visible ASCII bytes) is scoped to current owner and API key. Object key order/JSON whitespace do not affect the digest; numeric lexical representations and omitted/defaulted fields remain distinct. A known terminal receipt expires after configured retention (default 24h), allowing reuse; dispatching/unknown receipts do not expire automatically. Stored replay expires earlier (default 1h) or may be unavailable after an output failure; store=false never retains response bodies. A retry in those states returns 409 and never re-executes. Replays reauthorize identity/model and do not create attempts, consume generation RPM or charge again. Stored responses support GET/delete/input_items and local previous_response_id or conversation continuation, mutually exclusive. Expanded stored context is capped at 256 KiB and 1024 items, pinned to the original target and reauthorized per turn; no native parent ID is sent. store=false cannot reference history. background=true additionally requires responses.background.enabled, explicit channel_ids and billing.mode=disabled; legacy/strict reject before acceptance or network I/O. The background input limit is 256 KiB including the private envelope; self-contained text/function tools only, no previous_response_id/conversation. Original stream=true background requests are observed as durable native sequence-numbered SSE and can resume on GET with stream=true and optional starting_after; nil and zero cursors differ. Only original stream=true jobs support event replay. Native task terminal and terminal event persistence are separate facts. Incomplete, unavailable or expired logs never fabricate DONE/completion. A queued local receipt does not prove remote acceptance or completion. Workers persist their target before POST, bind an accepted remote ID, then inspect/cancel/resume only that exact target. Disconnect does not cancel work; unknown dispatch is never blindly resubmitted. Background content (also store=false) has fixed temporary retention (default 10 minutes); idempotency tombstones default to 24h and uncertainty stays protected. Background is not promoted to A02 long-term history. Native WS remains unsupported. Strict returns 400 unsupported_billing_dimension before any monetary reservation. Optional startup server.forward_upstream_metadata (default false) exposes only a validated final foreground attempt request ID as X-TXAPI-Upstream-Request-ID, plus Retry-After on matching upstream/final 429 or 503. Local metadata takes precedence; other upstream headers are excluded. Background, claimed execution and WS are unchanged. Nonempty model POST bodies are not automatically replayed by the standard HTTP transport via Request.GetBody; any allowed Chat/embeddings retry remains a separate gateway attempt with fresh admission and applicable cumulative cost accounting. Dispatching still does not prove non-execution, and a permitted retry may execute twice at a Provider. Responses remains non-replayable; custom transports must preserve these boundaries. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Client tool_search is supported only with execution=client, at most one declaration, opaque object parameters/arguments capped at 65536 JSON bytes, and visible ASCII call_id of 1..64 bytes. tool_search_output requires client execution, completed status and 0..128 loaded tools; additional_tools requires developer role. Loaded definitions are restricted to the same bounded function/custom/one-level namespace types, with optional boolean defer_loading on members. Search items survive native events, background replay and encrypted full-context history. Server search, hosted tools, Code Mode/programmatic execution and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile; the client search case uses bundled gpt-5.5 metadata. Complete default model compatibility remains unverified.",
         "parameters": [
           {
             "in": "header",
@@ -6839,7 +6839,7 @@
       "get": {
         "operationId": "connectNativeResponsesWebSocket",
         "summary": "Connect a bounded native Responses WebSocket session",
-        "description": "Default disabled. Requires Authorization, billing disabled, explicit actual-model allowlist and activated credential encryption. No query/cookie credentials. One active main lane, pending=0. Omitted store or store=false uses only the latest connection-local native parent. Optional responses_ws.persistent_history requires responses.enabled and the same history owner; only explicit store=true selects local persisted history. Local parents must be ready, fully reconstructable, currently authorized and match the original target/credential fingerprint. HTTP/WS and new-connection continuation sends the complete bounded text/function context once as a new generation, omitting the native parent and forcing upstream store=false. Public local response IDs support existing GET/DELETE/input_items. Terminal history commits before terminal delivery; failed/incomplete/cancelled remain distinct, and unknown or failed persistence never fabricates completion. Limits: 1024 context items and 256 KiB wire messages. No HTTP fallback, automatic reconnect replay, background, conversation, reasoning/media, hosted tools or generate:false. TPM is estimated, not a strict financial guarantee. A transport failure may prevent an error JSON or close handshake from reaching the peer. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Hosted tools, tool_search, Code Mode additional_tools and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile, not bundled default model compatibility.",
+        "description": "Default disabled. Requires Authorization, billing disabled, explicit actual-model allowlist and activated credential encryption. No query/cookie credentials. One active main lane, pending=0. Omitted store or store=false uses only the latest connection-local native parent. Optional responses_ws.persistent_history requires responses.enabled and the same history owner; only explicit store=true selects local persisted history. Local parents must be ready, fully reconstructable, currently authorized and match the original target/credential fingerprint. HTTP/WS and new-connection continuation sends the complete bounded text/function context once as a new generation, omitting the native parent and forcing upstream store=false. Public local response IDs support existing GET/DELETE/input_items. Terminal history commits before terminal delivery; failed/incomplete/cancelled remain distinct, and unknown or failed persistence never fabricates completion. Limits: 1024 context items and 256 KiB wire messages. No HTTP fallback, automatic reconnect replay, background, conversation, reasoning/media, hosted tools or generate:false. TPM is estimated, not a strict financial guarantee. A transport failure may prevent an error JSON or close handshake from reaching the peer. Native Responses HTTP JSON/SSE, disabled native background and native WS accept named function/custom tools and one-level mixed namespaces. Calls/results and tool_choice preserve namespace separately from name and call_id. Limits are 64 groups, 1..128 unique function/custom members per group, and 1..128 UTF-8 byte group/member/custom names without edge whitespace/control characters. Custom format is optional text or grammar with lark/regex syntax and 1..65536 UTF-8 byte definition; grammar remains opaque and tools execute at the client. Custom input strings and native delta/done events survive JSON/SSE, background replay and encrypted full-context history. Client tool_search is supported only with execution=client, at most one declaration, opaque object parameters/arguments capped at 65536 JSON bytes, and visible ASCII call_id of 1..64 bytes. tool_search_output requires client execution, completed status and 0..128 loaded tools; additional_tools requires developer role. Loaded definitions are restricted to the same bounded function/custom/one-level namespace types, with optional boolean defer_loading on members. Search items survive native events, background replay and encrypted full-context history. Server search, hosted tools, Code Mode/programmatic execution and nested namespaces remain unsupported; cross-protocol Chat and managed-account text-only bindings do not inherit this capability. HTTP missing/null optional namespace/format is unspecified; WS closed fields reject explicit null. Fixed CLI custom conformance uses an explicit local model catalog profile; the client search case uses bundled gpt-5.5 metadata. Complete default model compatibility remains unverified.",
         "tags": [
           "Responses"
         ],
@@ -12982,10 +12982,13 @@
                 },
                 {
                   "$ref": "#/components/schemas/ResponseCustomTool"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponseToolSearch"
                 }
               ]
             },
-            "description": "Client-executed named function/custom tools and one-level mixed namespaces; hosted tools and tool_search remain unsupported."
+            "description": "Client-executed function/custom tools, one-level namespaces and at most one execution=client tool_search. Hosted and recursive search tools are rejected."
           },
           "tool_choice": {
             "oneOf": [
@@ -13332,6 +13335,10 @@
           },
           "strict": {
             "type": "boolean"
+          },
+          "defer_loading": {
+            "type": "boolean",
+            "description": "Client-side discovery deferral; the gateway never searches or executes a tool."
           }
         }
       },
@@ -13372,6 +13379,15 @@
                     },
                     {
                       "$ref": "#/components/schemas/NativeWSCustomOutput"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeWSToolSearchCall"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeWSToolSearchOutput"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeWSAdditionalTools"
                     }
                   ]
                 }
@@ -13398,10 +13414,13 @@
                 },
                 {
                   "$ref": "#/components/schemas/NativeWSCustomTool"
+                },
+                {
+                  "$ref": "#/components/schemas/NativeWSToolSearch"
                 }
               ]
             },
-            "description": "Client-executed named function/custom tools and one-level mixed namespaces; hosted tools and tool_search remain unsupported."
+            "description": "Client-executed function/custom tools, one-level namespaces and at most one execution=client tool_search. Hosted and recursive search tools are rejected."
           },
           "tool_choice": {
             "oneOf": [
@@ -15084,6 +15103,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "defer_loading": {
+            "type": "boolean",
+            "description": "Client-side discovery deferral; the gateway never searches or executes a tool."
           }
         },
         "additionalProperties": true
@@ -15140,6 +15163,9 @@
                       "maxLength": 128,
                       "x-max-utf8-bytes": 128,
                       "description": "1..128 UTF-8 bytes, without leading/trailing whitespace or control characters. The namespace is retained separately from the function name and call_id."
+                    },
+                    "defer_loading": {
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": true
@@ -15286,6 +15312,10 @@
             ],
             "description": "Grammar is opaque provider input; TXAPI validates shape and byte bounds without compiling or executing it.",
             "nullable": true
+          },
+          "defer_loading": {
+            "type": "boolean",
+            "description": "Client-side discovery deferral; the gateway never searches or executes a tool."
           }
         }
       },
@@ -15362,6 +15392,10 @@
               }
             ],
             "description": "Grammar is opaque provider input; TXAPI validates shape and byte bounds without compiling or executing it."
+          },
+          "defer_loading": {
+            "type": "boolean",
+            "description": "Client-side discovery deferral; the gateway never searches or executes a tool."
           }
         }
       },
@@ -15427,6 +15461,371 @@
             "maxLength": 128,
             "x-max-utf8-bytes": 128,
             "description": "1..128 UTF-8 bytes, without edge whitespace or control characters."
+          }
+        }
+      },
+      "ResponseToolSearch": {
+        "type": "object",
+        "required": [
+          "type",
+          "execution"
+        ],
+        "additionalProperties": true,
+        "description": "At most one top-level client search declaration; namespace members cannot contain search.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool_search"
+            ]
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "client"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "parameters": {
+            "type": "object",
+            "x-max-json-bytes": 65536,
+            "description": "Opaque JSON object, at most 65536 encoded JSON bytes. Not compiled or executed.",
+            "nullable": true
+          }
+        }
+      },
+      "ResponseToolSearchCall": {
+        "type": "object",
+        "required": [
+          "type",
+          "execution",
+          "call_id",
+          "arguments"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool_search_call"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "client"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[!-~]+$"
+          },
+          "arguments": {
+            "type": "object",
+            "x-max-json-bytes": 65536,
+            "description": "Opaque JSON object, at most 65536 encoded JSON bytes. Not compiled or executed."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "ResponseToolSearchOutput": {
+        "type": "object",
+        "required": [
+          "type",
+          "execution",
+          "call_id",
+          "status",
+          "tools"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool_search_output"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "client"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[!-~]+$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 128,
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ResponseFunctionTool"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponseCustomTool"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponseFunctionNamespace"
+                }
+              ]
+            },
+            "description": "Only existing bounded function/custom and one-level namespace tools. Search, hosted and nested tools are rejected. Known loaded function parameters must be objects of at most 65536 JSON bytes."
+          }
+        }
+      },
+      "ResponseAdditionalTools": {
+        "type": "object",
+        "required": [
+          "type",
+          "role",
+          "tools"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "additional_tools"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "developer"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 128,
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ResponseFunctionTool"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponseCustomTool"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponseFunctionNamespace"
+                }
+              ]
+            },
+            "description": "Only existing bounded function/custom and one-level namespace tools. Search, hosted and nested tools are rejected. Known loaded function parameters must be objects of at most 65536 JSON bytes."
+          }
+        }
+      },
+      "NativeWSToolSearch": {
+        "type": "object",
+        "required": [
+          "type",
+          "execution"
+        ],
+        "additionalProperties": false,
+        "description": "At most one top-level client search declaration; namespace members cannot contain search.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool_search"
+            ]
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "client"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object",
+            "x-max-json-bytes": 65536,
+            "description": "Opaque JSON object, at most 65536 encoded JSON bytes. Not compiled or executed."
+          }
+        }
+      },
+      "NativeWSToolSearchCall": {
+        "type": "object",
+        "required": [
+          "type",
+          "execution",
+          "call_id",
+          "arguments"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool_search_call"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "client"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[!-~]+$"
+          },
+          "arguments": {
+            "type": "object",
+            "x-max-json-bytes": 65536,
+            "description": "Opaque JSON object, at most 65536 encoded JSON bytes. Not compiled or executed."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          }
+        }
+      },
+      "NativeWSToolSearchOutput": {
+        "type": "object",
+        "required": [
+          "type",
+          "execution",
+          "call_id",
+          "status",
+          "tools"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool_search_output"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "client"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[!-~]+$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 128,
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/NativeWSFunctionTool"
+                },
+                {
+                  "$ref": "#/components/schemas/NativeWSCustomTool"
+                },
+                {
+                  "$ref": "#/components/schemas/NativeWSFunctionNamespace"
+                }
+              ]
+            },
+            "description": "Only existing bounded function/custom and one-level namespace tools. Search, hosted and nested tools are rejected. Known loaded function parameters must be objects of at most 65536 JSON bytes."
+          }
+        }
+      },
+      "NativeWSAdditionalTools": {
+        "type": "object",
+        "required": [
+          "type",
+          "role",
+          "tools"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "additional_tools"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "developer"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 128,
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/NativeWSFunctionTool"
+                },
+                {
+                  "$ref": "#/components/schemas/NativeWSCustomTool"
+                },
+                {
+                  "$ref": "#/components/schemas/NativeWSFunctionNamespace"
+                }
+              ]
+            },
+            "description": "Only existing bounded function/custom and one-level namespace tools. Search, hosted and nested tools are rejected. Known loaded function parameters must be objects of at most 65536 JSON bytes."
           }
         }
       }

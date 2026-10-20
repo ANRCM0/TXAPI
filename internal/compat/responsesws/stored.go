@@ -33,6 +33,21 @@ func validateStoredItems(raw json.RawMessage) error {
 		}
 		switch item.Type {
 		case "", "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output":
+		case "tool_search_call", "tool_search_output", "additional_tools":
+			// Preserve future fields in stored context, but enforce WS known
+			// null and loaded-tool policies before the shared HTTP validation.
+			var fields map[string]json.RawMessage
+			_ = json.Unmarshal(raw, &fields)
+			for _, key := range []string{"execution", "call_id", "status", "arguments", "tools", "role"} {
+				if value, present := fields[key]; present && bytes.Equal(value, []byte("null")) {
+					return errors.New("null stored tool search field")
+				}
+			}
+			if item.Type != "tool_search_call" {
+				if err := validateLoadedTools(fields["tools"]); err != nil {
+					return err
+				}
+			}
 		default:
 			return errors.New("stored WS input supports self-contained text and functions")
 		}
