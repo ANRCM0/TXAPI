@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -60,6 +61,14 @@ type fixture struct {
 	connections atomic.Int64
 	httpPosts   atomic.Int64
 	proxyPosts  atomic.Int64
+	chatActive  atomic.Int64
+	chat        []chatObservation
+}
+
+type chatObservation struct {
+	Input    string `json:"input"`
+	Protocol int    `json:"protocol"`
+	Peer     string `json:"peer"`
 }
 
 func (f *fixture) reject(message string) {
@@ -74,7 +83,8 @@ func (f *fixture) stats(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	_ = json.NewEncoder(w).Encode(map[string]any{"requests": f.requests, "errors": f.errors,
-		"active": f.active.Load(), "proxy_upgrades": f.upgrades.Load(), "http_posts": f.httpPosts.Load(), "proxy_posts": f.proxyPosts.Load()})
+		"active": f.active.Load(), "proxy_upgrades": f.upgrades.Load(), "http_posts": f.httpPosts.Load(), "proxy_posts": f.proxyPosts.Load(),
+		"chat": f.chat, "chat_active": f.chatActive.Load()})
 }
 
 func (f *fixture) observe(raw []byte, transport string, connection int64, responseID string) (map[string]any, string, error) {
@@ -140,10 +150,14 @@ func textOutput(id string) []any {
 }
 
 func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer "+upstreamKey ||
+	if (r.URL.Path != "/v1/responses" && r.URL.Path != "/v1/chat/completions") || r.Header.Get("Authorization") != "Bearer "+upstreamKey ||
 		r.Header.Get("Cookie") != "" || r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("Proxy-Authorization") != "" {
 		f.reject("provider path, authentication or private-header boundary")
 		http.Error(w, "fixture boundary", 403)
+		return
+	}
+	if r.URL.Path == "/v1/chat/completions" {
+		f.chatStream(w, r)
 		return
 	}
 	if r.Method == http.MethodPost {
@@ -271,6 +285,128 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func (f *fixture) chatStream(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Model    string
+		Stream   bool
+		Messages []struct{ Role, Content string }
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, (256<<10)+1))
+	if err != nil || len(raw) > 256<<10 || json.Unmarshal(raw, &body) != nil || r.Method != http.MethodPost ||
+		body.Model != "m" || !body.Stream || len(body.Messages) != 1 || body.Messages[0].Role != "user" {
+		f.reject("Chat fixture boundary")
+		http.Error(w, "fixture request", 400)
+		return
+	}
+	input := body.Messages[0].Content
+	if input != "h2-complete" && input != "h2-cancel" && input != "h2-recovery" {
+		f.reject("Chat fixture input")
+		http.Error(w, "fixture input", 400)
+		return
+	}
+	f.mu.Lock()
+	if len(f.chat) >= 8 {
+		f.mu.Unlock()
+		http.Error(w, "fixture capacity", 429)
+		return
+	}
+	f.chat = append(f.chat, chatObservation{Input: input, Protocol: r.ProtoMajor, Peer: r.RemoteAddr})
+	f.mu.Unlock()
+	f.chatActive.Add(1)
+	defer f.chatActive.Add(-1)
+	w.Header().Set("Content-Type", "text/event-stream")
+	if _, err := io.WriteString(w, "data: {\"id\":\"chat_h2\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"你好🌏\"},\"finish_reason\":null}]}\n\n"); err != nil {
+		return
+	}
+	if http.NewResponseController(w).Flush() != nil {
+		return
+	}
+	if input != "h2-cancel" {
+		_, _ = io.WriteString(w, "data: {\"id\":\"chat_h2\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n")
+		if http.NewResponseController(w).Flush() != nil {
+			return
+		}
+	}
+	// Neither normal completion nor cancellation can rely on provider EOF.
+	select {
+	case <-r.Context().Done():
+	case <-f.root.Done():
+	}
+}
+
+func chatCall(ctx context.Context, client *http.Client, base, key, input string, output io.Writer) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	payload, _ := json.Marshal(map[string]any{"model": "alias", "stream": true,
+		"messages": []map[string]string{{"role": "user", "content": input}}})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+key)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("Chat status %d", response.StatusCode)
+	}
+	scanner := bufio.NewScanner(io.LimitReader(response.Body, 64<<10))
+	scanner.Buffer(make([]byte, 4096), 32<<10)
+	var data, text string
+	var events int
+	var done bool
+	wanted := 3
+	if input == "h2-cancel" {
+		wanted = 1
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "data: ") {
+			data = strings.TrimPrefix(line, "data: ")
+			continue
+		}
+		if line != "" || data == "" {
+			continue
+		}
+		events++
+		if done {
+			return errors.New("Chat event after terminal")
+		}
+		if data == "[DONE]" {
+			done = true
+			data = ""
+			continue
+		}
+		var event struct {
+			Choices []struct{ Delta struct{ Content string } }
+		}
+		if json.Unmarshal([]byte(data), &event) != nil {
+			return errors.New("invalid Chat event")
+		}
+		for _, choice := range event.Choices {
+			text += choice.Delta.Content
+		}
+		data = ""
+		if input == "h2-cancel" && text != "" {
+			cancel()
+			break
+		}
+		if events > 8 {
+			return errors.New("Chat event capacity")
+		}
+	}
+	if scanner.Err() != nil {
+		return scanner.Err()
+	}
+	if text != "你好🌏" || done != (input != "h2-cancel") || data != "" || events != wanted {
+		return errors.New("Chat event or terminal mismatch")
+	}
+	return json.NewEncoder(output).Encode(map[string]any{"input": input, "events": events, "done": done})
 }
 
 func prepare(directory string) error {
@@ -442,7 +578,7 @@ func wsCall(ctx context.Context, client *http.Client, base, key, payload, until 
 }
 
 func main() {
-	mode := flag.String("mode", "serve", "prepare|serve|http|ws")
+	mode := flag.String("mode", "serve", "prepare|serve|http|ws|chat")
 	directory := flag.String("directory", "/fixtures", "ephemeral fixture directory")
 	target := flag.String("target", "http://gateway:8080", "explicit internal reverse-proxy target")
 	base := flag.String("base", "http://127.0.0.1:8081", "client base URL inside the isolated network")
@@ -467,6 +603,8 @@ func main() {
 		err = httpCall(ctx, client, *base, *method, *path, *key, *payload)
 	case "ws":
 		err = wsCall(ctx, client, *base, *key, *payload, *until, os.Stdout)
+	case "chat":
+		err = chatCall(ctx, client, *base, *key, *payload, os.Stdout)
 	default:
 		err = errors.New("unknown fixture mode")
 	}

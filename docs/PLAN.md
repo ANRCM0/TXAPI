@@ -307,6 +307,19 @@ P0 扩展有界负载证据（2026-10-20，非长期 soak 验收）：在干净�
 
 本地受控结果：Chat/Responses × 取消1/2条四种场景全部通过，完整 gateway 包回归通过（58.532s），该包 vet 与局部格式/差异检查通过。每场景均在满载四条流后取消部分流、保留其余活动流并补满名额、全部完成后再次同时填满四个名额；总计38次实际上游发送、6条取消流、32条正常终态、8次零发送满载429。每条受理流仅一次发送，正常流的文本/工具/本地Responses ID/单次终态保持，取消终态499且不伪造完成；每场景两端分别只建立1条真实TLS连接并协商HTTP/2，结束后所有请求/attempt/User/Key/channel名额及上游活动均归零。生产源码与后台占用已验证树相同，不重复其全量Go/实际main冒烟本地检查；最终新头完整Linux race/兼容/交付仍待CI，长期资源与性能验收继续开放。
 
+HTTP/2并发隔离最终精确头 `9d828995ed8f2dda1fab98a39926644337467b5e` 的 push Verify `39364726313` 与 PR Verify `39364761367` 六项全部成功；PR #76 已合并为 `548cb6ed507210bad3e3fbcd081ec2b8f971a662`，合并后 Verify `39366021776` 另行跟踪。后台占用合并后 `b405416973097911f1e070eddf7fb0f2122199b2` / Verify `39364578453` 已完整成功。上述证据不覆盖下列实际镜像默认传输增量。
+
+#### P0 实际镜像默认传输 HTTP/2 SSE 子批（2026-10-20）
+
+1. **层级/目录：**仅扩展 tests/upstream/nativews 的隔离 Provider/客户端、tests/smoke/native_ws_delivery.py 和本方案；使用既有实际镜像、生产 main、真实 Key、反代及加密 SQLite。无生产代码、配置接口、依赖或迁移变更。
+2. **依赖/冻结：**沿当前 Chat HTTP/SSE 与用量历史许可；夹具不注入 gateway Client、不改变其 dialer 或宿主 DNS/信任。隔离 Docker 网络中的官方域名别名、临时 CA 与 SSL_CERT_FILE 复用既有交付装配，不扩公开地基。
+3. **来源/地基：**对照 sub2api 固定 f2e5b55f3e8069df1c02a9a27af537b5fdefa64e 的 backend/internal/repository/http_upstream.go::buildUpstreamTransport（1379–1409）的真实 H2 协商及每次取消边界，验证 TXAPI 现有默认 Transport.Clone 路线；不复制 LGPLv3 实现，不引入画像、PING、HTTP回退或新连接池。现有注入 Client 的测试不能单独证明实际镜像默认路径，因此在原交付消费者补证据。
+4. **行为/边界：**正常 Chat SSE、首完整文本事件后取消、随后新调用三场景；Provider 在终态后保持流打开直到客户端取消。逐次核对每场景恰好1次发送、实际 HTTP/2 与相同远端连接、文本/终态、上游活动归零及生产 request/attempt 槽位释放。正常终态和取消均不能依赖上游 EOF，取消不伪造 DONE。三条用量均持久封存且不新增永久 Responses 历史或资金记录。
+5. **验证：**本地夹具覆盖真实 H2 协商/连接复用/关闭流取消、客户端完整事件/主动取消/截断拒绝；既有 CA/WS/反代夹具回归和 vet 集中执行。Linux 完整 CI 同批运行实际非root镜像、固定SDK/Codex与新增默认传输链；本地无Docker，夹具测试不能替代镜像通过。
+6. **协作/限制：**保留既有 HTTP/WS 续链、强杀、未知保护及用量计数断言，汇总额外3条Chat记录；disabled与真实Provider跳过范围不变。只补此受控交付组合，不声明多流并发/最大容量、TLS延迟预算、长期soak或S5-03完成。
+
+本地受控验证：Windows GOARCH=amd64 原交付夹具及新增真实H2协商/连接复用/流关闭测试、Chat客户端完整/取消/截断拒绝均通过，夹具包vet、Python UTF-8语法和差异检查通过。生产Go树未变；未执行本地Docker或重复全量Go。最终精确头完整Linux CI与实际镜像新增链仍待验收，不能从本地夹具成功推定镜像默认传输成功。
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。

@@ -143,6 +143,26 @@ class Installation:
     def stats(self):
         return json.loads(self.helper("http", base="http://127.0.0.1:9911", path="/stats").stdout)["body"]
 
+    def chat_http2(self):
+        for number, name in enumerate(("h2-complete", "h2-cancel", "h2-recovery"), 1):
+            report = json.loads(self.helper("chat", key=CLIENT_KEY, payload=name).stdout)
+            assert report == {"input": name, "events": 1 if name == "h2-cancel" else 3,
+                              "done": name != "h2-cancel"}, report
+            until(lambda: len((state := self.stats())["chat"] or []) == number and state["chat_active"] == 0,
+                  "Chat upstream stream did not drain")
+        state = self.stats()
+        rows = state["chat"]
+        assert [row["input"] for row in rows] == ["h2-complete", "h2-cancel", "h2-recovery"], rows
+        assert all(row["protocol"] == 2 for row in rows), rows
+        assert len({row["peer"] for row in rows}) == 1, "default upstream TLS connection was not reused"
+        assert not state["errors"], state["errors"]
+        def drained():
+            metrics = self.api("/metrics")
+            return all(f"{name} 0\n" in metrics for name in
+                       ("gateway_admission_requests_active", "gateway_admission_attempts_active"))
+        until(drained, "Chat production admission did not drain")
+        print("PASS: shipped default transport negotiated HTTP/2, normal/cancel/recovery SSE shared one TLS connection; 3 sends, all upstream streams drained", flush=True)
+
     def wait_sends(self, number):
         return until(lambda: (state if len((state := self.stats())["requests"] or []) == number and state["active"] == 0 else None),
                      "upstream sends or active connections differ")
@@ -404,6 +424,11 @@ def exercise(installation, sdk_image=None, codex_image=None, codex=None):
     i.ws(sixth["id"], "persistent-disabled", refused=True)
     i.usage(session, count)
     assert len(i.wait_sends(count)["requests"]) == count
+    i.chat_http2()
+    records = i.usage(session, count + 3)
+    chat = [row for row in records if row["operation"] == "chat"]
+    assert len(chat) == 3 and all(row["state"] == "sealed" for row in chat), chat
+    count += 3
     i.final_snapshot(unknowns, count, history_count)
 
 
