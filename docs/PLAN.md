@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/bdd04377e29c34d7a6a4474b727097884408650a`，客户端搜索 PR #71 精确头 `cf35875b15b911d25bfe6bc9a518af72b21e2841` 的 Verify `39353159474` / `39353151168` 全部六项成功，合并后 Verify `39354583737` 亦完整成功。Responses 配对基线 PR #70 合并后 Verify `39352347725` 已完整成功；custom/freeform PR #69 的精确头及合并后证据保留在对应 PR。本批固定 Codex WS/预热增量单列，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最新已合并功能头为 `master/16df654d76eddc2cee76c54260cba5306c7adbfe`：固定 Codex WS/预热 PR #72 的精确头 `dfa90e58f4b4234e10b04170aa02e3f08bebc171` 已通过 push Verify `39356956394` 与 PR Verify `39356964030` 全部六项；合并后独立 Verify `39358371893` 尚待完成。最近完整通过合并后CI的基线仍为 `bdd04377e29c34d7a6a4474b727097884408650a` / Verify `39354583737`。客户端搜索 PR #71、Responses 配对基线 PR #70、custom/freeform PR #69 的精确头与合并后证据保留在对应PR。本批新增的实际镜像+固定Codex WS组合不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.9` / 117 操作；数据库保持 schema v21，FC-P4-CODEX-WS-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.9` / 117 操作；数据库保持 schema v21，FC-P4-CODEX-WS-001 精确头CI已通过并合并，实际镜像+固定客户端组合增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -514,7 +514,7 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 </details>
 
 <details>
-<summary>FC-P4-CODEX-WS-001：原生非生成预热与固定客户端 WS 字段（源码及本地受控验证完成，精确头 CI 待验收）</summary>
+<summary>FC-P4-CODEX-WS-001：原生非生成预热与固定客户端 WS 字段（精确头CI通过并合并，合并后独立CI另记）</summary>
 
 2026-10-20。按本任务后续同类契约变更的既有授权记录后实施。固定官方 Codex0.163.0 的隔离 loopback 观察确认：supports_websockets=true 时先发送 generate=false，再以该响应ID发送正式轮次；create还含stream=true、include、reasoning、prompt_cache_key、client_metadata。仅打开客户端WS配置不能证明网关走WS，预热失败可触发客户端HTTP回退。
 
@@ -534,6 +534,17 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 2026-10-20 本批本地受控验证：固定 Codex0.163.0 实际 WS 的文本/function/custom/client-search 四场景全部完成，独立上游观测共11个 response.create（4个真实预热及7个生成），每场景仅1条上游连接、零HTTP fallback；每轮一条sealed用量，预热已知0/生成已知3分别保留，store=false不生成永久历史或资金记录。已知零/未知预热父usage、跨连接父ID、Key撤销与模型权限改变、预热断开后的unknown和准入释放、reasoning经WS→HTTP→新WS的完整加密历史均通过定向真实socket回归。原固定CLI HTTP八场景、Python openai3.8.0/websockets15.0.1的12个WS生成、build/vet/全量Go与实际main冒烟通过；OpenAPI0.13.9/117操作/595引用及Python语法检查通过。现有Linux race、实际镜像TLS/Upgrade/重启/强杀与SDK交付保留在完整CI，当前尚未记为本批通过；实际镜像中的固定Codex WS组合、真实Provider、完整默认工具/模型、长期容量和收费仍未验收。本批同时将“优先参考具体源码并原生化”提升为AGENTS入口和本方案的后续开发约束。
 
 </details>
+
+#### P4 固定 Codex WS 实际镜像交付子批（源码与本地夹具验证完成，镜像CI待验收）
+
+1. **层级/目录：**仅测试侧 `tests/upstream/nativews`、`tests/smoke/native_ws_delivery.py`、固定客户端脚本和 Verify；使用交付 Dockerfile 构建的真实 gateway main，不修改产品热路径。
+2. **公开依赖：**消费现有 API Key/模型授权、原生 WS、连接本地父 ID、disabled 用量及管理查询；无公开契约、配置默认值、schema、依赖或收费许可变化。`--codex` 是隔离交付测试的可选入口，不是产品配置。
+3. **地基影响/回退：**无 L0 或生产 owner 改动。复用现有 internal Docker 网络、临时 CA、TLS 上游、Upgrade 反代及非 root 镜像；测试结束删除带本批标签的容器、卷和网络，宿主 DNS/信任不变。客户端配置、测试 Key 与日志均为一次性材料。
+4. **行为：**固定 Codex0.163.0 的文本/function/custom/client-search 四场景经反代进入实际镜像；每场景独立 home/workspace，实际 generate=false 预热后沿同一连接继续，客户端工具只使用已有无副作用失败/元数据用例。观察端独立核对11次 create、4次预热、每场景一连接、零HTTP回退、父ID/模型映射及reasoning保留；每次实际发送都有独立用量，已知0与3分开，store=false不新增永久历史，资金不变。
+5. **验证：**本地验证TLS夹具和固定客户端；实际main的镜像四场景由完整Linux CI执行，并保留现有SDK、历史/重启/SIGKILL及完整检查。客户端归零退出不替代上游观察，Docker未运行时不记镜像通过；超时、失败也收尾并保留脱敏诊断。
+6. **来源/协作：**主参考仍为codex-proxy-rs `60570883007febebe732597a9881397098d724f5` 的 `backend/crates/providers/openai/src/transport/protocol/websocket.rs::websocket_response_create_payload` 及 `backend/crates/providers/openai/tests/transport/websocket_pool.rs` 中独立downstream预热/connection-local parent场景，采用真实预热和逐连接关联的回归机制，独立Go/Python夹具复用TXAPI现有交付链；不复制Rust代码或池化/自动回退。该组合不证明真实Provider、完整默认Codex工具、长期负载或收费完成。
+
+本地受控验证：TLS夹具四模型均完成真实预热、工具回传和文本终态，另一物理连接携旧父ID被拒并留下失败观察；既有TLS/Upgrade/SDK夹具回归与该包vet通过。固定Codex0.163.0复用同一客户端函数的四个WS场景全部通过，独立Go组装观察仍要求11次实际发送、4个预热和零HTTP回退。Python语法通过。实际镜像新增观察同时比较前端反代和上游HTTP POST计数，拒绝在网关提前失败而被上游观察遗漏的回退；最终快照分别核对29条用量和18条历史，11次store=false客户端请求不新增历史。此处描述已实现的断言，实际Docker结果待精确头LinuxCI，不将本地夹具通过写成镜像验收。
 
 ### P5：账号信号与调度评估
 
