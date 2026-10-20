@@ -100,7 +100,7 @@ def validate_ledger(value, expected, *, recovering=False):
         assert row["provider_held_units"] == receipt["provider_bound_units"] == 4_160_000
         assert row["provider_policy_version"], row
         if known:
-            charge, cost, tokens = (900_000, 4_000, (2, 1)) if rule["usage"] == "known" else (0, 0, (0, 0))
+            charge, cost, tokens = (900_000, 900_000, (2, 1)) if rule["usage"] == "known" else (0, 0, (0, 0))
             assert row["state"] == "settled" and row["charge_units"] == charge, row
             assert receipt["cost_known"] == 1 and receipt["cost_units"] == cost, receipt
             assert (receipt["prompt_tokens"], receipt["output_tokens"]) == tokens
@@ -111,7 +111,8 @@ def validate_ledger(value, expected, *, recovering=False):
         summaries.append({"id": row["id"], "scenario": rule["scenario"], "usage": rule["usage"],
                           "state": row["state"], "charge_units": row["charge_units"],
                           "selling_hold_units": row["reserved_units"], "provider_hold_units": row["provider_held_units"],
-                          "attempts": 1, "cost_known": bool(receipt["cost_known"]), "provider_cost_units": receipt["cost_units"],
+                          "attempts": 1, "cost_known": bool(receipt["cost_known"]),
+                          "attempt_selling_cost_units": receipt["cost_units"],
                           "lease_until": row["lease_until"]})
     held = sum(r["reserved_units"] for r in rows if r["state"] != "settled")
     used = sum(r["charge_units"] for r in rows if r["state"] == "settled")
@@ -241,7 +242,10 @@ def main():
               "scope": "final shipped static API strict main; synthetic operator policy; isolated Linux Docker; not real-provider tariff certification",
               "declared": {"selling_hold_units": 100_000_000, "provider_budget_units": 100_000_000,
                   "provider_attempt_bound_units": 4_160_000, "known_charge_units": 900_000,
-                  "known_provider_cost_units": 4_000, "known_tokens": [2, 1], "zero_tokens": [0, 0],
+                  "known_attempt_selling_cost_units": 900_000,
+                  "declared_token_cost_units": 4_000,
+                  "declared_token_cost_scope": "arithmetic from synthetic operator token tariff and known 2/1 tokens; not a provider invoice or BillingAttempt.CostUnits",
+                  "known_tokens": [2, 1], "zero_tokens": [0, 0],
                   "missing_usage": "pending, cost_known false, both user/key holds retained; never settled as zero",
                   "attempts_per_generation": 1, "background_control_rpc_limit": 32,
                   "intended_ci_timeout_seconds": 900, "real_lease_wait_limit_seconds": 350},

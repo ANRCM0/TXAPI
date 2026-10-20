@@ -14,7 +14,7 @@ def evidence(usage):
                 "charge_units": charge, "lease_until": 0}],
             "billing_attempts": [{"reservation_id": "r1", "number": 1,
                 "provider_bound_units": 4_160_000, "cost_known": int(known),
-                "cost_units": 4_000 if usage == "known" else 0,
+                "cost_units": 900_000 if usage == "known" else 0,
                 "prompt_tokens": 2 if usage == "known" else 0, "output_tokens": 1 if usage == "known" else 0}],
             "billing_balances": [{"owner_type": owner, "owner_id": 1, "used_units": charge,
                 "reserved_units": 0 if known else 100_000_000} for owner in ("user", "key")],
@@ -26,6 +26,14 @@ class StrictConsumerEvidenceTest(unittest.TestCase):
         for usage in ("known", "zero", "unknown"):
             with self.subTest(usage=usage):
                 self.assertTrue(validate_ledger(evidence(usage), {"r1": {"usage": usage, "scenario": "fixture"}}))
+
+    def test_provider_tariff_arithmetic_is_not_the_attempt_selling_cost(self):
+        value = evidence("known")
+        value["billing_attempts"][0]["cost_units"] = 4_000
+        with self.assertRaises(AssertionError):
+            validate_ledger(value, {"r1": {"usage": "known", "scenario": "fixture"}})
+        result = validate_ledger(evidence("known"), {"r1": {"usage": "known", "scenario": "fixture"}})
+        self.assertEqual(result["reservations"][0]["attempt_selling_cost_units"], 900_000)
 
     def test_unknown_refund_duplicate_attempt_and_one_sided_balance_fail(self):
         original = evidence("unknown")
