@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/b4d628138d0d01a4a5a901f4a5fc8c4e9d420aca`，Verify `39328615465` 已完整成功。WS SDK PR #66 最终精确头 `f9e0f5849d8b5d81732f537cff110b4e4796d4bb` 的 Verify `39329673632` / `39329668835` 全部六项成功，固定客户端与实际镜像/TLS/反代/恢复组合通过，已合并为 `2ea7ccc5718977598abea26242a0d4957c0b5f95`；合并后完整 Verify 另验。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/6571151b5a780dbde3b0e8a41ec39c936332fe61`，Verify `39344009711` 已完整成功。固定 Codex CLI 子集 PR #67 精确头 `3f70943ba919cd44848eb9804807a0a37c24bf8d` 的 Verify `39342438238` / `39342397734` 全部六项成功后合并；PR #66 合并后 Verify `39341203037` 也已完整成功。本批 namespace 原生增量单列，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.5` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.6` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -446,6 +446,23 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 支持边界：使用全新临时 CODEX_HOME/工作目录、API Key custom provider 与 Responses HTTP；关闭 apply_patch_freeform、multi_agent、goals、apps及WS/自动重试。默认 namespace 工具表当前会被明确拒绝，不能将本批标为完整默认 Codex、shell/apply_patch 执行、后台恢复或WS支持。夹具模型使用客户端fallback metadata，未证明官方模型目录和元数据。Windows CLI日志文件采用独立Job清理辅助进程，Linux用独立进程组和Kill/Wait；从未读取/改写用户Codex/Magpie配置。CI固定Linux release `codex-x86_64-unknown-linux-musl.tar.gz`，SHA-256 `beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4`；release只作为独立客户端依赖，不复制上游实现。
 
 官方配置依据：`https://developers.openai.com/codex/config-advanced`；固定发行来源：`https://github.com/openai/codex/releases/tag/rust-v0.163.0`。
+
+<details>
+<summary>FC-P4-NAMESPACE-001：原生 Responses function namespace（源码与本地受控验证完成）</summary>
+
+1. **层级/目录及缺口：**固定 Codex 0.163.0 的默认工具表包含 namespace，当前原生 Responses 在发送前拒绝。L2 internal/protocol/responses 校验声明及 function_call/function_call_output 的可选 namespace；internal/compat/responsesws 同步有界声明/选择及输出输入，现有历史 owner 保留原 JSON 字段。现有 L3/后台/WS 消费者、生产组装、用量和权限仍走唯一链路；测试、OpenAPI、固定 CLI harness 和本方案同批更新。不新增工具执行器。
+2. **公开语义与冻结边界：**原生 HTTP JSON/SSE、disabled-only 原生后台和原生 WS 的既有 function 子集追加单层 namespace 分组，成员仅 named function。兼容 responses/v1 的类型/签名/版本不变，其 ValidateHTTP 投影新增该声明能力；冻结 execution/identity/state、L0 和资金权威不变，无新地基版本/迁移。按当前用户同类 CR 直接实施授权记录后推进，不将导出或旧CI当批准。managed SIWC 仍限文本，strict Responses/后台/WS继续拒绝；跨协议 Chat 转换不继承 namespace 能力。
+3. **精确行为：**namespace 声明保留 type/name/description/tools 和原始成员 JSON；名称为1..128 UTF-8字节且无首尾空白/控制字符，单请求最多64个namespace，每组1..128个function，组内成员名唯一、名称同样有界，拒绝重复组、空/null/非数组成员、嵌套namespace、custom和hosted成员。原顶层function行为保留。tool_choice 的 function 可带可选namespace；function_call及function_call_output的namespace绑定原call_id保留，不拼接/剥离名字，不根据当前声明重写旧历史。HTTP缺失/null namespace视为未指定，显式字符串须有效；WS沿既有规则拒绝显式null。不执行、调度、搜索或加载工具，不把声明视为客户端执行授权。
+4. **兼容/历史/回退：**输出、SSE事件、存储/检索、完整上下文编译和HTTP↔WS按原JSON保留namespace；既有响应/项目ID改写、error脱敏、有效输出、终态和bounded事件继续成立。输出function namespace的已知字段类型错误应显式协议失败；不能丢namespace后以同名顶层函数代替。旧密文/迁移/账本不重写；回退二进制将拒绝新namespace请求/历史续链，已存内容不删除，只有匹配停写备份才按原方案做数据库回退。
+5. **验证/验收：**纯编解码覆盖同名跨组、选择、invalid/重复/深度/容量/UTF-8、未知可保留字段、JSON/SSE分片及错误字段；真实HTTP JSON/SSE、原生后台提交/恢复、WS和存储完整上下文核对上游字段/次数、当前权限、取消和用量未知保护。固定CLI扩展原namespace拒绝场景为真实声明与namespaced function结果往返（只调用不存在agent的wait类查询，禁止spawn/message/外部命令），另保留hosted/custom发送前拒绝。集中本地验证、精确头完整CI后合并；真实Provider另验。
+6. **协作/限制：**这只补function命名空间，custom/freeform、tool_search、programmatic/async执行、媒体/hosted及任意多路复用不继承。原CLI子集证据保留其精确提交，新的默认namespace声明必须重新证明；不能宣称完整默认Codex、shell/apply_patch执行或WS Codex已经验收。OpenAPI补声明、namespace字段和支持范围，操作数不变；性能不作提升声明。
+
+官方核对（2026-10-20）：OpenAI Responses Create API 的 Namespace tool、FunctionCall.namespace、FunctionCallOutput.namespace，以及固定CLI rust-v0.163.0的协议类型；不复制上游实现。依据：`https://developers.openai.com/api/reference/resources/responses/methods/create`、`https://developers.openai.com/api/docs/guides/function-calling`。
+
+2026-10-20 本批本地受控证据：HTTP JSON/SSE 的 namespace 函数结果、存储读取和完整上下文函数结果续链通过；真实双端 socket 的 HTTP→WS namespaced function→HTTP result→运行组件重建/新 WS 连接保持 namespace/name/call_id、未知可保留字段和原模型映射，四个新生成各仅一次实际发送。连接本地非存储 WS 两轮与原生后台提交/已知终态/相同 SQLite 及密钥重启后的查询分别通过，不重发已知后台生成。跨 Key 查询仍 404，不支持的 custom 成员在发送前拒绝；存储仍加密。纯校验覆盖64组/128成员/128 UTF-8字节精确边界、重复/空/null/嵌套/hosted/custom/错误类型、output-item added/done 与终态字段，HTTP未知扩展保留、WS闭合/显式null规则及旧顶层function兼容。Windows GOARCH=amd64 的全量 Go 回归通过（cmd/gateway66.524s、architecture22.187s、generation70.193s、Responses13.440s、store72.966s），build/vet及生产主进程local.py通过；最终受影响cmd/gateway、compat/responsesws、protocol/responses完整包复验通过（58.787s/1.075s/0.973s）。固定官方Codex0.163.0现有六场景全部通过：namespace场景用真实multi_agent_v1.wait_agent声明的targets参数查询不存在ID并回传错误结果，再完成文本输出，未spawn/message或执行外部命令；本批共8次实际HTTP发送/独立sealed usage，5次已知3 Token、3次未知未补零，disabled资金不变。该CLI回传的function_call_output未附namespace时保留原样，以call_id关联；显式namespace结果由HTTP/WS用例另验。OpenAPI0.13.6/117操作，未新增迁移/依赖/导出端口或L0路径，最终精确头Linux race/SDK/容器CI另验。此证据仅证明受控Provider夹具，不证明真实官方Provider、完整默认Codex工具、shell/apply_patch或Codex WS组合，也不开放收费。
+
+
+</details>
 
 ### P5：账号信号与调度评估
 

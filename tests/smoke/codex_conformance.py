@@ -1,7 +1,7 @@
 """Fixed Codex CLI against the production gateway and disposable local provider.
 
 Requires the official 0.163.0 binary; CI verifies the release archive digest.
-Only the named function tool subset is exercised. No user settings or service
+Named functions and one-level function namespaces are exercised. No user settings or service
 credentials are loaded, and the fixture never asks the client to run a command.
 """
 
@@ -25,7 +25,7 @@ from sdk_conformance import clean_environment, frame, gateway_process, response_
 
 
 VERSION = "codex-cli 0.163.0"
-CASES = ("cli-text", "cli-function-result", "cli-failed", "cli-incomplete", "cli-truncated", "cli-namespace-rejected")
+CASES = ("cli-text", "cli-function-result", "cli-failed", "cli-incomplete", "cli-truncated", "cli-namespace")
 ANSWER = "TXAPI fixture 你好🌏"
 
 
@@ -127,8 +127,17 @@ class Fixture:
                     assert 0 < length <= 1 << 20
                     body = json.loads(self.rfile.read(length))
                     case = body["model"].removeprefix("native-")
-                    assert case in CASES and case != "cli-namespace-rejected" and body["stream"] and body["store"] is False
-                    assert body["input"] and all(tool["type"] == "function" for tool in body["tools"])
+                    assert case in CASES and body["stream"] and body["store"] is False
+                    assert body["input"]
+                    assert all(tool["type"] in ("function", "namespace") for tool in body["tools"])
+                    if case == "cli-namespace":
+                        namespace = next(tool for tool in body["tools"] if tool["type"] == "namespace" and
+                                         any(member["name"] == "wait_agent" for member in tool["tools"]))
+                        assert namespace["name"] == "multi_agent_v1", namespace
+                        wait_tool = next(member for member in namespace["tools"] if member["name"] == "wait_agent")
+                        assert wait_tool["parameters"]["required"] == ["targets"], wait_tool
+                    else:
+                        assert all(tool["type"] == "function" for tool in body["tools"])
                     owner.requests.append(body)
                     value = response_document()
                     value["model"], value["output"][0]["content"][0]["text"] = body["model"], ANSWER
@@ -140,6 +149,13 @@ class Fixture:
                                             "header": "Fixture", "id": "fixture", "question": "Synthetic question",
                                             "options": [{"label": "One", "description": "Fixture one"},
                                                         {"label": "Two", "description": "Fixture two"}]}]})}]
+                    elif case == "cli-namespace" and not function_result:
+                        # A nonexistent agent ID returns a local error; no agent
+                        # is created, messaged or given work by this fixture.
+                        value["output"] = [{"type": "function_call", "id": "fc_namespace", "call_id": "call_namespace",
+                                            "namespace": namespace["name"], "name": "wait_agent",
+                                            "arguments": json.dumps({"targets": ["00000000-0000-0000-0000-000000000001"],
+                                                                     "timeout_ms": 1000})}]
                     elif case == "cli-failed":
                         value["status"] = "failed"
                         value["error"] = {"code": "server_error", "message": "synthetic CLI provider failure"}
@@ -202,8 +218,8 @@ class Fixture:
 
 
 def configure(home, model, base):
-    # These feature switches retain named function tools and avoid unsupported
-    # namespace/freeform capabilities in the default client tool registry.
+    # Retain named functions and enable the client's real function namespace
+    # registry for its dedicated case. Freeform tools remain outside this batch.
     (home / "config.toml").write_text(f'''model = "{model}"
 model_provider = "txapi_fixture"
 approval_policy = "never"
@@ -213,7 +229,7 @@ cli_auth_credentials_store = "file"
 project_root_markers = []
 [features]
 apply_patch_freeform = false
-multi_agent = {str(model == 'cli-namespace-rejected').lower()}
+multi_agent = {str(model == 'cli-namespace').lower()}
 goals = false
 apps = false
 [model_providers.txapi_fixture]
@@ -281,29 +297,33 @@ def main():
                     "--color", "never", "-C", str(workspace), "Use the synthetic fixture response. Do not execute commands."],
                     workspace, dict(env, TXAPI_TEST_CODEX_KEY=key))
                 events = [json.loads(line) for line in output.splitlines() if line.strip()]
-                if case in ("cli-text", "cli-function-result"):
+                if case in ("cli-text", "cli-function-result", "cli-namespace"):
                     assert result == 0 and events[-1]["type"] == "turn.completed", (case, result, output[-2000:], diagnostic[-1000:])
                     assert any(event.get("item", {}).get("text") == ANSWER for event in events), (case, output)
                 else:
                     assert result != 0 and any(event["type"] == "turn.failed" for event in events), (case, output)
-                    if case == "cli-namespace-rejected":
-                        assert "Responses supports only named function tools" in output, output
                 assert key not in output + diagnostic and fixture.key not in output + diagnostic
                 print("PASS:", case, flush=True)
         assert not fixture.errors, fixture.errors
         counts = collections.Counter(row["model"] for row in fixture.requests)
-        assert counts == collections.Counter({"native-" + case: 2 if case == "cli-function-result" else 1
-                                              for case in CASES if case != "cli-namespace-rejected"}), counts
+        assert counts == collections.Counter({"native-" + case: 2 if case in ("cli-function-result", "cli-namespace") else 1
+                                              for case in CASES}), counts
         function = [row for row in fixture.requests if row["model"] == "native-cli-function-result"]
         outputs = [item for item in function[1]["input"] if item.get("type") == "function_call_output"]
         assert len(outputs) == 1 and outputs[0]["call_id"] == "call_cli"
         assert "unavailable" in outputs[0]["output"].lower(), outputs
+        namespaced = [row for row in fixture.requests if row["model"] == "native-cli-namespace"]
+        call = next(item for item in namespaced[1]["input"] if item.get("type") == "function_call")
+        result_item = next(item for item in namespaced[1]["input"] if item.get("type") == "function_call_output")
+        assert call["namespace"] == "multi_agent_v1" and call["call_id"] == result_item["call_id"] == "call_namespace"
+        assert result_item.get("namespace") in (None, "multi_agent_v1"), result_item
+        assert result_item["output"] and "00000000-0000-0000-0000-000000000001" in result_item["output"], result_item
         with contextlib.closing(sqlite3.connect(database)) as db:
-            assert db.execute("SELECT COUNT(*) FROM usage_invocations").fetchone() == (6,)
-            assert db.execute("SELECT COUNT(*) FROM usage_invocations WHERE transport='http' AND state='sealed' AND attempt_count=1").fetchone() == (6,)
-            assert db.execute("SELECT COUNT(*) FROM usage_attempt_receipts").fetchone() == (6,)
-            assert db.execute("SELECT COUNT(*) FROM usage_attempt_receipts WHERE may_dispatch=1").fetchone() == (6,)
-            assert db.execute("SELECT COUNT(*) FROM usage_attempt_receipts WHERE total_tokens=3").fetchone() == (3,)
+            assert db.execute("SELECT COUNT(*) FROM usage_invocations").fetchone() == (8,)
+            assert db.execute("SELECT COUNT(*) FROM usage_invocations WHERE transport='http' AND state='sealed' AND attempt_count=1").fetchone() == (8,)
+            assert db.execute("SELECT COUNT(*) FROM usage_attempt_receipts").fetchone() == (8,)
+            assert db.execute("SELECT COUNT(*) FROM usage_attempt_receipts WHERE may_dispatch=1").fetchone() == (8,)
+            assert db.execute("SELECT COUNT(*) FROM usage_attempt_receipts WHERE total_tokens=3").fetchone() == (5,)
             assert db.execute("SELECT COUNT(*) FROM usage_attempt_receipts WHERE input_tokens IS NULL AND output_tokens IS NULL AND total_tokens IS NULL").fetchone() == (3,)
             for table in ("billing_reservations", "billing_attempts"):
                 assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
@@ -312,7 +332,7 @@ def main():
             assert db.execute("SELECT COUNT(*) FROM billing_balances WHERE used_units != 0 OR reserved_units != 0").fetchone() == (0,)
         logs = (work / "gateway.log").read_text(encoding="utf-8", errors="replace")
         assert key not in logs and fixture.key not in logs
-    print("PASS: fixed Codex 0.163.0, production Responses HTTP/SSE, text/function-result and failed/incomplete/truncated terminals; loopback only")
+    print("PASS: fixed Codex 0.163.0, production Responses HTTP/SSE, text/function-result/namespace and failed/incomplete/truncated terminals; loopback only")
 
 
 if __name__ == "__main__":

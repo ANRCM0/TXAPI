@@ -127,36 +127,14 @@ func parse(frame v2.Frame, persistent bool) (Request, error) {
 			return out, errors.New("invalid tools")
 		}
 		for _, raw := range tools {
-			tool, err := object(raw, "type name description parameters strict")
-			if err != nil {
+			if err := validateTool(raw, true); err != nil {
 				return out, err
-			}
-			typ, _ := text(tool["type"])
-			if typ != "function" {
-				return out, errors.New("only function tools supported")
-			}
-			if raw, ok := tool["description"]; ok {
-				if _, valid := text(raw); !valid {
-					return out, errors.New("function description must be text")
-				}
-			}
-			if raw, ok := tool["strict"]; ok {
-				var b bool
-				if json.Unmarshal(raw, &b) != nil {
-					return out, errors.New("invalid strict option")
-				}
-			}
-			if raw, ok := tool["parameters"]; ok {
-				var schema map[string]json.RawMessage
-				if json.Unmarshal(raw, &schema) != nil || schema == nil {
-					return out, errors.New("invalid function parameters")
-				}
 			}
 		}
 	}
 	if raw, ok := fields["tool_choice"]; ok {
 		if _, isText := text(raw); !isText {
-			if _, err := object(raw, "type name"); err != nil {
+			if _, err := object(raw, "type name namespace"); err != nil {
 				return out, err
 			}
 		}
@@ -200,7 +178,7 @@ func validateInput(raw json.RawMessage) error {
 		allowed := "type role content"
 		contentKey := "content"
 		if probe.Type == "function_call_output" {
-			allowed = "type call_id output"
+			allowed = "type call_id output name namespace"
 			contentKey = "output"
 		} else if probe.Type != "" && probe.Type != "message" {
 			return errors.New("unsupported input item")
@@ -413,13 +391,19 @@ func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
 
 func validateOutputItem(raw json.RawMessage) error {
 	var item struct {
-		Type    string
-		Content []json.RawMessage
+		Type      string
+		Namespace json.RawMessage
+		Content   []json.RawMessage
 	}
 	if json.Unmarshal(raw, &item) != nil {
 		return errors.New("invalid native WS output item")
 	}
 	if item.Type == "function_call" {
+		if item.Namespace != nil {
+			if _, valid := text(item.Namespace); !valid {
+				return errors.New("invalid native WS function namespace")
+			}
+		}
 		return nil
 	}
 	if item.Type != "message" {
@@ -466,4 +450,59 @@ func MapModel(frame v2.Frame, model string) (v2.Frame, error) {
 		return v2.Frame{}, errors.New("mapped native request exceeds message limit")
 	}
 	return v2.Frame{Type: 1, Data: body}, nil
+}
+
+// Each namespace contains functions only. The shared HTTP validator enforces
+// name uniqueness, depth and bounds; this layer retains the WS closed fields.
+func validateTool(raw json.RawMessage, allowNamespace bool) error {
+	var probe struct{ Type string }
+	if json.Unmarshal(raw, &probe) != nil {
+		return errors.New("invalid tool")
+	}
+	if probe.Type == "namespace" && allowNamespace {
+		group, err := object(raw, "type name description tools")
+		if err != nil {
+			return err
+		}
+		if value, ok := group["description"]; ok {
+			if _, valid := text(value); !valid {
+				return errors.New("namespace description must be text")
+			}
+		}
+		var members []json.RawMessage
+		if json.Unmarshal(group["tools"], &members) != nil {
+			return errors.New("invalid namespace members")
+		}
+		for _, member := range members {
+			if err := validateTool(member, false); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	tool, err := object(raw, "type name description parameters strict")
+	if err != nil {
+		return err
+	}
+	if probe.Type != "function" {
+		return errors.New("only function tools and function namespaces supported")
+	}
+	if raw, ok := tool["description"]; ok {
+		if _, valid := text(raw); !valid {
+			return errors.New("function description must be text")
+		}
+	}
+	if raw, ok := tool["strict"]; ok {
+		var b bool
+		if json.Unmarshal(raw, &b) != nil {
+			return errors.New("invalid strict option")
+		}
+	}
+	if raw, ok := tool["parameters"]; ok {
+		var schema map[string]json.RawMessage
+		if json.Unmarshal(raw, &schema) != nil || schema == nil {
+			return errors.New("invalid function parameters")
+		}
+	}
+	return nil
 }

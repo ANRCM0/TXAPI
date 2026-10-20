@@ -23,7 +23,10 @@ func validateStoredItems(raw json.RawMessage) error {
 		return errors.New("stored input requires bounded self-contained items")
 	}
 	for _, raw := range items {
-		var item struct{ Type string }
+		var item struct {
+			Type      string
+			Namespace json.RawMessage
+		}
 		if json.Unmarshal(raw, &item) != nil {
 			return errors.New("invalid stored input item")
 		}
@@ -31,6 +34,11 @@ func validateStoredItems(raw json.RawMessage) error {
 		case "", "message", "function_call", "function_call_output":
 		default:
 			return errors.New("stored WS input supports self-contained text and functions")
+		}
+		if (item.Type == "function_call" || item.Type == "function_call_output") && item.Namespace != nil {
+			if _, valid := text(item.Namespace); !valid {
+				return errors.New("invalid stored function namespace")
+			}
 		}
 	}
 	return nil

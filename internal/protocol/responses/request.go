@@ -52,17 +52,8 @@ func (r Request) ValidateHTTP() error {
 		}
 	}
 	if raw := r.fields["tools"]; present(raw) {
-		var tools []struct {
-			Type string `json:"type"`
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(raw, &tools) != nil {
-			return errors.New("Responses tools must be an array")
-		}
-		for _, tool := range tools {
-			if tool.Type != "function" || tool.Name == "" {
-				return errors.New("Responses supports only named function tools")
-			}
+		if err := validateTools(raw); err != nil {
+			return err
 		}
 	}
 	if raw := r.fields["tool_choice"]; present(raw) {
@@ -73,11 +64,15 @@ func (r Request) ValidateHTTP() error {
 			}
 		} else {
 			var choice struct {
-				Type string `json:"type"`
-				Name string `json:"name"`
+				Type      string          `json:"type"`
+				Name      string          `json:"name"`
+				Namespace json.RawMessage `json:"namespace"`
 			}
 			if json.Unmarshal(raw, &choice) != nil || choice.Type != "function" || choice.Name == "" {
 				return errors.New("unsupported Responses tool choice")
+			}
+			if err := validateNamespace(choice.Namespace); err != nil {
+				return err
 			}
 		}
 	}
@@ -98,6 +93,7 @@ func (r Request) ValidateHTTP() error {
 			Role             string          `json:"role"`
 			CallID           string          `json:"call_id"`
 			Name             string          `json:"name"`
+			Namespace        json.RawMessage `json:"namespace"`
 			Arguments        *string         `json:"arguments"`
 			Output           json.RawMessage `json:"output"`
 			Content          json.RawMessage `json:"content"`
@@ -118,7 +114,13 @@ func (r Request) ValidateHTTP() error {
 			if item.CallID == "" || item.Name == "" || item.Arguments == nil {
 				return errors.New("invalid Responses function call")
 			}
+			if err := validateNamespace(item.Namespace); err != nil {
+				return err
+			}
 		case "function_call_output":
+			if err := validateNamespace(item.Namespace); err != nil {
+				return err
+			}
 			if item.CallID == "" {
 				return errors.New("Responses function output requires call_id")
 			}
