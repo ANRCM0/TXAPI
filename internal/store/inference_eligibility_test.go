@@ -439,7 +439,7 @@ func TestInferenceEligibilitySchema18UpgradePreservesStaticSecretsAndAccount(t *
 		t.Fatal("schema18 accepted schema19")
 	}
 	var ledger []model.SchemaMigration
-	if err = upgraded.DB().Order("version").Find(&ledger).Error; err != nil || len(ledger) != len(released)+3 || ledger[len(ledger)-3].Version != 19 || ledger[len(ledger)-2].Version != 20 || ledger[len(ledger)-1].Version != 21 {
+	if err = upgraded.DB().Order("version").Find(&ledger).Error; err != nil || len(ledger) != len(released)+4 || ledger[len(ledger)-4].Version != 19 || ledger[len(ledger)-3].Version != 20 || ledger[len(ledger)-2].Version != 21 || ledger[len(ledger)-1].Version != 22 {
 		t.Fatal("schema19 not appended once", err)
 	}
 	for i, old := range released {

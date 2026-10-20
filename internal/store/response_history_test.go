@@ -115,7 +115,7 @@ func TestResponseHistoryV12MigrationPreservesV11ReceiptsAndFinancialState(t *tes
 		}
 		var rows []model.SchemaMigration
 		_ = s.DB().Order("version").Find(&rows).Error
-		if len(rows) != len(released)+10 || rows[len(rows)-10].Version != 12 || rows[len(rows)-9].Version != 13 || rows[len(rows)-8].Version != 14 || rows[len(rows)-7].Version != 15 || rows[len(rows)-6].Version != 16 || rows[len(rows)-5].Version != 17 || rows[len(rows)-4].Version != 18 || rows[len(rows)-3].Version != 19 || rows[len(rows)-2].Version != 20 || rows[len(rows)-1].Version != 21 {
+		if len(rows) != len(released)+11 || rows[len(rows)-11].Version != 12 || rows[len(rows)-10].Version != 13 || rows[len(rows)-9].Version != 14 || rows[len(rows)-8].Version != 15 || rows[len(rows)-7].Version != 16 || rows[len(rows)-6].Version != 17 || rows[len(rows)-5].Version != 18 || rows[len(rows)-4].Version != 19 || rows[len(rows)-3].Version != 20 || rows[len(rows)-2].Version != 21 || rows[len(rows)-1].Version != 22 {
 			t.Fatal("v12 not idempotent")
 		}
 		for i := range released {

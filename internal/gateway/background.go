@@ -34,7 +34,7 @@ type BackgroundRemote struct {
 
 func (g *Gateway) BillingMode() string { return string(g.billingMode) }
 func NewBackgroundRemote(g *Gateway, o BackgroundRemoteOptions) (*BackgroundRemote, error) {
-	if g == nil || g.billingMode != billing.ModeDisabled {
+	if g == nil || g.billingMode != billing.ModeDisabled && (g.billingMode != billing.ModeStrict || !g.strictReady()) {
 		return nil, bg.ErrUnsupportedBilling
 	}
 	if len(o.Registrations) == 0 || len(o.Channels) == 0 {
@@ -78,7 +78,7 @@ func NewBackgroundRemote(g *Gateway, o BackgroundRemoteOptions) (*BackgroundRemo
 	return r, nil
 }
 func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, progress bs.Progress) error {
-	if r == nil || r.gateway.billingMode != billing.ModeDisabled {
+	if r == nil || r.gateway.billingMode != billing.ModeDisabled && r.gateway.billingMode != billing.ModeStrict || call.BillingMode == "strict" && r.gateway.billingMode != billing.ModeStrict {
 		return bg.ErrUnsupportedBilling
 	}
 	if nilInterface(progress) || progress.Validate(ctx, call) != nil {
@@ -221,6 +221,34 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 		if e = progress.Dispatch(ctx, binding, rate); e != nil {
 			access.FinishTokens(ctx, g.limiter, 0)
 			return e
+		}
+		if call.BillingMode == "strict" {
+			port, ok := g.strictBilling.(interface {
+				ResumeReservation(context.Context, string, uint, uint, string, bool) (*billing.PreDeduct, error)
+			})
+			if !ok {
+				return bg.ErrUnsupportedBilling
+			}
+			pre, err := port.ResumeReservation(ctx, call.BillingID, call.TokenID, call.UserID, call.Model, true)
+			if err != nil {
+				return bg.ErrUnsupportedBilling
+			}
+			proof, err := billing.ParseResponsesStrictRequest(prepared.Input.Body)
+			if err != nil {
+				return bg.ErrUnsupportedCapability
+			}
+			attempt := model.BillingAttempt{Number: 1, ChannelID: uint(ch.id), CredentialID: credentialID, ActualModel: target.ActualModel, Group: ch.groupName}
+			if err := g.strictBilling.StartPreparedAttempt(ctx, pre, attempt, billing.ProviderTarget{ChannelID: uint(ch.id), BaseURL: ch.baseURL, Protocol: ch.typ, ActualModel: target.ActualModel, Operation: string(call.Operation)}, proof, prepared.Input.URL, prepared.Input.Body, prepared.Input.Header); err != nil {
+				return bg.ErrUnsupportedBilling
+			}
+		}
+	} else if call.BillingMode == "strict" {
+		control, ok := progress.(bs.ControlProgress)
+		if !ok {
+			return bg.ErrUnsupportedBilling
+		}
+		if err := control.Control(ctx); err != nil {
+			return err
 		}
 	}
 	prepared.Input.Timeout = 10 * time.Second

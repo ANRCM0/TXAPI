@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -67,8 +68,21 @@ func (g *Gateway) executeScope(c *executionScope, req execution.Request) {
 		writeError(c, http.StatusForbidden, result.ErrorMessage, "forbidden")
 		return
 	}
-	if g.billingMode == billing.ModeStrict && g.strictReady() {
+	if g.billingMode == billing.ModeStrict && (req.Operation() == execution.Responses || g.strictReady()) {
 		limits, err := billing.ParseStrictRequest(body, req.Operation() == execution.Embeddings)
+		if req.Operation() == execution.Responses {
+			limits, err = billing.ParseResponsesStrictRequest(body)
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(body, &fields) != nil {
+				err = billing.ErrProviderLimit
+			}
+			if _, exists := fields["type"]; exists {
+				err = billing.ErrProviderLimit
+			}
+			if _, exists := fields["stream_id"]; exists {
+				err = billing.ErrProviderLimit
+			}
+		}
 		if err != nil {
 			result.StatusCode = http.StatusBadRequest
 			result.ErrorMessage = err.Error()

@@ -153,12 +153,39 @@ func (r *BackgroundRunner) runOne(parent context.Context) (err error) {
 		defer end()
 		due := max(time.Now().Add(time.Second).UnixMilli(), p.row.DueAt)
 		_ = s.repository.ReleaseBackground(cleanup, claim, due)
+		if p.row.BillingID != "" && (p.row.Stage == string(bg.StageDispatching) || p.row.Stage == string(bg.StageTerminal) || p.row.Stage == string(bg.StageUncertain)) {
+			_ = s.finishFinance(cleanup, p.row)
+		}
 	}()
 	p.snapshot, e = s.openSnapshot(row)
 	if e != nil {
 		return e
 	}
-	call := bs.RemoteCall{Operation: execv1.Operation(row.Operation), Model: row.Model, PublicID: row.PublicID, Stream: row.Stream}
+	call := bs.RemoteCall{Operation: execv1.Operation(row.Operation), Model: row.Model, PublicID: row.PublicID, Stream: row.Stream, BillingID: row.BillingID, BillingMode: row.BillingMode, UserID: row.UserID, TokenID: row.TokenID}
+	if row.BillingMode == "strict" && row.Stage == string(bg.StageTerminal) && backgroundFinancialUsage(row) != nil {
+		if err := p.settleTerminalFinance(ctx); err != nil {
+			return err
+		}
+		if !p.row.ReplayPending {
+			return nil
+		}
+		row = p.row
+	}
+	if row.BillingMode == "strict" && row.ControlCalls >= 32 && row.Stage != string(bg.StageQueued) {
+		if err := s.finishFinance(ctx, row); err != nil {
+			return err
+		}
+		stage := bg.StageUncertain
+		if row.Stage == string(bg.StageTerminal) {
+			stage = bg.StageTerminal
+		}
+		ended, err := s.repository.UpdateBackground(ctx, claim, row.Revision, bs.Update{Stage: stage, Snapshot: row.Snapshot})
+		if err != nil {
+			return err
+		}
+		p.row = ended
+		return nil
+	}
 	if row.Stage == string(bg.StageQueued) {
 		if row.CancelRequested || row.Deadline <= time.Now().UnixMilli() {
 			return p.rejectQueued(ctx)
@@ -180,7 +207,7 @@ func (r *BackgroundRunner) runOne(parent context.Context) (err error) {
 		call.Target = payload.Target
 	} else if row.Stage == string(bg.StageRemoteActive) || row.ReplayPending {
 		call.Action = bg.RemoteInspect
-		if row.Stream && !p.snapshot.EventUnavailable {
+		if row.Stream && !p.snapshot.EventUnavailable && !(row.BillingMode == "strict" && row.Stage == string(bg.StageTerminal) && p.snapshot.EventComplete) {
 			call.Action = bg.RemoteResume
 		}
 		// Revocation blocks content and new work, not cleanup of already-bound
@@ -249,7 +276,7 @@ func (p *backgroundProgress) Validate(ctx context.Context, call bs.RemoteCall) e
 	if e := p.refresh(ctx); e != nil {
 		return e
 	}
-	if call.Operation != execv1.Operation(p.row.Operation) || call.Model != p.row.Model || call.PublicID != p.row.PublicID {
+	if call.Operation != execv1.Operation(p.row.Operation) || call.Model != p.row.Model || call.PublicID != p.row.PublicID || call.BillingID != p.row.BillingID || call.BillingMode != p.row.BillingMode || call.UserID != p.row.UserID || call.TokenID != p.row.TokenID {
 		return bg.ErrConflict
 	}
 	if call.Action == bg.RemoteSubmit {
@@ -265,7 +292,7 @@ func (p *backgroundProgress) Validate(ctx context.Context, call bs.RemoteCall) e
 	if (p.row.Stage != string(bg.StageRemoteActive) && !p.row.ReplayPending) || call.Target == nil || *call.Target != p.snapshot.Target || call.RemoteID != p.snapshot.RemoteID || len(call.Body) != 0 || call.Stream != p.row.Stream || call.Action != bg.RemoteInspect && call.Action != bg.RemoteCancel && call.Action != bg.RemoteResume {
 		return bg.ErrConflict
 	}
-	if p.row.ReplayPending && call.Action != bg.RemoteResume {
+	if p.row.ReplayPending && call.Action != bg.RemoteResume && !(p.row.BillingMode == "strict" && call.Action == bg.RemoteInspect) {
 		return bg.ErrConflict
 	}
 	if call.Action == bg.RemoteResume {
@@ -284,8 +311,11 @@ func (p *backgroundProgress) rejectQueued(ctx context.Context) error {
 	if p.row.Stage != string(bg.StageQueued) {
 		return bg.ErrConflict
 	}
-	_, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.StageTerminal})
-	return e
+	row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.StageTerminal})
+	if e != nil {
+		return e
+	}
+	return p.service.finishFinance(ctx, row)
 }
 func (p *backgroundProgress) Dispatch(ctx context.Context, target execv1.TargetConstraint, rate bs.RateReservation) error {
 	if e := p.refresh(ctx); e != nil {

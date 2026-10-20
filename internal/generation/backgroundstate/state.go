@@ -7,6 +7,7 @@ import (
 	"time"
 
 	bg "minigateway/internal/foundation/contracts/background/v1"
+	execution "minigateway/internal/foundation/contracts/execution/v1"
 	usage "minigateway/internal/foundation/contracts/execution/v3"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 	state "minigateway/internal/foundation/contracts/state/v1"
@@ -19,6 +20,9 @@ const MaxInput = 256 << 10
 const MaxEvents = 8192
 
 type Record struct {
+	BillingID    string
+	BillingMode  string
+	ControlCalls uint
 	// HistoryReservation is transient admission data, never persisted as task metadata.
 	HistoryReservation *HistoryReservation
 	ID                 string
@@ -66,6 +70,7 @@ type Claim struct {
 	Token string
 }
 type Update struct {
+	ControlCall   bool
 	History       *state.HistoryChange
 	Stage         bg.Stage
 	Snapshot      []byte
@@ -73,6 +78,12 @@ type Update struct {
 	DueAt         int64
 	ReplayPending bool
 	UsageMetadata *UsageMetadata
+}
+
+// Finance reuses the billing owner for one generation, never for each poll.
+type Finance interface {
+	ReserveBackground(context.Context, uint, uint, string, []byte) (string, time.Time, error)
+	CompleteBackgroundReservation(context.Context, string, uint, uint, string, *execution.Usage, bool) error
 }
 
 type HistoryReservation struct {

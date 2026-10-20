@@ -37,7 +37,10 @@ func (s *Store) InitializeBackground(ctx context.Context, digest, mode string) (
 		if err := tx.Model(&model.BackgroundJob{}).Where("stage <> ?", bg.StageTerminal).Count(&count).Error; err != nil {
 			return err
 		}
-		if mode != "disabled" {
+		if digest == "" || mode != "disabled" && mode != "strict" {
+			if err := tx.Model(&model.BackgroundJob{}).Where("stage <> ? OR replay_pending = 1 OR (billing_mode = 'strict' AND billing_id <> '' AND NOT EXISTS (SELECT 1 FROM billing_reservations br WHERE br.id = background_jobs.billing_id AND br.state = 'settled'))", bg.StageTerminal).Count(&count).Error; err != nil {
+				return err
+			}
 			if count != 0 {
 				return bg.ErrUnsupportedBilling
 			}
@@ -183,6 +186,12 @@ func (s *Store) LookupBackgroundSubmission(ctx context.Context, binding identity
 }
 
 func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Limits, guards ...state.HistoryGuard) (out bs.Record, err error) {
+	if in.BillingMode == "" {
+		in.BillingMode = "disabled"
+	}
+	if in.ControlCalls != 0 || in.BillingMode != "disabled" && in.BillingMode != "strict" || (in.BillingMode == "strict") != (in.BillingID != "") {
+		return out, bg.ErrConflict
+	}
 	now := time.Now().UnixMilli()
 	if len(guards) > 1 || !responseHash(in.ID) || !validBackgroundID(in.PublicID) || in.UserID == 0 || in.TokenID == 0 || in.Operation == "" || len(in.Operation) > 64 ||
 		!responseHash(in.KeyHash) || !responseHash(in.NamespaceHash) || !responseHash(in.RequestHash) || !responseHash(in.DigestVersion) || len(in.Model) == 0 || len(in.Model) > 256 ||
@@ -218,6 +227,22 @@ func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Lim
 			}
 			out = existing
 			return nil
+		}
+		if in.BillingMode == "strict" {
+			var reservation model.BillingReservation
+			if err := tx.Where("id = ? AND token_id = ? AND user_id = ? AND origin_model = ?", in.BillingID, in.TokenID, in.UserID, in.Model).First(&reservation).Error; err != nil {
+				return bg.ErrConflict
+			}
+			var attempts, linked int64
+			if err := tx.Model(&model.BillingAttempt{}).Where("reservation_id = ?", in.BillingID).Count(&attempts).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.BackgroundJob{}).Where("billing_id = ?", in.BillingID).Count(&linked).Error; err != nil {
+				return err
+			}
+			if reservation.State != "reserved" || reservation.LeaseUntil < in.Deadline || reservation.LeaseUntil <= now || attempts != 0 || linked != 0 {
+				return bg.ErrConflict
+			}
 		}
 		for _, guard := range guards {
 			parent, err := historyRead(tx, binding, guard.ID)
@@ -487,8 +512,14 @@ func (s *Store) UpdateBackground(ctx context.Context, c bs.Claim, revision uint6
 			return e
 		}
 		terminalReplay := row.Stage == string(bg.StageTerminal) && row.ReplayPending && in.Stage == bg.StageTerminal
-		if row.Deleted || row.Revision != revision || row.Revision >= math.MaxInt64 || !validBackgroundTransition(row.Stage, in.Stage) && !terminalReplay || in.ReplayPending && (in.Stage != bg.StageTerminal || !row.Stream) {
+		if row.Deleted || row.Revision != revision || row.Revision >= math.MaxInt64 || !validBackgroundTransition(row.Stage, in.Stage) && !terminalReplay || in.ReplayPending && (in.Stage != bg.StageTerminal || !row.Stream && row.BillingMode != "strict") {
 			return bg.ErrConflict
+		}
+		if in.ControlCall {
+			if row.BillingMode != "strict" || row.ControlCalls >= 32 || row.Stage != string(in.Stage) {
+				return bg.ErrCapacity
+			}
+			row.ControlCalls++
 		}
 		if row.Stage == string(bg.StageQueued) && in.Stage == bg.StageDispatching {
 			if row.CancelRequested || row.Deadline <= time.Now().UnixMilli() {
@@ -496,6 +527,15 @@ func (s *Store) UpdateBackground(ctx context.Context, c bs.Claim, revision uint6
 			}
 			if e := backgroundAuthority(tx, identity.Binding{UserID: row.UserID, TokenID: row.TokenID}, row.Model); e != nil {
 				return e
+			}
+			if row.BillingMode == "strict" {
+				var held int64
+				if err := tx.Model(&model.BillingReservation{}).Where("id = ? AND token_id = ? AND user_id = ? AND origin_model = ? AND state = 'reserved' AND lease_until > ?", row.BillingID, row.TokenID, row.UserID, row.Model, time.Now().UnixMilli()).Count(&held).Error; err != nil {
+					return err
+				}
+				if held != 1 {
+					return bg.ErrUnsupportedBilling
+				}
 			}
 		}
 		if row.ContentExpiresAt <= time.Now().UnixMilli() {

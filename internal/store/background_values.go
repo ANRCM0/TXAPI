@@ -9,6 +9,7 @@ import (
 
 func backgroundSnapshot(in model.BackgroundJob) bs.Record {
 	return bs.Record{
+		BillingID: in.BillingID, BillingMode: in.BillingMode, ControlCalls: in.ControlCalls,
 		ID:               in.ID,
 		PublicID:         in.PublicID,
 		UserID:           in.UserID,
@@ -46,6 +47,7 @@ func backgroundSnapshot(in model.BackgroundJob) bs.Record {
 
 func backgroundRow(in bs.Record) model.BackgroundJob {
 	return model.BackgroundJob{
+		BillingID: in.BillingID, BillingMode: in.BillingMode, ControlCalls: in.ControlCalls,
 		ID:               in.ID,
 		PublicID:         in.PublicID,
 		UserID:           in.UserID,

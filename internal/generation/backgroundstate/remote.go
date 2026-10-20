@@ -11,6 +11,8 @@ import (
 // RemoteCall and Progress are owner-only dispatch capabilities, not L3 APIs.
 // Every network call validates its current fenced claim before acquiring I/O.
 type RemoteCall struct {
+	BillingID, BillingMode    string
+	UserID, TokenID           uint
 	Action                    bg.RemoteAction
 	Operation                 execution.Operation
 	Body                      []byte
@@ -19,6 +21,8 @@ type RemoteCall struct {
 	Stream                    bool
 	After                     *uint64
 }
+
+type ControlProgress interface{ Control(context.Context) error }
 type RateReservation struct {
 	Epoch    string
 	Estimate int
