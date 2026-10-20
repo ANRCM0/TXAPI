@@ -1,4 +1,4 @@
-"""Finite same-host Chat SSE comparison: direct, TXAPI main and fixed new-api."""
+"""Finite same-host Chat JSON/SSE comparison: direct, TXAPI main and fixed new-api."""
 
 import argparse
 import base64
@@ -19,6 +19,7 @@ import uuid
 from local import ROOT, ports, ready
 from process_resources import RESOURCE_SCOPE, Resources
 from reference_build import REFERENCE_SHA, digest
+from reference_json import Fixture as JSONFixture, call as call_json
 from sdk_conformance import clean_environment, gateway_process
 from stream_baseline import CLIENT_KEY, UPSTREAM_KEY, TEXT, Fixture, clock, git, quantiles
 
@@ -193,7 +194,7 @@ def call(connection, key, fixture, seconds=5, mode="normal"):
     return sample
 
 
-def summary(samples):
+def summary(samples, json_mode=False):
     successful = [item for item in samples if item["success"]]
     return {"started": len(samples), "completed": len(successful),
             "failures": [item["failure"] for item in samples if not item["success"]],
@@ -202,7 +203,8 @@ def summary(samples):
             "observed_upstream_peers": len({peer for item in samples for peer in item["upstream_peers"]}),
             "successful_latency_ns": {name: quantiles([item[name] for item in successful]) for name in
                                       ("headers_ns", "first_body_byte_ns", "first_effective_text_ns", "elapsed_ns")},
-            "successful_text_fragment_latency_upper_ns": quantiles([event["latency_upper_ns"] for item in successful for event in item["events"]])}
+            ("successful_document_latency_upper_ns" if json_mode else "successful_text_fragment_latency_upper_ns"):
+                quantiles([event["latency_upper_ns"] for item in successful for event in item["events"]])}
 
 
 def run(args, report):
@@ -218,7 +220,9 @@ def run(args, report):
     report["environment"]["txapi_go_settings"] = json.loads(subprocess.check_output(
         [args.go, "env", "-json", "GOOS", "GOARCH", "CGO_ENABLED", "GOEXPERIMENT", "GOTOOLCHAIN", "GOAMD64"],
         cwd=ROOT, env=env, text=True, timeout=20))
-    fixture = Fixture(.005)
+    json_mode = args.operation == "chat-json"
+    fixture = JSONFixture(.005) if json_mode else Fixture(.005)
+    request_call = call_json if json_mode else call
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
     try:
@@ -277,22 +281,25 @@ def run(args, report):
                 for connection in connections.values():
                     stack.callback(connection.close)
                 report["stage"] = "client_and_auth_checks"
-                for mode, seconds in (("truncated", 5), ("timeout", .1)):
-                    negative = call(connections["direct"], UPSTREAM_KEY, fixture, seconds, mode)
+                self_checks = [("truncated", 5), ("timeout", .1)]
+                if json_mode:
+                    self_checks += [("provider_error", 5), ("invalid_usage", 5)]
+                for mode, seconds in self_checks:
+                    negative = request_call(connections["direct"], UPSTREAM_KEY, fixture, seconds, mode)
                     report["client_self_checks"].append({"mode": mode, "sample": negative})
                     if negative["success"] or negative["upstream_attempts"] != 1 or negative["drain_failure"]:
                         raise RuntimeError("comparison client accepted an incomplete or undrained fault")
                     if mode == "timeout" and (negative["failure"] != "absolute_deadline" or negative["elapsed_ns"] > 500_000_000):
                         raise RuntimeError("comparison client absolute deadline did not interrupt trickle receive")
                 for name in ("txapi", "new_api"):
-                    rejected = call(connections[name], "sk-invalid-comparison-key", fixture)
+                    rejected = request_call(connections[name], "sk-invalid-comparison-key", fixture)
                     report["auth_checks"].append({"target": name, "sample": rejected})
                     if rejected["http_status"] != 401 or rejected["upstream_attempts"] != 0:
                         raise RuntimeError("invalid Key was not a zero-send 401")
                 for _ in range(2):
                     report["stage"] = "warmup"
                     for name, (_, key) in targets.items():
-                        sample = call(connections[name], key, fixture)
+                        sample = request_call(connections[name], key, fixture)
                         report["warmup"].append({"target": name, "sample": sample})
                         if not sample["success"]:
                             raise RuntimeError("common-path warmup failed")
@@ -306,7 +313,7 @@ def run(args, report):
                             order = list(targets)
                             offset = (round_number + pair) % len(order)
                             for name in order[offset:] + order[:offset]:
-                                sample = call(connections[name], targets[name][1], fixture)
+                                sample = request_call(connections[name], targets[name][1], fixture)
                                 sample.update(target=name, pair=pair, round=round_number)
                                 report["samples"].append(sample)
                                 if not sample["success"]:
@@ -349,17 +356,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", type=Path, required=True, help="Completed reference_build.py output directory")
     parser.add_argument("--go", default="go")
+    parser.add_argument("--operation", choices=("chat-sse", "chat-json"), default="chat-sse")
     parser.add_argument("--samples", type=int, default=20)
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not (1 <= args.samples <= 1000 and 1 <= args.rounds <= 10):
         parser.error("samples 1..1000, rounds 1..10")
+    json_mode = args.operation == "chat-json"
     report = {"schema": 1, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
               "harness_sha256": digest(Path(__file__)), "stream_fixture_sha256": digest(ROOT / "tests/smoke/stream_baseline.py"),
+              "json_fixture_sha256": digest(ROOT / "tests/smoke/reference_json.py"),
               "resources_sha256": digest(ROOT / "tests/smoke/process_resources.py")},
               "environment": {"platform": platform.platform(), "python": platform.python_version(), "logical_cpus": os.cpu_count()},
-              "configuration": {"operation": "Chat text SSE", "http": "HTTP/1.1 loopback plaintext", "concurrency": 1,
+              "configuration": {"operation": "Chat text JSON" if json_mode else "Chat text SSE", "http": "HTTP/1.1 loopback plaintext", "concurrency": 1,
               "samples_per_target_per_round": args.samples, "rounds": args.rounds, "warmup_per_target": 2,
               "event_delay_ms": 5, "client_policy": "persistent, close on failure", "request_deadline_seconds": 5,
               "resource_scope": RESOURCE_SCOPE, "auth": "production API Key middleware; public bootstrap only",
@@ -368,13 +378,14 @@ def main():
               "non_equivalence": ["Independent authorization, quota/pricing, caching, admission and logging implementations",
                                   "Reference zero-priced model is not TXAPI disabled billing internals",
                                   "No cross-product ranking or common numeric performance gate"],
-              "event_latency_scope": "Same-clock complete text-fragment observation against its own provider write/flush; merged frames cover each completed fragment"},
+              "event_latency_scope": ("Same-clock complete validated JSON document against final provider body write/flush; valid JSON is not a stream first-token measurement"
+                                      if json_mode else "Same-clock complete text-fragment observation against its own provider write/flush; merged frames cover each completed fragment")},
               "samples": [], "warmup": [], "auth_checks": [], "client_self_checks": []}
     try:
         run(args, report)
     except Exception as error:
         report["fatal_error"] = type(error).__name__ + ": " + str(error)[:180]
-    report["summary"] = {name: summary([s for s in report["samples"] if s["target"] == name]) for name in ("direct", "txapi", "new_api")}
+    report["summary"] = {name: summary([s for s in report["samples"] if s["target"] == name], json_mode) for name in ("direct", "txapi", "new_api")}
     report["planned_measurement_requests"] = args.samples * args.rounds * 3
     report["started_measurement_requests"] = len(report["samples"])
     report["paired_differences_ns"] = {}
