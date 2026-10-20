@@ -248,11 +248,16 @@ func (f *wsAssemblyFixture) upstreamHandler(w http.ResponseWriter, r *http.Reque
 					map[string]any{"type": "response.output_item.done", "sequence_number": 5, "item": call},
 				}
 			}
+			if tool["type"] == "tool_search" {
+				call = map[string]any{"type": "tool_search_call", "id": "tsc_fixture", "call_id": "call_fixture", "execution": "client", "status": "completed", "arguments": map[string]any{"query": "雪🌏"}, "future": true}
+				pending = map[string]any{"type": "tool_search_call", "id": "tsc_fixture", "call_id": "call_fixture", "execution": "client", "status": "in_progress", "arguments": map[string]any{"query": "雪🌏"}}
+				events = []any{map[string]any{"type": "response.output_item.added", "sequence_number": 1, "item": pending}, map[string]any{"type": "response.output_item.done", "sequence_number": 2, "item": call}}
+			}
 			for _, event := range events {
 				if connection.Write(ctx, transport.Text, wsAssemblyJSON(event)) != nil {
 					return
 				}
-				if input == "block-custom" && event.(map[string]any)["sequence_number"] == 2 {
+				if (input == "block-custom" && event.(map[string]any)["sequence_number"] == 2) || (input == "block-search" && event.(map[string]any)["sequence_number"] == 1) {
 					select {
 					case f.blocked <- struct{}{}:
 					default:

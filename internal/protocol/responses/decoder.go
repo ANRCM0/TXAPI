@@ -388,6 +388,9 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 			effective = delta != ""
 		}
 	case "response.output_item.added":
+		if item, ok := event.Item.(map[string]any); ok && item["type"] == "tool_search_call" {
+			effective = true // The bounded client call was validated above.
+		}
 		if item, ok := event.Item.(map[string]any); ok && (item["type"] == "function_call" || item["type"] == "custom_tool_call") {
 			name, _ := item["name"].(string)
 			arguments, _ := item["arguments"].(string)

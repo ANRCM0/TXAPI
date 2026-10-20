@@ -227,6 +227,12 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 					{"type": "response.output_item.done", "sequence_number": 5, "output_index": 0, "item": item},
 				}
 			}
+			if tool["type"] == "tool_search" {
+				item = map[string]any{"id": "tsc_" + id, "type": "tool_search_call", "call_id": "call_" + id, "execution": "client", "status": "completed", "arguments": map[string]any{"query": "雪🌏"}}
+				pending = map[string]any{"id": item["id"], "type": "tool_search_call", "call_id": item["call_id"], "execution": "client", "status": "in_progress", "arguments": map[string]any{"query": "雪🌏"}}
+				output = []any{item}
+				events = []map[string]any{{"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": pending}, {"type": "response.output_item.done", "sequence_number": 2, "output_index": 0, "item": item}}
+			}
 		}
 		for _, event := range events {
 			event["stream_id"] = "main"

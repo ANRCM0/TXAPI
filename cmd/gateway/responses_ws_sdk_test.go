@@ -37,11 +37,11 @@ func TestResponsesWSPythonSDKProcess(t *testing.T) {
 		}
 	}
 	f.waitReleased(t)
-	if f.attempts.Load() != 10 || f.httpCalls.Load() != 0 {
-		t.Fatalf("SDK must produce exactly ten WS creates, got %d/%d", f.attempts.Load(), f.httpCalls.Load())
+	if f.attempts.Load() != 12 || f.httpCalls.Load() != 0 {
+		t.Fatalf("SDK must produce exactly twelve WS creates, got %d/%d", f.attempts.Load(), f.httpCalls.Load())
 	}
 	var observations []wsAssemblyObservation
-	for len(observations) < 10 {
+	for len(observations) < 12 {
 		select {
 		case observation := <-f.observations:
 			observations = append(observations, observation)
@@ -49,7 +49,7 @@ func TestResponsesWSPythonSDKProcess(t *testing.T) {
 			t.Fatal("missing wire observations")
 		}
 	}
-	for index, expected := range []int{1, 3, 5, 7, 1, 1, 1, 1, 1, 3} {
+	for index, expected := range []int{1, 3, 5, 7, 1, 1, 1, 1, 1, 3, 1, 4} {
 		items := historyWire(t, observations[index], expected)
 		if !observations[index].PrivateHeaders || observations[index].Key != "upstream-main-fixture" {
 			t.Fatal("SDK credentials/private headers reached provider")
@@ -60,12 +60,15 @@ func TestResponsesWSPythonSDKProcess(t *testing.T) {
 		if index == 9 && (string(items[1]["type"]) != `"custom_tool_call"` || string(items[2]["type"]) != `"custom_tool_call_output"` || string(items[1]["namespace"]) != `"text"` || string(items[2]["namespace"]) != `"text"` || string(items[1]["call_id"]) != string(items[2]["call_id"])) {
 			t.Fatal("SDK custom association lost")
 		}
+		if index == 11 && (string(items[1]["type"]) != `"tool_search_call"` || string(items[2]["type"]) != `"tool_search_output"` || string(items[3]["type"]) != `"additional_tools"` || string(items[1]["call_id"]) != string(items[2]["call_id"])) {
+			t.Fatal("SDK search discovery association lost")
+		}
 	}
 	if observations[0].Connection != observations[1].Connection || observations[1].Connection != observations[2].Connection || observations[2].Connection == observations[3].Connection {
 		t.Fatal("SDK same-connection rounds or explicit reconnect differed")
 	}
 	var rows []model.ResponseHistory
-	if err := f.st.DB().Find(&rows).Error; err != nil || len(rows) != 10 {
+	if err := f.st.DB().Find(&rows).Error; err != nil || len(rows) != 12 {
 		t.Fatal("SDK history count", len(rows), err)
 	}
 	unknown := 0
@@ -80,7 +83,7 @@ func TestResponsesWSPythonSDKProcess(t *testing.T) {
 		t.Fatal("SDK canceled request did not retain uncertainty", unknown)
 	}
 	var usage []model.UsageInvocation
-	if err := f.st.DB().Find(&usage).Error; err != nil || len(usage) != 10 {
+	if err := f.st.DB().Find(&usage).Error; err != nil || len(usage) != 12 {
 		t.Fatal("SDK usage count", len(usage), err)
 	}
 	statuses := map[string]int{}
@@ -90,11 +93,11 @@ func TestResponsesWSPythonSDKProcess(t *testing.T) {
 		}
 		statuses[row.Host.ProtocolStatus]++
 	}
-	if statuses["completed"] != 7 || statuses["failed"] != 1 || statuses["incomplete"] != 1 {
+	if statuses["completed"] != 9 || statuses["failed"] != 1 || statuses["incomplete"] != 1 {
 		t.Fatal("SDK protocol outcomes changed", statuses)
 	}
 	var attempts []model.UsageAttemptReceipt
-	if err := f.st.DB().Find(&attempts).Error; err != nil || len(attempts) != 10 {
+	if err := f.st.DB().Find(&attempts).Error; err != nil || len(attempts) != 12 {
 		t.Fatal("SDK attempt count", len(attempts), err)
 	}
 	known := 0
@@ -111,7 +114,7 @@ func TestResponsesWSPythonSDKProcess(t *testing.T) {
 			t.Fatal("SDK unknown usage became a fabricated count")
 		}
 	}
-	if known != 7 {
+	if known != 9 {
 		t.Fatal("SDK known usage count", known)
 	}
 }

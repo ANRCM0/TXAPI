@@ -39,6 +39,7 @@ func validateTools(raw json.RawMessage) error {
 		return errors.New("Responses tools must be an array")
 	}
 	groups := map[string]bool{}
+	search := false
 	for _, raw := range tools {
 		var tool struct {
 			Type string `json:"type"`
@@ -48,16 +49,32 @@ func validateTools(raw json.RawMessage) error {
 			return errors.New("invalid Responses tool")
 		}
 		if tool.Type == "function" && tool.Name != "" {
+			if err := validateDeferred(raw); err != nil {
+				return err
+			}
 			continue
 		}
 		if tool.Type == "custom" {
 			if err := validateCustomTool(raw); err != nil {
 				return err
 			}
+			if err := validateDeferred(raw); err != nil {
+				return err
+			}
+			continue
+		}
+		if tool.Type == "tool_search" {
+			if search {
+				return errors.New("Responses permits at most one client tool_search")
+			}
+			if err := validateSearchTool(raw); err != nil {
+				return err
+			}
+			search = true
 			continue
 		}
 		if tool.Type != "namespace" {
-			return errors.New("Responses supports only named function/custom tools and one-level namespaces")
+			return errors.New("Responses supports only function/custom namespaces and client tool_search")
 		}
 		var group struct {
 			Description json.RawMessage   `json:"description"`
@@ -73,6 +90,11 @@ func validateTools(raw json.RawMessage) error {
 			}
 		}
 		groups[tool.Name] = true
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		if _, ok := fields["defer_loading"]; ok {
+			return errors.New("Responses namespace deferral belongs on members")
+		}
 		names := map[string]bool{}
 		for _, raw := range group.Tools {
 			var member struct {
@@ -86,6 +108,9 @@ func validateTools(raw json.RawMessage) error {
 				if err := validateCustomTool(raw); err != nil {
 					return err
 				}
+			}
+			if err := validateDeferred(raw); err != nil {
+				return err
 			}
 			names[member.Name] = true
 		}
@@ -106,6 +131,9 @@ func validateOutputToolItem(raw json.RawMessage) error {
 	}
 	if item.Type == "custom_tool_call" {
 		return validateCustomCall(raw)
+	}
+	if item.Type == "tool_search_call" || item.Type == "tool_search_output" {
+		return validateSearchItem(raw)
 	}
 	return nil
 }

@@ -175,6 +175,24 @@ func validateInput(raw json.RawMessage) error {
 		if json.Unmarshal(raw, &probe) != nil {
 			return errors.New("invalid input item")
 		}
+		if probe.Type == "tool_search_output" || probe.Type == "additional_tools" || probe.Type == "tool_search_call" {
+			allowed := "type id execution call_id status tools"
+			if probe.Type == "additional_tools" {
+				allowed = "type id role tools"
+			} else if probe.Type == "tool_search_call" {
+				allowed = "type id execution call_id status arguments"
+			}
+			fields, err := object(raw, allowed)
+			if err != nil {
+				return err
+			}
+			if probe.Type != "tool_search_call" {
+				if err := validateLoadedTools(fields["tools"]); err != nil {
+					return err
+				}
+			}
+			continue // The shared native validator checks call/status/schema.
+		}
 		allowed := "type role content"
 		contentKey := "content"
 		if probe.Type == "function_call_output" || probe.Type == "custom_tool_call_output" {
@@ -402,6 +420,19 @@ func validateOutputItem(raw json.RawMessage) error {
 	if json.Unmarshal(raw, &item) != nil {
 		return errors.New("invalid native WS output item")
 	}
+	if item.Type == "tool_search_call" {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		if status, ok := fields["status"]; ok && bytes.Equal(status, []byte("null")) {
+			return errors.New("null native tool search status")
+		}
+		return nil // The native facts decoder validates this bounded client call.
+	}
+	if item.Type == "tool_search_output" {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		return validateLoadedTools(fields["tools"])
+	}
 	if item.Type == "function_call" || item.Type == "custom_tool_call" {
 		if item.Namespace != nil {
 			if _, valid := text(item.Namespace); !valid {
@@ -463,6 +494,18 @@ func validateTool(raw json.RawMessage, allowNamespace bool) error {
 	if json.Unmarshal(raw, &probe) != nil {
 		return errors.New("invalid tool")
 	}
+	if probe.Type == "tool_search" && allowNamespace {
+		fields, err := object(raw, "type execution description parameters")
+		if err != nil {
+			return err
+		}
+		if description, ok := fields["description"]; ok {
+			if _, valid := text(description); !valid {
+				return errors.New("tool search description must be text")
+			}
+		}
+		return nil // Shared native validation enforces client execution/schema.
+	}
 	if probe.Type == "namespace" && allowNamespace {
 		group, err := object(raw, "type name description tools")
 		if err != nil {
@@ -484,9 +527,9 @@ func validateTool(raw json.RawMessage, allowNamespace bool) error {
 		}
 		return nil
 	}
-	allowed := "type name description parameters strict"
+	allowed := "type name description parameters strict defer_loading"
 	if probe.Type == "custom" {
-		allowed = "type name description format"
+		allowed = "type name description format defer_loading"
 	}
 	tool, err := object(raw, allowed)
 	if err != nil {
@@ -523,6 +566,23 @@ func validateTool(raw json.RawMessage, allowNamespace bool) error {
 		var schema map[string]json.RawMessage
 		if json.Unmarshal(raw, &schema) != nil || schema == nil {
 			return errors.New("invalid function parameters")
+		}
+	}
+	return nil
+}
+
+func validateLoadedTools(raw json.RawMessage) error {
+	var tools []json.RawMessage
+	if json.Unmarshal(raw, &tools) != nil || tools == nil || len(tools) > 128 {
+		return errors.New("native loaded tools require a bounded array")
+	}
+	for _, raw := range tools {
+		var probe struct{ Type string }
+		if json.Unmarshal(raw, &probe) != nil || probe.Type == "tool_search" {
+			return errors.New("recursive tool search is unsupported")
+		}
+		if err := validateTool(raw, true); err != nil {
+			return err
 		}
 	}
 	return nil

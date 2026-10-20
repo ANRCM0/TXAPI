@@ -94,7 +94,7 @@ func (r Request) ValidateHTTP() error {
 			CallID           string          `json:"call_id"`
 			Name             string          `json:"name"`
 			Namespace        json.RawMessage `json:"namespace"`
-			Arguments        *string         `json:"arguments"`
+			Arguments        json.RawMessage `json:"arguments"`
 			Output           json.RawMessage `json:"output"`
 			Content          json.RawMessage `json:"content"`
 			EncryptedContent *string         `json:"encrypted_content"`
@@ -111,7 +111,8 @@ func (r Request) ValidateHTTP() error {
 				return err
 			}
 		case "function_call":
-			if item.CallID == "" || item.Name == "" || item.Arguments == nil {
+			var arguments string
+			if item.CallID == "" || item.Name == "" || !present(item.Arguments) || json.Unmarshal(item.Arguments, &arguments) != nil {
 				return errors.New("invalid Responses function call")
 			}
 			if err := validateNamespace(item.Namespace); err != nil {
@@ -133,6 +134,10 @@ func (r Request) ValidateHTTP() error {
 			}
 		case "custom_tool_call_output":
 			if err := validateCustomOutput(raw); err != nil {
+				return err
+			}
+		case "tool_search_call", "tool_search_output", "additional_tools":
+			if err := validateSearchItem(raw); err != nil {
 				return err
 			}
 		case "reasoning":
@@ -214,7 +219,8 @@ func (r Request) PromptText() string {
 		Namespace string          `json:"namespace"`
 		Content   json.RawMessage `json:"content"`
 		Output    json.RawMessage `json:"output"`
-		Arguments string          `json:"arguments"`
+		Arguments json.RawMessage `json:"arguments"`
+		Tools     json.RawMessage `json:"tools"`
 		Name      string          `json:"name"`
 	}
 	_ = json.Unmarshal(r.Input, &items)
@@ -222,7 +228,16 @@ func (r Request) PromptText() string {
 		appendText(item.Content)
 		appendText(item.Output)
 		text.WriteString(item.Name)
-		text.WriteString(item.Arguments)
+		if item.Type == "tool_search_call" {
+			text.Write(item.Arguments)
+		} else {
+			var arguments string
+			_ = json.Unmarshal(item.Arguments, &arguments)
+			text.WriteString(arguments)
+		}
+		if item.Type == "tool_search_output" || item.Type == "additional_tools" {
+			text.Write(item.Tools)
+		}
 		if item.Type == "custom_tool_call" {
 			text.WriteString(item.Input)
 		}
