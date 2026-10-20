@@ -52,18 +52,20 @@ type observation struct {
 }
 
 type fixture struct {
-	root        context.Context
-	mu          sync.Mutex
-	requests    []observation
-	errors      []string
-	active      atomic.Int64
-	serial      atomic.Int64
-	upgrades    atomic.Int64
-	connections atomic.Int64
-	httpPosts   atomic.Int64
-	proxyPosts  atomic.Int64
-	chatActive  atomic.Int64
-	chat        []chatObservation
+	root            context.Context
+	mu              sync.Mutex
+	requests        []observation
+	errors          []string
+	active          atomic.Int64
+	serial          atomic.Int64
+	upgrades        atomic.Int64
+	connections     atomic.Int64
+	httpPosts       atomic.Int64
+	proxyPosts      atomic.Int64
+	chatActive      atomic.Int64
+	chat            []chatObservation
+	baseline        *baselineRun
+	baselineStarted atomic.Bool
 }
 
 type chatObservation struct {
@@ -302,6 +304,17 @@ func (f *fixture) chatStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input := body.Messages[0].Content
+	if strings.HasPrefix(input, "h2-baseline-") {
+		f.mu.Lock()
+		run := f.baseline
+		f.mu.Unlock()
+		if run == nil {
+			http.Error(w, "baseline inactive", 409)
+			return
+		}
+		run.stream(w, r, input)
+		return
+	}
 	if input != "h2-complete" && input != "h2-cancel" && input != "h2-recovery" {
 		f.reject("Chat fixture input")
 		http.Error(w, "fixture input", 400)
@@ -480,15 +493,23 @@ func serve(directory, target string) error {
 		return err
 	}
 	defer proxy.Transport.(*http.Transport).CloseIdleConnections()
+	baseline, err := f.baselineHandler(directory)
+	if err != nil {
+		return err
+	}
+	stats := http.NewServeMux()
+	stats.HandleFunc("/stats", f.stats)
+	stats.HandleFunc("/baseline", baseline)
 	servers := []*http.Server{
 		{Addr: ":443", Handler: http.HandlerFunc(f.provider), ReadHeaderTimeout: 5 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}},
 		{Addr: ":8081", Handler: proxy, ReadHeaderTimeout: 5 * time.Second},
-		{Addr: ":9911", Handler: http.HandlerFunc(f.stats), ReadHeaderTimeout: 5 * time.Second},
+		{Addr: ":9911", Handler: stats, ReadHeaderTimeout: 5 * time.Second},
+		{Addr: ":8443", Handler: proxy, ReadHeaderTimeout: 5 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}},
 	}
 	errorsOut := make(chan error, len(servers))
 	for index, server := range servers {
 		go func(index int, server *http.Server) {
-			if index == 0 {
+			if index == 0 || index == 3 {
 				errorsOut <- server.ListenAndServeTLS(filepath.Join(directory, "server.pem"), filepath.Join(directory, "server-key.pem"))
 			} else {
 				errorsOut <- server.ListenAndServe()
