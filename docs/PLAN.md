@@ -12,9 +12,9 @@
 
 ## 当前基线与能力边界
 
-最近已核对主线为 `master/e7ad3e45b061a23c1cde1aa93443a83a5922efc5`（PR #96）。最终功能头 `e5fb0318803ac7e9bd9c03960b64575aaef2e8dd` 的 push Verify `39481368396`、PR Verify `39481434122` 全六项成功；实际合并主线的独立 Verify `39483862377` 另行核对。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
+最近已核对主线为 `master/e7ad3e45b061a23c1cde1aa93443a83a5922efc5`（PR #96）。最终功能头 `e5fb0318803ac7e9bd9c03960b64575aaef2e8dd` 的 push Verify `39481368396`、PR Verify `39481434122` 全六项成功；实际合并主线的独立 Verify `39483862377` 也已成功。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
 
-[OpenAPI](openapi.json) 为 `0.13.19` / 117 操作，数据库 schema v21。接口数、测试数和已完成子批数不换算为项目完成百分比。0.13.19 为 P1-A 本批接口说明，新增能力的验收状态不继承上述主线 CI。
+[OpenAPI](openapi.json) 为本轮候选 `0.14.0` / 117 操作，数据库 schema v22。接口数、测试数和已完成子批数不换算为项目完成百分比。本轮静态中转、成本政策、后台/WS 收费与 Linux Docker 承载处于集成验证阶段，不继承上述主线 CI。
 
 P6-A/P6-B、P4-A1/P4-A2、P1-A 已通过 PR #92/#93/#94/#95/#96 合入上述主线。当前按用户授权并发完成 P0、P8、P7，交付范围遵循新的静态 API 中转目标；参考项目仍按文末固定 SHA 读取。
 
@@ -79,11 +79,11 @@ R04a/P1/P2/P3 的既有账号代码和加密状态只保留历史兼容与受控
 
 历史绑定当前 owner、创建 Key 和模型权限，内容加密、CAS/TTL/容量受限。`previous_response_id` 与 conversation 明确上下文来源，原生父 ID 和本地全上下文不能重复叠加；只有完整可重建、重新准入和计价的上下文才允许显式重放。`store=false` 不变永久历史，原生后台仍按声明临时保存恢复内容。后台受理先持久化任务和适用准入/预留事实再确认；内部任务状态、公开协议状态和财务终态分别映射。事件序号先持久提交再公开，按 `sequence_number` / `starting_after` 恢复；事件过期、丢失或不可重建时显式报错。
 
-迁移只追加版本，不修改已发布步骤。schema v21 升级前停写并一致备份；旧 schema20 二进制拒绝打开 v21，回退需恢复匹配的停写备份，不能删账号或改写账本/迁移修复。凭据/内容密钥、备份/WAL、内存和公网 TLS 的边界独立维护，管理掩码不构成加密。
+迁移只追加版本，不修改已发布步骤。schema v22 升级前停写并一致备份；旧 schema21 二进制拒绝打开 v22，回退需恢复匹配的停写备份，不能删账号或改写账本/迁移修复。v22 追加 reservation 政策摘要、后台财务绑定和控制 RPC 计数；旧任务保持 disabled，旧账本不补造政策或收费。凭据/内容密钥、备份/WAL、内存和公网 TLS 的边界独立维护，管理掩码不构成加密。
 
 ## 严格计费边界
 
-strict 当前仅放行已登记的官方 OpenAI 文本 Chat/embeddings 档案；Responses 全部拒绝，原生后台/WS 必须使用 disabled。Anthropic/Gemini、兼容代理、未知模型/计价维度不继承许可。legacy 不提供 strict 持久预算保证；disabled 只关闭计费，保留身份和准入。
+strict 保留已登记的官方 OpenAI 文本 Chat/embeddings 档案；本轮实现显式运营者政策绑定的静态兼容 Chat/embeddings，以及 HTTP/后台/WS 的自包含 Responses 文本/顶层 function 子集。新增收费在最终集成头验收前仍为候选能力；Anthropic/Gemini、未知模型/计价维度不继承许可。legacy 不提供 strict 持久预算保证且继续拒绝后台/WS；disabled 只关闭计费，保留身份和准入。
 
 `StartPreparedAttempt` 校验最终真实 URL、正文、输出限制和鉴权头，是唯一可执行成本准入入口。无最终正文的 `StartCostedAttempt` 不能开启新尝试。输入、费率或凭据证明缺失分别返回 `provider_input_unproven`、`provider_tariff_unproven`、`provider_credential_unproven`，不发送、不处罚健康、不换凭据绕过。
 
@@ -91,6 +91,8 @@ strict 当前仅放行已登记的官方 OpenAI 文本 Chat/embeddings 档案；
 |---|---|
 | `openai_embeddings_v1` | 官方根 URL、openai/embeddings；三个精确模型 `text-embedding-3-small`、`text-embedding-3-large`、`text-embedding-ada-002`；整请求输入包络至少 300000 Token，文本数组最多 2048 条，不接受 token ID 数组/混合输入 |
 | `openai_chat_v1` | 官方根 URL、openai/chat、`gpt-4o-mini-2024-07-18`；输入包络至少 128000，`max_completion_tokens` 至多 16384；正文 `service_tier: "default"`，严格文本、`n=1`；工具/媒体及未登记缓存、推理、等级扩展拒绝 |
+| `operator_chat_v1` / `operator_embeddings_v1` | 绑定静态兼容 API，沿用各自 strict 文本闭合字段；整正文大小有界，政策声明完整输入包络、显式输出上限及费用；不自动支持 Chat 工具或新计量维度 |
+| `operator_responses_v1` | 显式 `max_output_tokens`、自包含文本或已配对顶层 function，最多 64 个定义、128 对调用/结果；HTTP/后台/WS 实际 wire 共用校验。strict 不继承父 ID、conversation、prewarm、reasoning、custom/namespace/search/compaction 或媒体许可 |
 
 档案数字来自 2026-10-17 登记的实现约束，详见[输入档案](../internal/billing/input_profile.go)和[费用档案](../internal/billing/tariff_profile.go)。原核对来源为 OpenAI Create embeddings、GPT-4o Mini、Chat Completions、Priority processing、Pricing Standard 文档；修改适用范围时重新核对，不把旧快照或模拟上游当真实价格认证。
 
@@ -99,6 +101,8 @@ strict 当前仅放行已登记的官方 OpenAI 文本 Chat/embeddings 档案；
 ### 严格计费配置
 
 以 [gateway.example.yaml](../configs/gateway.example.yaml) 为准。费率档案 `openai_standard_usd_2026_10_17` 使用 USD、显式 `credential_bindings` 和完整 Key 的小写 SHA-256，发送前核对实际 Bearer Header；更换 Key/ID 须重新核实并加载。内置价格下限不能证明账号最高适用价格。Provider 金额精度为 `1e-9`，用户售价采用独立账户单位，不自动换汇或相互比较；真实密钥、摘要清单和个人配置不提交。
+
+兼容 API 使用 `operator_declared_tokens_v1`，完整绑定 channel/baseURL/protocol/actual-model/operation、credential ID/Key 摘要、三位大写币种、正输入/适用输出费率、`policy_version`、未来 Unix 秒 `policy_expires_at`、`max_request_bytes` 与显式 `additional_cost_per_attempt`（可为零）。正文上限为 1..1048576 字节且不超过声明输入包络；非 loopback 使用 HTTPS。未知维度、过期政策、实际 URL/body/model/Header 漂移和全部尝试预算不足在发送前拒绝。政策在预留时固定，排队任务不得静默采用新版本。额外费用声明覆盖一次生成的失败和最多 32 次持久控制 RPC；轮询/取消不形成第二个生成或重复扣费。这些是运营者输入假设，不是远端 tokenizer 或账单认证。
 
 ## 参考对照与规划依据
 

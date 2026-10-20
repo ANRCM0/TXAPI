@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"minigateway/internal/config"
 )
 
 func relayCommand(t *testing.T, args ...string) ([]byte, error) {
@@ -41,5 +43,25 @@ func TestAPIKeyRelayHasNoOAuthCommand(t *testing.T) {
 				t.Fatalf("removed command was not rejected before configuration/store/network work: %v\n%s", err, output)
 			}
 		})
+	}
+}
+
+func TestStrictLeaseCoversEnabledConsumerLifetime(t *testing.T) {
+	c := &config.Config{}
+	c.Server.TotalTimeoutSeconds = 30
+	if lease := strictBillingLease(c); lease != 35*time.Second {
+		t.Fatal("HTTP lease", lease)
+	}
+	c.ResponsesWS.Enabled = true
+	if lease := strictBillingLease(c); lease <= 120*time.Second {
+		t.Fatal("WS round exceeds reservation lifetime", lease)
+	}
+	c.Responses.Background.Enabled = true
+	if lease := strictBillingLease(c); lease <= 5*time.Minute {
+		t.Fatal("background deadline exceeds reservation lifetime", lease)
+	}
+	c.Server.TotalTimeoutSeconds = 600
+	if lease := strictBillingLease(c); lease != 605*time.Second {
+		t.Fatal("longer HTTP lease was shortened", lease)
 	}
 }

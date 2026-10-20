@@ -2,16 +2,19 @@ package config
 
 import "testing"
 
-func TestBackgroundConfigurationIsExplicitAndDisabledBillingOnly(t *testing.T) {
+func TestBackgroundConfigurationIsExplicitAndRejectsLegacyBilling(t *testing.T) {
 	prefix := minimalCfg + "\ndatabase:\n  credential_keys_file: credential.json\nresponses:\n  enabled: true\n  keys_file: content.json\n  background:\n    enabled: true\n    channel_ids: [1]\n"
-	for _, mode := range []string{"legacy", "strict"} {
+	for _, mode := range []string{"legacy"} {
 		if _, e := Load(writeCfg(t, prefix+"billing:\n  mode: "+mode+"\n")); e == nil {
-			t.Fatal("charged mode enabled background", mode)
+			t.Fatal("legacy mode enabled background", mode)
 		}
 	}
 	cfg, e := Load(writeCfg(t, prefix+"billing:\n  mode: disabled\n"))
 	if e != nil {
 		t.Fatal(e)
+	}
+	if _, err := Load(writeCfg(t, prefix+"billing:\n  mode: strict\n")); err != nil {
+		t.Fatal("strict background configuration rejected before policy admission", err)
 	}
 	b := cfg.Responses.Background
 	if !b.Enabled || len(b.ChannelIDs) != 1 || b.RetentionSeconds != 600 || b.MetadataSeconds != 86400 || b.InstanceActive != 16 || b.OwnerActive != 2 || b.InstanceBytes != 64<<20 || b.OwnerBytes != 16<<20 {

@@ -47,8 +47,8 @@ func startResponsesWSRuntimeWithFactory(cfg config.ResponsesWSConfig, st *store.
 	if !cfg.Enabled {
 		return nil, nil
 	}
-	if st == nil || gw == nil || limiter == nil || factory == nil || gw.BillingMode() != "disabled" || !st.CredentialEncryptionReady(context.Background()) {
-		return nil, errors.New("native websocket requires disabled billing and activated credential encryption")
+	if st == nil || gw == nil || limiter == nil || factory == nil || gw.BillingMode() != "disabled" && gw.BillingMode() != "strict" || !st.CredentialEncryptionReady(context.Background()) {
+		return nil, errors.New("native websocket requires disabled or strict billing and activated credential encryption")
 	}
 	var storedHistory history.StoredRounds
 	if cfg.PersistentHistory {
@@ -196,11 +196,17 @@ func newOfficialNativeResource(root context.Context, limits contract.Limits) (ga
 	return &officialNativeResource{manager: manager}, nil
 }
 func (r *officialNativeResource) Dial(ctx context.Context, key string) (execution.Connection, error) {
+	return r.dial(ctx, "wss://api.openai.com/v1/responses", http.Header{"Authorization": {"Bearer " + key}})
+}
+func (r *officialNativeResource) DialTarget(ctx context.Context, endpoint, key string) (execution.Connection, error) {
+	return r.dial(ctx, endpoint, http.Header{"Authorization": {"Bearer " + key}, "OpenAI-Beta": {"responses_websockets=2025-06-01"}})
+}
+func (r *officialNativeResource) dial(ctx context.Context, endpoint string, header http.Header) (execution.Connection, error) {
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
 		return nil, errors.New("native websocket connection identity unavailable")
 	}
-	connection, err := r.manager.Dial(ctx, "wss://api.openai.com/v1/responses", http.Header{"Authorization": {"Bearer " + key}})
+	connection, err := r.manager.Dial(ctx, endpoint, header)
 	if err != nil {
 		return nil, err
 	}

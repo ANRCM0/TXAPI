@@ -192,6 +192,8 @@ func main() {
 					InputBoundProfile: c.InputBoundProfile,
 					TariffProfile:     c.TariffProfile, Currency: c.Currency, CredentialBindings: c.CredentialBindings,
 					InputPricePer1K: c.InputPricePer1K, OutputPricePer1K: c.OutputPricePer1K, Evidence: c.Evidence,
+					PolicyVersion: c.PolicyVersion, PolicyExpiresAt: c.PolicyExpiresAt,
+					MaxRequestBytes: c.MaxRequestBytes, AdditionalCostPerAttempt: c.AdditionalCostPerAttempt,
 				})
 			}
 			if err := engine.ConfigureProviderCosts(cfg.Billing.MaxProviderRequestCost, contracts); err != nil {
@@ -203,7 +205,7 @@ func main() {
 		}
 		if cfg.Billing.MaxRequestCost == "" {
 			slog.Warn("strict fee ceiling is missing; model calls will be rejected")
-		} else if err := engine.EnableStrict(cfg.Billing.MaxRequestCost, time.Duration(cfg.Server.TotalTimeoutSeconds+5)*time.Second); err != nil {
+		} else if err := engine.EnableStrict(cfg.Billing.MaxRequestCost, strictBillingLease(cfg)); err != nil {
 			slog.Error("strict billing initialization failed", "err", err)
 			os.Exit(1)
 		}

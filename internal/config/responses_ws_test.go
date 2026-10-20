@@ -2,6 +2,7 @@ package config
 
 import (
 	"gopkg.in/yaml.v3"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,21 @@ func TestResponsesWSConfigRequiresExplicitSafeSettings(t *testing.T) {
 				t.Fatal("unsafe config accepted")
 			}
 		})
+	}
+}
+
+func TestResponsesWSBillingAndCredentialDependencies(t *testing.T) {
+	base := "admin_key: fixture-key\ndatabase:\n  credential_keys_file: fixture-credentials.json\nresponses_ws:\n  enabled: true\n  models: [m]\n"
+	for _, mode := range []string{"disabled", "strict"} {
+		if _, err := Load(writeCfg(t, base+"billing:\n  mode: "+mode+"\n")); err != nil {
+			t.Fatal("supported billing policy rejected before send admission", mode, err)
+		}
+	}
+	if _, err := Load(writeCfg(t, base+"billing:\n  mode: legacy\n")); err == nil {
+		t.Fatal("legacy WS billing enabled")
+	}
+	if _, err := Load(writeCfg(t, strings.Replace(base, "  credential_keys_file: fixture-credentials.json\n", "", 1)+"billing:\n  mode: strict\n")); err == nil {
+		t.Fatal("strict WS started without credential encryption")
 	}
 }
 

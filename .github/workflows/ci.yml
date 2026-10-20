@@ -191,3 +191,34 @@ jobs:
           echo "beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4  $codex_dir/codex.tar.gz" | sha256sum --check
           tar -xzf "$codex_dir/codex.tar.gz" -C "$codex_dir"
           python3 tests/smoke/native_ws_delivery.py --go go --sdk --codex "$codex_dir/codex-x86_64-unknown-linux-musl"
+
+  p0-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 容量预算与容器采样判定回归
+        run: |
+          python3 tests/smoke/capacity_curve_test.py
+          python3 tests/smoke/docker_resources_test.py
+      - name: Chat 与 Responses 分档容量、取消与全槽位恢复
+        timeout-minutes: 25
+        run: python3 tests/smoke/capacity_curve.py --levels 1,4,8,16 --sustain-seconds 60 --output "$RUNNER_TEMP/p0/capacity-curve.json"
+      - name: 实际 Linux Docker H1 与 H2 各十五分钟持续运行
+        if: ${{ !cancelled() }}
+        timeout-minutes: 35
+        run: python3 tests/smoke/native_ws_delivery.py --go go --soak-seconds 900 --soak-workers 2 --output "$RUNNER_TEMP/p0/docker-protocol-soak.json"
+      - name: 保留全部计划、样本、失败与资源报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: p0-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/p0
+          if-no-files-found: error
+          retention-days: 14

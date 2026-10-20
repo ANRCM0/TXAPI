@@ -3,7 +3,7 @@ PYTHON ?= python3
 NODE ?= node
 CONFIG ?= config.yaml
 
-.PHONY: init prepare build run test vet check smoke delivery compatibility sdk-conformance ws-sdk-conformance codex-conformance contracts web-check clean
+.PHONY: init prepare build run test vet check smoke delivery p0-linux compatibility sdk-conformance ws-sdk-conformance codex-conformance contracts web-check clean
 
 prepare:
 	mkdir -p bin .local/data
@@ -46,6 +46,14 @@ smoke:
 
 delivery:
 	$(PYTHON) tests/smoke/delivery.py --go "$(GO)"
+
+# Linux Docker only. P0_OUTPUT must name a new report directory.
+P0_OUTPUT ?= .local/p0-linux
+p0-linux:
+	$(PYTHON) tests/smoke/capacity_curve_test.py
+	$(PYTHON) tests/smoke/docker_resources_test.py
+	$(PYTHON) tests/smoke/capacity_curve.py --go "$(GO)" --levels 1,4,8,16 --sustain-seconds 60 --output "$(P0_OUTPUT)/capacity-curve.json"
+	$(PYTHON) tests/smoke/native_ws_delivery.py --go "$(GO)" --soak-seconds 900 --soak-workers 2 --output "$(P0_OUTPUT)/docker-protocol-soak.json"
 
 # Install tests/smoke/requirements-sdk.txt in an isolated environment first.
 sdk-conformance:
