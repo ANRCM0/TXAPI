@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -424,9 +425,13 @@ func prepare(directory string) error {
 	if err != nil {
 		return err
 	}
-	server := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "api.openai.com"}, DNSNames: []string{"api.openai.com"},
+	issuer, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		return err
+	}
+	server := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "api.openai.com"}, DNSNames: []string{"api.openai.com", "localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 		NotBefore: ca.NotBefore, NotAfter: ca.NotAfter, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	serverDER, err := x509.CreateCertificate(rand.Reader, server, ca, &key.PublicKey, key)
+	serverDER, err := x509.CreateCertificate(rand.Reader, server, issuer, &key.PublicKey, key)
 	if err != nil {
 		return err
 	}

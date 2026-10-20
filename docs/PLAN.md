@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最新已合并功能头为 `master/b405416973097911f1e070eddf7fb0f2122199b2`：后台占用与清理计数修复 PR #75 的精确头 `15144d4ea72c0bd3db4bfbe5f1df48baa5782816` 已通过 push Verify `39363223724` 与 PR Verify `39363228191` 全部六项；合并后独立 Verify `39364578453` 尚在运行。最近完整通过合并后 CI 的基线为 `abb10d91d32181d3267ee92831ca8e43150e1833` / Verify `39362290678`（准入/原生 WS 占用 PR #74）；实际镜像固定 Codex WS PR #73 合并后的 Verify `39360238364` 也完整成功。更早的固定 WS/预热 PR #72、客户端搜索 PR #71、Responses 配对基线 PR #70、custom/freeform PR #69 的精确头与合并后证据保留在对应 PR。本批 HTTP/2 并发隔离测试增量不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最新已合并功能头为 `master/24ec655fdd278e38fec34efbd4fa80ec0e2d0bbe`：实际镜像默认HTTP/2 SSE PR #77 的精确头 `778891be1a0966dd63e005d66f661bd71ed7a830` 已通过 push Verify `39366096453` 与 PR Verify `39366132260` 全部六项，合并后独立 Verify `39367073953` 运行中。HTTP/2并发隔离 PR #76 的精确头六项也全部成功；其合并后 Verify `39366021776` 被新主线运行取消，不能称独立通过。最近完整通过合并后CI的基线为 `b405416973097911f1e070eddf7fb0f2122199b2` / Verify `39364578453`（后台占用PR #75）；更早的精确头与合并后证据保留在对应PR。本批TLS配对测量不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -319,6 +319,19 @@ HTTP/2并发隔离最终精确头 `9d828995ed8f2dda1fab98a39926644337467b5e` 的
 6. **协作/限制：**保留既有 HTTP/WS 续链、强杀、未知保护及用量计数断言，汇总额外3条Chat记录；disabled与真实Provider跳过范围不变。只补此受控交付组合，不声明多流并发/最大容量、TLS延迟预算、长期soak或S5-03完成。
 
 本地受控验证：Windows GOARCH=amd64 原交付夹具及新增真实H2协商/连接复用/流关闭测试、Chat客户端完整/取消/截断拒绝均通过，夹具包vet、Python UTF-8语法和差异检查通过。生产Go树未变；未执行本地Docker或重复全量Go。最终精确头完整Linux CI与实际镜像新增链仍待验收，不能从本地夹具成功推定镜像默认传输成功。
+
+实际镜像默认传输最终精确头验收：`778891be1a0966dd63e005d66f661bd71ed7a830` 的 push Verify `39366096453` 与 PR Verify `39366132260` 六项全部成功，PR #77 已合并为 `24ec655fdd278e38fec34efbd4fa80ec0e2d0bbe`；交付日志确认正常/取消/恢复三次SSE共用一条实际HTTP/2 TLS连接且全部流排空，既有非root镜像、SDK/Codex、强杀及持久用量断言同时通过。合并后Verify `39367073953` 单列；PR #76合并后 `39366021776` 已取消，不作通过。该证据不覆盖下列TLS测量档案。
+
+#### P0 TLS 上游配对测量子批（2026-10-20）
+
+1. **层级/目录：**tests/smoke/stream_baseline.py 复用现有生产main/真实Key/临时SQLite的串行配对测量，追加TLS上游档案、独立夹具检查和既有Verify；tests/upstream/nativews 的临时CA生成器补loopback SAN与标准Authority Key Identifier。本批不改Go生产实现、新增包或依赖。
+2. **依赖/契约：**消费当前Chat/Responses前台HTTP、disabled、store=false和既有默认Client，不注入测试Transport。直接客户端信任临时CA并校验IP，Go进程仅通过Linux子进程SSL_CERT_FILE加载该CA，不改宿主信任或生产配置接口。当前生产TLS基线限Linux；Windows仅执行夹具和明文消费者回归，不称TLS主进程已验收。
+3. **来源/地基：**主参考sub2api固定f2e5b55f3e8069df1c02a9a27af537b5fdefa64e的backend/internal/repository/http_upstream.go::buildUpstreamTransport的TLS握手/协议边界，改写为TXAPI既有测量消费者的实际协商记录，不复制LGPLv3实现或引入HTTP2 PING/回退策略。测量沿既有独立时钟/配对差值实现；TLS服务器只声明HTTP/1.1，记录实际TLS版本、ALPN与HTTP协议，不能冒充H2性能证据。L0/公开地基不变。
+4. **行为/范围：**直连为验证证书的TLS HTTP/1.1；网关边缘为loopback明文HTTP/1.1、上游为相同TLS fixture。两目标采用相同认证/载荷/事件节奏，分别保持连接，逐对交替次序；报告首正文、首有效文本、完成和事件观察区间、完整分母/失败样本、实际attempt、连接/资源与排空。只度量该拓扑，不声称双端TLS或实际反代性能等价；所有源码/资源/harness摘要单列。
+5. **验证与预算：**夹具分别覆盖Chat/Responses的合法CA/IP、未知CA和错主机拒绝、完整/截断/合法chunk-extension慢滴的绝对接收deadline与排空；已有明文档案和capacity消费者回归。Linux CI新增每操作20对的TLS生产主进程self-check/有限测量，保留生产Key401、测量前新库、全部失败和配对数；不把独立P99相减，不用20对声称P99通过，不新增或事后挑选延迟阈值。
+6. **协作/限制：**本批只补TLS档案与测量证据，不是性能优化；证书/密钥/配置/SQLite及报告只在临时目录/Runner temp，不提交。真实Provider按用户要求跳过，H2配对测量、多并发TLS/慢读、长期soak与完整P0性能验收仍开放；strict/S5-03、账号池和收费许可不变。
+
+本地受控验证：Windows GOARCH=amd64 的TLS夹具在Chat/Responses均通过完整事件、未知CA/错主机拒绝、截断拒绝、100ms慢滴绝对接收截止与排空；原有Go交付夹具和vet通过。首轮因叶证书缺AKI被Python严格校验拒绝，改为使用解析后的CA（含SKI）签发并生成标准AKI后复验通过，未放宽验证。既有明文生产main的Chat/Responses self-check及每目标3条测量全部完成、每请求1次发送；capacity并发4×每worker2请求×1轮，直连/网关各8/8、4条协调取消、未发送429与全部4名额恢复通过。Python语法/差异检查通过，性能数据不作优化结论；Linux TLS生产main与最终精确头完整CI/实际镜像仍待验收。
 
 ### P1：最小托管账号推理
 
