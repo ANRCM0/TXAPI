@@ -232,11 +232,22 @@ def background_workflow(gateway, work, env, service, ready, request):
                 browser_env = dict(env, TXAPI_BASE_URL=base, TXAPI_TEST_ADMIN_USERNAME="bg-smoke-admin",
                                    TXAPI_TEST_ADMIN_PASSWORD="bg-smoke-password-only", TXAPI_TEST_TASK_ID=console_id)
                 subprocess.run([env.get("TXAPI_TASK_BROWSER_NODE", "node"), str(Path(__file__).resolve().parents[1] / "browser" / "tasks-live.cjs")], env=browser_env, check=True, timeout=90)
-            status, body = request(base + "/api/me/background/" + console_id, session)
-            assert status == 200
-            revision = json.loads(body)["data"]["revision"]
-            status, body = request(base + "/api/me/background/" + console_id + "/cancel", session, {"revision": revision})
-            assert status == 200 and json.loads(body)["data"]["cancel_requested"]
+            control = base + "/api/me/background/" + console_id
+            # The worker can advance revision between a read and the CAS POST.
+            # Exercise a known stale revision, then issue bounded fresh intents.
+            status, body = request(control + "/cancel", session, {"revision": "1"})
+            assert status == 409 and json.loads(body)["error"]["type"] == "conflict", (status, body)
+            for attempt in range(5):
+                status, body = request(control, session)
+                assert status == 200, (status, body)
+                revision = json.loads(body)["data"]["revision"]
+                status, body = request(control + "/cancel", session, {"revision": revision})
+                if status == 200:
+                    assert json.loads(body)["data"]["cancel_requested"], (status, body)
+                    break
+                assert status == 409 and json.loads(body)["error"]["type"] == "conflict", (status, body)
+                assert attempt < 4, ("Console task kept changing across five fresh intents", status, body)
+                time.sleep(0.05)
             deadline = time.monotonic() + 10
             while True:
                 status, body = request(base + "/v1/responses/" + console_id, token)
