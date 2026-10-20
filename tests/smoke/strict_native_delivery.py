@@ -212,7 +212,10 @@ def exercise(i, report):
         for job in jobs:
             assert job["billing_mode"] == "strict" and job["billing_id"] in expected and 1 <= job["control_calls"] <= 32
         wire = [r for r in i.stats()["requests"] if r["input"] == "background-" + kind]
-        assert len([r for r in wire if r["transport"] == "http"]) == 1 and len(wire) <= 32
+        submits = [r for r in wire if r["transport"] == "http"]
+        controls = [r for r in wire if r["transport"] == "http-control"]
+        assert len(submits) == 1 and len(controls) <= 32
+        assert len(wire) == len(submits) + len(controls) and len(wire) <= 1 + 32
         report["background_wire"].append({"scenario": kind, "calls": wire})
         i.restart_strict()
 
@@ -253,7 +256,10 @@ def exercise(i, report):
     assert recovered["billing_balances"] == again["billing_balances"]
     transcript = i.stats()["requests"]
     assert len([r for r in transcript if r["input"] == "http-block"]) == 1
-    assert len(transcript) <= 136  # Four <=32-RPC jobs + six foreground creates + one killed create.
+    # Four jobs each submit once and issue <=32 controls, plus six foreground
+    # creates and the killed create. Control calls retain their separate cap.
+    wire_bound = 4 * (1 + 32) + 6 + 1
+    assert len(transcript) <= wire_bound
     report["wire"] = transcript
     report["passed"] = True
 
