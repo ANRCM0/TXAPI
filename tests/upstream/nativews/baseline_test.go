@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,10 @@ func TestDualTLSBaselinePairsUseCompleteEventsAndDrain(t *testing.T) {
 	u, _ := url.Parse(provider.URL)
 	proxy := httputil.NewSingleHostReverseProxy(u)
 	proxy.Transport = direct.Transport
+	proxy.ModifyResponse = func(response *http.Response) error {
+		response.Header.Set("X-TXAPI-Usage-ID", fmt.Sprintf("usage_%032x", f.serial.Add(1)))
+		return nil
+	}
 	original := proxy.Director
 	proxy.Director = func(r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+baselineClientKey {
@@ -59,6 +64,9 @@ func TestDualTLSBaselinePairsUseCompleteEventsAndDrain(t *testing.T) {
 		}
 		if row.Target != want || row.Protocol != 2 || row.ProviderProtocol != 2 || row.Attempts != 1 || !row.Drained || row.Error != "" {
 			t.Fatalf("sample %+v", row)
+		}
+		if (row.UsageID != "") != (row.Target == "gateway") {
+			t.Fatal("usage header observation", row)
 		}
 		if row.FirstBodyNS < 0 || row.FirstTextNS < row.FirstBodyNS || row.CompleteNS < row.FirstTextNS || len(row.EventLowerNS) != 10 {
 			t.Fatalf("timing %+v", row)

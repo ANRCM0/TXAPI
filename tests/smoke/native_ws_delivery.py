@@ -204,7 +204,11 @@ class Installation:
             assert all(low <= high for low, high in zip(row["event_lower_ns"], row["event_upper_ns"]))
         assert self.api("/metrics").count("gateway_admission_requests_active 0\n") == 1
         assert self.api("/metrics").count("gateway_admission_attempts_active 0\n") == 1
-        return 20
+        usage_ids = {row.get("usage_id", "") for row in report["samples"] if row["target"] == "gateway"}
+        assert len(usage_ids) == 20 and all(value.startswith("usage_") and len(value) == 38
+                                           and int(value[6:], 16) >= 0 for value in usage_ids), usage_ids
+        assert not any(row.get("usage_id") for row in report["samples"] if row["target"] == "direct")
+        return usage_ids
 
     def ws_request(self, parent, value, tools=False):
         body = {"type": "response.create", "model": "alias", "input": value, "store": True}
@@ -470,7 +474,8 @@ def exercise(installation, sdk_image=None, codex_image=None, codex=None):
     chat = [row for row in records if row["operation"] == "chat"]
     assert len(chat) == 3 and all(row["state"] == "sealed" for row in chat), chat
     count += 3
-    count += i.dual_tls_baseline()
+    baseline_ids = i.dual_tls_baseline()
+    count += len(baseline_ids)
     records = i.usage(session, count)
     chat = [row for row in records if row["operation"] == "chat"]
     assert len(chat) == 23 and all(row["state"] == "sealed" for row in chat), chat
@@ -479,8 +484,12 @@ def exercise(installation, sdk_image=None, codex_image=None, codex=None):
         detail = i.api("/api/me/usage-records/" + row["id"], session)["data"]
         assert len(detail["attempts"]) == 1 and detail["attempts"][0]["may_dispatch"], detail
         usage = detail["attempts"][0]["usage"]
-        if usage["total_tokens"] == "10":
-            assert usage["input_tokens"] == "2" and usage["output_tokens"] == "8", usage
+        if row["id"] in baseline_ids:
+            # Legacy Chat does not implement v3 detailed-usage facts. Native
+            # 2/8/10 is checked on the wire; persisted unknown stays unknown.
+            assert usage["completeness"] == usage["source"] == "unknown", usage
+            assert all(usage[name] is None for name in ("input_tokens", "output_tokens", "total_tokens",
+                        "cached_input_tokens", "cache_write_input_tokens", "reasoning_output_tokens")), usage
             baseline_receipts += 1
     assert baseline_receipts == 20, baseline_receipts
     i.final_snapshot(unknowns, count, history_count)

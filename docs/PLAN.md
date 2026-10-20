@@ -359,6 +359,8 @@ TLS测量最终头的完整CI已成功并合并。Linux PR运行中Chat/Response
 
 首次Linux交付测量完成40/40、20个成功配对，逐请求1次发送与排空均通过，但随后夹具仍用默认50条分页等候52条记录，持续轮询后触发120次/分钟查询限流，故交付整体失败。修复仅显式请求允许的limit=100，并要求has_more=false，不扩大生产查询/留存容量、取消限流或丢弃旧记录断言；最终修复头完整CI重新验收，首轮数据仅为有限观察，不能把测量成功当交付通过。
 
+随后核对到用量验收假设超出现有Chat能力：gateway仅从实现execution/v3.Decoder的消费者取得原生明细，现有Chat legacy解码器会将持久明细保留unknown，日志中的v1计数不转换为v3事实。本批保持这一边界，客户端仍严格校验原始SSE的2/8/10，但持久验收改用实际X-TXAPI-Usage-ID关联全部20个新增sealed回执，逐条核对单次dispatch以及六个原生数量均为null、source/completeness为unknown；不根据线端数据伪造持久事实，不为测量新增生产解码能力或收费许可。首次20条原生持久计数的错误预期作废，相关失败保留在CI日志；Chat原生明细若另行补齐，需独立功能切片及契约验证。
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。

@@ -42,6 +42,7 @@ type baselineSample struct {
 	Target           string  `json:"target"`
 	Error            string  `json:"error,omitempty"`
 	Status           int     `json:"status"`
+	UsageID          string  `json:"usage_id,omitempty"`
 	Protocol         int     `json:"protocol"`
 	TLS              string  `json:"tls"`
 	ALPN             string  `json:"alpn"`
@@ -278,6 +279,7 @@ func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key
 	}
 	defer response.Body.Close()
 	sample.Status, sample.Protocol = response.StatusCode, response.ProtoMajor
+	sample.UsageID = response.Header.Get("X-TXAPI-Usage-ID")
 	if response.TLS != nil {
 		sample.TLS, sample.ALPN = tls.VersionName(response.TLS.Version), response.TLS.NegotiatedProtocol
 	}
