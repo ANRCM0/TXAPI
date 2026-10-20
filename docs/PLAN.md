@@ -37,7 +37,7 @@
 | 用量与计费 | Responses 原生 Token 明细（Chat legacy 持久明细仍 unknown）、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.12` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合及准入/原生 WS 占用指标已通过精确头 CI 并合并；Chat原生用量观察增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.13` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合及准入/原生 WS 占用指标已通过精确头 CI 并合并；Chat原生用量观察增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -392,6 +392,10 @@ Windows GOARCH=amd64 build与全量vet通过；全量Go首轮仅旧TestFactsDoNo
 4. **行为/兼容/回退：**保留向量/base64/未知字段原始JSON字节；缺失/null/空usage或缺少prompt_tokens/total_tokens时返回未知聚合用量，strict保留pending及双hold，legacy沿原未知估算路径。只有两个字段显式存在、非负精确整数、相等且适合既有int范围时形成已知输入专用回执；可选completion_tokens只能缺失/null/显式零。非法JSON、重复键、非对象error响应、非法类型/溢出/负值/矛盾数量拒绝解码；已发送事实不清零，保持原重试/提交策略。回退旧二进制会恢复该缺陷，无数据迁移。
 5. **验证/验收：**先复现空usage/部分/null被当成零或完整回执，再覆盖有效非零与显式零、未知/大小写别名、重复/非法/矛盾及原始wire。实际loopback上游与strict账本验证一次发送、正常只按输入计费、未知/非法均保留双hold与成本attempt；保留原legacy缺失用量估算、Chat/Responses和拒绝stream消费者。集中协议/gateway及适用完整Go/main/SDK回归，最终精确头完整CI后合并。
 6. **协作影响：**与Chat原生观察分批，不改其解码器或历史记录，不新增embeddings原生明细承诺。OpenAPI仅声明费用回执的已知/未知条件；S5-03、真实Provider及后台/WS收费继续开放。
+
+本地受控结果：6个空/部分/null/大小写字段存在性用例先复现错误已知回执，修复后完整protocol包1.729s与包vet通过；有效输入专用/显式零、向量与base64原始wire、未知、负值/非法类型/不一致/溢出/重复键和error响应均覆盖。12个双端真实socket strict场景各发送一次：输入11/总量11只收220单位，显式零正常结算；空/部分/null/别名及非法量均pending且user/key分别保留100000000单位hold，所有场景原Provider历史包络6000000单位保留。
+
+Windows GOARCH=amd64完整build/vet通过；全量Go首轮只在旧S5模式测试失败，因为其embeddings分支沿用Chat夹具的11/7/18（含7个输出Token），已改为正确输入专用18/18并保留原状态、日志总量、发送数和零收费断言。最终完整gateway包61.807s与包vet通过；其他全量包均通过且源码未改（cmd/gateway75.727s、architecture21.610s、billing33.812s、core9.331s、protocol1.120s、generation66.362s、store68.419s）。生产main完整local.py通过，包含既有strict/未知/强杀恢复、后台、Chat原生持久用量与shadow链；不把该Chat消费者冒充新增embeddings原生明细。OpenAPI0.13.13/117仅同步费用回执说明，schema保持v21，差异/格式与JSON检查通过；最终完整精确头CI另验。
 
 ### P1：最小托管账号推理
 
