@@ -378,6 +378,12 @@ Windows GOARCH=amd64 build与全量vet通过；全量Go首轮仅旧TestFactsDoNo
 
 固定官方Python SDK 2.11.0/httpx0.28.1的Chat/Responses JSON/SSE、工具/UTF-8、终态、截断、关闭和准入释放受控回归同样通过；客户端wire不因增加原生观察而改写。SDK证据仍限loopback夹具，不证明真实Provider。
 
+本批首轮精确头231fd947的两套CI均在原慢读/不读回归失败：旧夹具要求先填满中间HTTP/2窗口，再在2.5秒总预算前观察连续100ms的上游写入停顿，race运行未观察到该条件。新增完整JSON校验可能影响填满窗口的速度，但没有同条件吞吐证据，不据此断言生产性能根因。仅修正该测试的施压与观察位置：反代accepted TCP发送缓冲显式设1024字节，直接计数TLS下实际socket Write的开始/结束；同一写入连续100ms未返回且上游仍活动才证明真实背压。保留1024个有限32KiB事件、真实TLS/HTTP2中间跳、2.5秒总预算/12秒attempt预算、慢读/不读两种条件、单attempt、全部准入/上游排空和后续请求恢复；不删校验、不扩大生产deadline或缓冲，不把JSON处理速度当背压证据。新版完整精确头CI另验。
+
+该测试修复后的完整cmd/gateway本地回归另暴露旧WS预热测试的竞态：native Execute的准入release defer先于usage finish defer执行，因此名额归零不代表用量已封口。仅在原测试增加最多3秒等待预期数量的sealed父记录，再执行原有单attempt、零/未知与权限断言；原已知零/未知组合连续5轮通过。生产生命周期与持久写入顺序未改，不以延时读取掩盖实际失败状态。
+
+两处测试修正后的Windows GOARCH=amd64集中复验：全部P0真实网络子组10.999s、WS预热权限/用量子组5轮12.082s通过，最终完整cmd/gateway包67.045s及包vet通过。首轮CI其他包与两套实际镜像交付均通过；因测试修正产生新头，最终完整CI仍重新验收。两轮清洁231fd947头各100对完整main HTTP/1.1明文串行测量均100%完成、一次attempt、排空无失败；首正文配对P95为3.5151/3.4699ms、首有效文本1.9550/1.7954ms、网关事件上界P95为1.1023/1.2727ms，满足原5/5/2ms预算。原始报告/摘要与资源数写入PR，测试修正不改变所测生产与harness源码；不外推TLS/H2、容量或长期稳定性。
+
 ### P1：最小托管账号推理
 
 - **层级/目录：**L1 `internal/upstreamidentity`、`gateway`、`scheduler`；L2 Provider 编解码；`cmd/gateway` 注入；现有 L3 生成功能消费。

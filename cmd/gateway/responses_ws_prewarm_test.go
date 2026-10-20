@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	ws "github.com/coder/websocket"
 	"minigateway/internal/access"
@@ -63,6 +64,22 @@ func TestResponsesWSPrewarmContinuationRechecksAuthorityAndUsage(t *testing.T) {
 			}
 			if f.attempts.Load() != want || f.httpCalls.Load() != 0 || f.connections.Load() != 1 {
 				t.Fatal("prewarm replayed or bypassed authority")
+			}
+			// Admission release precedes the deferred usage recorder. Wait for
+			// the durable seal rather than reading a still-prepared next round.
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				var sealed int64
+				if err := f.st.DB().Model(&model.UsageInvocation{}).Where("state=?", "sealed").Count(&sealed).Error; err != nil {
+					t.Fatal(err)
+				}
+				if sealed == want {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("prewarm usage did not seal: %d/%d", sealed, want)
+				}
+				time.Sleep(time.Millisecond)
 			}
 			var rows []model.UsageAttemptReceipt
 			if err := f.st.DB().Find(&rows).Error; err != nil || len(rows) != int(want) {
