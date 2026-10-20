@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最新已合并功能头为 `master/16df654d76eddc2cee76c54260cba5306c7adbfe`：固定 Codex WS/预热 PR #72 的精确头 `dfa90e58f4b4234e10b04170aa02e3f08bebc171` 已通过 push Verify `39356956394` 与 PR Verify `39356964030` 全部六项；合并后独立 Verify `39358371893` 尚待完成。最近完整通过合并后CI的基线仍为 `bdd04377e29c34d7a6a4474b727097884408650a` / Verify `39354583737`。客户端搜索 PR #71、Responses 配对基线 PR #70、custom/freeform PR #69 的精确头与合并后证据保留在对应PR。本批新增的实际镜像+固定Codex WS组合不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最新已合并功能头为 `master/e995433ba81497819d4d7ce5504aef61833853a0`：实际镜像固定 Codex WS PR #73 的精确头 `1969574eb34bb81652e7f3ec15460ae3ff4d190d` 已通过 push Verify `39358802030` 与 PR Verify `39358812647` 全部六项；合并后独立 Verify `39360238364` 尚待完成。最近完整通过合并后 CI 的基线为 `16df654d76eddc2cee76c54260cba5306c7adbfe` / Verify `39358371893`。固定 WS/预热 PR #72、客户端搜索 PR #71、Responses 配对基线 PR #70、custom/freeform PR #69 的精确头与合并后证据保留在对应 PR。本批新增占用指标不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.9` / 117 操作；数据库保持 schema v21，FC-P4-CODEX-WS-001 精确头CI已通过并合并，实际镜像+固定客户端组合增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.10` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合已通过精确头 CI 并合并；占用指标增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -265,6 +265,17 @@ P0 扩展有界负载证据（2026-10-20，非长期 soak 验收）：在干净�
 两轮网关各553次资源查询全部可用，CPU增量0.90625/0.984375s，50ms采样working set峰值33763328/33402880字节，private commit峰值65159168/64638976字节，handle峰值207/199；排空后的句柄206/198包含保留连接和运行时初始化，不据此判定泄漏或资源稳定。报告基于源码 `fd127abe377399716595b1dcc5084d73859a6f65` 加未提交harness（dirty=true），stream_baseline.py SHA-256 `210e125279b2039e2b207152c3e7c9d8db4c4886bad23c0cb21fa8c5c78c1a67`，资源采样摘要 `40748d8de431e4ce99a221dfb9960bca1ba989d4bea402b7bf4ca61f357961a0`；与PR #69合并后的生产树完全相同。初次夹具初始化因遗漏凭据密钥文件及其digest_key而失败，补齐独立合成配置后才开始测量，不把零样本算通过。CI追加独立Responses self-check/20对有限测量，数值仅报告；最终同一harness的Chat self-check/5对测量通过；原容量消费者并发4、每worker5请求、两轮，直连40/40与网关40/40完成、8个协调取消排空、两次未发送429及全部4名额恢复均通过；Python AST、测量摘要一致性、CI命令保留及diff检查通过。Go生产树不变，不重复已有全量Go本地回归，最终新头完整CI独立验收。此批不扩大TLS/H2、长期soak、真实Provider或收费验收。
 
 补充既有Chat并发持续基线：在干净 `fd127abe` 上，16worker、每worker50请求、4轮、事件配置5ms，独立重复两遍；每遍直连3200/3200、网关3200/3200均完成、每请求一次发送，每目标41600个完整事件。每遍64个协调取消均观察上游结束，4次过载429均未发出，释放后全部16名额恢复；16个阶段结束后活动上游均为零。网关完整事件观察延迟上界P95为2.4742/2.4562ms；working set采样峰值44306432/44433408字节、private commit峰值76632064/76472320字节、handle峰值均270，所有资源查询可用；两遍运行中预热后句柄分别229→237→237→238及229→229→237→237。报告保留完整样本/阶段资源与源码及三个harness摘要，既有capacity源码摘要 `5ea07723b8c5a05a94c03239889cb400475fee4415fa19664bc28cdf034252c8`。这是有限closed-loop和恢复证据，不代表最大容量、长期资源平稳、并发1配对预算通过或真实Provider运行。
+
+#### FC-P0-OCCUPANCY-001：当前准入与原生 WS 占用指标（2026-10-20）
+
+1. **层级/目录：**L1 access 复用现有 Capacity.Snapshot；L1 gateway 在 NativeWebSocketService 读取现有 sessions/active 状态；叶子 metrics 只输出固定聚合值，cmd/gateway 注入只读提供者。修改上述既有目录、生产入口回归和本方案/OpenAPI，不新增包或后台采集 worker。
+2. **公开依赖与冻结：**新增 metrics.RuntimeStats / SetRuntimeStatsProvider 和 gateway.NativeWebSocketService.Occupancy 组装能力；不改变冻结 observability/v1、control/v1、responsesws/v1 或 L3 功能契约。当前观测不能成为准入、恢复、路由或资金事实。
+3. **地基影响与来源：**L0 不变。主参考 sub2api 固定 f2e5b55f3e8069df1c02a9a27af537b5fdefa64e 的 backend/internal/service/openai_ws_pool.go::accountPoolLoadLocked / AccountPoolLoad（1802–1830）从 owner 当前受锁状态读取连接/在途快照，以及 ops_metrics_collector.go::dbPoolStats（872–878）从资源 owner 读取实际占用。TXAPI 按已有 session/round 与 request/attempt 槽位改写，不引入参考账号池、排队、Redis、持久指标或周期数据库扫描，不复制第三方代码。
+4. **接口、兼容与回退：**既有 /metrics 增加固定无标签 gauges：gateway_admission_requests_active、gateway_admission_attempts_active、gateway_native_ws_enabled、gateway_native_ws_connections_active、gateway_native_ws_rounds_active。连接表示已授权且未完成 Close 的原生 session（不是 TCP FD 或上游池连接）；轮次包含已开始 Execute 的授权/准入/发送/终态收尾，预热同样计入；request/attempt 仍是原两层准入槽位，不能相加当生成总数。跨 owner 快照不保证同一时刻；关闭后仍在释放的资源不能提前报零。没有注入提供者时省略该组；WS 关闭时 enabled=0 且两项 WS 占用为零。无身份、Key、模型、父 ID 或正文标签；保留既有 /metrics 访问边界。删除注入即可回退，无配置/数据库迁移。
+5. **消费者与验收：**真实消费者为生产 main 的 /metrics。定向验证 provider 动态快照/固定输出、未启用行为、空闲连接与活跃轮次分离、busy 拒绝、取消/完成/关闭后的释放及并发抓取；真实 socket 组装回归与实际 main 冒烟证明注入可见，完整 build/vet/Go/精确头 Linux race 与交付集中执行。只声明本切片占用可见，不将其当 CPU/RSS/FD、后台恢复/事件保留指标或长期资源稳定证据。
+6. **其他影响：**无新产品开关、依赖、schema、收费或权限变化；OpenAPI 同步解释指标语义，不增加操作。其余运行验收和真实 Provider 门槛保持待验。
+
+本地受控验证：provider 未注入时省略、动态快照与固定无标签 gauge 输出、WS 关闭时 enabled=0、真实 request/attempt 槽位变化均通过；原生 session 的 busy 拒绝、活跃轮次取消与 Close join、并发读取通过。真实 socket 完成与断开两种路径分别观察空闲 1连接/0轮次、执行 1/1、完成保留连接及关闭后全部释放，且只有1次实际上游发送、零HTTP回退。Windows GOARCH=amd64 build、vet、全量 Go 回归通过；生产 main 的完整 local.py 冒烟通过，包含本批关闭 WS 的 /metrics 注入断言与既有 strict 拒绝、结算、密钥轮换、后台/用量强杀恢复及 shadow。OpenAPI0.13.10/117、Python语法、差异/局部格式及方案链接检查通过。未执行本地 Docker/race；最终精确头 Linux 完整 CI/交付仍待验收。
 
 ### P1：最小托管账号推理
 
@@ -535,7 +546,7 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 
 </details>
 
-#### P4 固定 Codex WS 实际镜像交付子批（源码与本地夹具验证完成，镜像CI待验收）
+#### P4 固定 Codex WS 实际镜像交付子批（精确头完整 CI 通过并合并）
 
 1. **层级/目录：**仅测试侧 `tests/upstream/nativews`、`tests/smoke/native_ws_delivery.py`、固定客户端脚本和 Verify；使用交付 Dockerfile 构建的真实 gateway main，不修改产品热路径。
 2. **公开依赖：**消费现有 API Key/模型授权、原生 WS、连接本地父 ID、disabled 用量及管理查询；无公开契约、配置默认值、schema、依赖或收费许可变化。`--codex` 是隔离交付测试的可选入口，不是产品配置。
@@ -544,7 +555,7 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 5. **验证：**本地验证TLS夹具和固定客户端；实际main的镜像四场景由完整Linux CI执行，并保留现有SDK、历史/重启/SIGKILL及完整检查。客户端归零退出不替代上游观察，Docker未运行时不记镜像通过；超时、失败也收尾并保留脱敏诊断。
 6. **来源/协作：**主参考仍为codex-proxy-rs `60570883007febebe732597a9881397098d724f5` 的 `backend/crates/providers/openai/src/transport/protocol/websocket.rs::websocket_response_create_payload` 及 `backend/crates/providers/openai/tests/transport/websocket_pool.rs` 中独立downstream预热/connection-local parent场景，采用真实预热和逐连接关联的回归机制，独立Go/Python夹具复用TXAPI现有交付链；不复制Rust代码或池化/自动回退。该组合不证明真实Provider、完整默认Codex工具、长期负载或收费完成。
 
-本地受控验证：TLS夹具四模型均完成真实预热、工具回传和文本终态，另一物理连接携旧父ID被拒并留下失败观察；既有TLS/Upgrade/SDK夹具回归与该包vet通过。固定Codex0.163.0复用同一客户端函数的四个WS场景全部通过，独立Go组装观察仍要求11次实际发送、4个预热和零HTTP回退。Python语法通过。实际镜像新增观察同时比较前端反代和上游HTTP POST计数，拒绝在网关提前失败而被上游观察遗漏的回退；最终快照分别核对29条用量和18条历史，11次store=false客户端请求不新增历史。此处描述已实现的断言，实际Docker结果待精确头LinuxCI，不将本地夹具通过写成镜像验收。
+本地受控验证：TLS夹具四模型均完成真实预热、工具回传和文本终态，另一物理连接携旧父ID被拒并留下失败观察；既有TLS/Upgrade/SDK夹具回归与该包vet通过。固定Codex0.163.0复用同一客户端函数的四个WS场景全部通过，独立Go组装观察仍要求11次实际发送、4个预热和零HTTP回退。Python语法通过。实际镜像新增观察同时比较前端反代和上游HTTP POST计数，拒绝在网关提前失败而被上游观察遗漏的回退；最终快照分别核对29条用量和18条历史，11次store=false客户端请求不新增历史。PR #73 精确头 `1969574eb34bb81652e7f3ec15460ae3ff4d190d` 的 push Verify `39358802030` / PR Verify `39358812647` 全部六项成功，交付日志明确确认四场景、11次发送/回执、4次预热/连接、零HTTP回退及镜像TLS/反代/重启/强杀保护通过；已合并为 `e995433ba81497819d4d7ce5504aef61833853a0`，合并后CI单独记录。不声称真实Provider、完整默认Codex或收费完成。
 
 ### P5：账号信号与调度评估
 
@@ -654,15 +665,6 @@ P6 本批交付验证范围（2026-10-20）：①仅 `tests/upstream/nativews`�
 - **行为/契约：**分别证明用户收费上限、单次 Provider 成本和全部尝试累计上界；绑定模型/操作/账号、最高适用价格、输入输出限制、计价维度、价格版本和有效假设，无法证明则发送前拒绝。
 - **验收：**覆盖批量输入、完整历史/工具定义、输出/推理/缓存/等级、失败请求收费、税/附加项、途中改价、映射/有限重试、跨 Key 并发、溢出及未知 attempt。界限/依据/拒绝原因可由后端查询，异常实际用量保留 pending；复用适用崩溃证据，新增行为补回归。
 - **协作影响：**可与 P1/P4 独立研究；不因账号闭环或 usage 接线而扩大 strict。只有每个准许组合的完整证据成立才关闭 S5-03，S5 完成也不代表支付平台就绪。
-
-#### FC-P0-OCCUPANCY-001：当前准入与原生 WS 占用指标（2026-10-20）
-
-1. **层级/目录：**L1 access 复用现有 Capacity.Snapshot；L1 gateway 在 NativeWebSocketService 读取现有 sessions/active 状态；叶子 metrics 只输出固定聚合值，cmd/gateway 注入只读提供者。修改上述既有目录、生产入口回归和本方案/OpenAPI，不新增包或后台采集 worker。
-2. **公开依赖与冻结：**新增 metrics.RuntimeStats / SetRuntimeStatsProvider 和 gateway.NativeWebSocketService.Occupancy 组装能力；不改变冻结 observability/v1、control/v1、responsesws/v1 或 L3 功能契约。当前观测不能成为准入、恢复、路由或资金事实。
-3. **地基影响与来源：**L0 不变。主参考 sub2api 固定 f2e5b55f3e8069df1c02a9a27af537b5fdefa64e 的 backend/internal/service/openai_ws_pool.go::accountPoolLoadLocked / AccountPoolLoad（1802–1830）从 owner 当前受锁状态读取连接/在途快照，以及 ops_metrics_collector.go::dbPoolStats（872–878）从资源 owner 读取实际占用。TXAPI 按已有 session/round 与 request/attempt 槽位改写，不引入参考账号池、排队、Redis、持久指标或周期数据库扫描，不复制第三方代码。
-4. **接口、兼容与回退：**既有 /metrics 增加固定无标签 gauges：gateway_admission_requests_active、gateway_admission_attempts_active、gateway_native_ws_enabled、gateway_native_ws_connections_active、gateway_native_ws_rounds_active。连接表示已授权且未完成 Close 的原生 session（不是 TCP FD 或上游池连接）；轮次包含已开始 Execute 的授权/准入/发送/终态收尾，预热同样计入；request/attempt 仍是原两层准入槽位，不能相加当生成总数。跨 owner 快照不保证同一时刻；关闭后仍在释放的资源不能提前报零。没有注入提供者时省略该组；WS 关闭时 enabled=0 且两项 WS 占用为零。无身份、Key、模型、父 ID 或正文标签；保留既有 /metrics 访问边界。删除注入即可回退，无配置/数据库迁移。
-5. **消费者与验收：**真实消费者为生产 main 的 /metrics。定向验证 provider 动态快照/固定输出、未启用行为、空闲连接与活跃轮次分离、busy 拒绝、取消/完成/关闭后的释放及并发抓取；真实 socket 组装回归与实际 main 冒烟证明注入可见，完整 build/vet/Go/精确头 Linux race 与交付集中执行。只声明本切片占用可见，不将其当 CPU/RSS/FD、后台恢复/事件保留指标或长期资源稳定证据。
-6. **其他影响：**无新产品开关、依赖、schema、收费或权限变化；OpenAPI 同步解释指标语义，不增加操作。其余运行验收和真实 Provider 门槛保持待验。
 
 ## 集成验收与后续门槛
 
