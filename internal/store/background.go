@@ -547,7 +547,7 @@ func (s *Store) CleanupBackground(ctx context.Context, limit int) error {
 			if e := tx.Where("task_id = ?", row.ID).Delete(&model.BackgroundEvent{}).Error; e != nil {
 				return e
 			}
-			changes := map[string]interface{}{"ciphertext": []byte{}, "snapshot": []byte{}, "reserved_bytes": 0, "stored_bytes": 0, "replay_pending": false, "revision": gorm.Expr("revision + 1"), "claim_hash": "", "claim_until": 0}
+			changes := map[string]interface{}{"ciphertext": []byte{}, "snapshot": []byte{}, "reserved_bytes": 0, "stored_bytes": 0, "event_count": 0, "replay_pending": false, "revision": gorm.Expr("revision + 1"), "claim_hash": "", "claim_until": 0}
 			if row.Stage != string(bg.StageTerminal) {
 				changes["stage"] = bg.StageUncertain
 			}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"minigateway/internal/access"
@@ -68,9 +69,19 @@ type BackgroundRunnerOptions struct {
 	Resolve func(context.Context, access.Binding) (access.Principal, error)
 }
 type BackgroundRunner struct {
-	opts   BackgroundRunnerOptions
-	cancel context.CancelFunc
-	done   chan struct{}
+	opts           BackgroundRunnerOptions
+	cancel         context.CancelFunc
+	done           chan struct{}
+	activeControls atomic.Int64
+}
+
+// ActiveControls counts claimed control operations through release cleanup.
+// It is not the number of remote generations or currently valid leases.
+func (r *BackgroundRunner) ActiveControls() int64 {
+	if r == nil {
+		return 0
+	}
+	return r.activeControls.Load()
 }
 
 // Fixed, queue-less workers bound control traffic separately from generation
@@ -133,6 +144,8 @@ func (r *BackgroundRunner) runOne(parent context.Context) (err error) {
 	if e != nil {
 		return e
 	}
+	r.activeControls.Add(1)
+	defer r.activeControls.Add(-1)
 	p := &backgroundProgress{service: s, remote: r.opts.Remote, row: row, claim: claim}
 	defer func() {
 		cleanup, end := context.WithTimeout(context.Background(), 2*time.Second)
