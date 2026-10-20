@@ -19,38 +19,40 @@ const MaxInput = 256 << 10
 const MaxEvents = 8192
 
 type Record struct {
-	ID               string
-	PublicID         string
-	UserID           uint
-	TokenID          uint
-	Operation        string
-	Model            string
-	KeyHash          string
-	NamespaceHash    string
-	RequestHash      string
-	DigestVersion    string
-	Stage            string
-	Stream           bool
-	Store            bool
-	Revision         uint64
-	CreatedAt        int64
-	Deadline         int64
-	ContentExpiresAt int64
-	ExpiresAt        int64
-	ReservedBytes    int64
-	Ciphertext       []byte
-	Snapshot         []byte
-	ClaimEpoch       int64
-	ClaimHash        string
-	ClaimUntil       int64
-	CancelRequested  bool
-	DueAt            int64
-	LastSequence     int64
-	StoredBytes      int64
-	EventCount       int64
-	Deleted          bool
-	ReplayPending    bool
-	UsageMetadata    UsageMetadata
+	// HistoryReservation is transient admission data, never persisted as task metadata.
+	HistoryReservation *HistoryReservation
+	ID                 string
+	PublicID           string
+	UserID             uint
+	TokenID            uint
+	Operation          string
+	Model              string
+	KeyHash            string
+	NamespaceHash      string
+	RequestHash        string
+	DigestVersion      string
+	Stage              string
+	Stream             bool
+	Store              bool
+	Revision           uint64
+	CreatedAt          int64
+	Deadline           int64
+	ContentExpiresAt   int64
+	ExpiresAt          int64
+	ReservedBytes      int64
+	Ciphertext         []byte
+	Snapshot           []byte
+	ClaimEpoch         int64
+	ClaimHash          string
+	ClaimUntil         int64
+	CancelRequested    bool
+	DueAt              int64
+	LastSequence       int64
+	StoredBytes        int64
+	EventCount         int64
+	Deleted            bool
+	ReplayPending      bool
+	UsageMetadata      UsageMetadata
 }
 type Event struct {
 	TaskID     string
@@ -64,12 +66,26 @@ type Claim struct {
 	Token string
 }
 type Update struct {
+	History       *state.HistoryChange
 	Stage         bg.Stage
 	Snapshot      []byte
 	Events        []Event
 	DueAt         int64
 	ReplayPending bool
 	UsageMetadata *UsageMetadata
+}
+
+type HistoryReservation struct {
+	Row    state.ResponseHistory
+	Limits state.HistoryLimits
+}
+
+// HistoryBusy binds a private pending history slot to its background task.
+func HistoryBusy(id string) string {
+	if len(id) != 64 {
+		return ""
+	}
+	return "bg_" + id[:32]
 }
 
 // UsageMetadata is bounded task metadata, atomically saved with the snapshot.

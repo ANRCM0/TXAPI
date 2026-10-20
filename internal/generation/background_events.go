@@ -141,20 +141,25 @@ func (p *backgroundProgress) ObserveUsage(ctx context.Context, detail bgv2.Obser
 		if e != nil {
 			return e
 		}
-		snapshot, e := p.service.sealSnapshot(p.row, next)
+		candidate := next
+		publication, e := p.preparePublication(ctx, &candidate)
+		if e != nil {
+			return e
+		}
+		snapshot, e := p.service.sealSnapshot(p.row, candidate)
 		if e != nil {
 			return e
 		}
 		pending := stage == bg.StageTerminal && p.row.Stream && !next.EventComplete && !next.EventUnavailable
 		metadata := &bs.UsageMetadata{NativeState: next.NativeState, Usage: next.DetailedUsage}
-		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: stage, Snapshot: snapshot, Events: events, ReplayPending: pending, DueAt: time.Now().Add(time.Second).UnixMilli(), UsageMetadata: metadata})
+		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: stage, Snapshot: snapshot, Events: events, ReplayPending: pending, DueAt: time.Now().Add(time.Second).UnixMilli(), UsageMetadata: metadata, History: publication})
 		if errors.Is(e, bg.ErrConflict) {
 			continue
 		}
 		if e != nil {
 			return e
 		}
-		p.row, p.snapshot = row, next
+		p.row, p.snapshot = row, candidate
 		if finishRate {
 			p.remote.FinishRate(ctx, row.TokenID, next.Rate, next.Usage)
 		}

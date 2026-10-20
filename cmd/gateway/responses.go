@@ -124,7 +124,7 @@ func startResponsesRuntime(cfg config.ResponsesConfig, st *store.Store, gw *gate
 			return nil, err
 		}
 		b := cfg.Background
-		backgroundService, err = generation.NewBackgroundService(ctx, generation.BackgroundOptions{Repository: st, Parser: native.BackgroundParser{}, History: historyRepository, Compiler: native.BackgroundHistoryCodec{}, BillingMode: gw.BillingMode(), ActiveKey: keys.Active, Keys: keys.Keys, DigestKey: keys.Digest,
+		backgroundService, err = generation.NewBackgroundService(ctx, generation.BackgroundOptions{Repository: st, Parser: native.BackgroundParser{}, History: historyRepository, Compiler: native.BackgroundHistoryCodec{}, Projector: native.BackgroundHistoryCodec{}, BillingMode: gw.BillingMode(), ActiveKey: keys.Active, Keys: keys.Keys, DigestKey: keys.Digest,
 			Retention: time.Duration(b.RetentionSeconds) * time.Second, MetadataRetention: time.Duration(b.MetadataSeconds) * time.Second,
 			Limits: bs.Limits{InstanceRecords: b.InstanceRecords, OwnerRecords: b.OwnerRecords, InstanceBytes: b.InstanceBytes, OwnerBytes: b.OwnerBytes, InstanceActive: b.InstanceActive, OwnerActive: b.OwnerActive}})
 		if err != nil {

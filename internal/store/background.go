@@ -89,7 +89,7 @@ func (s *Store) InitializeBackground(ctx context.Context, digest, mode string) (
 		for _, row := range rows {
 			records = append(records, backgroundSnapshot(row))
 		}
-		return nil
+		return releaseInactiveBackgroundHistory(tx)
 	})
 	return
 }
@@ -266,6 +266,9 @@ func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Lim
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
+		if err := reserveBackgroundHistory(tx, in); err != nil {
+			return err
+		}
 		out = backgroundSnapshot(row)
 		return nil
 	})
@@ -339,6 +342,9 @@ func cancelBackgroundRow(tx *gorm.DB, row *model.BackgroundJob) error {
 		row.Ciphertext, row.ReservedBytes, row.ClaimHash, row.ClaimUntil = []byte{}, 0, "", 0
 		updates["stage"], updates["ciphertext"], updates["reserved_bytes"] = row.Stage, []byte{}, 0
 		updates["claim_hash"], updates["claim_until"] = "", 0
+		if err := releaseBackgroundHistory(tx, *row); err != nil {
+			return err
+		}
 	}
 	return tx.Model(&model.BackgroundJob{}).Where("id = ?", row.ID).Updates(updates).Error
 }
@@ -394,6 +400,9 @@ func (s *Store) ClaimBackground(ctx context.Context, lease time.Duration) (out b
 		now := time.Now().UnixMilli()
 		// An expired dispatch lease cannot prove that POST was never accepted.
 		if e := tx.Model(&model.BackgroundJob{}).Where("stage = ? AND claim_until <= ?", bg.StageDispatching, now).Updates(map[string]interface{}{"stage": bg.StageUncertain, "claim_hash": "", "claim_until": 0, "revision": gorm.Expr("revision + 1")}).Error; e != nil {
+			return e
+		}
+		if e := releaseInactiveBackgroundHistory(tx); e != nil {
 			return e
 		}
 		var row model.BackgroundJob
@@ -541,6 +550,9 @@ func (s *Store) UpdateBackground(ctx context.Context, c bs.Claim, revision uint6
 		if len(in.Events) > 0 && row.StoredBytes+int64(len(row.Snapshot))+int64(len(row.Ciphertext)) > row.ReservedBytes-1024 {
 			return bg.ErrCapacity
 		}
+		if e = updateBackgroundHistory(tx, row, in); e != nil {
+			return e
+		}
 		row.Stage = string(in.Stage)
 		row.ReplayPending = in.ReplayPending
 		row.Revision++
@@ -569,6 +581,9 @@ func (s *Store) ReleaseBackground(ctx context.Context, c bs.Claim, due int64) er
 		if row.Stage == string(bg.StageDispatching) {
 			row.Stage = string(bg.StageUncertain)
 			row.Revision++
+			if e := releaseBackgroundHistory(tx, row); e != nil {
+				return e
+			}
 		}
 		row.ClaimHash = ""
 		row.ClaimUntil = 0
@@ -590,6 +605,9 @@ func (s *Store) CleanupBackground(ctx context.Context, limit int) error {
 			return e
 		}
 		for _, row := range rows {
+			if e := releaseBackgroundHistory(tx, row); e != nil {
+				return e
+			}
 			if e := tx.Where("task_id = ?", row.ID).Delete(&model.BackgroundEvent{}).Error; e != nil {
 				return e
 			}

@@ -31,6 +31,7 @@ type BackgroundOptions struct {
 	Parser            execv1.Parser
 	History           history.Repository
 	Compiler          history.BackgroundCompiler
+	Projector         history.BackgroundHistoryProjector
 	BillingMode       string
 	ActiveKey         string
 	Keys              map[string][]byte
@@ -47,6 +48,7 @@ type BackgroundService struct {
 	parser            execv1.Parser
 	history           history.Repository
 	compiler          history.BackgroundCompiler
+	projector         history.BackgroundHistoryProjector
 	mode              string
 	keys              *secrets.Ring
 	digest            []byte
@@ -57,11 +59,12 @@ type BackgroundService struct {
 }
 
 type backgroundPayload struct {
-	Operation     execv1.Operation
-	Body          json.RawMessage
-	Target        *execv1.TargetConstraint `json:",omitempty"`
-	ParentID      string                   `json:",omitempty"`
-	ParentVersion uint64                   `json:",omitempty"`
+	Operation      execv1.Operation
+	Body           json.RawMessage
+	Target         *execv1.TargetConstraint `json:",omitempty"`
+	ParentID       string                   `json:",omitempty"`
+	ParentVersion  uint64                   `json:",omitempty"`
+	PublishHistory bool                     `json:",omitempty"`
 }
 
 func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*BackgroundService, error) {
@@ -69,6 +72,9 @@ func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*Background
 		return nil, bg.ErrUnsupportedBilling
 	}
 	if nilResponseHistoryDependency(o.History) != nilResponseHistoryDependency(o.Compiler) {
+		return nil, bg.ErrUnavailable
+	}
+	if !nilResponseHistoryDependency(o.Projector) && nilResponseHistoryDependency(o.History) {
 		return nil, bg.ErrUnavailable
 	}
 	if len(o.DigestKey) != 32 || o.Retention < 5*time.Minute || o.Retention > time.Hour || o.MetadataRetention < o.Retention || o.MetadataRetention > 7*24*time.Hour ||
@@ -87,7 +93,7 @@ func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*Background
 		return nil, bg.ErrUnavailable
 	}
 	sum := sha256.Sum256(o.DigestKey)
-	s := &BackgroundService{repository: o.Repository, parser: o.Parser, history: o.History, compiler: o.Compiler, mode: o.BillingMode, keys: ring, digest: bytes.Clone(o.DigestKey), version: hex.EncodeToString(sum[:]), retention: o.Retention, metadataRetention: o.MetadataRetention, limits: o.Limits}
+	s := &BackgroundService{repository: o.Repository, parser: o.Parser, history: o.History, compiler: o.Compiler, projector: o.Projector, mode: o.BillingMode, keys: ring, digest: bytes.Clone(o.DigestKey), version: hex.EncodeToString(sum[:]), retention: o.Retention, metadataRetention: o.MetadataRetention, limits: o.Limits}
 	records, err := o.Repository.InitializeBackground(ctx, s.version, o.BillingMode)
 	if err != nil {
 		return nil, safeBackgroundError(err)
@@ -265,13 +271,19 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 	}
 	requestHash := s.hash("request", original)
 	keyHash := s.hash("key", []byte(key))
-	if parentID != "" {
+	legacyReceipt := false
+	if parentID != "" || in.IdempotencyKey != "" {
 		out, found, e := s.repository.LookupBackgroundSubmission(ctx, binding, keyHash, requestHash, string(in.Operation), modelName)
 		if e != nil {
 			return bg.Receipt{}, safeBackgroundError(e)
 		}
 		if found {
-			return s.receipt(out)
+			if out.NamespaceHash != "" || parentID != "" {
+				return s.receipt(out)
+			}
+			// The original admission transaction alone backfills a matching v13
+			// namespace. Its existing receipt must never acquire new history.
+			legacyReceipt = true
 		}
 	}
 	payload := backgroundPayload{Operation: in.Operation, Body: body}
@@ -301,13 +313,26 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 	if request.Operation() != in.Operation || request.Requirements().Operation != in.Operation || request.Requirements().Transport != execv1.Background || request.Stream() != in.Stream || request.Requirements().Stream != in.Stream || !bytes.Equal(request.Body(), body) || request.Model() != modelName {
 		return bg.Receipt{}, bg.ErrUnsupportedCapability
 	}
+	r := bs.Record{ID: id, PublicID: in.ID, UserID: binding.UserID, TokenID: binding.TokenID, Operation: string(in.Operation), Model: request.Model(),
+		KeyHash: keyHash, NamespaceHash: s.foregroundNamespace(binding, key), RequestHash: requestHash, DigestVersion: s.version, Stage: string(bg.StageQueued), Stream: in.Stream, Store: in.Store,
+		Revision: 1, CreatedAt: now.UnixMilli(), Deadline: in.Deadline.UnixMilli(), ContentExpiresAt: now.Add(s.retention).UnixMilli(), ExpiresAt: now.Add(s.metadataRetention).UnixMilli(), ReservedBytes: bs.MaxInput + bs.MaxContent + 512, LastSequence: -1}
+	if _, explicit := flags["store"]; explicit && store && !legacyReceipt && in.Operation == execv1.Responses && !nilResponseHistoryDependency(s.projector) {
+		prepared, prepareErr := s.projector.PrepareBackgroundHistory(payload.Body, r.PublicID)
+		if prepareErr == nil {
+			pending := s.history.Fresh(r.PublicID, "response", r.Model, binding)
+			pending.CreatedAt, pending.ExpiresAt, pending.Busy = r.CreatedAt, r.ContentExpiresAt, bs.HistoryBusy(r.ID)
+			pending, err = s.history.Seal(pending, history.Content{Request: prepared.Request, Input: prepared.Input, Active: pending.Busy, Parent: payload.ParentID})
+			if err != nil {
+				return bg.Receipt{}, backgroundHistoryError(err)
+			}
+			r.HistoryReservation = &bs.HistoryReservation{Row: pending, Limits: s.history.Limits()}
+			payload.PublishHistory = true
+		}
+	}
 	plain, err := json.Marshal(payload)
 	if err != nil || len(plain) > bs.MaxInput {
 		return bg.Receipt{}, bg.ErrCapacity
 	}
-	r := bs.Record{ID: id, PublicID: in.ID, UserID: binding.UserID, TokenID: binding.TokenID, Operation: string(in.Operation), Model: request.Model(),
-		KeyHash: keyHash, NamespaceHash: s.foregroundNamespace(binding, key), RequestHash: requestHash, DigestVersion: s.version, Stage: string(bg.StageQueued), Stream: in.Stream, Store: in.Store,
-		Revision: 1, CreatedAt: now.UnixMilli(), Deadline: in.Deadline.UnixMilli(), ContentExpiresAt: now.Add(s.retention).UnixMilli(), ExpiresAt: now.Add(s.metadataRetention).UnixMilli(), ReservedBytes: bs.MaxInput + bs.MaxContent + 512, LastSequence: -1}
 	r.Ciphertext, err = s.keys.Seal(plain, backgroundAAD(r, "input"))
 	if err != nil {
 		return bg.Receipt{}, bg.ErrUnavailable

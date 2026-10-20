@@ -8,3 +8,22 @@ import "encoding/json"
 type BackgroundCompiler interface {
 	CompileBackground(json.RawMessage, []json.RawMessage) (json.RawMessage, error)
 }
+
+// BackgroundHistoryProjector validates the bounded text/function history subset.
+// It does not authorize, dispatch, encrypt, or publish a response.
+type BackgroundHistoryProjector interface {
+	PrepareBackgroundHistory(json.RawMessage, string) (BackgroundHistoryInput, error)
+	ProjectBackgroundHistory(json.RawMessage, json.RawMessage, string, string, string) (BackgroundHistoryResult, error)
+}
+
+type BackgroundHistoryInput struct {
+	Request json.RawMessage
+	Input   []json.RawMessage
+}
+
+type BackgroundHistoryResult struct {
+	Request  json.RawMessage
+	Input    []json.RawMessage
+	Items    []json.RawMessage
+	Response json.RawMessage
+}

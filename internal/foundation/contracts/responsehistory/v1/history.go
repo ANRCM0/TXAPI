@@ -35,6 +35,7 @@ type Content struct {
 // Seal encrypts only; publication requires a successful Apply. Fresh creates an
 // unpersisted identity with the configured TTL. No method dispatches inference.
 type Repository interface {
+	Limits() state.HistoryLimits
 	Read(context.Context, identity.Binding, string) (state.ResponseHistory, Content, error)
 	Seal(state.ResponseHistory, Content) (state.ResponseHistory, error)
 	Fresh(string, string, string, identity.Binding) state.ResponseHistory

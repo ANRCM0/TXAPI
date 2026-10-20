@@ -19,6 +19,47 @@ func (s *Store) BackgroundKind(ctx context.Context, b identity.Binding, id strin
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var rows []struct{ Kind, Model string }
 		now := time.Now().UnixMilli()
+		var job model.BackgroundJob
+		found := tx.Select("id", "public_id", "user_id", "token_id", "model", "store", "deleted", "stage", "created_at", "content_expires_at").Where("public_id = ?", id).Limit(1).Find(&job)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected != 0 {
+			if job.UserID != b.UserID || job.TokenID != b.TokenID || job.Deleted {
+				return bg.ErrNotFound
+			}
+			var h model.ResponseHistory
+			hit := tx.Select("id", "user_id", "token_id", "kind", "model", "version", "busy", "deleted", "created_at", "expires_at", "reserved_bytes").Where("id = ?", id).Limit(1).Find(&h)
+			if hit.Error != nil {
+				return hit.Error
+			}
+			if hit.RowsAffected != 0 {
+				pending := h.Version == 1 && h.Busy == bs.HistoryBusy(job.ID) && h.CreatedAt == job.CreatedAt && h.ExpiresAt == job.ContentExpiresAt && h.ReservedBytes == model.ResponseHistoryMaxBytes
+				published := h.Version >= 2 && h.Busy == ""
+				if !job.Store || h.UserID != job.UserID || h.TokenID != job.TokenID || h.Model != job.Model || h.Kind != "response" || !pending && !published {
+					return bg.ErrNotFound
+				}
+			}
+			var collisions int64
+			if err := tx.Model(&model.ResponseRequest{}).Where("response_id = ?", id).Count(&collisions).Error; err != nil {
+				return err
+			}
+			if collisions != 0 {
+				return bg.ErrNotFound
+			}
+			if err := backgroundAuthority(tx, b, job.Model); err != nil {
+				return err
+			}
+			if job.ContentExpiresAt > now {
+				kind = bg.BackgroundResource
+				return nil
+			}
+			if hit.RowsAffected != 0 && !h.Deleted && h.Version >= 2 && h.Busy == "" && h.ExpiresAt > now && h.ReservedBytes > 0 {
+				kind = bg.ForegroundResource
+				return nil
+			}
+			return bg.ErrNotFound
+		}
 		// One authority index, not a not-found fallback between content owners.
 		e := tx.Raw(`SELECT 'background' AS kind, model FROM background_jobs
 			WHERE public_id = ? AND user_id = ? AND token_id = ? AND deleted = 0 AND content_expires_at > ?
@@ -59,6 +100,9 @@ func (s *Store) DeleteBackground(ctx context.Context, b identity.Binding, id str
 			return bg.ErrConflict
 		}
 		if e = tx.Where("task_id = ?", row.ID).Delete(&model.BackgroundEvent{}).Error; e != nil {
+			return e
+		}
+		if e = tx.Model(&model.ResponseHistory{}).Where("id = ? AND user_id = ? AND token_id = ? AND model = ? AND kind = 'response'", row.PublicID, row.UserID, row.TokenID, row.Model).Updates(map[string]any{"version": gorm.Expr("version + 1"), "deleted": true, "busy": "", "reserved_bytes": 0, "ciphertext": []byte{}}).Error; e != nil {
 			return e
 		}
 		row.Deleted = true
