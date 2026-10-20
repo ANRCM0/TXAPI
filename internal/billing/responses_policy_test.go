@@ -321,3 +321,34 @@ func TestOperatorPolicySupportsIndependentStaticChatAndEmbeddings(t *testing.T) 
 		}
 	}
 }
+
+func TestResponsesStrictRequestStreamIDRequiresCreate(t *testing.T) {
+	for _, tc := range []struct {
+		fields string
+		valid  bool
+	}{
+		{`"type":"response.create","stream_id":"main",`, true},
+		{`"stream_id":"main",`, false},
+		{`"type":"response.create","stream_id":"other",`, false},
+		{`"type":"response.create","stream_id":null,`, false},
+		{`"type":"response.cancel","stream_id":"main",`, false},
+	} {
+		_, err := ParseResponsesStrictRequest([]byte(`{` + tc.fields + `"model":"m","input":"hi","max_output_tokens":32}`))
+		if (err == nil) != tc.valid {
+			t.Fatalf("fields %s: %v", tc.fields, err)
+		}
+	}
+}
+
+func TestOperatorResponsesWireTransportFields(t *testing.T) {
+	c := operatorContract()
+	body := []byte(`{"type":"response.create","stream_id":"main","model":"m","input":"hi","max_output_tokens":32}`)
+	if err := checkOperatorRequest(c, "wss://relay.example/v1/responses", body); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{string(body), `{"type":"response.create","model":"m","input":"hi","max_output_tokens":32}`} {
+		if err := checkOperatorRequest(c, "https://relay.example/v1/responses", []byte(raw)); !errors.Is(err, ErrProviderLimit) {
+			t.Fatalf("HTTP accepted WS fields: %v", err)
+		}
+	}
+}

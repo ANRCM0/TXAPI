@@ -79,6 +79,14 @@ func checkOperatorRequest(c ProviderCostContract, preparedURL string, body []byt
 	if preparedURL != want && (c.Operation != "responses" || preparedURL != ws) || len(body) > c.MaxRequestBytes {
 		return ErrProviderLimit
 	}
+	if c.Operation == "responses" && preparedURL == want {
+		fields, valid := wireObject(body)
+		_, hasType := fields["type"]
+		_, hasStream := fields["stream_id"]
+		if !valid || hasType || hasStream {
+			return ErrProviderLimit
+		}
+	}
 	var request StrictRequest
 	var err error
 	if c.Operation == "responses" {
@@ -121,11 +129,18 @@ func ParseResponsesStrictRequest(body []byte) (StrictRequest, error) {
 		return invalid()
 	}
 	f, ok := wireObject(body)
-	if !ok || !wireKeys(f, "type", "model", "input", "instructions", "tools", "tool_choice", "parallel_tool_calls", "stream", "store", "background", "max_output_tokens", "temperature", "top_p", "service_tier", "truncation") {
+	if !ok || !wireKeys(f, "type", "stream_id", "model", "input", "instructions", "tools", "tool_choice", "parallel_tool_calls", "stream", "store", "background", "max_output_tokens", "temperature", "top_p", "service_tier", "truncation") {
 		return invalid()
 	}
 	if name, ok := strictString(f["model"]); !ok || name == "" || len(name) > 256 {
 		return invalid()
+	}
+	if raw, exists := f["stream_id"]; exists {
+		kind, valid := strictString(f["type"])
+		stream, validStream := strictString(raw)
+		if !valid || kind != "response.create" || !validStream || stream != "main" {
+			return invalid()
+		}
 	}
 	var limit int
 	if json.Unmarshal(f["max_output_tokens"], &limit) != nil || limit < 1 || limit > 2_147_483_647 {
