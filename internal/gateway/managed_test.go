@@ -120,7 +120,7 @@ func TestManagedExactGrantUsesOneExecutorAndMetadataOnlyCatalogCache(t *testing.
 }
 
 func TestManagedForbiddenFieldsRefuseBeforeAnyWireCall(t *testing.T) {
-	for _, extra := range []string{`"background":false`, `"previous_response_id":null`, `"conversation":null`, `"tools":[]`, `"tool_choice":"none"`, `"temperature":1`, `"max_output_tokens":16`, `"metadata":{}`, `"service_tier":"default"`, `"stream_options":{}`} {
+	for _, extra := range []string{`"background":false`, `"previous_response_id":null`, `"conversation":null`, `"tools":[{"type":"custom","name":"x"}]`, `"tool_choice":{"type":"function","name":"undeclared"}`, `"temperature":1`, `"max_output_tokens":16`, `"metadata":{}`, `"service_tier":"default"`, `"stream_options":{}`} {
 		t.Run(extra, func(t *testing.T) {
 			a, d := &managedAccessFixture{}, &managedDirectoryFixture{}
 			g := newManagedTestGateway(t, a, d, func(*http.Request) (*http.Response, error) { t.Fatal("forbidden request sent"); return nil, nil })

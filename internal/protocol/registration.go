@@ -60,7 +60,8 @@ func Protocols(overrides map[string]adaptor.Adaptor) []execution.ProtocolRegistr
 type siwcAdapterPort struct{ *adapterPort }
 
 func (p *siwcAdapterPort) Supports(r execution.Request) bool {
-	return r.Operation() == execution.Responses && r.Stream() && r.Requirements().Transport == execution.HTTP && !r.Requirements().Tools && p.adapterPort.Supports(r)
+	// Tool kinds remain the managed source owner's closed permission policy.
+	return r.Operation() == execution.Responses && r.Stream() && r.Requirements().Transport == execution.HTTP && p.adapterPort.Supports(r)
 }
 
 func (p *siwcAdapterPort) Prepare(r execution.Request, t execution.Target) (execution.Input, *execution.Error) {

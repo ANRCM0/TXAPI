@@ -12,11 +12,11 @@
 
 ## 当前基线与能力边界
 
-最近已核对主线为 `master/3d0210afb8e2b55d3a033b8aee165d760313cdbe`（PR #94）。最终功能头 `bf984e0fb23ce3a4ac982ac40adac618f6c870f5` 的 push Verify `39463664954`、PR Verify `39463728777` 全六项成功；实际合并主线的独立 Verify `39466422774` 也已完整成功。该功能头与合并主线的完整文件树相同。PR delivery 首次依赖下载网络失败，单独重跑成功，未改变代码或断言。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
+最近已核对主线为 `master/55146008730eb981dbbe37f0d0018375e93b6828`（PR #95）。最终功能头 `107447f9fbac4276386cb597f02a6ca293d72616` 的 push Verify `39472887175`、PR Verify `39472897842` 全六项成功；实际合并主线的独立 Verify `39475507319` 也已完整成功。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
 
-[OpenAPI](openapi.json) 为 `0.13.18` / 117 操作，数据库 schema v21。接口数、测试数和已完成子批数不换算为项目完成百分比。0.13.18 为 P4-A2 本批接口说明，新增能力的验收状态不继承上述主线 CI。
+[OpenAPI](openapi.json) 为 `0.13.19` / 117 操作，数据库 schema v21。接口数、测试数和已完成子批数不换算为项目完成百分比。0.13.19 为 P1-A 本批接口说明，新增能力的验收状态不继承上述主线 CI。
 
-P6-A/P6-B、P4-A1 已通过 PR #92/#93/#94 合入上述主线；当前切片为 P4-A2 固定 Codex 的 Responses 原生压缩 V2。参考项目仍按文末固定 SHA 读取；未升级参考版本，未新增参考程序或真实 Provider 运行证据。
+P6-A/P6-B、P4-A1/P4-A2 已通过 PR #92/#93/#94/#95 合入上述主线；当前切片为 P1-A 单 SIWC 账号 HTTP function 轮次。参考项目仍按文末固定 SHA 读取；未升级参考版本，未新增参考程序或真实 Provider 运行证据。
 
 | 能力 | 已验收范围 | 当前限制 |
 |---|---|---|
@@ -26,7 +26,7 @@ P6-A/P6-B、P4-A1 已通过 PR #92/#93/#94 合入上述主线；当前切片为 
 | 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复、任务用量元数据；P6-A 父历史输入与 P6-B 显式 store=true 的 completed 文本/function 结果原子历史发布 | 默认关闭且仅 disabled；仅新受理且可重建的文本/function 结果发布，旧任务不补建；收费未实现 |
 | 原生 WS | 双端原生连接、逐轮授权/准入、串行文本与声明工具；显式持久续链、HTTP/WS 跨模式、prewarm/reasoning、固定 SDK/Codex 与受控镜像回归 | 默认关闭且仅 disabled；默认只支持连接内最新父 ID，持久历史须显式开启；后台跨模式仅已发布文本/function 子集，收费与任意多路复用未完成 |
 | 执行与路由 | 唯一执行事实、资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow；阶段超时、有限响应头和重放审计 | shadow 默认关闭且不控制路由；无准入等待队列，不代表外部 Runtime |
-| 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流、P2 有界刷新、P3 资格反馈/人工恢复的受控闭环 | 无完整账号池；reset 未知，不自动推断恢复；真实 OAuth、过期/轮换和限流未验收 |
+| 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流，P1-A 本批扩展顶层 function 轮次、P2 有界刷新、P3 资格反馈/人工恢复的受控闭环 | 无完整账号池；reset 未知，不自动推断恢复；真实 OAuth、过期/轮换和限流未验收 |
 | 用量与计费 | Responses/Chat/embeddings 原生 Token 明细、不可变售价、定点价格、双 hold、幂等结算、对账/未知保护；WS 每轮明细和后台任务用量 | 缺失与部分用量保持未知；通用用量历史仅 disabled；后台/WS 收费未实现，S5-03 未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取、占用指标；固定客户端、实际镜像安装/升级/备份恢复回归 | 受控环境通过；真实 Provider 部署、生产告警阈值、备份保管和运维演练未验收 |
 
@@ -39,9 +39,9 @@ P6-A/P6-B、P4-A1 已通过 PR #92/#93/#94 合入上述主线；当前切片为 
 | P8 完整成本证明 | 已登记 strict Chat/embeddings 档案、双预算与恢复账本 | 缺逐凭据最高适用费率、失败收费、税/附加项、未来改价假设和完整计量证明；S5-03 不能关闭 |
 | P0 完整性能与承载 | HTTP/1.1、TLS/H2、受控反代、慢读/取消/过载恢复、一次 30 分钟 Windows 持续流 | 完整长时 soak、最大稳定容量、目标部署网络/SLO 和完整性能验收仍开放 |
 | P4 真实兼容 | 固定 HTTP/WS SDK、Codex、工具和受控 Provider 回归 | 至少一个声明范围内的真实 Provider/客户端完整组合未验收；按当前指示跳过真实调用 |
-| P4 默认客户端接入 | 标准 `/v1/models`、固定 Codex 文本/工具/WS 回归 | P4-A1 已合并标准配置 HTTP 文本/function 与缓存搜索轮次；P4-A2 本批验证默认文本摘要与显式 V2 压缩及 opaque 重发，验收见本批 PR。没有 Codex 专用版本化目录或 standalone compact 操作，不声明默认全面兼容 |
+| P4 默认客户端接入 | 标准 `/v1/models`、固定 Codex 文本/工具/WS 回归 | P4-A1 已合并标准配置 HTTP 文本/function 与缓存搜索轮次；P4-A2 已合并默认文本摘要与显式 V2 压缩及 opaque 重发，证据见 PR #95。没有 Codex 专用版本化目录或 standalone compact 操作，不声明默认全面兼容 |
 | P1/P2/P3 真实账号生命周期 | 单 SIWC 文本流、刷新、资格反馈及人工恢复受控验收 | 真实 OAuth、过期、Token 轮换、账号限流和恢复缺外部证据；不扩展为完整账号池 |
-| P1 托管账号消费者扩展 | 静态 Key 已有工具能力，托管账号有实时 AcquireAccess 和单绑定文本流 | 托管账号的封闭正文校验仍拒绝工具及工具结果；先做单账号 HTTP function 工具轮次，不直接扩大到 WS、后台或账号池 |
+| P1 托管账号消费者扩展 | 静态 Key 已有工具能力，托管账号有实时 AcquireAccess 和单绑定文本流 | 本批封闭校验扩展顶层 function 定义及自包含调用/结果，接固定 HTTP SDK；验收见本批 PR，不扩大到 namespace/custom/search、WS、后台或账号池 |
 | 生产可操作性 | 受控镜像安装/升级、停写备份恢复、任务/账本查询和占用指标 | 告警阈值、备份保管、生产网络及运维演练需目标部署环境验收 |
 
 近期功能顺序为 **P6-A 后台承接已有历史 → P6-B 后台结果续链 → P4-A 固定客户端标准配置接入 → P1-A 单托管账号工具轮次**。P0-C 受控容量/多协议持续运行与 P8-A 成本证据梳理可独立推进，受影响的 P0/P4 回归随功能批次完成。P7 收费等待逐操作 P8 证明；P5 多账号评分、WS 池/多路复用和准入等待队列保留启用条件。真实调用跳过不等于全部剩余开发受阻。
@@ -115,7 +115,7 @@ strict 当前仅放行已登记的官方 OpenAI 文本 Chat/embeddings 档案；
 | 转发与转换 | new-api `relay/helper/stream_scanner.go`、`relaykit/relayconvert/text_converter_registry.go` 的流收尾、转换路线/质量声明；codex-proxy-rs 的 raw frame/观察分离 | 完整 SSE、跨 Provider 现有转换、阶段超时、背压和有限头已交付；[协议目录](../internal/protocol)与[阶段实现](../internal/gateway/http_stage_timeouts.go)继续持有规则 | 复用现有链路，只修具体现象；不再把完整事件、阶段超时列为待建框架。质量标签不能替代字段保真或成本证明 |
 | 续链与连接范围 | codex-proxy-rs `backend/crates/gateway-core/src/engine/continuation.rs::NativeContinuationPin` 区分 Persisted/ConnectionLocal 并绑定客户端/Provider/账号；pool `lease.rs` 分离 reservation、连接与 lease | [StoredRounds](../internal/generation/response_history_stored.go) 已有 owner/Key、目标约束与加密历史；P6-A 由 [background owner](../internal/generation/background_history.go) 展开父历史，再交原 BackgroundParser 验证完整正文 | P6 拆为输入继承和结果发布；采用 scope/绑定规则，不把参考 affinity pin 作为本地持久历史，也不假设参考已有 TXAPI 式后台事务实现 |
 | 客户端默认路径 | codex-proxy-rs `backend/crates/gateway-api/src/openai/models.rs::models_response` 按 client_version 返回目录；sub2api `openai_codex_models_service.go` 有有界缓存/权限过滤；new-api 有独立 Responses compact 路径 | [ListModels](../internal/compat/generationhttp/handler.go) 仅标准列表；[固定 Codex 消费者](../tests/smoke/codex_conformance.py) 部分使用 model_catalog_json；server 未注册 standalone compact；固定 Codex 0.163.0 V2 实际使用普通 Responses input 触发 | P4-A 按实际客户端请求补长会话场景；V2 范围独立登记而复用唯一 Responses owner，传统独立路径另有消费者才实施，不从普通 Responses 推断所有压缩模式 |
-| 托管账号与路由 | sub2api `token_refresh_service.go`、`openai_account_scheduler.go` 有分页刷新、资格/亲和/负载选择；codex-proxy-rs Provider 持有账号 revision 和执行绑定；CRS scheduler 有专属绑定与会话亲和 | [managed.go](../internal/gateway/managed.go) 的 validateManagedBody 仅允许 model/input/instructions/store/stream，现有 P2/P3 已有 CAS/uncertain/资格 owner；多账号可信信号不足 | 先扩展单账号消费者的工具闭环，复用刷新和资格；不为采用调度器先建设账号池，不把估计 reset 当 Provider 事实 |
+| 托管账号与路由 | sub2api `token_refresh_service.go`、`openai_account_scheduler.go` 有分页刷新、资格/亲和/负载选择；codex-proxy-rs Provider 持有账号 revision 和执行绑定；CRS scheduler 有专属绑定与会话亲和 | [managed.go](../internal/gateway/managed.go) 的 validateManagedBody 本批增加 tools/tool_choice/parallel_tool_calls 与有界配对 function input，现有 P2/P3 已有 CAS/uncertain/资格 owner；多账号可信信号不足 | 先扩展单账号消费者的工具闭环，复用刷新和资格；不为采用调度器先建设账号池，不把估计 reset 当 Provider 事实 |
 | 工具、错误与用量 | CRS `openaiResponsesRelayService.js` 的事件/用量提取和 scheduler 的会话失效可提供回归场景；其选定路径缺 usage 时补零、直接 res.write 的做法不能证明严格用量与背压 | 声明工具、原生部分/未知 usage、同步背压和 WS/后台元数据已实现 | 保留已验语义；P4 补默认客户端字段及失败场景，P7 不复制补零或按流事件直接扣费 |
 | 收费与恢复 | new-api `service/billing_session.go::Settle/Refund` 为分步提交及异步退款；sub2api 的调度/计费提供多维计价场景 | TXAPI 有持久双 hold、未知占用、不可变报价和强杀恢复；最高凭据费率/失败收费/附加项等仍缺证据 | P8 与功能开发独立记账；参考项目已收费不构成 TXAPI 完整成本证明，不替换现有事务资金权威 |
 | 承载与运维 | sub2api `openai_ws_pool.go::Acquire/Release`、codex-proxy-rs pool lease 展示有界租借/排空机制，参考项目还有更广管理面 | 当前单实例 SQLite、有限准入、受控交付和一次 Windows HTTP/1.1 30 分钟结果已具备；多协议长时/容量边界和实际现场运维仍缺 | 先完成 P0-C 的受控容量和 TLS/H2/反代持续证据；池化、排队和新运维平台必须有数据/消费者，受控上限不冒充生产上限 |
@@ -186,6 +186,17 @@ P0–P8 按可独立验收的切片推进，已验收子集保留，不重复立
 - **测试/验收：**固定 CLI 原始轮次→真实 V2 trigger→opaque 压缩结果→下一轮原样重发→completed，保留现有标准配置回归；JSON/SSE、未知元数据、部分/缺失 usage、failed/incomplete/截断、取消/超时、敏感错误脱敏与单次发送。验证 store、后台、WS、managed、收费和非法 shape 拒绝；集中本地检查与精确头完整 CI，真实调用继续跳过。
 - **其他模块影响与来源：**主参考固定 codex-proxy-rs `60570883007febebe732597a9881397098d724f5` 的 gateway-protocol/src/openai/codex.rs 请求语义、gateway-api/src/openai/responses/request.rs 原始 Generate 包络、providers/openai/src/transport/request.rs::scope_request_to_account 不透明 input 保留和 headers.rs Lite 标记；严格形状/范围由 TXAPI owner 原生补强。不采用 search_history.rs 的 hosted additional_tools 注入；new-api standalone compact 仅用于确认与实际消费者路径不同，未复制 AGPL 代码。
 
+### P1-A 具体变更请求：单 SIWC 账号 HTTP function 轮次
+
+2026-10-21 按当前任务同类契约调整直接实施的授权登记。扩展现有托管请求的封闭文本子集，通过固定 Python SDK 消费 function 定义、原生调用、客户端结果及下一轮输出。只验证受控账号状态与模拟 Provider；目录可见和既有 scope 不证明真实 SIWC 的工具支持。
+
+- **层级/目录：**L1 gateway 持有托管正文许可与既有账号发送校验；L2 protocol 的 SIWC adapter 声明 HTTP 流式工具能力并复用原生 Responses codec；cmd/gateway 和 tests/smoke 提供生产组装/固定 SDK 消费者，CI/Makefile 接入现有 SDK 回归。
+- **公开依赖：**复用 execution/v1-v4、upstreamauth/v1-v3、configuration/v2、既有 Responses 与用量端口；不新增冻结接口、凭据缓存或第二条执行链。SIWC Supports 的 Tools 位只允许进入现有 L1 封闭校验后的原生执行。
+- **地基影响：**最多 64 个唯一顶层 function，名称为 1..64 个 ASCII 字母/数字/下划线/连字符；可选 description、object parameters、boolean strict。parameters 与单次 arguments/result 各上限 64 KiB；arguments 为自包含 JSON object，result 为字符串。每请求最多 128 对唯一 call_id 的已完成调用/结果，结果须关联前面的调用且不得重复，禁止未配对历史和远端 item lookup。optional id 有界，未知字段继续拒绝，正文仍受原 1 MiB 上限约束。
+- **契约/迁移/回退：**仅单绑定、原生 HTTP stream=true、显式 store=false、disabled；tool_choice 支持 auto/none/required 或已声明的顶层 function，parallel_tool_calls 仅 boolean。现有 SIWC resource 与 resource.invoke/chatgpt.tokens.use.direct 检查、每次发送 AcquireAccess、revision/epoch、目录与资格反馈保持；不增加 OAuth scope。namespace/custom/search/compaction/reasoning、WS、后台、持久父链和收费不继承支持。无 schema/config 迁移，旧版本回退为拒绝新增正文。
+- **测试/验收：**固定 SDK 经真实 HTTP socket 完成工具往返，检查原始正文、分片/UTF-8/终态/原生用量、每轮重新授权、单 attempt 与容量释放；非法 shape/上限、owner/Key/模型隔离、停用/刷新/重授权与发送竞争、旧 revision/uncertain/过期禁发、错误脱敏/取消与无静态 Key 回退。批次稳定后集中本地验证，完整精确头 CI 后合并，合并后主线独立记账。
+- **其他模块影响与来源：**主参考固定 codex-proxy-rs 60570883007febebe732597a9881397098d724f5 的 providers/openai/src/transport/request.rs::scope_request_to_account/encode_generate_request，将可信账号身份与自包含工具正文分开；canonical.rs::output_item_added/tool_item_done 提供 call_id 与增量/完成场景。参考使用其 Codex 账号与租借体系，不能证明本项目 SIWC 权限，因此在既有 TXAPI owner 原生补强范围校验，不复制其池/存储/身份字段或源码。Apache-2.0 来源与采用落点保留在文末。
+
 ### P0：核心转发保真、稳定性与性能
 
 L0 `internal/core` 只持有机械发送/读写事实；L1 gateway/scheduler 决定路由与重试，L2 protocol/compat/transport 决定协议与输出。已完成完整 SSE、阶段超时、有限响应头、传输自动重放修正、真实网络释放、TLS/H2/反代、并发/过载恢复与有限持续流子批。继续复用唯一 executor、资源代次和已批准 execution 端口，不先重写内核。
@@ -214,11 +225,11 @@ L0 `internal/core` 只持有机械发送/读写事实；L1 gateway/scheduler 决
 
 ### P1：最小托管账号推理
 
-L1 upstreamidentity/gateway/scheduler 持有账号、资格与发送授权，L2 Provider 编解码，组装根只注入。已完成单 SIWC account/owner/call Key/实际 slug/channel/credential 绑定的受控 Responses HTTP/SSE 文本流，消费现有 upstreamauth 状态机，不另建 OAuth、存储或凭据缓存。
+L1 upstreamidentity/gateway/scheduler 持有账号、资格与发送授权，L2 Provider 编解码，组装根只注入。已完成单 SIWC account/owner/call Key/实际 slug/channel/credential 绑定的受控 Responses HTTP/SSE 文本流；P1-A 本批扩展顶层 function 轮次，消费现有 upstreamauth 状态机，不另建 OAuth、存储或凭据缓存。
 
-范围保持 disabled、自包含 input 数组、`store=false`、`stream=true`；不包含工具、父链、conversation、后台、WS 或媒体。仅官方固定 Responses/models 路径，校验资源/scopes、正常 TLS、禁止跨 origin 重定向，证明不足的旧账号须重授权。每次 attempt 发送前实时 AcquireAccess，绑定 revision；停用先提交则新 acquire 拒绝，已签发访问不推断可撤销。管理员会话与调用 Key 分离，不伪造 Key，不自动回落静态 Key 或重试绕过账号限制。
+范围保持 disabled、自包含 input 数组、`store=false`、`stream=true`；本批仅增加有界顶层 function 定义与配对调用/结果，具体限制见 P1-A。namespace/custom/search/reasoning/compaction、父链、conversation、后台、WS 和媒体继续拒绝。仅官方固定 Responses/models 路径，校验资源/scopes、正常 TLS、禁止跨 origin 重定向，证明不足的旧账号须重授权。每次 attempt 发送前实时 AcquireAccess，绑定 revision；停用先提交则新 acquire 拒绝，已签发访问不推断可撤销。管理员会话与调用 Key 分离，不伪造 Key，不自动回落静态 Key 或重试绕过账号限制。
 
-真实账号闭环仍未验收。下一消费者扩展按 P1-A 的单账号 HTTP function 轮次交付，单独声明 Provider、账号来源和操作，验证停用/重授权/刷新与发送竞争、过期/uncertain 禁发、旧 revision 和脱敏；不扩大 strict。
+真实账号闭环仍未验收。P1-A 通过固定 HTTP SDK 和模拟 Provider 验证单账号 function 轮次；每轮当前账号/Key/模型授权、停用/重授权/刷新、uncertain 禁发、旧 revision 和脱敏分别验证，既有 store 过期与并发规则沿用。受控测试不证明真实 SIWC 工具能力，不扩大 strict。
 
 ### P2：有界自动刷新
 
@@ -298,6 +309,8 @@ L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威�
 | 固定 HTTP SDK 后台、固定 new-api Chat SSE/JSON 对照及验收说明 | #84–#87 |
 | embeddings 原生部分用量、SDK 向量格式、JSON TCP 条件 | #88、#89、#90 |
 | 同进程 30 分钟持续流、资源预算与前后恢复 | #91 |
+| 后台父输入与后台 completed 结果 HTTP/WS 续链 | #92、#93 |
+| 固定 Codex 标准配置与原生压缩 V2 | #94、#95 |
 
 ### 条件后置
 
@@ -403,6 +416,22 @@ Regression files are `internal/protocol/chat_sse_test.go`,
 `internal/protocol/sse_estimation_test.go` and
 `internal/gateway/p0_sse_socket_test.go`. This notice does not expand protocol,
 strict-billing or real-Provider acceptance.
+
+#### P1-A Managed HTTP Function Rounds
+
+Primary mechanism reference: zyycn/codex-proxy-rs at fixed revision
+60570883007febebe732597a9881397098d724f5 (Apache License 2.0),
+`backend/crates/providers/openai/src/transport/request.rs::encode_generate_request`
+and `scope_request_to_account`, plus `canonical.rs::output_item_added` and
+`tool_item_done`. The account identity boundary and call_id/delta/done
+scenarios inform this slice; no upstream function is copied or translated.
+TXAPI's existing gateway owner independently validates the closed SIWC
+text/function subset, preserves the request body and reacquires credentials
+through its existing store authority before every send. The native Responses
+codec and executor remain the only wire path. The reference uses its own
+Codex account and lease system; it does not prove SIWC resource/scopes or real
+function capability. The fixed SDK fixture uses synthetic accounts and a
+loopback provider only. The existing Apache license copy below is retained.
 
 #### P4-A2 Native Responses Compaction V2
 

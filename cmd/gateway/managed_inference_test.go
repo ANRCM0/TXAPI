@@ -202,7 +202,7 @@ func TestManagedInferenceAdminCreateRestartAndRealResponsesConsumer(t *testing.T
 	if attempts.Load() != 2 || catalogs.Load() != 1 {
 		t.Fatalf("duplicate send or stale cache: attempts%d catalogs%d", attempts.Load(), catalogs.Load())
 	}
-	for _, body := range []string{strings.Replace(valid, `"stream":true`, `"stream":false`, 1), strings.Replace(valid, `"store":false`, `"store":true`, 1), strings.Replace(valid, `"stream":true`, `"stream":true,"background":false`, 1), strings.Replace(valid, `"stream":true`, `"stream":true,"tools":[]`, 1)} {
+	for _, body := range []string{strings.Replace(valid, `"stream":true`, `"stream":false`, 1), strings.Replace(valid, `"store":false`, `"store":true`, 1), strings.Replace(valid, `"stream":true`, `"stream":true,"background":false`, 1), strings.Replace(valid, `"stream":true`, `"stream":true,"tools":[{"type":"custom","name":"x"}]`, 1)} {
 		if code, raw := request(body, key.Key); code < 400 {
 			t.Fatalf("forbidden input sent: %d %s", code, raw)
 		}
