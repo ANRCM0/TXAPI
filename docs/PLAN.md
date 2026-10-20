@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最近已确认的完整合并基线：`master/6571151b5a780dbde3b0e8a41ec39c936332fe61`，Verify `39344009711` 已完整成功。固定 Codex CLI 子集 PR #67 精确头 `3f70943ba919cd44848eb9804807a0a37c24bf8d` 的 Verify `39342438238` / `39342397734` 全部六项成功后合并；PR #66 合并后 Verify `39341203037` 也已完整成功。本批 namespace 原生增量单列，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最近已确认的完整合并基线：`master/6aef78f0bbe9df7d03b0b5661f83ed75fb89cdbb`，Verify `39347438757` 已完整成功。namespace 批次 PR #68 精确头 `d1f1afa1b1fc94baa11fe4c9ed4eac09c0099ed6` 的 Verify `39345977371` / `39345912321` 全部六项成功后合并。本批 custom/freeform 增量单列，不继承旧头验收。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -37,7 +37,7 @@
 | 用量与计费 | 原生 Token 明细、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.6` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.7` / 117 操作；数据库迁移追加 schema v21，FC-P7-WS-USAGE-001 与 FC-P7-BG-USAGE-001 的源码与受控验收状态单列于下，不继承上述基线 CI。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -448,7 +448,7 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 官方配置依据：`https://developers.openai.com/codex/config-advanced`；固定发行来源：`https://github.com/openai/codex/releases/tag/rust-v0.163.0`。
 
 <details>
-<summary>FC-P4-NAMESPACE-001：原生 Responses function namespace（源码与本地受控验证完成）</summary>
+<summary>FC-P4-NAMESPACE-001：原生 Responses function namespace（精确头 CI 通过，已合并）</summary>
 
 1. **层级/目录及缺口：**固定 Codex 0.163.0 的默认工具表包含 namespace，当前原生 Responses 在发送前拒绝。L2 internal/protocol/responses 校验声明及 function_call/function_call_output 的可选 namespace；internal/compat/responsesws 同步有界声明/选择及输出输入，现有历史 owner 保留原 JSON 字段。现有 L3/后台/WS 消费者、生产组装、用量和权限仍走唯一链路；测试、OpenAPI、固定 CLI harness 和本方案同批更新。不新增工具执行器。
 2. **公开语义与冻结边界：**原生 HTTP JSON/SSE、disabled-only 原生后台和原生 WS 的既有 function 子集追加单层 namespace 分组，成员仅 named function。兼容 responses/v1 的类型/签名/版本不变，其 ValidateHTTP 投影新增该声明能力；冻结 execution/identity/state、L0 和资金权威不变，无新地基版本/迁移。按当前用户同类 CR 直接实施授权记录后推进，不将导出或旧CI当批准。managed SIWC 仍限文本，strict Responses/后台/WS继续拒绝；跨协议 Chat 转换不继承 namespace 能力。
@@ -461,6 +461,24 @@ PR #66 最终精确头 f9e0f5849d8b5d81732f537cff110b4e4796d4bb 的 Verify 39329
 
 2026-10-20 本批本地受控证据：HTTP JSON/SSE 的 namespace 函数结果、存储读取和完整上下文函数结果续链通过；真实双端 socket 的 HTTP→WS namespaced function→HTTP result→运行组件重建/新 WS 连接保持 namespace/name/call_id、未知可保留字段和原模型映射，四个新生成各仅一次实际发送。连接本地非存储 WS 两轮与原生后台提交/已知终态/相同 SQLite 及密钥重启后的查询分别通过，不重发已知后台生成。跨 Key 查询仍 404，不支持的 custom 成员在发送前拒绝；存储仍加密。纯校验覆盖64组/128成员/128 UTF-8字节精确边界、重复/空/null/嵌套/hosted/custom/错误类型、output-item added/done 与终态字段，HTTP未知扩展保留、WS闭合/显式null规则及旧顶层function兼容。Windows GOARCH=amd64 的全量 Go 回归通过（cmd/gateway66.524s、architecture22.187s、generation70.193s、Responses13.440s、store72.966s），build/vet及生产主进程local.py通过；最终受影响cmd/gateway、compat/responsesws、protocol/responses完整包复验通过（58.787s/1.075s/0.973s）。固定官方Codex0.163.0现有六场景全部通过：namespace场景用真实multi_agent_v1.wait_agent声明的targets参数查询不存在ID并回传错误结果，再完成文本输出，未spawn/message或执行外部命令；本批共8次实际HTTP发送/独立sealed usage，5次已知3 Token、3次未知未补零，disabled资金不变。该CLI回传的function_call_output未附namespace时保留原样，以call_id关联；显式namespace结果由HTTP/WS用例另验。OpenAPI0.13.6/117操作，未新增迁移/依赖/导出端口或L0路径，最终精确头Linux race/SDK/容器CI另验。此证据仅证明受控Provider夹具，不证明真实官方Provider、完整默认Codex工具、shell/apply_patch或Codex WS组合，也不开放收费。
 
+
+</details>
+
+<details>
+<summary>FC-P4-CUSTOM-001：原生 Responses custom/freeform 工具往返（源码与本地受控验证通过，精确头 CI 待验）</summary>
+
+1. **层级/目录与缺口：**固定 Codex 0.163.0 的 apply_patch_freeform 默认工具声明为 custom；namespace 子批仍明确拒绝该类型。L2 internal/protocol/responses 处理自定义工具声明、输入/输出项目、原生 JSON/SSE 与背景流，internal/protocol/responses_estimation.go 同步 legacy 输出文本估算；internal/compat/responsesws 增量接同类 WS/持久完整上下文。L3 现有历史、后台、WS 消费者不另建执行链；cmd/gateway 测试、固定 CLI/Python SDK、OpenAPI 和本方案同批更新。
+2. **公开依赖与冻结：**沿已批准 execution、responses、compat/responses/v1、httpoutput、responsehistory/v1、background 等既有入口；公开类型/签名/版本与数据库 schema21 不变。compat/responses/v1.ValidateHTTP 对 self-contained custom 项的新增语义按本具体记录实施，不把已有导出/CI当批准。不新建地基端口、L0 路径或工具执行器。
+3. **精确声明和边界：**原生 HTTP JSON/SSE、disabled 原生后台、disabled WS 的工具声明追加 named custom，支持顶层或单层 namespace 混合 function/custom，组内名称跨两种类型唯一；维持每请求至多64组、每组1..128成员。新 custom 名称1..128 UTF-8字节且无首尾空白/控制字符。format 省略或null使用原生默认；已指定对象仅声明 text 或 grammar，grammar syntax 仅 lark/regex、definition 为1..65536 UTF-8字节文本。网关仅校验形状和限额并原样传递，不编译 grammar、检查模型采样语法或代执行。HTTP扩展保留；WS沿现有闭合/显式null规则拒绝未知结构。
+4. **调用、历史与回退：**custom_tool_call 必须有 call_id/name/string input，可有 namespace；custom_tool_call_output 必须有 call_id 和声明范围文本/文本parts output，可有 name/namespace。custom tool_choice 为 type/name/可选namespace；已知字段类型错误在发送前拒绝。原生 output added/done、custom_tool_call_input.delta/done、终态与历史保留原字符串、call_id、name、namespace、未知可保留字段；非空 custom input delta 或已命名custom item算有效输出，心跳/空delta/done不冒充首输出。完整上下文经同一 owner/Key/当前权限/目标绑定重编译，不把input转JSON函数参数或静默丢项目。旧数据/密钥/迁移/财务不重写；回退旧二进制会拒绝新custom请求/续链，留存原密文；数据库回退遵守匹配停写备份。
+5. **验证与退出：**声明/format/语法枚举/UTF-8限额/重复跨类型名称/null/hosted拒绝、JSON/SSE跨块UTF-8和交错函数/custom、有效输出、错误字段/截断不伪造完成；真实HTTP/WS/后台和持久历史查询/跨模式/组件重建，保留权限与取消未知不重放/用量未知不补零。固定 CLI 通过显式本地 model_catalog_json 能力档案启用原生 custom apply_patch 声明请求；该夹具不启用 tool_search/Code Mode，不代表 bundled 默认模型配置，夹具只提供故意无效且不含路径的补丁字符串，检验客户端解析错误作为 custom_tool_call_output 的完整上下文往返；不写文件/运行命令或创建/消息 agent。固定 SDK 用类型化事件验证对应范围，精确提交完整CI/race/交付另验。
+6. **协作与许可：**managed SIWC仍限文本；strict Responses/后台/WS收费仍拒绝；跨协议Chat不继承custom/namespace，hosted/media/tool_search/programmatic及任意多路复用继续拒绝。不把该显式档案等同完整默认Codex工具执行/WS/官方Provider验收。本批只补已观察到的原生客户端缺口，性能不作提升声明，操作数不变。
+
+官方核对（2026-10-20）：OpenAI Function calling 的 Custom tools/CFG（text/grammar、lark/regex）与 Responses streaming 的 response.custom_tool_call_input.delta/done；固定 rust-v0.163.0 协议 CustomToolCall/CustomToolCallOutput 与 apply_patch 客户端处理。依据：`https://developers.openai.com/api/docs/guides/function-calling`、`https://developers.openai.com/api/reference/resources/responses/streaming-events`。不复制上游实现。
+
+固定客户端边界：0.163.0 bundled `gpt-5.5` 还声明 tool_search，新模型还可提交 additional_tools/Code Mode；当前均在发送前拒绝，不能据本批局部成功宣称默认客户端全量支持。custom 夹具采用文档与固定版本 config.schema.json 登记的 model_catalog_json，测试数据自行构造 synthetic slug/freeform/text 模态档案，不复制上游模型提示或更改用户模型/代理配置。实际 0.163.0 执行器原生解析故意无效且无路径的补丁，错误结果按 custom_tool_call_output 回传；工作目录断言没有新增日志之外的文件。配置依据：`https://developers.openai.com/codex/config-reference/`，固定源码 `codex-rs/protocol/src/openai_models.rs`。
+
+2026-10-20 本批本地受控证据：custom 声明/grammar64KiB/custom名称128 UTF-8字节/重复跨类型成员/已知字段错误/hosted拒绝、HTTP JSON/SSE 跨字节Unicode及函数/custom交错、有效输出、终态不重复估算、后台事件持久回放均通过。真实 socket 的 WS custom→HTTP result→组件重建/新WS完整上下文保持 input/name/namespace/call_id，custom delta 后断开保留 uncertain，查询和父链续接冲突且实际上游只发送一次。固定 Python SDK openai3.8.0/websockets15.0.1 的10个生成通过，含类型化custom delta、终态和HTTP读取；7个已知3Token、3个未知未补零，资金不变。固定 Codex0.163.0 的7场景通过，custom显式档案使用真实freeform声明和原生补丁解析错误往返；共10次实际HTTP发送/独立sealed usage，7次已知3Token、3次未知，工作目录无副作用文件，资金不变。全量 Go 回归通过（cmd/gateway76.492s、architecture91.854s、generation69.787s、Responses15.751s、store62.939s、TLS/Upgrade夹具2.743s）；build/vet和实际main local.py均通过。最终补齐custom输出估算后，protocol全树/gateway/cmd完整包复验通过（gateway33.129s、cmd57.769s），最终存储WS字段校验包复验1.017s通过。OpenAPI0.13.7/117操作和575个引用、Python语法、格式/差异检查通过。尚未执行本批Linux race/实际镜像交付，也未证明真实Provider、默认Codex全部工具或收费；最终精确提交CI另验。
 
 </details>
 

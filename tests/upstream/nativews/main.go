@@ -197,13 +197,35 @@ func (f *fixture) provider(w http.ResponseWriter, r *http.Request) {
 		events := []map[string]any{{"type": "response.output_text.delta", "sequence_number": 1, "delta": "你好🌏"}}
 		if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
 			item := map[string]any{"id": "fc_" + id, "type": "function_call", "call_id": "call_" + id, "name": "weather", "arguments": "{}", "status": "completed"}
+			pending := map[string]any{"id": "fc_" + id, "type": "function_call", "call_id": "call_" + id, "name": "weather", "arguments": ""}
+			tool, _ := tools[0].(map[string]any)
+			if tool["type"] == "namespace" {
+				item["namespace"], pending["namespace"] = tool["name"], tool["name"]
+				if members, ok := tool["tools"].([]any); ok && len(members) > 0 {
+					tool, _ = members[0].(map[string]any)
+				}
+			}
 			output = []any{item}
 			events = []map[string]any{
-				{"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": map[string]any{"id": "fc_" + id, "type": "function_call", "call_id": "call_" + id, "name": "weather", "arguments": ""}},
+				{"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": pending},
 				{"type": "response.function_call_arguments.delta", "sequence_number": 2, "output_index": 0, "item_id": "fc_" + id, "delta": "{"},
 				{"type": "response.function_call_arguments.delta", "sequence_number": 3, "output_index": 0, "item_id": "fc_" + id, "delta": "}"},
 				{"type": "response.function_call_arguments.done", "sequence_number": 4, "output_index": 0, "item_id": "fc_" + id, "arguments": "{}"},
 				{"type": "response.output_item.done", "sequence_number": 5, "output_index": 0, "item": item},
+			}
+			if tool["type"] == "custom" {
+				item["type"], pending["type"] = "custom_tool_call", "custom_tool_call"
+				item["name"], pending["name"] = tool["name"], tool["name"]
+				delete(item, "arguments")
+				delete(pending, "arguments")
+				item["input"], pending["input"] = "raw 雪🌏\nsecond", ""
+				events = []map[string]any{
+					{"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": pending},
+					{"type": "response.custom_tool_call_input.delta", "sequence_number": 2, "output_index": 0, "item_id": item["id"], "delta": "raw 雪🌏\n"},
+					{"type": "response.custom_tool_call_input.delta", "sequence_number": 3, "output_index": 0, "item_id": item["id"], "delta": "second"},
+					{"type": "response.custom_tool_call_input.done", "sequence_number": 4, "output_index": 0, "item_id": item["id"], "input": item["input"]},
+					{"type": "response.output_item.done", "sequence_number": 5, "output_index": 0, "item": item},
+				}
 			}
 		}
 		for _, event := range events {

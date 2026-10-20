@@ -27,7 +27,7 @@ func responsesCompletionText(stream bool, body []byte) string {
 				return false
 			}
 		}
-		if event.Type == "response.output_text.delta" || event.Type == "response.function_call_arguments.delta" {
+		if event.Type == "response.output_text.delta" || event.Type == "response.function_call_arguments.delta" || event.Type == "response.custom_tool_call_input.delta" {
 			deltas.WriteString(event.Delta)
 		}
 		return !terminal && event.Type != "error"
@@ -43,6 +43,7 @@ func responsesOutputText(body []byte) string {
 		Output []struct {
 			Type      string `json:"type"`
 			Arguments string `json:"arguments"`
+			Input     string `json:"input"`
 			Content   []struct {
 				Text    string `json:"text"`
 				Refusal string `json:"refusal"`
@@ -56,6 +57,9 @@ func responsesOutputText(body []byte) string {
 	for _, item := range response.Output {
 		if item.Type == "function_call" {
 			text.WriteString(item.Arguments)
+		}
+		if item.Type == "custom_tool_call" {
+			text.WriteString(item.Input)
 		}
 		for _, part := range item.Content {
 			text.WriteString(part.Text)

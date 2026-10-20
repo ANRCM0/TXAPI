@@ -233,16 +233,20 @@ class Installation:
         assert not state["State"]["Running"] and state["State"]["ExitCode"] == 0, result.stdout
         print(result.stdout.strip(), flush=True)
         report = json.loads(result.stdout.splitlines()[-1])
-        assert report["cases"] == 8 and len(set(report["ids"])) == 8
+        assert report["cases"] == 10 and len(set(report["ids"])) == 10
         self.api("/v1/responses/" + report["unknown"], CLIENT_KEY, status=409)
-        records = self.usage(self.api("/api/auth/login", body=ADMIN, method="POST")["session_token"], 14)
+        records = self.usage(self.api("/api/auth/login", body=ADMIN, method="POST")["session_token"], 16)
         assert sum(row["state"] == "interrupted" for row in records) == 1
-        state = self.wait_sends(14)
+        state = self.wait_sends(16)
         assert not state["errors"]
         requests = state["requests"][6:]
-        assert [len(row["input"]) for row in requests] == [1, 3, 5, 7, 1, 1, 1, 1]
+        assert [len(row["input"]) for row in requests] == [1, 3, 5, 7, 1, 1, 1, 1, 1, 3]
         assert all(row["transport"] == "ws" and row["model"] == "m" and not row["store"] and not row["previous"] for row in requests)
         assert requests[2]["input"][3]["call_id"] == requests[2]["input"][4]["call_id"]
+        custom = requests[9]["input"]
+        assert custom[1]["type"] == "custom_tool_call" and custom[2]["type"] == "custom_tool_call_output"
+        assert custom[1]["input"] == "raw 雪🌏\nsecond" and custom[2]["output"] == "custom-result"
+        assert custom[1]["call_id"] == custom[2]["call_id"] and custom[1]["namespace"] == custom[2]["namespace"] == "text"
         return report["unknown"]
 
     def final_snapshot(self, unknowns, count):
@@ -323,7 +327,7 @@ def exercise(installation, sdk_image=None):
     unknowns, count = [unknown], 6
     if sdk_image:
         unknowns.append(i.sdk(sdk_image))
-        count = 14
+        count = 16
     i.settings["responses_ws"]["persistent_history"] = False
     i.save()
     i.restart()

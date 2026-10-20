@@ -34,8 +34,8 @@ def client_phase(path, deployed=False):
                                         extra_headers={"Cookie": "sdk-private-cookie",
                                                        "X-Forwarded-For": "192.0.2.11"})
 
-    def finish(connection, status="completed", tools=False):
-        text, arguments, created = "", "", None
+    def finish(connection, status="completed", tools=False, custom=False):
+        text, arguments, custom_input, created = "", "", "", None
         for _ in range(32):
             event = connection.recv()
             assert event.type != "error", event
@@ -46,11 +46,19 @@ def client_phase(path, deployed=False):
                 text += event.delta
             elif event.type == "response.function_call_arguments.delta":
                 arguments += event.delta
+            elif event.type == "response.custom_tool_call_input.delta":
+                from openai.types.responses import ResponseCustomToolCallInputDeltaEvent
+                assert isinstance(event, ResponseCustomToolCallInputDeltaEvent)
+                custom_input += event.delta
             elif event.type in ("response.completed", "response.failed", "response.incomplete"):
                 response = event.response
                 assert event.type == "response." + status and response.status == status
                 assert created == response.id and response.model == "alias" and response.id.startswith("resp_")
-                if tools:
+                if custom:
+                    assert custom_input == "raw 雪🌏\nsecond" and response.output[0].input == custom_input
+                    assert response.output[0].type == "custom_tool_call" and response.output[0].namespace == "text"
+                    assert response.output[0].name == tool_name
+                elif tools:
                     assert json.loads(arguments) == {} and response.output[0].call_id
                     assert response.output[0].name == tool_name
                 else:
@@ -100,10 +108,21 @@ def client_phase(path, deployed=False):
         with connect(client) as connection:
             connection.response.create(model="alias", input="new after cancellation", store=True)
             finish(connection)
-    assert len(public_ids) == 8
-    print("PASS: openai 3.8.0 typed WS text/tools, same/new connections, HTTP retrieval, failed/incomplete and cancellation", flush=True)
+        with connect(client) as connection:
+            connection.response.create(model="alias", input="SDK custom", store=True,
+                tools=[{"type": "namespace", "name": "text", "tools": [{"type": "custom", "name": tool_name,
+                        "format": {"type": "grammar", "syntax": "regex", "definition": ".+"}}]}],
+                tool_choice={"type": "custom", "name": tool_name, "namespace": "text"})
+            custom_response = finish(connection, custom=True)
+            assert client.responses.retrieve(custom_response.id).output[0].input == "raw 雪🌏\nsecond"
+            connection.response.create(model="alias", store=True, previous_response_id=custom_response.id,
+                input=[{"type": "custom_tool_call_output", "call_id": custom_response.output[0].call_id,
+                        "namespace": "text", "name": tool_name, "output": "custom-result"}])
+            finish(connection)
+    assert len(public_ids) == 10
+    print("PASS: openai 3.8.0 typed WS text/function/custom tools, same/new connections, HTTP retrieval, failed/incomplete and cancellation", flush=True)
     if deployed:
-        print(json.dumps({"cases": 8, "unknown": unknown, "ids": public_ids}), flush=True)
+        print(json.dumps({"cases": 10, "unknown": unknown, "ids": public_ids}), flush=True)
 
 
 def main():

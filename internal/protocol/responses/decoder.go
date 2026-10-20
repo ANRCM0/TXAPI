@@ -75,7 +75,7 @@ func parseResponse(body []byte) (Response, *execv1.Usage, *usageWire, error) {
 			return r, nil, nil, errors.New("invalid Responses output")
 		}
 		for _, item := range output {
-			if err := validateOutputNamespace(item); err != nil {
+			if err := validateOutputToolItem(item); err != nil {
 				return r, nil, nil, err
 			}
 		}
@@ -272,14 +272,22 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	if event.Type == "response.output_item.added" || event.Type == "response.output_item.done" {
 		if item, ok := event.Item.(map[string]any); ok {
 			raw, _ := json.Marshal(item)
-			if err := validateOutputNamespace(raw); err != nil {
+			if err := validateOutputToolItem(raw); err != nil {
 				return nil, err
 			}
 		}
 	}
-	if event.Type == "response.output_text.delta" || event.Type == "response.function_call_arguments.delta" {
+	if event.Type == "response.output_text.delta" || event.Type == "response.function_call_arguments.delta" || event.Type == "response.custom_tool_call_input.delta" {
 		if _, ok := event.Delta.(string); !ok {
 			return nil, errors.New("invalid Responses output delta")
+		}
+	}
+	if event.Type == "response.custom_tool_call_input.done" {
+		var done struct {
+			Input *string `json:"input"`
+		}
+		if json.Unmarshal(data, &done) != nil || done.Input == nil {
+			return nil, errors.New("invalid Responses custom input completion")
 		}
 	}
 	if event.Sequence != nil {
@@ -375,14 +383,17 @@ func (s *streamDecoder) flush() ([]execv1.Frame, error) {
 	// snapshots do not imply text or tool progress.
 	effective := false
 	switch event.Type {
-	case "response.output_text.delta", "response.function_call_arguments.delta":
+	case "response.output_text.delta", "response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
 		if delta, ok := event.Delta.(string); ok {
 			effective = delta != ""
 		}
 	case "response.output_item.added":
-		if item, ok := event.Item.(map[string]any); ok && item["type"] == "function_call" {
+		if item, ok := event.Item.(map[string]any); ok && (item["type"] == "function_call" || item["type"] == "custom_tool_call") {
 			name, _ := item["name"].(string)
 			arguments, _ := item["arguments"].(string)
+			if item["type"] == "custom_tool_call" {
+				arguments, _ = item["input"].(string)
+			}
 			effective = name != "" || arguments != ""
 		}
 	}

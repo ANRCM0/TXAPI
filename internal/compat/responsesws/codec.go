@@ -1,4 +1,4 @@
-// Package responsesws bounds the single-lane text/function native WS subset.
+// Package responsesws bounds the single-lane text/function/custom native WS subset.
 package responsesws
 
 import (
@@ -177,7 +177,7 @@ func validateInput(raw json.RawMessage) error {
 		}
 		allowed := "type role content"
 		contentKey := "content"
-		if probe.Type == "function_call_output" {
+		if probe.Type == "function_call_output" || probe.Type == "custom_tool_call_output" {
 			allowed = "type call_id output name namespace"
 			contentKey = "output"
 		} else if probe.Type != "" && probe.Type != "message" {
@@ -294,7 +294,7 @@ func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
 		return empty, errors.New("duplicate native WS response")
 	}
 	switch event.Type {
-	case "response.created", "response.in_progress", "response.completed", "response.incomplete", "response.failed", "response.cancelled", "response.output_text.delta", "response.output_text.done", "response.output_item.added", "response.output_item.done", "response.content_part.added", "response.content_part.done", "response.function_call_arguments.delta", "response.function_call_arguments.done", "error":
+	case "response.created", "response.in_progress", "response.completed", "response.incomplete", "response.failed", "response.cancelled", "response.output_text.delta", "response.output_text.done", "response.output_item.added", "response.output_item.done", "response.content_part.added", "response.content_part.done", "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done", "error":
 	default:
 		return empty, errors.New("unsupported native WS event")
 	}
@@ -303,7 +303,7 @@ func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
 		if len(event.Response) == 0 || bytes.Equal(event.Response, []byte("null")) {
 			return empty, errors.New("native WS lifecycle event requires a response")
 		}
-	case "response.output_text.delta", "response.function_call_arguments.delta":
+	case "response.output_text.delta", "response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
 		if _, valid := text(root["delta"]); !valid {
 			return empty, errors.New("native WS delta must be text")
 		}
@@ -314,6 +314,10 @@ func (d *Decoder) DecodeUsage(frame v2.Frame) (v3.Envelope, error) {
 	case "response.function_call_arguments.done":
 		if _, valid := text(root["arguments"]); !valid {
 			return empty, errors.New("native WS function arguments must be text")
+		}
+	case "response.custom_tool_call_input.done":
+		if _, valid := text(root["input"]); !valid {
+			return empty, errors.New("native WS custom input must be text")
 		}
 	case "response.output_item.added", "response.output_item.done":
 		if _, present := root["item"]; !present {
@@ -398,7 +402,7 @@ func validateOutputItem(raw json.RawMessage) error {
 	if json.Unmarshal(raw, &item) != nil {
 		return errors.New("invalid native WS output item")
 	}
-	if item.Type == "function_call" {
+	if item.Type == "function_call" || item.Type == "custom_tool_call" {
 		if item.Namespace != nil {
 			if _, valid := text(item.Namespace); !valid {
 				return errors.New("invalid native WS function namespace")
@@ -452,7 +456,7 @@ func MapModel(frame v2.Frame, model string) (v2.Frame, error) {
 	return v2.Frame{Type: 1, Data: body}, nil
 }
 
-// Each namespace contains functions only. The shared HTTP validator enforces
+// Each namespace contains function/custom tools. The shared HTTP validator enforces
 // name uniqueness, depth and bounds; this layer retains the WS closed fields.
 func validateTool(raw json.RawMessage, allowNamespace bool) error {
 	var probe struct{ Type string }
@@ -480,16 +484,33 @@ func validateTool(raw json.RawMessage, allowNamespace bool) error {
 		}
 		return nil
 	}
-	tool, err := object(raw, "type name description parameters strict")
+	allowed := "type name description parameters strict"
+	if probe.Type == "custom" {
+		allowed = "type name description format"
+	}
+	tool, err := object(raw, allowed)
 	if err != nil {
 		return err
 	}
-	if probe.Type != "function" {
-		return errors.New("only function tools and function namespaces supported")
+	if probe.Type != "function" && probe.Type != "custom" {
+		return errors.New("only function/custom tools and one-level namespaces supported")
 	}
 	if raw, ok := tool["description"]; ok {
 		if _, valid := text(raw); !valid {
 			return errors.New("function description must be text")
+		}
+	}
+	if raw, ok := tool["format"]; ok {
+		var format struct{ Type string }
+		if json.Unmarshal(raw, &format) != nil {
+			return errors.New("invalid custom tool format")
+		}
+		allowed := "type"
+		if format.Type == "grammar" {
+			allowed = "type syntax definition"
+		}
+		if _, err := object(raw, allowed); err != nil {
+			return err
 		}
 	}
 	if raw, ok := tool["strict"]; ok {

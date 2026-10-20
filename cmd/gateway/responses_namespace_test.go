@@ -79,7 +79,7 @@ func TestResponsesFunctionNamespaceStoredHTTPWSAndReopenedContext(t *testing.T) 
 		t.Fatal(err)
 	}
 	f.historyHTTP(t, other.Key, "GET", "/v1/responses/"+second, nil, 404)
-	f.historyHTTP(t, f.key, "POST", "/v1/responses", map[string]any{"model": "alias", "input": "reject", "tools": []any{map[string]any{"type": "namespace", "name": "weather", "tools": []any{map[string]any{"type": "custom", "name": "lookup"}}}}}, 400)
+	f.historyHTTP(t, f.key, "POST", "/v1/responses", map[string]any{"model": "alias", "input": "reject", "tools": []any{map[string]any{"type": "namespace", "name": "weather", "tools": []any{map[string]any{"type": "web_search", "name": "lookup"}}}}}, 400)
 	if f.attempts.Load() != 4 || f.httpCalls.Load() != 2 {
 		t.Fatal("replayed generation or refusal sent upstream")
 	}
