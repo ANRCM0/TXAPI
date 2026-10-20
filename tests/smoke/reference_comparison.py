@@ -178,7 +178,8 @@ def call(connection, key, fixture, seconds=5, mode="normal"):
     with fixture.lock:
         attempts = fixture.records.get(tag, [])
         sample.update(upstream_attempts=len(attempts), drain_failure=not all(a["finished"] for a in attempts),
-                      upstream_peers=[a["peer"] for a in attempts])
+                      upstream_peers=[a["peer"] for a in attempts],
+                      upstream_http=[a["http"] for a in attempts])
         sent = list(attempts[0]["events"]) if len(attempts) == 1 else []
     for item in observed:
         index = item["fragment"] + 2  # Heartbeat and assistant role precede text.
@@ -186,7 +187,8 @@ def call(connection, key, fixture, seconds=5, mode="normal"):
             sample["events"].append({"fragment": item["fragment"],
                                      "latency_lower_ns": max(0, item["received_ns"] - sent[index]["flush_return_ns"]),
                                      "latency_upper_ns": item["received_ns"] - sent[index]["write_start_ns"]})
-    if sample["success"] and (len(attempts) != 1 or sample["drain_failure"] or len(sample["events"]) != len(TEXT)):
+    if sample["success"] and (len(attempts) != 1 or sample["drain_failure"] or len(sample["events"]) != len(TEXT)
+                              or sample["upstream_http"] != ["HTTP/1.1"]):
         sample.update(success=False, failure="attempt_drain_or_fragment_mismatch")
     return sample
 
@@ -211,6 +213,11 @@ def run(args, report):
     report["reference_build"] = metadata
     env = clean_environment()
     env["GOARCH"] = "amd64"
+    report["environment"]["txapi_go_version"] = subprocess.check_output(
+        [args.go, "version"], cwd=ROOT, env=env, text=True, timeout=20).strip()
+    report["environment"]["txapi_go_settings"] = json.loads(subprocess.check_output(
+        [args.go, "env", "-json", "GOOS", "GOARCH", "CGO_ENABLED", "GOEXPERIMENT", "GOTOOLCHAIN", "GOAMD64"],
+        cwd=ROOT, env=env, text=True, timeout=20))
     fixture = Fixture(.005)
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
@@ -218,6 +225,7 @@ def run(args, report):
         with tempfile.TemporaryDirectory(prefix="txapi-reference-run-") as temporary, contextlib.ExitStack() as stack:
             work = Path(temporary)
             gateway = work / ("gateway.exe" if os.name == "nt" else "gateway")
+            report["stage"] = "build_txapi_main"
             subprocess.run([args.go, "build", "-o", str(gateway), "./cmd/gateway"], cwd=ROOT, env=env, check=True, timeout=240)
             tx_port, ref_port = ports()
             credential_keys = work / "credential-keys.json"
@@ -233,14 +241,17 @@ def run(args, report):
                       "tokens": [{"name": "client", "key": CLIENT_KEY, "models": ["baseline-model"]}]}
             config_file = work / "config.json"
             config_file.write_text(json.dumps(config))
+            report["stage"] = "initialize_txapi"
             for flags, command_env in [(["-init-admin"], dict(env, TXAPI_ADMIN_USERNAME="bench-admin", TXAPI_ADMIN_PASSWORD="bench-password-only")),
                                        (["-seed-only"], env), (["-claim-token", "1", "-owner-user", "1"], env)]:
                 subprocess.run([str(gateway), "-config", str(config_file), *flags], cwd=ROOT, env=command_env,
                                check=True, timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             tx = stack.enter_context(gateway_process(gateway, config_file, work / "txapi.log", env))
+            report["stage"] = "start_txapi"
             ready(tx, tx_port)
             # Reference gets an explicit environment, never host SQL/Redis/auth settings.
-            reference_env = {name: env[name] for name in ("PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE") if name in env}
+            inherited = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE"}
+            reference_env = {name: value for name, value in env.items() if name.upper() in inherited}
             reference_env.update(PORT=str(ref_port), SQLITE_PATH=str(work / "reference.db"),
                                  SESSION_SECRET=uuid.uuid4().hex + uuid.uuid4().hex, CHANNEL_TEST_ENABLED="false",
                                  BATCH_UPDATE_ENABLED="false", RELAY_TIMEOUT="5", GIN_MODE="release")
@@ -256,13 +267,16 @@ def run(args, report):
                             ref.kill()
                             ref.wait(timeout=5)
                 stack.callback(stop_reference)
+                report["stage"] = "start_reference"
                 ready(ref, ref_port)
+                report["stage"] = "bootstrap_reference"
                 reference_key = setup_reference(ref_port, fixture.server_port)
                 targets = {"direct": (fixture.server_port, UPSTREAM_KEY), "txapi": (tx_port, CLIENT_KEY),
                            "new_api": (ref_port, reference_key)}
                 connections = {name: http.client.HTTPConnection("127.0.0.1", port) for name, (port, _) in targets.items()}
                 for connection in connections.values():
                     stack.callback(connection.close)
+                report["stage"] = "client_and_auth_checks"
                 for mode, seconds in (("truncated", 5), ("timeout", .1)):
                     negative = call(connections["direct"], UPSTREAM_KEY, fixture, seconds, mode)
                     report["client_self_checks"].append({"mode": mode, "sample": negative})
@@ -276,14 +290,17 @@ def run(args, report):
                     if rejected["http_status"] != 401 or rejected["upstream_attempts"] != 0:
                         raise RuntimeError("invalid Key was not a zero-send 401")
                 for _ in range(2):
+                    report["stage"] = "warmup"
                     for name, (_, key) in targets.items():
                         sample = call(connections[name], key, fixture)
                         report["warmup"].append({"target": name, "sample": sample})
                         if not sample["success"]:
                             raise RuntimeError("common-path warmup failed")
                 report["resources"] = {}
+                report["stage"] = "measurement"
                 for round_number in range(args.rounds):
-                    resources = {"txapi": Resources(tx.pid), "new_api": Resources(ref.pid), "harness": Resources(os.getpid())}
+                    # Each sampler also observes the harness/fixture process.
+                    resources = {"txapi": Resources(tx.pid), "new_api": Resources(ref.pid)}
                     try:
                         for pair in range(args.samples):
                             order = list(targets)
@@ -300,22 +317,27 @@ def run(args, report):
                 with fixture.lock:
                     report["active_upstream_after_measurement"] = sum(not item["finished"] for attempts in fixture.records.values() for item in attempts)
                 deadline = time.monotonic() + 5
+                report["stage"] = "check_persisted_logs"
                 expected_logs = 2 + args.samples * args.rounds
                 while True:
                     with contextlib.closing(sqlite3.connect((work / "reference.db").as_uri() + "?mode=ro", uri=True, timeout=3)) as db:
                         persisted_logs = db.execute("SELECT COUNT(*) FROM logs WHERE type=2 AND model_name='baseline-model'").fetchone()[0]
                         quota = db.execute("SELECT remain_quota,used_quota FROM tokens WHERE name='reference-only'").fetchone()
-                    if persisted_logs == expected_logs:
+                    with contextlib.closing(sqlite3.connect((work / "gateway.db").as_uri() + "?mode=ro", uri=True, timeout=3)) as db:
+                        tx_logs = db.execute("SELECT COUNT(*) FROM logs WHERE origin_model='baseline-model' AND status=200").fetchone()[0]
+                    if persisted_logs == expected_logs and tx_logs == expected_logs:
                         break
                     if time.monotonic() >= deadline:
-                        raise RuntimeError("reference consumption log did not preserve every completed request")
+                        raise RuntimeError("gateway logs did not preserve every completed request")
                     time.sleep(.05)
                 report["reference_persisted_consumption"] = {"rows": persisted_logs, "expected_rows": expected_logs,
                                                              "token_quota_unchanged": quota == (1000000, 0)}
+                report["txapi_persisted_requests"] = {"rows": tx_logs, "expected_rows": expected_logs}
                 if quota != (1000000, 0):
                     raise RuntimeError("reference zero-priced fixture changed its finite token quota")
                 stop_reference()
                 stack.pop_all().close()
+                report["stage"] = "complete"
     finally:
         fixture.stop_event.set()
         fixture.shutdown()

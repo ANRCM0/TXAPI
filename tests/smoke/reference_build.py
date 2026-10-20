@@ -47,6 +47,7 @@ def build(source, work, go):
                 "go_flags": ["CGO_ENABLED=0", "GOARCH=amd64", "GOWORK=off", "GOEXPERIMENT=greenteagc", "-ldflags=-s -w"],
                 "source_changes": "none; generated web assets only"}
     try:
+        metadata["stage"] = "export_source"
         archive = work / "source.tar"
         subprocess.run(["git", "archive", "--format=tar", "--output", str(archive), REFERENCE_SHA],
                        cwd=source, check=True, timeout=45)
@@ -56,6 +57,7 @@ def build(source, work, go):
         with tarfile.open(archive) as files:
             files.extractall(exported, filter="data")
         asset, expected_hash = BUN_ARCHIVES[platform.system()]
+        metadata["stage"] = "download_bun"
         bun_zip = work / "bun.zip"
         url = f"https://github.com/oven-sh/bun/releases/download/bun-v{BUN_VERSION}/{asset}"
         with urllib.request.urlopen(url, timeout=45) as response, bun_zip.open("wb") as output:
@@ -84,9 +86,13 @@ def build(source, work, go):
                 subprocess.run(command, cwd=cwd, env=env, stdout=output, stderr=output,
                                check=True, timeout=timeout)
             metadata["go_version"] = subprocess.check_output([go, "version"], env=env, text=True).strip()
+            metadata["stage"] = "install_web_dependencies"
             run([str(bun), "install", "--frozen-lockfile", "--ignore-scripts"], exported / "web", 600)
+            metadata["stage"] = "build_web_assets"
             run([str(bun), "run", "build"], exported / "web", 1200)
+            metadata["stage"] = "download_go_modules"
             run([go, "mod", "download"], exported, 900)
+            metadata["stage"] = "build_reference_main"
             pgo_dir = subprocess.check_output([go, "list", "-m", "-f", "{{.Dir}}", "github.com/Calcium-Ion/moejs"],
                                               cwd=exported, env=env, text=True, timeout=60).strip()
             binary = work / ("new-api.exe" if os.name == "nt" else "new-api")
@@ -95,6 +101,7 @@ def build(source, work, go):
         metadata["binary"] = str(binary)
         metadata["binary_sha256"] = digest(binary)
         metadata["status"] = "built"
+        metadata["stage"] = "complete"
     except BaseException as error:
         metadata.update(status="failed", error=type(error).__name__, log=str(log))
         raise

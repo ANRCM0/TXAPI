@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "tests/smoke/reference_*.py"
+      - "tests/smoke/stream_baseline.py"
+      - "tests/smoke/process_resources.py"
+      - "tests/smoke/local.py"
+      - "tests/smoke/sdk_conformance.py"
       - ".github/workflows/reference-comparison.yml"
   workflow_dispatch:
 
@@ -28,7 +32,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
+          go-version-file: .local/reference-source/go.mod
           cache: true
           cache-dependency-path: |
             go.sum
@@ -49,7 +53,7 @@ jobs:
           report_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "reference-comparison.json"
           if report_path.exists():
               report = json.loads(report_path.read_text())
-              print(json.dumps({key: report.get(key) for key in ("source", "reference_build", "environment", "configuration", "summary", "resources", "planned_measurement_requests", "started_measurement_requests", "paired_differences_ns", "active_upstream_after_measurement", "fatal_error")}, sort_keys=True))
+              print(json.dumps({key: report.get(key) for key in ("source", "reference_build", "environment", "configuration", "stage", "summary", "resources", "planned_measurement_requests", "started_measurement_requests", "paired_differences_ns", "active_upstream_after_measurement", "auth_checks", "client_self_checks", "reference_persisted_consumption", "txapi_persisted_requests", "fatal_error")}, sort_keys=True))
           else:
               build_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "new-api-reference" / "build.json"
               print(build_path.read_text() if build_path.exists() else "Reference build did not produce a record")
