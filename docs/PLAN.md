@@ -23,7 +23,7 @@
 
 ## 当前基线与能力边界
 
-最新已合并功能头为 `master/16d1beeac3907c1515d611044e21d9623bcf4959`：strict强杀矩阵PR #80的修复头 `21d4a0e625720e387b8cff5c597f75d4980e708d` 已通过 push Verify `39372416145` 与 PR Verify `39372421552` 全部六项，PR测试合并文件树与该头相同；合并后独立 Verify `39373920654` 运行中。最近完整通过合并后CI的基线为TLS条件对照PR #79的 `189eaef53ccf058acd5cae2e7795a99983e69a1d` / Verify `39370670996`，PR #78合并后 Verify `39368635708` 同样成功。更早证据保留对应PR；本批双端TLS/H2测量与合并后主线分别验收，不继承旧头绿灯。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
+最新已合并且完整通过CI的功能头为 `master/2d7f5ffce32b2a7f3a384ec483a7746571cacbc5`：双端TLS/H2基线PR #81最终头 `b0286bd70e2605a87eb707349d0a996ecf0cd4df` 已通过 push Verify `39374041346` 与 PR Verify `39374044882` 全部六项，PR测试合并文件树与该头相同；合并后独立 Verify `39375474361` 同样全部成功。strict强杀恢复PR #80合并后的 Verify `39373920654`、PR #79的 Verify `39370670996` 也已成功。更早证据保留对应PR；本批Chat原生用量另按最终精确头验收，不继承旧头绿灯。证据仅覆盖相应提交。下表记录已验收子集，未列入的组合不自动继承支持或计费许可。
 
 | 能力 | 当前已验收范围 | 仍未完成或必须保留的限制 |
 |---|---|---|
@@ -37,7 +37,7 @@
 | 用量与计费 | Responses 原生 Token 明细（Chat legacy 持久明细仍 unknown）、不可变售价报价、前台 HTTP 用量、定点价格、双 hold、幂等结算、对账/未知保护 | 用量历史仅 disabled；WS 每轮明细已通过精确头CI并合并；后台任务用量元数据已通过精确头CI并合并；后台/WS 收费未覆盖，S5-03 完整成本证明未完成 |
 | 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取，受控 SDK 与容器交付回归 | 真实 Provider/OAuth/Codex 完整组合未验收；固定 WS SDK 受控验收按本批记录，账号管理待后端能力 |
 
-本批源码的 [OpenAPI](openapi.json) 为 `0.13.11` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合及准入/原生 WS 占用指标已通过精确头 CI 并合并；后台占用增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
+本批源码的 [OpenAPI](openapi.json) 为 `0.13.12` / 117 操作；数据库保持 schema v21，固定 Codex WS 与实际镜像组合及准入/原生 WS 占用指标已通过精确头 CI 并合并；Chat原生用量观察增量单列于下。接口数量、测试数量或子批通过不换算为项目完成百分比。S5、完整后台/WS 与真实组合验收继续开放，已完成的公共框架不重新立项。
 
 ## 架构与契约
 
@@ -362,6 +362,21 @@ TLS测量最终头的完整CI已成功并合并。Linux PR运行中Chat/Response
 首次Linux交付测量完成40/40、20个成功配对，逐请求1次发送与排空均通过，但随后夹具仍用默认50条分页等候52条记录，持续轮询后触发120次/分钟查询限流，故交付整体失败。修复仅显式请求允许的limit=100，并要求has_more=false，不扩大生产查询/留存容量、取消限流或丢弃旧记录断言；最终修复头完整CI重新验收，首轮数据仅为有限观察，不能把测量成功当交付通过。
 
 随后核对到用量验收假设超出现有Chat能力：gateway仅从实现execution/v3.Decoder的消费者取得原生明细，现有Chat legacy解码器会将持久明细保留unknown，日志中的v1计数不转换为v3事实。本批保持这一边界，客户端仍严格校验原始SSE的2/8/10，但持久验收改用实际X-TXAPI-Usage-ID关联全部20个新增sealed回执，逐条核对单次dispatch以及六个原生数量均为null、source/completeness为unknown；不根据线端数据伪造持久事实，不为测量新增生产解码能力或收费许可。首次20条原生持久计数的错误预期作废，相关失败保留在CI日志；Chat原生明细若另行补齐，需独立功能切片及契约验证。
+
+#### P4-CHAT-USAGE-001：Chat 原生用量接入既有观察契约（2026-10-20）
+
+1. **层级/目录：**L2 `internal/protocol` 在 OpenAI Chat 解码入口实现现有 execution/v3 观察，复用同一完整 SSE 事件状态机；L1 gateway 和生产 main 的现有 usage recorder 为真实消费者。修改协议实现、适用网关/生产入口回归、既有镜像消费者和本方案/OpenAPI说明，不新增发送链、包或观察数据库。
+2. **公开依赖/冻结：**只消费已批准 execution/v1/v2/v3/v4、usagehistory/v1 与当前准入/账本端口，不新增公开签名或扩大冻结范围。OpenAI兼容 Chat JSON/SSE 的标准 `prompt_tokens`、`completion_tokens`、`total_tokens`、`prompt_tokens_details.cached_tokens` 与 `completion_tokens_details.reasoning_tokens` 按真实存在性映射；cache-write 未声明，保持未知。Anthropic/Gemini转换、embeddings、Responses、后台/WS另按原能力。
+3. **来源/地基：**主参考 new-api 固定 `25372e30b1f94255b1f818aeaaf006f042572580` 的 `relay/channel/openai/usage.go::extractCachedTokensFromBody`（53–82），采用标准字段指针区分零与缺失的做法；不采用以零触发跨厂商回退、估算或自动补总量。按本项目现有 v3 观察和累计校验独立改写，不复制第三方实现。L0、HTTP客户端、解析线程、配置和schema不变。
+4. **行为/兼容/回退：**保留JSON原始字节与SSE完整事件的未知字段、顺序和工具内容；每流独立观察，使用现有JSON UTF-8、32层嵌套和重复键边界。原生数量仅接受非负精确int64，保留零/部分/未知，显式总量和子项受既有一致性/溢出规则约束，非法数量拒绝，不根据文本或其他数量推导。SSE在完整usage事件观察快照，在合法finish加DONE后只交付一次真实终态；截断、取消和deadline不伪造完成。只有完整终态数量投影至原聚合计费，strict许可/费率/未知hold不扩大；去掉私有v3包装可退回既有观察能力，无迁移。
+5. **验证/验收：**JSON/SSE原生完整、零、部分、缺失/null、细分单独存在、非法类型/负值/不一致/溢出/重复键；多usage累计、终态后无新数据、跨块UTF-8和多行事件、工具/未知字段保真、截断/取消/首输出/空闲/进度；真实socket和生产main按实际usage ID查询落库并重启读取，逐次发送与disabled资金不变。strict既有JSON/SSE结算、未知保护及强杀矩阵完整回归；集中build/vet/全量Go、SDK/镜像与最终精确头完整CI后合并。
+6. **协作影响：**只在OpenAI Chat私有包装中接入v3，避免公共基础decoder连带改变跨协议转换。镜像消费者新增已知数量预期必须绑定实际wire/usage ID，保留既有记录数、单attempt、强杀与资金断言；更新能力说明并保留旧批次unknown历史事实。真实Provider/OAuth继续按用户要求跳过，收费、长期容量和S5-03不随本批完成。
+
+本地受控结果：JSON/SSE协议定向回归通过完整、零、部分、未知、细分单独存在及非法数量/重复键拒绝、原始wire、独立流与进度；双端真实socket的10个正常组合和累计下降/截断/取消/null四个场景通过。12个strict JSON/SSE场景各只有一次发送：完整11/7/18按原价只收5850000单位，显式零正常结算为零；部分、仅细分、未知与非法快照均保持pending，user/key各保留20000000000单位hold，历史Provider成本准入不丢失。完整终态前的已知观察不被当作聚合财务回执。
+
+Windows GOARCH=amd64 build与全量vet通过；全量Go首轮仅旧TestFactsDoNotInventProvenanceForLegacyDecoder把内置OpenAI解码器隐含视为v1-only的假设失败，其余包通过（cmd/gateway92.198s、architecture38.304s、billing41.680s、protocol2.732s、generation83.890s、store82.004s）。改为显式v1-only包装并保留未知来源原断言后，完整gateway包66.113s及其vet通过，包含既有11场景真实Process.Kill恢复矩阵。生产主进程local.py通过，真实usage ID对应JSON/SSE4/1/5、cached=2、reasoning=0、cache-write=null，重启保持原样；旧首块强杀/不重放、关闭采集、权限隔离和资金不变断言保留。Python AST、OpenAPI0.13.12/117与差异/格式检查通过。最终精确头完整CI、Linux race与实际镜像新增已知回执组合另验，不能继承PR #81的绿灯或回写其历史unknown记录。
+
+固定官方Python SDK 2.11.0/httpx0.28.1的Chat/Responses JSON/SSE、工具/UTF-8、终态、截断、关闭和准入释放受控回归同样通过；客户端wire不因增加原生观察而改写。SDK证据仍限loopback夹具，不证明真实Provider。
 
 ### P1：最小托管账号推理
 
