@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -176,9 +178,24 @@ func TestBackgroundNativeCrashChild(t *testing.T) {
 }
 
 func TestBackgroundNativeProcessDeathFencesEveryDispatchAndEventCommitWindow(t *testing.T) {
+	bgRuntimeCrashWindows(t, nil)
+}
+
+type bgRuntimeCrashScenario struct {
+	receipt      bg.Receipt
+	validatePost func(*testing.T, []byte)
+	validateRow  func(*testing.T, bgRuntimeFixture, model.BackgroundJob)
+}
+
+// Both self-contained and inherited inputs use the same real process-death
+// barriers, recovery assertions and old-claim fencing checks.
+func bgRuntimeCrashWindows(t *testing.T, prepare func(*testing.T, bgRuntimeFixture) bgRuntimeCrashScenario) {
+	t.Helper()
 	for _, mode := range []string{"claimed", "dispatching-before-send", "accepted-before-bind", "event-before-ack", "terminal-before-db"} {
 		t.Run(mode, func(t *testing.T) {
 			var posts, resumes atomic.Int64
+			var scenarioMu sync.RWMutex
+			var scenario bgRuntimeCrashScenario
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("Authorization") != "Bearer fixture-upstream-key" {
 					t.Error("credential changed")
@@ -186,6 +203,15 @@ func TestBackgroundNativeProcessDeathFencesEveryDispatchAndEventCommitWindow(t *
 				w.Header().Set("Content-Type", "text/event-stream")
 				if r.Method == "POST" && r.URL.Path == "/v1/responses" {
 					posts.Add(1)
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
+						t.Error(err)
+					}
+					scenarioMu.RLock()
+					if scenario.validatePost != nil {
+						scenario.validatePost(t, body)
+					}
+					scenarioMu.RUnlock()
 					_, _ = fmt.Fprint(w, bgWire(0, "queued")+bgWire(1, "completed"))
 					return
 				}
@@ -200,7 +226,14 @@ func TestBackgroundNativeProcessDeathFencesEveryDispatchAndEventCommitWindow(t *
 			defer upstream.Close()
 			path := filepath.Join(t.TempDir(), "native-crash.db")
 			f := bgRuntimeOpen(t, path, upstream.URL, nil)
-			receipt := f.submit(t, 1)
+			scenarioMu.Lock()
+			if prepare == nil {
+				scenario.receipt = f.submit(t, 1)
+			} else {
+				scenario = prepare(t, f)
+			}
+			scenarioMu.Unlock()
+			receipt := scenario.receipt
 			if e := f.st.Close(); e != nil {
 				t.Fatal(e)
 			}
@@ -297,6 +330,9 @@ func TestBackgroundNativeProcessDeathFencesEveryDispatchAndEventCommitWindow(t *
 			}
 			if _, e = f.runner.opts.Service.repository.ReadClaimedBackground(context.Background(), barrier.Claim); !errors.Is(e, bs.ErrClaimLost) {
 				t.Fatal("stale claim read permitted", e)
+			}
+			if scenario.validateRow != nil {
+				scenario.validateRow(t, f, row)
 			}
 		})
 	}

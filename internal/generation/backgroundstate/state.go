@@ -9,6 +9,7 @@ import (
 	bg "minigateway/internal/foundation/contracts/background/v1"
 	usage "minigateway/internal/foundation/contracts/execution/v3"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
+	state "minigateway/internal/foundation/contracts/state/v1"
 )
 
 var ErrClaimLost = errors.New("background claim lost")
@@ -79,7 +80,8 @@ type UsageMetadata struct {
 }
 type Repository interface {
 	InitializeBackground(context.Context, string, string) ([]Record, error)
-	AdmitBackground(context.Context, Record, Limits) (Record, error)
+	LookupBackgroundSubmission(context.Context, identity.Binding, string, string, string, string) (Record, bool, error)
+	AdmitBackground(context.Context, Record, Limits, ...state.HistoryGuard) (Record, error)
 	ReadBackground(context.Context, identity.Binding, string) (Record, error)
 	BackgroundKind(context.Context, identity.Binding, string) (bg.ResourceKind, error)
 	DeleteBackground(context.Context, identity.Binding, string, *uint64) error

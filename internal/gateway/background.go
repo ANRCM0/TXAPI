@@ -89,7 +89,7 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 	requests := make(map[int]execution.Request)
 	var candidates []*channel
 	if call.Action == bg.RemoteSubmit {
-		if call.Target != nil || call.RemoteID != "" {
+		if call.RemoteID != "" {
 			return bg.ErrConflict
 		}
 		p, ok := access.PrincipalFromContext(ctx)
@@ -99,7 +99,7 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 		if g.hasManagedGrant(p.UserID, p.TokenID, call.Model) {
 			return bg.ErrUnsupportedCapability
 		}
-		for _, ch := range g.pickChannels(call.Model, nil) {
+		for _, ch := range g.responseChannels(g.pickChannels(call.Model, nil), call.Model, call.Target) {
 			ch = staticBackgroundChannel(ch)
 			if len(ch.credentials) == 0 {
 				continue
@@ -143,6 +143,9 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 		credentialID = cred.ID
 		credential = *cred
 		target = *buildMeta(ch, cred, req, call.PublicID)
+		if call.Target != nil && (responseTarget(ch, cred, call.Model) != *call.Target || target.ActualModel != call.Target.ActualModel) {
+			return bg.ErrUnavailable
+		}
 	} else {
 		for _, v := range candidates {
 			v = staticBackgroundChannel(v)
@@ -207,6 +210,10 @@ func (r *BackgroundRemote) Execute(ctx context.Context, call bs.RemoteCall, prog
 			return bg.ErrCapacity
 		}
 		binding := responseTarget(ch, &credential, call.Model)
+		if call.Target != nil && binding != *call.Target {
+			access.FinishTokens(ctx, g.limiter, 0)
+			return bg.ErrUnavailable
+		}
 		rate := bs.RateReservation{Estimate: estimate}
 		if p, ok := access.PrincipalFromContext(ctx); ok && g.limiter != nil && p.TPMLimit > 0 {
 			rate.Epoch = r.epoch

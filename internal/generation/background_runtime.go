@@ -170,16 +170,13 @@ func (r *BackgroundRunner) runOne(parent context.Context) (err error) {
 			return e
 		}
 		ctx = access.WithPrincipal(access.NewGenerationContext(ctx), principal)
-		plain, e := s.keys.Open(row.Ciphertext, backgroundAAD(row, "input"))
-		if e != nil {
-			return e
-		}
-		var payload backgroundPayload
-		if json.Unmarshal(plain, &payload) != nil || payload.Operation != call.Operation {
+		payload, e := s.openPayload(row)
+		if e != nil || payload.Operation != call.Operation {
 			return bg.ErrUnavailable
 		}
 		call.Action = bg.RemoteSubmit
 		call.Body = bytes.Clone(payload.Body)
+		call.Target = payload.Target
 	} else if row.Stage == string(bg.StageRemoteActive) || row.ReplayPending {
 		call.Action = bg.RemoteInspect
 		if row.Stream && !p.snapshot.EventUnavailable {
@@ -255,12 +252,11 @@ func (p *backgroundProgress) Validate(ctx context.Context, call bs.RemoteCall) e
 		return bg.ErrConflict
 	}
 	if call.Action == bg.RemoteSubmit {
-		if p.row.Stage != string(bg.StageQueued) || call.Target != nil || call.RemoteID != "" || call.After != nil || call.Stream != p.row.Stream {
+		if p.row.Stage != string(bg.StageQueued) || call.RemoteID != "" || call.After != nil || call.Stream != p.row.Stream {
 			return bg.ErrConflict
 		}
-		plain, e := p.service.keys.Open(p.row.Ciphertext, backgroundAAD(p.row, "input"))
-		var payload backgroundPayload
-		if e != nil || json.Unmarshal(plain, &payload) != nil || !bytes.Equal(payload.Body, call.Body) {
+		payload, e := p.service.openPayload(p.row)
+		if e != nil || !bytes.Equal(payload.Body, call.Body) || (call.Target == nil) != (payload.Target == nil) || call.Target != nil && *call.Target != *payload.Target {
 			return bg.ErrConflict
 		}
 		return nil
@@ -295,6 +291,10 @@ func (p *backgroundProgress) Dispatch(ctx context.Context, target execv1.TargetC
 		return e
 	}
 	if p.row.Stage != string(bg.StageQueued) || target.ChannelID == 0 || target.CredentialID == 0 || target.Fingerprint == "" {
+		return bg.ErrConflict
+	}
+	payload, e := p.service.openPayload(p.row)
+	if e != nil || payload.Target != nil && *payload.Target != target {
 		return bg.ErrConflict
 	}
 	p.snapshot = backgroundSnapshot{Target: target, Rate: rate}

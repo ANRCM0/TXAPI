@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"math"
@@ -15,6 +16,7 @@ import (
 	"minigateway/internal/access"
 	bg "minigateway/internal/foundation/contracts/background/v1"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
+	state "minigateway/internal/foundation/contracts/state/v1"
 	bs "minigateway/internal/generation/backgroundstate"
 	"minigateway/internal/model"
 )
@@ -145,9 +147,44 @@ func backgroundResourceFree(tx *gorm.DB, id string) error {
 	return nil
 }
 
-func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Limits) (out bs.Record, err error) {
+func lookupBackgroundSubmission(tx *gorm.DB, binding identity.Binding, keyHash, requestHash, operation, modelName string, now int64) (out bs.Record, found bool, err error) {
+	var row model.BackgroundJob
+	q := tx.Where("user_id = ? AND token_id = ? AND key_hash = ?", binding.UserID, binding.TokenID, keyHash).Limit(1).Find(&row)
+	if q.Error != nil || q.RowsAffected == 0 {
+		return out, false, q.Error
+	}
+	if row.RequestHash != requestHash || row.Operation != operation || row.Model != modelName {
+		return out, true, bg.ErrConflict
+	}
+	if row.Deleted || row.ContentExpiresAt <= now && row.Stage == string(bg.StageTerminal) {
+		return out, true, bg.ErrCursorUnavailable
+	}
+	return backgroundSnapshot(row), true, nil
+}
+
+// LookupBackgroundSubmission checks the current authority before resolving an
+// idempotent receipt, without refreshing retention or modifying its namespace.
+func (s *Store) LookupBackgroundSubmission(ctx context.Context, binding identity.Binding, keyHash, requestHash, operation, modelName string) (out bs.Record, found bool, err error) {
+	if !responseHash(keyHash) || !responseHash(requestHash) || operation == "" || len(operation) > 64 || modelName == "" || len(modelName) > 256 {
+		return out, false, bg.ErrConflict
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := backgroundAuthority(tx, binding, modelName); err != nil {
+			return err
+		}
+		var lookupErr error
+		out, found, lookupErr = lookupBackgroundSubmission(tx, binding, keyHash, requestHash, operation, modelName, time.Now().UnixMilli())
+		return lookupErr
+	}, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		out = bs.Record{}
+	}
+	return
+}
+
+func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Limits, guards ...state.HistoryGuard) (out bs.Record, err error) {
 	now := time.Now().UnixMilli()
-	if !responseHash(in.ID) || !validBackgroundID(in.PublicID) || in.UserID == 0 || in.TokenID == 0 || in.Operation == "" || len(in.Operation) > 64 ||
+	if len(guards) > 1 || !responseHash(in.ID) || !validBackgroundID(in.PublicID) || in.UserID == 0 || in.TokenID == 0 || in.Operation == "" || len(in.Operation) > 64 ||
 		!responseHash(in.KeyHash) || !responseHash(in.NamespaceHash) || !responseHash(in.RequestHash) || !responseHash(in.DigestVersion) || len(in.Model) == 0 || len(in.Model) > 256 ||
 		in.Stage != string(bg.StageQueued) || in.Revision != 1 || in.CreatedAt <= 0 || in.CreatedAt > now || in.Deadline <= now || in.Deadline-in.CreatedAt > int64(5*time.Minute/time.Millisecond) ||
 		in.ContentExpiresAt < in.Deadline || in.ContentExpiresAt-in.CreatedAt > int64(time.Hour/time.Millisecond) || in.ExpiresAt < in.ContentExpiresAt || in.ExpiresAt-in.CreatedAt > int64(7*24*time.Hour/time.Millisecond) ||
@@ -167,26 +204,35 @@ func (s *Store) AdmitBackground(ctx context.Context, in bs.Record, limits bs.Lim
 		if err := backgroundAuthority(tx, binding, in.Model); err != nil {
 			return err
 		}
-		var existing model.BackgroundJob
-		q := tx.Where("user_id = ? AND token_id = ? AND key_hash = ?", in.UserID, in.TokenID, in.KeyHash).Limit(1).Find(&existing)
-		if q.Error != nil {
-			return q.Error
+		existing, found, lookupErr := lookupBackgroundSubmission(tx, binding, in.KeyHash, in.RequestHash, in.Operation, in.Model, now)
+		if lookupErr != nil {
+			return lookupErr
 		}
-		if q.RowsAffected != 0 {
-			if existing.RequestHash != in.RequestHash || existing.Operation != in.Operation || existing.Model != in.Model {
-				return bg.ErrConflict
-			}
-			if existing.Deleted || existing.ContentExpiresAt <= now && existing.Stage == string(bg.StageTerminal) {
-				return bg.ErrCursorUnavailable
-			}
+		if found {
 			if existing.NamespaceHash == "" {
 				existing.NamespaceHash = in.NamespaceHash
-				if e := saveBackground(tx, &existing); e != nil {
+				row := backgroundRow(existing)
+				if e := saveBackground(tx, &row); e != nil {
 					return e
 				}
 			}
-			out = backgroundSnapshot(existing)
+			out = existing
 			return nil
+		}
+		for _, guard := range guards {
+			parent, err := historyRead(tx, binding, guard.ID)
+			if errors.Is(err, model.ErrHistoryNotFound) || errors.Is(err, access.ErrUnauthorized) {
+				return bg.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			if parent.Model != in.Model || parent.Kind != "response" {
+				return bg.ErrNotFound
+			}
+			if parent.Version != guard.Version || parent.Busy != "" {
+				return bg.ErrConflict
+			}
 		}
 		if err := backgroundResourceFree(tx, in.PublicID); err != nil {
 			return err

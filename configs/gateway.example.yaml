@@ -171,7 +171,8 @@ responses:
   owner_bytes: 4194304
   active_requests: 32
   owner_requests: 4
-  # Native background is a separate disabled-billing-only, self-contained input slice.
+  # Native background requires disabled billing. Input may use ready saved HTTP/WS
+  # history via previous_response_id; it snapshots full context and the exact target.
   # Explicit channel opt-in is required; "openai" alone never declares support.
   background:
     enabled: false

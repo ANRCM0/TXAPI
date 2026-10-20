@@ -56,13 +56,34 @@ class Fixture:
                     data = None
                     if self.command == "POST" and url.path == "/v1/responses":
                         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                        assert body["background"] is True and body["store"] is False
-                        case = "sse" if body.get("stream") else "json"
-                        assert body["input"] == "sdk-background-" + case
-                        remote_id = "resp_remote_" + case
-                        with owner.lock:
-                            owner.calls["create-" + case] += 1
-                        data = event(0, remote_id, "queued") if case == "sse" else document(remote_id, "in_progress")
+                        assert body["model"] == "m" and "previous_response_id" not in body
+                        if not body.get("background"):
+                            assert not body.get("stream")
+                            assert len(body["input"]) == 1
+                            assert "sdk-history-parent" in json.dumps(body["input"][0])
+                            with owner.lock:
+                                owner.calls["parent"] += 1
+                            data = document("resp_remote_parent", "completed")
+                        elif isinstance(body["input"], list):
+                            assert body["background"] is True and body["store"] is False
+                            assert not body.get("stream") and len(body["input"]) == 3
+                            assert "sdk-history-parent" in json.dumps(body["input"][0])
+                            assert body["input"][1]["role"] == "assistant"
+                            assert body["input"][1]["content"] == response_document()["output"][0]["content"]
+                            assert body["input"][2]["role"] == "user"
+                            assert body["input"][2]["content"] == "sdk-history-next"
+                            assert all("id" not in item for item in body["input"])
+                            with owner.lock:
+                                owner.calls["background-history"] += 1
+                            data = document("resp_remote_history", "completed")
+                        else:
+                            assert body["background"] is True and body["store"] is False
+                            case = "sse" if body.get("stream") else "json"
+                            assert body["input"] == "sdk-background-" + case
+                            remote_id = "resp_remote_" + case
+                            with owner.lock:
+                                owner.calls["create-" + case] += 1
+                            data = event(0, remote_id, "queued") if case == "sse" else document(remote_id, "in_progress")
                     else:
                         remote_id = url.path.split("/")[-2 if self.command == "POST" else -1]
                         assert remote_id in ("resp_remote_sse", "resp_remote_json")
@@ -239,8 +260,35 @@ def exercise(binary, work, env, fixture):
             denied(lambda: owner.responses.retrieve(cancel_id), 404)
             isolated(public_id)
             assert {row[0]: row[1:] for row in sql(usage_query)} == rows
+
+            # Keep the original recovery/usage assertions above exact; this is
+            # the independent SDK consumer of the local-history input bridge.
+            parent = owner.responses.create(model="m", input="sdk-history-parent")
+            assert isinstance(parent, Response) and parent.status == "completed"
+            assert sql("SELECT COUNT(*) FROM response_histories WHERE id=? AND deleted=0",
+                       (parent.id,)) == [(1,)]
+            denied(lambda: other.responses.create(model="m", input="sdk-history-next", background=True,
+                                                   store=False, previous_response_id=parent.id), 404)
+            with fixture.lock:
+                assert fixture.calls["parent"] == 1 and fixture.calls["background-history"] == 0
+            continuation = dict(model="m", input="sdk-history-next", background=True, store=False,
+                                previous_response_id=parent.id,
+                                extra_headers={"Idempotency-Key": "sdk-history-once"})
+            task = owner.responses.create(**continuation)
+            assert isinstance(task, Response) and task.id != parent.id
+            owner.responses.delete(parent.id)
+            denied(lambda: owner.responses.retrieve(parent.id), 404)
+            replay = owner.responses.create(**continuation)
+            assert replay.id == task.id, "deleted parent broke accepted-task idempotency"
+            terminal = wait_for(lambda: owner.responses.retrieve(task.id),
+                                lambda value: value.status == "completed",
+                                "SDK history background task did not complete")
+            assert terminal.id == task.id and terminal.output_text == complete.output_text
+            assert sql("SELECT COUNT(*) FROM response_histories WHERE id=?", (task.id,)) == [(0,)], \
+                "background result was published as permanent history"
         with fixture.lock:
             assert fixture.calls["create-sse"] == fixture.calls["create-json"] == fixture.calls["cancel"] == 1
+            assert fixture.calls["parent"] == fixture.calls["background-history"] == 1
             assert fixture.calls["resume"] >= 1 and not fixture.errors, fixture.errors
         for path in work.glob("*.log"):
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -266,7 +314,7 @@ def main():
         fixture = Fixture()
         stack.callback(fixture.close)
         exercise(binary, work, env, fixture)
-    print("PASS: pinned HTTP SDK background typed create/retrieve/cursor, observer close, Kill/Wait recovery, cancel/delete, Key isolation and exact persisted usage; two upstream creates/one cancel; loopback only")
+    print("PASS: pinned HTTP SDK background typed create/retrieve/cursor, observer close, Kill/Wait recovery, cancel/delete, Key isolation and exact persisted usage; two original creates/one cancel plus one saved parent/one history background, parent deletion/idempotent replay and no permanent background history; loopback only")
 
 
 if __name__ == "__main__":

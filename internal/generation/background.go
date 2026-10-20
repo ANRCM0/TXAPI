@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"minigateway/internal/access"
@@ -19,6 +20,8 @@ import (
 	execv1 "minigateway/internal/foundation/contracts/execution/v1"
 	identity "minigateway/internal/foundation/contracts/identity/v1"
 	jsonvalue "minigateway/internal/foundation/contracts/json/v1"
+	history "minigateway/internal/foundation/contracts/responsehistory/v1"
+	state "minigateway/internal/foundation/contracts/state/v1"
 	bs "minigateway/internal/generation/backgroundstate"
 	"minigateway/internal/secrets"
 )
@@ -26,6 +29,8 @@ import (
 type BackgroundOptions struct {
 	Repository        bs.Repository
 	Parser            execv1.Parser
+	History           history.Repository
+	Compiler          history.BackgroundCompiler
 	BillingMode       string
 	ActiveKey         string
 	Keys              map[string][]byte
@@ -40,6 +45,8 @@ type BackgroundOptions struct {
 type BackgroundService struct {
 	repository        bs.Repository
 	parser            execv1.Parser
+	history           history.Repository
+	compiler          history.BackgroundCompiler
 	mode              string
 	keys              *secrets.Ring
 	digest            []byte
@@ -50,13 +57,19 @@ type BackgroundService struct {
 }
 
 type backgroundPayload struct {
-	Operation execv1.Operation
-	Body      json.RawMessage
+	Operation     execv1.Operation
+	Body          json.RawMessage
+	Target        *execv1.TargetConstraint `json:",omitempty"`
+	ParentID      string                   `json:",omitempty"`
+	ParentVersion uint64                   `json:",omitempty"`
 }
 
 func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*BackgroundService, error) {
 	if ctx == nil || nilPort(o.Repository) || nilPort(o.Parser) || o.BillingMode != "disabled" {
 		return nil, bg.ErrUnsupportedBilling
+	}
+	if nilResponseHistoryDependency(o.History) != nilResponseHistoryDependency(o.Compiler) {
+		return nil, bg.ErrUnavailable
 	}
 	if len(o.DigestKey) != 32 || o.Retention < 5*time.Minute || o.Retention > time.Hour || o.MetadataRetention < o.Retention || o.MetadataRetention > 7*24*time.Hour ||
 		o.Limits.OwnerRecords < 1 || o.Limits.InstanceRecords < o.Limits.OwnerRecords || o.Limits.InstanceRecords > 4096 ||
@@ -74,7 +87,7 @@ func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*Background
 		return nil, bg.ErrUnavailable
 	}
 	sum := sha256.Sum256(o.DigestKey)
-	s := &BackgroundService{repository: o.Repository, parser: o.Parser, mode: o.BillingMode, keys: ring, digest: bytes.Clone(o.DigestKey), version: hex.EncodeToString(sum[:]), retention: o.Retention, metadataRetention: o.MetadataRetention, limits: o.Limits}
+	s := &BackgroundService{repository: o.Repository, parser: o.Parser, history: o.History, compiler: o.Compiler, mode: o.BillingMode, keys: ring, digest: bytes.Clone(o.DigestKey), version: hex.EncodeToString(sum[:]), retention: o.Retention, metadataRetention: o.MetadataRetention, limits: o.Limits}
 	records, err := o.Repository.InitializeBackground(ctx, s.version, o.BillingMode)
 	if err != nil {
 		return nil, safeBackgroundError(err)
@@ -86,7 +99,7 @@ func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*Background
 			return nil, bg.ErrUnavailable
 		}
 		if len(r.Ciphertext) > 0 {
-			if _, err := s.keys.Open(r.Ciphertext, backgroundAAD(r, "input")); err != nil {
+			if _, err := s.openPayload(r); err != nil {
 				return nil, bg.ErrUnavailable
 			}
 		}
@@ -161,8 +174,12 @@ func canonicalBackground(body []byte) ([]byte, error) {
 	if json.Unmarshal(fields["background"], &background) != nil || !background {
 		return nil, bg.ErrUnsupportedCapability
 	}
-	for _, key := range []string{"previous_response_id", "conversation"} {
-		if raw := fields[key]; len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+	if raw := fields["conversation"]; len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, bg.ErrUnsupportedCapability
+	}
+	if raw := fields["previous_response_id"]; len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		var parent string
+		if json.Unmarshal(raw, &parent) != nil || !strings.HasPrefix(parent, "resp_") || len(parent) < 6 || len(parent) > 80 || strings.TrimSpace(parent) != parent {
 			return nil, bg.ErrUnsupportedCapability
 		}
 	}
@@ -204,13 +221,6 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 	if err != nil {
 		return bg.Receipt{}, err
 	}
-	request, err := s.parser.ParseRequest(in.Operation, bytes.Clone(body))
-	if err != nil || nilPort(request) {
-		return bg.Receipt{}, bg.ErrUnsupportedCapability
-	}
-	if request.Operation() != in.Operation || request.Requirements().Operation != in.Operation || request.Requirements().Transport != execv1.Background || request.Stream() != in.Stream || request.Requirements().Stream != in.Stream || !bytes.Equal(request.Body(), body) || request.Model() == "" {
-		return bg.Receipt{}, bg.ErrUnsupportedCapability
-	}
 	var flags map[string]json.RawMessage
 	if json.Unmarshal(body, &flags) != nil {
 		return bg.Receipt{}, bg.ErrConflict
@@ -223,6 +233,14 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 	}
 	if stream != in.Stream || store != in.Store {
 		return bg.Receipt{}, bg.ErrConflict
+	}
+	var modelName, parentID string
+	if json.Unmarshal(flags["model"], &modelName) != nil || modelName == "" {
+		return bg.Receipt{}, bg.ErrUnsupportedCapability
+	}
+	_ = json.Unmarshal(flags["previous_response_id"], &parentID)
+	if parentID != "" && in.Operation != execv1.Responses {
+		return bg.Receipt{}, bg.ErrUnsupportedCapability
 	}
 	now := time.Now()
 	if in.Deadline.IsZero() {
@@ -239,18 +257,62 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 	if key == "" {
 		key = id
 	}
-	plain, err := json.Marshal(backgroundPayload{Operation: in.Operation, Body: body})
+	// Preserve the released self-contained fingerprint and hash the original
+	// client request, never the mutable parent or its compiled representation.
+	original, err := json.Marshal(backgroundPayload{Operation: in.Operation, Body: body})
+	if err != nil || len(original) > bs.MaxInput {
+		return bg.Receipt{}, bg.ErrCapacity
+	}
+	requestHash := s.hash("request", original)
+	keyHash := s.hash("key", []byte(key))
+	if parentID != "" {
+		out, found, e := s.repository.LookupBackgroundSubmission(ctx, binding, keyHash, requestHash, string(in.Operation), modelName)
+		if e != nil {
+			return bg.Receipt{}, safeBackgroundError(e)
+		}
+		if found {
+			return s.receipt(out)
+		}
+	}
+	payload := backgroundPayload{Operation: in.Operation, Body: body}
+	var guards []state.HistoryGuard
+	if parentID != "" {
+		payload, guards, err = s.prepareHistory(ctx, binding, payload, parentID, modelName)
+		if err != nil {
+			// Another submit may have committed the same request before its
+			// parent disappeared. Recheck the receipt without requiring the parent.
+			if in.IdempotencyKey != "" {
+				out, found, lookupErr := s.repository.LookupBackgroundSubmission(ctx, binding, keyHash, requestHash, string(in.Operation), modelName)
+				if lookupErr != nil {
+					return bg.Receipt{}, safeBackgroundError(lookupErr)
+				}
+				if found {
+					return s.receipt(out)
+				}
+			}
+			return bg.Receipt{}, err
+		}
+		body = payload.Body
+	}
+	request, err := s.parser.ParseRequest(in.Operation, bytes.Clone(body))
+	if err != nil || nilPort(request) {
+		return bg.Receipt{}, bg.ErrUnsupportedCapability
+	}
+	if request.Operation() != in.Operation || request.Requirements().Operation != in.Operation || request.Requirements().Transport != execv1.Background || request.Stream() != in.Stream || request.Requirements().Stream != in.Stream || !bytes.Equal(request.Body(), body) || request.Model() != modelName {
+		return bg.Receipt{}, bg.ErrUnsupportedCapability
+	}
+	plain, err := json.Marshal(payload)
 	if err != nil || len(plain) > bs.MaxInput {
 		return bg.Receipt{}, bg.ErrCapacity
 	}
 	r := bs.Record{ID: id, PublicID: in.ID, UserID: binding.UserID, TokenID: binding.TokenID, Operation: string(in.Operation), Model: request.Model(),
-		KeyHash: s.hash("key", []byte(key)), NamespaceHash: s.foregroundNamespace(binding, key), RequestHash: s.hash("request", plain), DigestVersion: s.version, Stage: string(bg.StageQueued), Stream: in.Stream, Store: in.Store,
+		KeyHash: keyHash, NamespaceHash: s.foregroundNamespace(binding, key), RequestHash: requestHash, DigestVersion: s.version, Stage: string(bg.StageQueued), Stream: in.Stream, Store: in.Store,
 		Revision: 1, CreatedAt: now.UnixMilli(), Deadline: in.Deadline.UnixMilli(), ContentExpiresAt: now.Add(s.retention).UnixMilli(), ExpiresAt: now.Add(s.metadataRetention).UnixMilli(), ReservedBytes: bs.MaxInput + bs.MaxContent + 512, LastSequence: -1}
 	r.Ciphertext, err = s.keys.Seal(plain, backgroundAAD(r, "input"))
 	if err != nil {
 		return bg.Receipt{}, bg.ErrUnavailable
 	}
-	out, err := s.repository.AdmitBackground(ctx, r, s.limits)
+	out, err := s.repository.AdmitBackground(ctx, r, s.limits, guards...)
 	if err != nil {
 		return bg.Receipt{}, safeBackgroundError(err)
 	}
