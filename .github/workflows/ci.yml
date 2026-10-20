@@ -87,6 +87,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/txapi-sdk-venv"
           "$RUNNER_TEMP/txapi-sdk-venv/bin/python" -m pip install -r tests/smoke/requirements-sdk.txt
           "$RUNNER_TEMP/txapi-sdk-venv/bin/python" tests/smoke/sdk_conformance.py --go go
+          "$RUNNER_TEMP/txapi-sdk-venv/bin/python" tests/smoke/background_sdk_conformance.py --go go
 
       - name: 固定官方 Python WS SDK 的受控兼容回归
         timeout-minutes: 5

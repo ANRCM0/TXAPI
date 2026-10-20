@@ -50,6 +50,7 @@ delivery:
 # Install tests/smoke/requirements-sdk.txt in an isolated environment first.
 sdk-conformance:
 	$(PYTHON) tests/smoke/sdk_conformance.py --go "$(GO)"
+	$(PYTHON) tests/smoke/background_sdk_conformance.py --go "$(GO)"
 
 # Install requirements-ws-sdk.txt in a separate environment from the HTTP SDK.
 ws-sdk-conformance:
