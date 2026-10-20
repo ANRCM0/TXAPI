@@ -382,9 +382,6 @@ func (c *Config) validate() error {
 	if err := c.UpstreamAccounts.validate(c.Database.CredentialKeysFile); err != nil {
 		return err
 	}
-	if c.UpstreamAccounts.Inference.Enabled && (c.Billing.Mode != "disabled" || strings.TrimSpace(c.Database.CredentialKeysFile) == "" || !c.Responses.Enabled) {
-		return fmt.Errorf("upstream_accounts.inference.enabled requires billing.mode disabled, database.credential_keys_file and responses.enabled")
-	}
 	if err := c.UsageHistory.validate(c.Billing.Mode); err != nil {
 		return err
 	}

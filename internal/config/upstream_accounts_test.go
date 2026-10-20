@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestManagedInferenceRequiresExplicitSafeDependencies(t *testing.T) {
+func TestAPIKeyRelayRejectsManagedInference(t *testing.T) {
 	base, err := Load(writeCfg(t, minimalCfg))
 	if err != nil || base.UpstreamAccounts.Inference.Enabled {
 		t.Fatalf("default capability: %+v %v", base, err)
@@ -24,12 +24,12 @@ func TestManagedInferenceRequiresExplicitSafeDependencies(t *testing.T) {
 		})
 	}
 	_, err = Load(writeCfg(t, minimalCfg+"billing:\n  mode: disabled\ndatabase:\n  credential_keys_file: fixture-keys.json\nresponses:\n  enabled: true\n  keys_file: fixture-content.json\nupstream_accounts:\n  inference:\n    enabled: true\n"))
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "upstream_accounts.inference.enabled is unavailable") {
+		t.Fatal("legacy prerequisites must not reactivate managed inference", err)
 	}
 }
 
-func TestUpstreamRefreshDefaultsBoundsAndEncryption(t *testing.T) {
+func TestAPIKeyRelayRejectsUpstreamRefresh(t *testing.T) {
 	cfg, err := Load(writeCfg(t, minimalCfg))
 	if err != nil || cfg.UpstreamAccounts.Refresh.Enabled || cfg.UpstreamAccounts.Refresh.IntervalSeconds != 30 || cfg.UpstreamAccounts.Refresh.BeforeExpirySeconds != 600 || cfg.UpstreamAccounts.Refresh.MaxAttemptsPerCycle != 4 {
 		t.Fatalf("refresh default configuration: %v", err)
@@ -43,7 +43,7 @@ func TestUpstreamRefreshDefaultsBoundsAndEncryption(t *testing.T) {
 		}
 	}
 	_, err = Load(writeCfg(t, minimalCfg+"database:\n  credential_keys_file: fixture-keys.json\nupstream_accounts:\n  refresh:\n    enabled: true\n"))
-	if err != nil {
-		t.Fatal("refresh lifecycle should not require enabling inference", err)
+	if err == nil || !strings.Contains(err.Error(), "upstream_accounts.refresh.enabled is unavailable") {
+		t.Fatal("encryption must not reactivate OAuth refresh", err)
 	}
 }

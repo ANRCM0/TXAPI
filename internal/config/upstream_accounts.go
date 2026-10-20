@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"strings"
 )
 
 type UpstreamAccountsConfig struct {
@@ -34,13 +33,16 @@ func (c *UpstreamAccountsConfig) defaults() {
 	}
 }
 
-func (c UpstreamAccountsConfig) validate(keysFile string) error {
+func (c UpstreamAccountsConfig) validate(_ string) error {
+	if c.Inference.Enabled {
+		return fmt.Errorf("upstream_accounts.inference.enabled is unavailable in the API-key relay; configure a static API channel")
+	}
+	if c.Refresh.Enabled {
+		return fmt.Errorf("upstream_accounts.refresh.enabled is unavailable in the API-key relay; OAuth refresh is not supported")
+	}
 	r := c.Refresh
 	if r.IntervalSeconds < 5 || r.IntervalSeconds > 3600 || r.BeforeExpirySeconds < 30 || r.BeforeExpirySeconds > 86400 || r.BeforeExpirySeconds < r.IntervalSeconds || r.MaxAttemptsPerCycle < 1 || r.MaxAttemptsPerCycle > 16 {
 		return fmt.Errorf("upstream_accounts.refresh requires interval_seconds 5..3600, before_expiry_seconds 30..86400 and at least interval_seconds, max_attempts_per_cycle 1..16")
-	}
-	if r.Enabled && strings.TrimSpace(keysFile) == "" {
-		return fmt.Errorf("upstream_accounts.refresh.enabled requires database.credential_keys_file")
 	}
 	return nil
 }

@@ -6,17 +6,17 @@
 
 建设可扩展的 AI 网关，保持 **Go/Gin 模块化单体、单二进制、单实例 SQLite**，通过已登记的 L0–L3 契约扩展功能。以核心转发正确、协议兼容、故障可定位、容量有边界为主线，优先从固定参考源码原生化实现，适配既有 owner、契约和生命周期。
 
-标准 API Key 路线独立可用，不依赖账号池。保留现有内嵌 ES Modules 控制台与 API 回归，新前端、支付/套餐、媒体平台、多实例、PostgreSQL/Redis 和外部插件 Runtime 后置。基础权限、用量、对账、诊断与备份恢复随功能交付，不随商业页面后置。
+2026-10-21 用户将当前产品收敛为类似 new-api 的 **静态 API Key 中转**：配置兼容上游、模型、调用 Key、售价和额度，经现有唯一执行链完成 HTTP/后台/WS 转发、用量与结算。OAuth、SIWC 托管账号、自动刷新和账号池退出当前产品范围，正常交付不提供授权命令、刷新 worker 或托管推理入口；历史实现、数据库和已登记契约保留兼容，不删除历史凭据或账本。
 
-真实 Provider/OAuth 按用户当前没有真实 Key 的指示跳过，不请求或发起付费调用；真实组合继续列为未验收。此限制不阻止后台父链等可独立实现的工作，也不构成收费许可。
+当前验收不要求真实 Provider、真实账号或 OAuth 调用，全部使用受控 API 上游和合成 Key；不发起真实付费请求。成本政策由运营者显式声明并绑定版本、有效期、渠道/凭据、模型、操作和最坏尝试包络，运行时执行相应边界；此声明不是实际 Provider 账单认证。部署与安装验收环境为 **Linux Docker**，覆盖安装、升级、停写备份恢复、TLS/反代、持久卷、取消/关闭及强杀恢复。保留现有内嵌控制台；新前端、支付/套餐、媒体、多实例和外部 Runtime 后置。
 
 ## 当前基线与能力边界
 
-最近已核对主线为 `master/55146008730eb981dbbe37f0d0018375e93b6828`（PR #95）。最终功能头 `107447f9fbac4276386cb597f02a6ca293d72616` 的 push Verify `39472887175`、PR Verify `39472897842` 全六项成功；实际合并主线的独立 Verify `39475507319` 也已完整成功。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
+最近已核对主线为 `master/e7ad3e45b061a23c1cde1aa93443a83a5922efc5`（PR #96）。最终功能头 `e5fb0318803ac7e9bd9c03960b64575aaef2e8dd` 的 push Verify `39481368396`、PR Verify `39481434122` 全六项成功；实际合并主线的独立 Verify `39483862377` 另行核对。该功能头与合并主线的完整文件树相同。证据只覆盖对应代码与环境，后续修改另行验收；CI、合并、制品发布与生产运行分别记账。
 
 [OpenAPI](openapi.json) 为 `0.13.19` / 117 操作，数据库 schema v21。接口数、测试数和已完成子批数不换算为项目完成百分比。0.13.19 为 P1-A 本批接口说明，新增能力的验收状态不继承上述主线 CI。
 
-P6-A/P6-B、P4-A1/P4-A2 已通过 PR #92/#93/#94/#95 合入上述主线；当前切片为 P1-A 单 SIWC 账号 HTTP function 轮次。参考项目仍按文末固定 SHA 读取；未升级参考版本，未新增参考程序或真实 Provider 运行证据。
+P6-A/P6-B、P4-A1/P4-A2、P1-A 已通过 PR #92/#93/#94/#95/#96 合入上述主线。当前按用户授权并发完成 P0、P8、P7，交付范围遵循新的静态 API 中转目标；参考项目仍按文末固定 SHA 读取。
 
 | 能力 | 已验收范围 | 当前限制 |
 |---|---|---|
@@ -26,25 +26,19 @@ P6-A/P6-B、P4-A1/P4-A2 已通过 PR #92/#93/#94/#95 合入上述主线；当前
 | 原生后台 | 持久受理、原生提交/查询/取消、事件序号恢复、fencing、强杀恢复、任务用量元数据；P6-A 父历史输入与 P6-B 显式 store=true 的 completed 文本/function 结果原子历史发布 | 默认关闭且仅 disabled；仅新受理且可重建的文本/function 结果发布，旧任务不补建；收费未实现 |
 | 原生 WS | 双端原生连接、逐轮授权/准入、串行文本与声明工具；显式持久续链、HTTP/WS 跨模式、prewarm/reasoning、固定 SDK/Codex 与受控镜像回归 | 默认关闭且仅 disabled；默认只支持连接内最新父 ID，持久历史须显式开启；后台跨模式仅已发布文本/function 子集，收费与任意多路复用未完成 |
 | 执行与路由 | 唯一执行事实、资源代次/排空、资格/优先级/权重/亲和/健康、诊断与 shadow；阶段超时、有限响应头和重放审计 | shadow 默认关闭且不控制路由；无准入等待队列，不代表外部 Runtime |
-| 托管账号 | R04a 授权/加密/CAS；P1 单 SIWC 绑定文本流，P1-A 本批扩展顶层 function 轮次、P2 有界刷新、P3 资格反馈/人工恢复的受控闭环 | 无完整账号池；reset 未知，不自动推断恢复；真实 OAuth、过期/轮换和限流未验收 |
+| 历史托管账号 | R04a/P1/P1-A/P2/P3 的既有受控实现与加密状态保留兼容 | 已退出当前产品范围；正常二进制不接 OAuth、刷新或托管推理，不作为待完成验收 |
 | 用量与计费 | Responses/Chat/embeddings 原生 Token 明细、不可变售价、定点价格、双 hold、幂等结算、对账/未知保护；WS 每轮明细和后台任务用量 | 缺失与部分用量保持未知；通用用量历史仅 disabled；后台/WS 收费未实现，S5-03 未完成 |
-| 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取、占用指标；固定客户端、实际镜像安装/升级/备份恢复回归 | 受控环境通过；真实 Provider 部署、生产告警阈值、备份保管和运维演练未验收 |
+| 管理与交付 | 任务控制、路由诊断、配置发布、个人财务/账本读取、占用指标；固定客户端和实际镜像回归 | 本轮以 Linux Docker 安装、升级、持久化、备份恢复和负载/故障验收为交付条件，不再等待真实账号或另一个未指定现场 |
 
 ### 当前剩余工作
 
 | 工作 | 已具备的基础 | 未完成及下一步 |
 |---|---|---|
-| P6 后台父链与跨模式 | P6-A/P6-B 已合并并通过独立主线 CI；completed 文本/function 结果原子发布、HTTP/WS 消费、删除和独立 TTL | conversation、托管账号与其他结果类型不继承支持，未知执行不假续接；更广重连和池化仍按需求排期 |
-| P7 后台/WS 收费 | 每轮 WS 明细、后台任务用量与状态元数据 | 逐生成预留、结算、取消/未知恢复和成本准入未接通；依赖各操作 P8 证明，继续仅 disabled |
-| P8 完整成本证明 | 已登记 strict Chat/embeddings 档案、双预算与恢复账本 | 缺逐凭据最高适用费率、失败收费、税/附加项、未来改价假设和完整计量证明；S5-03 不能关闭 |
-| P0 完整性能与承载 | HTTP/1.1、TLS/H2、受控反代、慢读/取消/过载恢复、一次 30 分钟 Windows 持续流 | 完整长时 soak、最大稳定容量、目标部署网络/SLO 和完整性能验收仍开放 |
-| P4 真实兼容 | 固定 HTTP/WS SDK、Codex、工具和受控 Provider 回归 | 至少一个声明范围内的真实 Provider/客户端完整组合未验收；按当前指示跳过真实调用 |
-| P4 默认客户端接入 | 标准 `/v1/models`、固定 Codex 文本/工具/WS 回归 | P4-A1 已合并标准配置 HTTP 文本/function 与缓存搜索轮次；P4-A2 已合并默认文本摘要与显式 V2 压缩及 opaque 重发，证据见 PR #95。没有 Codex 专用版本化目录或 standalone compact 操作，不声明默认全面兼容 |
-| P1/P2/P3 真实账号生命周期 | 单 SIWC 文本流、刷新、资格反馈及人工恢复受控验收 | 真实 OAuth、过期、Token 轮换、账号限流和恢复缺外部证据；不扩展为完整账号池 |
-| P1 托管账号消费者扩展 | 静态 Key 已有工具能力，托管账号有实时 AcquireAccess 和单绑定文本流 | 本批封闭校验扩展顶层 function 定义及自包含调用/结果，接固定 HTTP SDK；验收见本批 PR，不扩大到 namespace/custom/search、WS、后台或账号池 |
-| 生产可操作性 | 受控镜像安装/升级、停写备份恢复、任务/账本查询和占用指标 | 告警阈值、备份保管、生产网络及运维演练需目标部署环境验收 |
+| P0 / Linux Docker | HTTP/1.1、TLS/H2、反代、慢读/取消/过载恢复、镜像安装恢复及一次 Windows 持续流 | 补分档容量曲线、Linux Docker 多协议持续运行、预算/全部失败样本及排空报告；完成同环境安装、升级、备份恢复和故障验证 |
+| P8 / 显式成本政策 | strict Chat/embeddings 档案、不可变报价、双预算与恢复账本 | 绑定运营者声明的静态 Key/API 模型费率、有效期、整请求输入/输出和失败/附加费用；新增 Responses 文本/function 档案及实际 wire 校验，声明与外部实际账单分开 |
+| P7 / 后台与 WS 结算 | 每轮 WS 用量、后台任务元数据、唯一账本与原生生命周期 | 接逐生成持久预留、attempt 成本、已知终态结算、取消/未知 hold 和崩溃恢复；消费 P8 同一政策，未声明的组合保持拒绝 |
 
-近期功能顺序为 **P6-A 后台承接已有历史 → P6-B 后台结果续链 → P4-A 固定客户端标准配置接入 → P1-A 单托管账号工具轮次**。P0-C 受控容量/多协议持续运行与 P8-A 成本证据梳理可独立推进，受影响的 P0/P4 回归随功能批次完成。P7 收费等待逐操作 P8 证明；P5 多账号评分、WS 池/多路复用和准入等待队列保留启用条件。真实调用跳过不等于全部剩余开发受阻。
+本轮三条代理并发实施 **P0 Linux Docker 承载与交付、P8 显式成本政策、P7 后台/WS 结算**。共享契约、数据库版本、配置、组装、OpenAPI 和 CI 由主任务统一协调；先完成具体消费者，再集中验证和修复，以最终集成功能头的完整 CI 与 Linux Docker 证据交付。P5 多账号评分、WS 池/多路复用和准入等待队列仍保留各自启用条件。
 
 ## 架构与契约
 
@@ -79,9 +73,9 @@ P6-A/P6-B、P4-A1/P4-A2 已通过 PR #92/#93/#94/#95 合入上述主线；当前
 
 `usage_history` 默认关闭且仅允许 disabled，覆盖前台 Chat/embeddings/Responses 与原生 WS 每轮；不覆盖原生后台或 durable claimed 执行。查询用 transport 区分 HTTP/WS，用 protocol_status 区分协议快照与宿主终态；后台用量保存在任务元数据中，不重复写入通用用量历史。实例父记录上限 1..65536、owner 上限不大于实例、保留期 1..2592000 秒；零配置采用有限默认值，每调用预留有限 retry 子槽。预留/写入失败沿既有准入拒绝，不退化成可丢日志；记录数限制不是磁盘/WAL 字节保证。
 
-### 账号与持久状态
+### 历史账号兼容与持久状态
 
-R04a 命令为 `-upstream-account authorize|reauthorize|list|refresh|disable`，仅输出脱敏元数据，凭据复用既有 AEAD。loopback 授权使用 state/nonce/S256 PKCE 和签名身份/签发 client 校验。刷新遵循 claim → started → 单次网络交换 → revision/fence CAS；只有已证明未发出的尝试可退避重试，可能轮换但未存回的结果保持 uncertain 并要求重授权。现有托管账号不自动成为推理凭据。
+R04a/P1/P2/P3 的既有账号代码和加密状态只保留历史兼容与受控回归。当前主二进制不再注册 `-upstream-account`，`upstream_accounts.inference.enabled` / `refresh.enabled` 为 true 时启动明确拒绝，不启动 OAuth、自动刷新或托管推理；旧账号不会转成静态 Key。现有数据库迁移和账号记录不回滚、不删除，旧 CLI 的授权/刷新语义不成为当前 API 中转入口。
 
 历史绑定当前 owner、创建 Key 和模型权限，内容加密、CAS/TTL/容量受限。`previous_response_id` 与 conversation 明确上下文来源，原生父 ID 和本地全上下文不能重复叠加；只有完整可重建、重新准入和计价的上下文才允许显式重放。`store=false` 不变永久历史，原生后台仍按声明临时保存恢复内容。后台受理先持久化任务和适用准入/预留事实再确认；内部任务状态、公开协议状态和财务终态分别映射。事件序号先持久提交再公开，按 `sequence_number` / `starting_after` 恢复；事件过期、丢失或不可重建时显式报错。
 
@@ -100,7 +94,7 @@ strict 当前仅放行已登记的官方 OpenAI 文本 Chat/embeddings 档案；
 
 档案数字来自 2026-10-17 登记的实现约束，详见[输入档案](../internal/billing/input_profile.go)和[费用档案](../internal/billing/tariff_profile.go)。原核对来源为 OpenAI Create embeddings、GPT-4o Mini、Chat Completions、Priority processing、Pricing Standard 文档；修改适用范围时重新核对，不把旧快照或模拟上游当真实价格认证。
 
-先证明不可变售价/目标倍率覆盖，再核对每次尝试和整请求累计 Provider 包络；缓存折扣不降低最坏预留，未知尝试继续占用，定点溢出或覆盖不足在发送前拒绝。异常实际用量保留 pending 与审计。当前仍缺逐凭据最高适用费率、失败收费、税/附加项、未来改价假设和完整计量证明，**S5-03 保持未完成**；事后用户收费封顶不等于 Provider 成本有界。
+先证明不可变售价/目标倍率覆盖，再核对每次尝试和整请求累计的已配置上游成本包络；缓存折扣不降低最坏预留，未知尝试继续占用，定点溢出或覆盖不足在发送前拒绝。异常实际用量保留 pending 与审计。2026-10-21 用户移除真实 Provider/账号验收后，S5-03 的本产品退出条件调整为显式运营者成本政策、实际发送校验、全部尝试包络及持久预留/结算/恢复的受控验收。实际最高费率、税费和外部账单认证不再作为开发完成门槛，也不能由配置或模拟测试声称已获认证。
 
 ### 严格计费配置
 
@@ -126,21 +120,51 @@ strict 当前仅放行已登记的官方 OpenAI 文本 Chat/embeddings 档案；
 
 P0–P8 按可独立验收的切片推进，已验收子集保留，不重复立项。实现前记录具体契约变化，真实消费者、权限、协议、取消/释放、成本事实和交付回归同批处理；源码完成、本地检查、精确头 CI、合并和运行验收分别记录。
 
-### 近期交付顺序与退出条件
+### 本轮并发交付与退出条件
 
-下表是候选实施批次，不表示本次规划更新已新增接口、批准新的计费组合或完成行为验收。各切片实施前按“开发与验证规则”登记六项及具体源码函数；继续使用现有 P0–P8 分类，避免重立大阶段。
+用户于 2026-10-21 明确授权三条代理并发完成 P0/P8/P7，并将产品收敛为静态 API Key 中转、Linux Docker 安装部署。具体变更请求如下；源码完成、集中验证、最终功能头 CI 和实际合并状态分别记账。
 
-| 顺序/批次 | 本批交付与真实消费者 | owner、公开依赖与来源 | 退出条件与范围限制 |
-|---|---|---|---|
-| 1 / P6-A | 已存 HTTP/WS 结果通过 previous_response_id 进入 native background；由现有后台 HTTP/SDK 消费者验证 | L1 generation 历史/后台，L2 responses codec；复用 responsehistory/state/background 已登记范围，必要时具体变更契约；主参考 codex-proxy-rs NativeContinuationPin 的 scope/目标绑定 | 在受理前持久化完整输入和父记录版本/目标约束，展开历史与后台私有包络一起受现有正文/项目数上限约束；受理与 worker 发送均核对当前授权；父记录随后过期/删除按已确认快照政策执行。验证跨 owner/Key、撤销、TTL、CAS、受理/发送强杀及幂等；仅 disabled、静态 Key，首批不含 conversation、托管账号、WS 池或收费 |
-| 2 / P6-B | 已知终态的后台结果成为 HTTP/WS 下一次生成的历史来源；固定 SDK 与新连接/重启消费 | 同一 generation 历史/后台 owner，后台任务/事件与历史发布不得各自成为新权威；沿用 P6-A 绑定、幂等与 scope 规则，持久发布缺口按具体 CR 处理 | 明确显式 store=true、可保存结果与独立 TTL；任务终态、历史提交和公开完成分开处理，重复恢复不重复发布。store=false 临时内容不自动升级永久历史，unknown/缺失结果不续链；先文本/function，再按既有工具范围增量 |
-| 3 / P4-A | 固定 Codex 标准用户配置的模型发现、文本/工具轮次与长会话；保留既有特定目录场景 | L2 models/protocol/compat，L1 模型权限与执行；主参考 codex-proxy-rs models_response，sub2api 目录权限/缓存补边界；原生 V2 参考 codex-proxy-rs 普通 Generate/opaque 保留，传统 standalone 仅在有消费者时参考 new-api | 以固定客户端版本和必要 Provider/base URL/Key/模型配置为边界，不用额外本地目录或关闭能力开关冒充标准配置。按实际请求确认 client_version/目录字段、上游能力与权限；目录缓存上限、失效和撤销隔离可解释，不写死全模型支持。compact 若纳入则独立声明具体模式的输入输出、不可重放、超时/用量与 disabled 限制，经唯一执行链，拒绝伪造压缩或静默换模型；未纳入时明确支持组合，不宣称默认完整兼容 |
-| 4 / P1-A | 单 SIWC 托管账号 HTTP function 定义→调用→客户端结果→下一轮输出；接现有 Responses/固定 SDK 消费者 | L1 gateway/upstreamidentity，L2 responses；复用 AcquireAccess/资格反馈/刷新，无第二套鉴权或令牌缓存；主参考 codex-proxy-rs Provider 账号/revision 接线，CRS 补专属失效用例 | 先核对资源/scopes 与具体请求能力，再扩展封闭校验，保持每次发送重新 acquire 和当前 Key/模型授权；工具由客户端执行，第二轮自包含上下文有界。覆盖刷新/停用竞争、旧 revision、失败分类和取消；disabled/store=false、单绑定，暂不接 namespace/custom/search、持久父链、后台或 WS |
-| 可独立 / P0-C | 受控负载下的稳定容量曲线及 TLS/H2/反代持续运行，复用现有实际 main/镜像消费者 | 既有 tests/smoke capacity/stream/process_resources 与 delivery，L0 只在实测瓶颈和已登记变更内调整；参考 pool/调度代码仅提出待测假设 | 固定机器/资源/协议/计费/日志和载荷，先分档基线、再预设通过预算与停止上限，记录全部计划/失败样本、首有效输出/事件延迟、CPU/RSS/FD/占用及排空。扩大协议/负载不得直接继承 16worker 预算；本机受控最大稳定档位可独立测，生产容量与现场 SLO 仍单列 |
-| 可独立 / P8-A | 为现有白名单建立逐操作/凭据/价格版本的成本证据和未知项清单，确认最小下一计费组合 | 既有 billing/ledger/quotation/gateway；参考收费代码仅补场景，不能提供凭据合同证据 | 区分代码可验证的输入/输出/全部 attempt 边界与外部最高费率/失败收费/税费证据；证据缺失不扩大 strict。先补可独立检查的证明与拒绝路径，再按明确账号/预算授权做真实核对；不能用更多 mock 消除外部未知 |
-| 证据成立后 / P7 | 对一个已通过 P8 的操作接逐生成收费，分别交付 WS 或后台 | 现有资金与 execution owner，逐操作具体契约/迁移；不按连接或事件新建收费 owner | 双预算、不可变报价、全部 attempt、用量未知和强杀恢复形成完整闭环后才开放；WS 与后台不自动互相继承许可，未通过继续 disabled |
+| 批次 | 交付与消费者 | 退出条件 |
+|---|---|---|
+| P0 / Linux Docker | 复用真实 main 的容量 harness、实际镜像及 TLS/H2/反代/WS 消费者 | Chat/Responses 分档容量与过载/取消恢复；同一 Linux Docker 镜像持续运行和资源预算、安装升级、持久卷与停写备份恢复、正常关闭及强杀恢复；保留全部失败样本和 JSON 报告 |
+| P8 / 显式成本政策 | 现有 billing owner 的静态渠道/模型/凭据/操作政策，供 HTTP/WS/后台同一成本入口消费 | 完整且有效的声明才能发送；精确 wire URL/body/Header、输入/输出上界和附加费用、不可变版本、溢出/未知/过期拒绝；不把声明当实际 Provider 账单认证 |
+| P7 / 逐生成结算 | 现有 WS 每轮与原生后台任务 owner 复用唯一 ledger/quotation/execution | 后台受理时持久预留、WS 每轮独立预留；已知用量幂等结算、取消/未知继续 hold、轮询/事件/重连不重复扣费，强杀恢复不重发未知生成；兼容 disabled，legacy 长生命周期收费继续拒绝 |
 
-推进判断：某一项缺真实账号、费率合同或现场环境时，保留该项未验收并转向表中可独立切片；不把所有后端工作归为同一个外部阻塞，也不为保持推进而重复已通过测试或增加没有消费者的平台。P5、WS 池、排队、完整账号池等仍按后文条件触发。
+### API-ONLY-001：静态中转交付入口
+
+- **层级/目录：**组装根 `cmd/gateway/main.go`、启动配置 `internal/config`、示例配置和 OpenAPI；不修改 L0 或既有存储权威。
+- **公开依赖：**沿用既有静态配置、execution/ledger/identity 与 HTTP/WS/后台端口；不新增 OAuth 或账号端口。
+- **地基影响：**正常产品不再注册上游账号 CLI、不注入托管推理/管理员托管仓库、不启动刷新 worker；显式开启历史配置立即拒绝。公共冻结契约及加密历史仍保留兼容。
+- **接口/迁移/回退：**旧 `-upstream-account` 为未知参数；旧 inference/refresh enabled=true 报明确错误；管理托管兼容端点保持不可用，不生成或消费 OAuth Token。不删除存量账号、凭据或迁移；回退只按实际 schema 与停写备份规则。
+- **验证：**真实 main 子进程验证帮助/旧命令拒绝先于配置/数据库/网络，启动配置覆盖完整旧前置条件也不能重新开启；静态渠道、撤销、额度、既有迁移与恢复回归保持。
+- **协作影响：**真实 Provider/账号验收和 OAuth 路线移出当前完成门槛；受控 API 协议与资金验证、Linux Docker 安装部署保留。
+
+### P0-C 具体变更请求：Linux Docker 承载与持续运行
+
+- **层级/目录：**既有 `tests/smoke`、`tests/upstream/nativews` 测试辅助和 Docker/部署文件；CI/Makefile 统一组装，不为测量新增生产转发路径。
+- **公开依赖：**复用当前实际 main、镜像、capacity/stream/process_resources、delivery/native_ws_delivery；主参考 new-api 固定 `25372e30b1f94255b1f818aeaaf006f042572580` 的流/交付机制，具体来源随实现记录。
+- **地基影响：**先实现测量与真实消费者；无实测瓶颈不改 L0、不删除鉴权/准入/日志/账本来跑分。
+- **接口/迁移/回退：**受控 Chat/Responses 按 1/4/8/16 档采样，预算/停止边界在运行前固定；Linux Docker 依次覆盖 TLS HTTP/1.1 与 H2 持续流及反代/WS。资源报告与持久数据分离，不新增数据库迁移。
+- **验证：**全部计划/开始/完成/失败、首有效输出/事件延迟、CPU/RSS/FD、取消/过载前后全槽位恢复和最终排空；持续阶段与安装升级、停写备份恢复、强杀恢复同环境验收。受控最大通过档位不外推任意机器的生产容量。
+- **协作影响：**单独有界 Linux job 运行较长验收，保留现有 check/delivery 门槛；最终集成变化影响热路径时以最终功能头重复适用验收。
+
+### P8-A 具体变更请求：运营者声明的静态 Responses 成本政策
+
+- **层级/目录：**L1 `billing` 的输入/费率/发送证明，`config` 的 billing 配置及 `cmd/gateway` 映射；P7 直接消费同一 Engine。
+- **公开依赖：**沿用 ProviderCostContract、不可变 snapshot、Reserve/StartPreparedAttempt/EndAttempt/Finish 与双 hold；新增候选政策字段先登记，不增加第二个资金 owner。
+- **地基影响：**新增 `operator_declared_tokens_v1` 费率政策与 `operator_responses_v1` 输入档案；精确静态渠道/baseURL/model/credential、Responses 文本/function、显式输出上限。原官方档案不被兼容代理自动继承。
+- **接口/迁移/回退：**新增 `policy_version`、`policy_expires_at`、`max_request_bytes`、`additional_cost_per_attempt`；版本和有效期绑定 snapshot，整正文与输出有界，附加包络包含一次生成约定的失败/控制 RPC 费用。schema v22 追加 reservation policy version，旧行不补造声明；旧历史结算仍使用其原 snapshot。
+- **验证：**实际发送 URL/path/body/model/输出/鉴权/WS beta、过期/漂移/未绑定/未知字段、全请求/全 attempt 累计、定点溢出和异常 usage；未知或证据缺失发送前拒绝，发送后不确定仍保留 hold。
+- **协作影响：**声明是运行政策及运营者输入，不是外部真实费率或 tokenizer/账单认证；不要求真实账号或付费验收。P7 只开放该明确子集，不自动扩展媒体、搜索、reasoning 等额外维度。
+
+### P7 具体变更请求：后台与 WS strict 逐生成结算
+
+- **层级/目录：**L1 `gateway`/`generation`/`store`/`billing`，后台 owner 私有 finance seam 与候选 WS/执行端口；组装根注入，L2 只提取原生用量。
+- **公开依赖：**复用原账本的预留、prepared attempt、终态、历史报价和恢复；冻结 `background/v1` 的公开调用签名保持，BackgroundOptions 注入同 owner Finance，不能从 L3 访问私有账本。
+- **地基影响：**新增 strict 静态 Responses 文本/function 子集；WS 每轮重新授权/准入/预留；后台受理前保存预留关联，queued 不占网络 attempt 槽。disabled 保持；legacy 后台/WS 收费继续拒绝。
+- **接口/迁移/回退：**schema v22 统一追加后台 BillingID/BillingMode、控制 RPC 计数与 reservation policy version，旧 disabled 任务不补收费。dispatch 重查当前权限、原持久预留、原售价/政策版本及有效期；最多 32 次原生控制 RPC，费用包络由 P8 覆盖。
+- **验证：**受理/hold/task 写入与 dispatch/ID/用量/结算的强杀窗口；queued 预留失效后不能发送；完整/零/缺失/部分用量、重复/迟到终态、取消竞争、跨 Key 隔离、重连/轮询/事件不重收费，unknown 不重发且不补零。
+- **协作影响：**P7/P8 代理直接对齐端口和文件所有权；共享迁移、公开快照、配置/OpenAPI、运行组装和 CI 由主任务统一。回退恢复匹配版本停写备份，不逆改历史账本。
 
 ### P6-A 具体变更请求：后台输入历史快照
 
@@ -223,35 +247,21 @@ L0 `internal/core` 只持有机械发送/读写事实；L1 gateway/scheduler 决
 
 30 分钟子批的受控证据：干净提交 `13ee3bd1267a575a84ee858578a9e3920fc4155a`，16 worker、100ms 事件、disabled、Windows HTTP/1.1，持续 1801.1476 秒，完成 21975/21975 请求与 285675 个事件；每请求一次上游发送，排空 active=0，零协议/drain 失败。前后共 32 条协调取消、两次满额 429 零发送及 16 槽恢复通过。网关 CPU 平均约 0.0996 核，working set/private commit/handle 采样峰值为 47312896/80175104 字节/271，满足预先规定的各 256MiB、512 handles、0.5 核预算。前后 handles 为 221/238，保留 +17 事实，不据此声称无泄漏。实际运行脚本及生产代码与 PR #91 最终集成版本相同；细节见 PR #91。此结果只证明该受控场景，不关闭完整 soak、最大容量或生产网络验收。
 
-### P1：最小托管账号推理
+### P1/P2/P3：历史托管账号实现
 
-L1 upstreamidentity/gateway/scheduler 持有账号、资格与发送授权，L2 Provider 编解码，组装根只注入。已完成单 SIWC account/owner/call Key/实际 slug/channel/credential 绑定的受控 Responses HTTP/SSE 文本流；P1-A 本批扩展顶层 function 轮次，消费现有 upstreamauth 状态机，不另建 OAuth、存储或凭据缓存。
+R04a、单 SIWC 文本/function、刷新与资格反馈已按原批次完成受控实现。2026-10-21 用户明确要求不采用 OAuth，该路线从当前产品和验收中移除，不再列真实 OAuth、过期/轮换/限流或账号池为待办。正常 main 不注册授权 CLI、不组装托管推理或刷新 worker，旧 enabled 配置明确拒绝。
 
-范围保持 disabled、自包含 input 数组、`store=false`、`stream=true`；本批仅增加有界顶层 function 定义与配对调用/结果，具体限制见 P1-A。namespace/custom/search/reasoning/compaction、父链、conversation、后台、WS 和媒体继续拒绝。仅官方固定 Responses/models 路径，校验资源/scopes、正常 TLS、禁止跨 origin 重定向，证明不足的旧账号须重授权。每次 attempt 发送前实时 AcquireAccess，绑定 revision；停用先提交则新 acquire 拒绝，已签发访问不推断可撤销。管理员会话与调用 Key 分离，不伪造 Key，不自动回落静态 Key 或重试绕过账号限制。
-
-真实账号闭环仍未验收。P1-A 通过固定 HTTP SDK 和模拟 Provider 验证单账号 function 轮次；每轮当前账号/Key/模型授权、停用/重授权/刷新、uncertain 禁发、旧 revision 和脱敏分别验证，既有 store 过期与并发规则沿用。受控测试不证明真实 SIWC 工具能力，不扩大 strict。
-
-### P2：有界自动刷新
-
-已交付 L1 upstreamidentity worker 与统一 lifecycle，CLI/worker 共用 claim → started → 单次交换 → CAS/uncertain。默认关闭；默认间隔 30 秒、到期前 600 秒、每周期最多 4 次，范围和约束见[账号配置](../internal/config/upstream_accounts.go)。扫描、分页、周期时间、Provider 并发/QPS、账号冷却和失败退避均有界，不新增等待队列；未提交的状态修复先于新工作，取消并 join 后关闭共享资源。
-
-受控刷新/并发/CAS/关闭已验收；真实 Token 轮换、过期和 Provider 故障数据未验收。started/uncertain 不盲目重放，可能轮换但存回失败须重授权，不以刷新锁代替轮换安全。后续只按实际生命周期需求扩展，契约不足再记录具体变更。
-
-### P3：账号资格与限流恢复
-
-已交付 L2 Provider 分类、L1 持久资格反馈与管理员 CAS 人工恢复。区分凭据/权限/账号或模型限流/拥塞/网络故障；反馈绑定已签发 revision，旧反馈不处罚新凭据，成功响应不自动清除拒绝。reset 保持 unknown，不从本地估计伪造 Provider 窗口；人工恢复带版本，发送前 AcquireAccess 是当前权威资格。
-
-待写反馈有界，持久失败按既有关闭政策处理；内存暂存与强杀窗口不宣称持久恰好一次。真实限流/过期/恢复未验收。后续自动恢复须有可信 reset、来源与新鲜度证据，模型限制不得扩大为整个账号限制，专属账号失败不得静默回落。
+历史代码、加密记录和契约保留兼容与原有隔离/迁移回归，不删除存量账号或把账号 Token 当静态 Key 使用。既有来源与许可保留；当前新增功能只接静态 API channel/credential。
 
 ### P4：协议回归与转换诊断
 
 L2 protocol/compat 负责独立流状态、编解码及有界/去重/脱敏诊断，L3 继续消费登记生成入口。固定 HTTP/WS SDK、Codex、同协议/转换 SSE、function/custom、单层 namespace、客户端 tool_search 加载及不透明 reasoning/prewarm 已按各子批声明验收；工具由客户端执行，不建立通用工具执行器。
 
-真实 Provider 与实际客户端完整组合仍未验收。近期按 P4-A 补固定客户端的标准配置、模型目录和长会话；模型目录与 compact 是独立能力，不因普通 models/Responses 可用而推断已支持。新增组合须列源/目标协议、操作、传输、字段/工具和固定客户端版本；验证工具交错、UTF-8 参数分片、delta/done 去重、ID/名称恢复、failed/incomplete、未知字段、部分 usage、背压/取消/断流。无法表示的字段发送前拒绝，不伪造完成；能力变化同步 OpenAPI 和已有消费者，不扩大财务/路由许可。
+固定客户端标准配置、模型目录与长会话已按 P4-A1/P4-A2 完成受控回归；本轮不要求真实 Provider 验收。模型目录与 compact 是独立能力，不因普通 models/Responses 可用而推断已支持。新增组合须列源/目标协议、操作、传输、字段/工具和固定客户端版本；验证工具交错、UTF-8 参数分片、delta/done 去重、ID/名称恢复、failed/incomplete、未知字段、部分 usage、背压/取消/断流。无法表示的字段发送前拒绝，不伪造完成；能力变化同步 OpenAPI 和已有消费者，不扩大财务/路由许可。
 
 ### P5：账号信号与调度评估
 
-继续复用已有 scheduler/routes/shadow。当前唯一 active SIWC grant 的候选池为 1，shadow 比较要求 2..8 渠道；P3 没有可信窗口、剩余额度、等待或账号相对负载。多账号评分与真实调度后置，不为评分扩大账号池或猜测 reset。
+继续复用已有 scheduler/routes/shadow。当前静态渠道复用已登记的资格、优先级、权重、亲和和健康规则；shadow 比较要求 2..8 有效渠道。OAuth/账号窗口不属于本产品输入，不为评分增加账号池或猜测 reset。
 
 现有 R00 有界采样和最高优先级池内静态比较保持；不足有效样本为 neutral，本地资格拒绝不伪装为 HTTP 结果，HTTP 成功/错误不推导账号窗口。满足前置数据后，再声明来源/新鲜度、饥饿/公平/分布、回退及效果标准，shadow 不直接控制生产路由。
 
@@ -269,17 +279,17 @@ WS 池和任意多路复用继续按需求后置；租借隔离、上限、重�
 
 已交付 WS 每轮原生明细（通用用量历史 transport=WS）与后台任务元数据（独立任务 owner）。原生 Token 允许未知、零和部分完整，来源/完整度、协议快照与宿主终态分开；持久失败不静默丢弃，事件重放不重复记账，后台不重复写通用前台用量历史。对应 schema v20/v21 迁移只追加。
 
-**收费未实现，后台/WS 继续仅 disabled。** 每个操作先完成 P8 成本许可，再接不可变报价、逐生成预留/结算、全部 attempt 成本和取消/未知恢复；不能按连接或事件次数收费，不因有 usage 就认定最终账单成立。复用 ledger/quotation/execution 和既有事务账本，公开契约、配置及迁移统一协调。
+本轮按上方 P7 具体请求接入静态 Key 的 strict Responses 文本/function 收费。每个操作消费 P8 的显式有效政策及原不可变报价、逐生成预留/结算、全部 attempt 成本和取消/未知恢复；不能按连接或事件次数收费，不因有 usage 就认定最终账单成立。复用 ledger/quotation/execution 和既有事务账本，公开契约、配置及迁移统一协调。新增收费在最终功能头完成集中验证前仍不计为已验收，disabled 回归必须保留。
 
 退出条件包含零/缺失/部分用量、断流/取消、重试、回执提交和结算前后强杀、跨 Key 并发、幂等与重复恢复；未证明组合发送前拒绝，不从前台 strict 恢复证据推断后台/WS 财务安全。
 
-### P8：完整成本证明
+### P8：静态 API 的显式成本政策与边界
 
-L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威。已具备现有 strict Chat/embeddings 输入/费率档案、双 hold、不可变报价、pending/审计及受控强杀恢复；S5-03 仍未完成。
+L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威。已具备原 strict Chat/embeddings 官方档案、双 hold、不可变报价、pending/审计及受控强杀恢复；本轮为静态兼容 API 增加明确的运营者政策，不依赖 OAuth 或真实账单认证。
 
-逐组合绑定操作、模型、账号/凭据、最高适用价格、输入/输出/完整历史和工具定义、推理/缓存/等级等维度、价格版本与有效假设；分别证明用户收费上限、单次 Provider 成本和全部尝试累计上界。失败请求收费、税/附加项、途中改价、批量输入、有限重试、溢出、跨 Key 并发及未知 attempt 都须覆盖。内置标准模型 Token 价格下限不能证明凭据最高费率或真实账单。
+逐组合绑定操作、模型、静态渠道/凭据、声明费率、输入/输出/完整历史和工具、价格政策版本、有效期和附加费用包络；分别执行用户收费上限、已配置单次成本和全部尝试累计上界。失败/控制 RPC 费用由声明包络覆盖，途中改价不改写已预留请求，批量输入、有限重试、溢出、跨 Key 并发及未知 attempt 均需回归。政策的 Token/正文关系和适用费用是假设输入，不由配置或模拟测试升级为真实 tokenizer/账单证明。
 
-可以独立研究并补证据；证明不足继续发送前拒绝，异常实际用量保留 pending，不因账号、协议、usage 或模拟测试完成而扩大 strict。Responses/后台/WS 逐项申请支持，只有各准许组合的完整证据成立才关闭 S5-03；此门槛不代表支付平台就绪。
+缺字段、过期、目标或凭据不匹配、无法表示的计量维度继续发送前拒绝，发送后异常用量保留 pending。P7 的后台/WS 逐项消费同一成本入口；S5-03 以当前产品范围的发送边界、累计包络和预留/恢复完整通过为退出条件，外部实际账单认证不再是本项目完成门槛。支付平台仍后置。
 
 ## 集成验收与后续门槛
 
@@ -287,10 +297,10 @@ L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威�
 |---|---|---|
 | 强杀与恢复 | PR #80 [strict 财务边界](../internal/gateway/strict_crash_test.go)、[后台 dispatch/事件窗口](../internal/generation/background_runtime_test.go)、PR #64 [持久 WS 窗口](../cmd/gateway/responses_ws_crash_test.go) | 不扩展到后台/WS 收费或真实 Provider 受理/计费认证 |
 | 跨模式与权限 | PR #62/#63 [HTTP/WS 历史与权限](../cmd/gateway/responses_ws_history_test.go)；PR #92 [后台父输入](../cmd/gateway/background_history_test.go)；PR #93 [后台结果 HTTP/WS 消费](../cmd/gateway/background_publication_test.go) | 仅支持已声明的完整上下文、completed 文本/function 发布和单串行轮次；不扩大其他结果或收费 |
-| 后端操作 | [实际 main 冒烟](../tests/smoke/local.py)、[任务/事件/TTL](../tests/smoke/background.py)、[用量持久化/隔离](../tests/smoke/usage_history.py)，PR #74/#75 占用指标 | 正文读取须有明确授权；生产告警、备份保管及运维演练待部署现场验收 |
+| 后端操作 | [实际 main 冒烟](../tests/smoke/local.py)、[任务/事件/TTL](../tests/smoke/background.py)、[用量持久化/隔离](../tests/smoke/usage_history.py)，PR #74/#75 占用指标 | Linux Docker 安装、持久卷、升级、停写备份恢复与故障演练为本轮交付环境；正文读取仍需明确授权 |
 | 镜像与固定客户端 | [安装/升级/备份恢复](../tests/smoke/delivery.py)、[原生 WS 镜像/TLS/Upgrade/重启](../tests/smoke/native_ws_delivery.py)、固定 SDK/Codex 回归 | 只覆盖固定版本与声明操作；任意客户端、真实 Provider、版本化模型目录/compact 等不继承支持 |
 | 性能与承载 | P0 对照、TLS/H2/反代、慢读/取消/过载恢复及 PR #91 的 30 分钟运行 | 完整 soak、最大稳定容量、生产网络/SLO 未验收；采样峰值不证明无泄漏 |
-| 真实 Provider/账号 | 当前按用户指示跳过 | 真实客户端闭环、OAuth、轮换、限流和实际费用未验收 |
+| 静态 API 中转 | 受控 API 上游与固定客户端，经同一实际执行链 | OAuth、真实账号/Provider 验收退出本轮；实际账单认证不由受控回归替代 |
 
 ### 已完成批次证据索引
 
@@ -309,6 +319,7 @@ L1 billing/gateway/store 持有唯一报价、预算、attempt 和账本权威�
 | 固定 HTTP SDK 后台、固定 new-api Chat SSE/JSON 对照及验收说明 | #84–#87 |
 | embeddings 原生部分用量、SDK 向量格式、JSON TCP 条件 | #88、#89、#90 |
 | 同进程 30 分钟持续流、资源预算与前后恢复 | #91 |
+| 历史单 SIWC HTTP function 轮次（本轮退出产品） | #96 |
 | 后台父输入与后台 completed 结果 HTTP/WS 续链 | #92、#93 |
 | 固定 Codex 标准配置与原生压缩 V2 | #94、#95 |
 
