@@ -537,12 +537,15 @@ func serve(directory, target string) error {
 	return err
 }
 
-func httpCall(ctx context.Context, client *http.Client, base, method, path, key, payload string) error {
+func httpCall(ctx context.Context, client *http.Client, base, method, path, key, payload, idempotency string) error {
 	request, err := http.NewRequestWithContext(ctx, method, base+path, strings.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if idempotency != "" {
+		request.Header.Set("Idempotency-Key", idempotency)
+	}
 	if key != "" {
 		request.Header.Set("Authorization", "Bearer "+key)
 	}
@@ -559,7 +562,8 @@ func httpCall(ctx context.Context, client *http.Client, base, method, path, key,
 	if json.Unmarshal(raw, &body) != nil {
 		body = string(raw)
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"status": response.StatusCode, "body": body})
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"status": response.StatusCode, "body": body,
+		"billing_id": response.Header.Get("X-TXAPI-Billing-ID"), "idempotency": response.Header.Get("X-TXAPI-Idempotency")})
 }
 
 func wsCall(ctx context.Context, client *http.Client, base, key, payload, until string, output io.Writer) error {
@@ -619,6 +623,7 @@ func main() {
 	path := flag.String("path", "/healthz", "HTTP path")
 	key := flag.String("key", "", "synthetic fixture bearer")
 	payload := flag.String("payload", "", "synthetic JSON request")
+	idempotency := flag.String("idempotency", "", "synthetic idempotency key")
 	until := flag.String("until", "terminal", "WS terminal|disconnect|error")
 	timeoutSeconds := flag.Int("timeout-seconds", 30, "bounded fixture command timeout: 1..1900")
 	flag.Parse()
@@ -637,10 +642,14 @@ func main() {
 		err = prepare(*directory)
 	case "serve":
 		err = serve(*directory, *target)
+	case "strict-serve":
+		err = strictServe(*directory, *target)
 	case "http":
-		err = httpCall(ctx, client, *base, *method, *path, *key, *payload)
+		err = httpCall(ctx, client, *base, *method, *path, *key, *payload, *idempotency)
 	case "ws":
 		err = wsCall(ctx, client, *base, *key, *payload, *until, os.Stdout)
+	case "strict-ws":
+		err = strictWSCall(ctx, client, *base, *key, *payload, os.Stdout)
 	case "resources":
 		err = processResources(os.Stdout)
 	case "soak":

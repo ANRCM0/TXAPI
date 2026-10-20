@@ -154,7 +154,7 @@ class Installation:
         run(["docker", "create", "--name", self.provider, "--label", self.label,
              "--network", self.network, "--network-alias", "api.openai.com", "--network-alias", "nativews-fixture", "--user", "0",
              *self.helper_mount, "--mount", f"type=bind,source={self.work},target=/fixtures,readonly",
-             "--entrypoint", "/smoke-nativews", self.image])
+             "--entrypoint", "/smoke-nativews", self.image, "-mode", getattr(self, "provider_mode", "serve")])
         self.containers.append(self.provider)
         run(["docker", "start", self.provider])
         until(lambda: self.helper("http", base="http://127.0.0.1:9911", path="/stats", check=False).returncode == 0,
