@@ -20,7 +20,7 @@ import time
 from stream_baseline import (CLIENT_KEY, UPSTREAM_KEY, Fixture, call,
                              clock, events, git, summarize)
 from local import ROOT, ports, ready, service
-from process_resources import RESOURCE_SCOPE, Resources
+from process_resources import RESOURCE_SCOPE, Resources, resource
 
 
 class CapacityFixture(Fixture):
@@ -77,6 +77,98 @@ def wave(target, port, fixture, workers, requests, deadline):
     return {"target": target, "planned": workers * requests, "elapsed_ns": elapsed,
             "completed_per_second": sum(s["success"] for s in samples) * 1e9 / elapsed,
             "summary": summarize(samples), "worker_errors": errors, "samples": samples}
+
+
+def sustained_wave(port, fixture, workers, seconds, deadline, pid, results):
+    start = threading.Barrier(workers + 1, timeout=5)
+    lock, stop = threading.Lock(), threading.Event()
+    result = {"requested_seconds": seconds, "request_cap": 32768, "started": 0,
+              "samples": [], "worker_errors": [], "checkpoints": []}
+    results.append(result)
+    started = clock()
+    until = started + int(seconds * 1e9)
+
+    def worker(index):
+        connection = http.client.HTTPConnection("127.0.0.1", port)
+        try:
+            start.wait()
+            while not stop.is_set():
+                with lock:
+                    if clock() >= until:
+                        return
+                    if result["started"] >= result["request_cap"]:
+                        result["worker_errors"].append("request_cap_reached_before_duration")
+                        stop.set()
+                        return
+                    sequence = result["started"]
+                    result["started"] += 1
+                sample = call(connection, CLIENT_KEY, fixture, deadline)
+                sample.update(worker=index, sequence=sequence, target="gateway")
+                with lock:
+                    result["samples"].append(sample)
+                if not sample["success"]:
+                    stop.set()
+                    return
+        except Exception:
+            stop.set()
+            raise
+        finally:
+            connection.close()
+
+    def checkpoint():
+        with lock:
+            value = {"elapsed_ns": clock() - started, "started": result["started"],
+                     "returned": len(result["samples"]),
+                     "failed": sum(not s["success"] for s in result["samples"])}
+        value["gateway_resources"] = resource(pid)
+        result["checkpoints"].append(value)
+        print(json.dumps({"sustained_progress": value}), flush=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        jobs = [pool.submit(worker, i) for i in range(workers)]
+        # Set the shared interval only after every worker exists, before release.
+        started = clock()
+        until = started + int(seconds * 1e9)
+        start.wait()
+        checkpoint()
+        pending, next_checkpoint = set(jobs), started + 60_000_000_000
+        while pending:
+            _, pending = concurrent.futures.wait(pending, timeout=1)
+            if clock() >= next_checkpoint:
+                checkpoint()
+                next_checkpoint += 60_000_000_000
+        for job in jobs:
+            try:
+                job.result()
+            except Exception as error:
+                result["worker_errors"].append(type(error).__name__ + ": " + str(error)[:160])
+    result["elapsed_ns"] = clock() - started
+    wait_idle(fixture)
+    checkpoint()
+    result["summary"] = summarize(result["samples"])
+    result["active_after_drain"] = active(fixture)
+    if (result["worker_errors"] or result["started"] != len(result["samples"])
+            or result["summary"]["completed"] != result["started"] or not result["started"]
+            or result["elapsed_ns"] < seconds * 1e9):
+        raise RuntimeError("sustained interval failed or ended before its requested duration")
+    return result
+
+
+def sustained_budget(value, resources):
+    peaks = resources["sampled_peaks"]["gateway"]
+    counts = resources["sampling"]["gateway"]
+    cpu = resources["cpu_delta_seconds"]["gateway"]
+    required = ("rss_bytes", "private_commit_bytes", "handle_count") if platform.system() == "Windows" else ("rss_bytes", "fd_count")
+    known = (all(key in peaks for key in required) and counts["available"] == counts["attempted"]
+             and isinstance(cpu, (int, float)))
+    limits = {"rss_bytes": 256 * 1024 * 1024, "private_commit_bytes": 256 * 1024 * 1024,
+              "handle_count": 512, "fd_count": 512, "average_cpu_cores": .5}
+    average_cpu = cpu / (value["elapsed_ns"] / 1e9) if isinstance(cpu, (int, float)) else None
+    exceeded = [key for key in required if key in peaks and peaks[key] > limits[key]]
+    if average_cpu is not None and average_cpu > limits["average_cpu_cores"]:
+        exceeded.append("average_cpu_cores")
+    return {"known": known, "limits": limits, "average_cpu_cores": average_cpu,
+            "exceeded": exceeded, "passed": known and not exceeded}
 
 
 def cancel_wave(fixture, port, workers, deadline, results):
@@ -207,12 +299,18 @@ def main():
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--event-delay-ms", type=int, default=5)
     parser.add_argument("--deadline-seconds", type=float, default=5)
+    parser.add_argument("--sustain-seconds", type=int, default=0)
+    parser.add_argument("--enforce-sustain-budget", action="store_true")
     args = parser.parse_args()
     if not (1 <= args.workers <= 16 and 1 <= args.requests_per_worker <= 200
             and 1 <= args.rounds <= 4 and 1 <= args.event_delay_ms <= 100
             and 3 <= args.deadline_seconds <= 15
             and args.workers * args.requests_per_worker * args.rounds <= 3200):
         parser.error("workers 1..16, requests 1..200, rounds 1..4, total/target <=3200, delay 1..100ms, deadline 3..15s")
+    if not (args.sustain_seconds == 0 or 5 <= args.sustain_seconds <= 1800):
+        parser.error("sustain-seconds must be 0 or 5..1800")
+    if args.enforce_sustain_budget and args.sustain_seconds < 60:
+        parser.error("resource budget enforcement requires sustain-seconds >=60")
     clean = {k: v for k, v in os.environ.items() if not k.upper().startswith(("GATEWAY_", "TXAPI_"))}
     clean["GOARCH"] = "amd64"
     report = {"schema": 2, "source": {"sha": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
@@ -228,8 +326,10 @@ def main():
                   "fixture_backlog": 64, "fixture_events": len(events()),
                   "resource_scope": RESOURCE_SCOPE + "; cancel/overload/direct/gateway phase intervals are separate",
                   "cancellation_policy": "one wave per round; all workers observe first text before barrier/socket shutdown; intentional cancellations reported separately",
-                  "limits": "bounded closed-loop workload, not maximum capacity, long-duration soak, TLS/H2 or Provider acceptance"},
-              "waves": [], "cancellations": [], "overload": [], "resources": [], "correctness_failures": []}
+                  "limits": "bounded baseline plus optional declared continuous interval; not maximum capacity, TLS/H2 or Provider acceptance"},
+              "waves": [], "sustained": [], "cancellations": [], "overload": [], "resources": [], "correctness_failures": []}
+    report["configuration"]["sustained_counting"] = (
+        "time-based interval with every started result retained, separate from alternating baseline planned/started counts")
     fixture = CapacityFixture(args.event_delay_ms / 1000)
     thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     thread.start()
@@ -259,6 +359,7 @@ def main():
                     subprocess.run(command + extra, cwd=ROOT, env=env, stdout=log, stderr=log, check=True, timeout=30)
             with service(command, work / "gateway.log", clean) as process:
                 ready(process, port)
+                report["environment"]["gateway_pid"] = process.pid
                 for round_index in range(args.rounds):
                     for target in ("cancel", "overload") + (("direct", "gateway") if round_index % 2 == 0 else ("gateway", "direct")):
                         resources = Resources(process.pid)
@@ -285,6 +386,33 @@ def main():
                                      fixture_connections_opened=fixture.connections - before_connections,
                                      fixture_active_after_drain=active(fixture))
                         report["resources"].append(value)
+                if args.sustain_seconds:
+                    target = "sustained"
+                    resources = Resources(process.pid)
+                    before_connections = fixture.connections
+                    sustained = sustained_wave(port, fixture, args.workers, args.sustain_seconds,
+                                                args.deadline_seconds, process.pid, report["sustained"])
+                    value = resources.finish()
+                    resources = None
+                    value.update(phase=target, fixture_connections_opened=fixture.connections - before_connections,
+                                 fixture_active_after_drain=active(fixture))
+                    report["resources"].append(value)
+                    sustained["resource_budget"] = sustained_budget(sustained, value)
+                    sustained["resource_budget"]["enforced"] = args.enforce_sustain_budget
+                    for target in ("cancel_after_sustained", "overload_after_sustained"):
+                        resources = Resources(process.pid)
+                        before_connections = fixture.connections
+                        if target == "cancel_after_sustained":
+                            cancel_wave(fixture, port, args.workers, args.deadline_seconds, report["cancellations"])
+                        else:
+                            overload(fixture, port, args.workers, args.deadline_seconds, report["overload"])
+                        value = resources.finish()
+                        resources = None
+                        value.update(phase=target, fixture_connections_opened=fixture.connections - before_connections,
+                                     fixture_active_after_drain=active(fixture))
+                        report["resources"].append(value)
+                    if args.enforce_sustain_budget and not sustained["resource_budget"]["passed"]:
+                        raise RuntimeError("sustained resource budget failed or could not be proved")
     except Exception as error:
         report["fatal_error"] = type(error).__name__ + ": " + str(error)[:500]
     finally:
@@ -302,8 +430,9 @@ def main():
     report["summary"] = {target: summarize([s for w in report["waves"] if w["target"] == target for s in w["samples"]])
                          for target in ("direct", "gateway")}
     report["started_measurement_requests"] = sum(s["started"] for s in report["summary"].values())
+    report["started_sustained_requests"] = sum(value["started"] for value in report["sustained"])
     report["planned_measurement_requests"] = 2 * args.workers * args.requests_per_worker * args.rounds
-    report["planned_cancellations"] = args.workers * args.rounds
+    report["planned_cancellations"] = args.workers * (args.rounds + bool(args.sustain_seconds))
     report["observed_cancellations"] = sum(x.get("observed_cancellations", 0) for x in report["cancellations"])
     report["unpaired_distribution_differences_ns"] = {
         key: {q: report["summary"]["gateway"]["successful_latency_ns"][key][q] -
@@ -314,6 +443,8 @@ def main():
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"output": str(args.output.resolve()), "summary": report["summary"],
                       "overload_rounds": len(report["overload"]), "canceled": report["observed_cancellations"],
+                      "sustained": [{k: value.get(k) for k in ("requested_seconds", "started", "elapsed_ns", "resource_budget")}
+                                    for value in report["sustained"]],
                       "fatal_error": report.get("fatal_error")}, ensure_ascii=False))
     if (report.get("fatal_error") or report["correctness_failures"]
             or report["started_measurement_requests"] != report["planned_measurement_requests"]
