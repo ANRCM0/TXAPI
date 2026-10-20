@@ -29,6 +29,42 @@ ENV = {key: value for key, value in os.environ.items()
        if not key.upper().startswith(("GATEWAY_", "TXAPI_", "OPENAI_"))}
 
 
+def assess_protocol_soak(phase):
+    value, observed = phase["report"], phase["resources"]
+    rows = value["samples"]
+    errors = []
+    valid_events = all(isinstance(row.get("event_upper_ns"), list)
+                       and len(row["event_upper_ns"]) == 10
+                       and all(isinstance(v, int) and not isinstance(v, bool) for v in row["event_upper_ns"])
+                       for row in rows)
+    phase["observed_p95_ns"] = {
+        key: percentile([sample.get(field) for sample in rows
+                         if isinstance(sample.get(field), int) and not isinstance(sample[field], bool)])
+        for key, field in (("first_text_p95_ns", "first_text_ns"), ("complete_p95_ns", "complete_ns"))}
+    phase["observed_p95_ns"]["event_upper_p95_ns"] = percentile(
+        [latency for sample in rows for latency in sample["event_upper_ns"]]) if valid_events else None
+    if (value["errors"] or not value["started"] or value["started"] != value["completed"] or
+            value["started"] != len(rows) or value["active_after"] != 0 or
+            value["elapsed_ns"] < phase["requested_seconds"] * 1e9):
+        errors.append("started/completed/interval/drain mismatch")
+    if not valid_events or any(row["protocol"] != phase["protocol"] or row["provider_protocol"] != 2
+            or row["provider_alpn"] != "h2" or not row["tls"] or not row["provider_tls"]
+            or row["attempts"] != 1 or not row["drained"] or row.get("error")
+            or any(not isinstance(row.get(field), int) or isinstance(row[field], bool)
+                   for field in ("first_text_ns", "complete_ns")) for row in rows):
+        errors.append("TLS/protocol/attempt/event correctness failed")
+    if not observed["known"]:
+        errors.append("gateway resource evidence incomplete")
+    for key in ("rss_bytes", "fd_count", "average_cpu_cores"):
+        metric = observed.get(key)
+        if not isinstance(metric, (float, int)) or metric > phase["limits"][key]:
+            errors.append(key + " unknown or above predeclared budget")
+    for key, metric in phase["observed_p95_ns"].items():
+        if metric is None or metric > phase["limits"][key]:
+            errors.append(key + " unknown or above predeclared budget")
+    phase["errors"], phase["passed"] = errors, not errors
+
+
 def run(command, *, capture=False, check=True, timeout=60, env=ENV):
     return subprocess.run(command, cwd=ROOT, env=env, check=check, timeout=timeout,
                           stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
@@ -196,32 +232,7 @@ class Installation:
                 phase["report"] = json.loads(result.stdout)
             finally:
                 phase["resources"] = resources.finish()
-            value, observed = phase["report"], phase["resources"]
-            rows = value["samples"]
-            phase["observed_p95_ns"] = {
-                key: percentile([sample[field] for sample in rows]) for key, field in
-                (("first_text_p95_ns", "first_text_ns"), ("complete_p95_ns", "complete_ns"))}
-            phase["observed_p95_ns"]["event_upper_p95_ns"] = percentile(
-                [latency for sample in rows for latency in sample["event_upper_ns"]])
-            errors = []
-            if (value["errors"] or not value["started"] or value["started"] != value["completed"] or
-                    value["started"] != len(rows) or value["active_after"] != 0 or value["elapsed_ns"] < seconds * 1e9):
-                errors.append("started/completed/interval/drain mismatch")
-            if any(row["protocol"] != protocol or row["provider_protocol"] != 2 or row["provider_alpn"] != "h2"
-                   or not row["tls"] or not row["provider_tls"] or row["attempts"] != 1 or not row["drained"]
-                   or row.get("error") or len(row["event_upper_ns"]) != 10 for row in rows):
-                errors.append("TLS/protocol/attempt/event correctness failed")
-            if not observed["known"]:
-                errors.append("gateway resource evidence incomplete")
-            for key in ("rss_bytes", "fd_count", "average_cpu_cores"):
-                value = observed.get(key)
-                if not isinstance(value, (float, int)) or value > phase["limits"][key]:
-                    errors.append(key + " unknown or above predeclared budget")
-            for key, value in phase["observed_p95_ns"].items():
-                if value is None or value > phase["limits"][key]:
-                    errors.append(key + " unknown or above predeclared budget")
-            phase["errors"] = errors
-            phase["passed"] = not errors
+            assess_protocol_soak(phase)
             metrics = self.api("/metrics")
             until(lambda: all(f"{name} 0\n" in self.api("/metrics") for name in
                               ("gateway_admission_requests_active", "gateway_admission_attempts_active")),

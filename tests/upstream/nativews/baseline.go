@@ -235,6 +235,10 @@ func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key
 }
 
 func (run *baselineRun) callProtocol(ctx context.Context, client *http.Client, base, key, model, tag string, protocol int) (sample baselineSample) {
+	return run.callProtocolCompletion(ctx, client, base, key, model, tag, protocol, false)
+}
+
+func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http.Client, base, key, model, tag string, protocol int, waitEOF bool) (sample baselineSample) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -296,7 +300,8 @@ func (run *baselineRun) callProtocol(ctx context.Context, client *http.Client, b
 		sample.Error = "status or verified HTTP2 mismatch"
 		return
 	}
-	reader := &baselineReader{Reader: io.LimitReader(response.Body, 64<<10)}
+	limited := &io.LimitedReader{R: response.Body, N: 64 << 10}
+	reader := &baselineReader{Reader: limited}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), 32<<10)
 	var data, text string
@@ -323,6 +328,12 @@ func (run *baselineRun) callProtocol(ctx context.Context, client *http.Client, b
 		if data == "[DONE]" {
 			done = finished
 			sample.CompleteNS = arrival.Sub(start).Nanoseconds()
+			// A soak worker reuses an admission slot only after the gateway
+			// handler finishes. Direct fixtures intentionally stay open at DONE.
+			if waitEOF && (scanner.Scan() || scanner.Err() != nil || limited.N == 0) {
+				sample.Error = "trailing stream data or incomplete HTTP body"
+				return
+			}
 			break
 		}
 		var event struct {

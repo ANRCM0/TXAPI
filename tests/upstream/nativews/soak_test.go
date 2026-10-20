@@ -1,15 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -28,20 +24,9 @@ func TestSoakRetainsEveryConcurrentResultAndNegotiatesEdgeProtocols(t *testing.T
 			t.Cleanup(cancel)
 			upstream := provider.Client()
 			t.Cleanup(upstream.CloseIdleConnections)
-			u, _ := url.Parse(provider.URL)
-			proxy := httputil.NewSingleHostReverseProxy(u)
-			proxy.Transport = upstream.Transport
-			original := proxy.Director
-			proxy.Director = func(r *http.Request) {
-				raw, _ := io.ReadAll(r.Body)
-				_ = r.Body.Close()
-				raw = bytes.ReplaceAll(raw, []byte(`"model":"alias"`), []byte(`"model":"m"`))
-				r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(raw)), int64(len(raw))
-				r.Header.Set("Authorization", "Bearer "+upstreamKey)
-				r.Header["X-Forwarded-For"] = nil
-				original(r)
-			}
-			edge := httptest.NewUnstartedServer(proxy)
+			edge := httptest.NewUnstartedServer(soakTestGateway(t, upstream, provider.URL, func(w http.ResponseWriter, r *http.Request) {
+				time.Sleep(200 * time.Millisecond)
+			}))
 			edge.EnableHTTP2 = true
 			edge.StartTLS()
 			t.Cleanup(edge.Close)
@@ -61,6 +46,9 @@ func TestSoakRetainsEveryConcurrentResultAndNegotiatesEdgeProtocols(t *testing.T
 			for _, sample := range report.Samples {
 				if sample.Protocol != protocol || sample.ProviderProtocol != 2 || sample.Attempts != 1 || !sample.Drained || len(sample.EventUpperNS) != 10 {
 					t.Fatalf("sample: %+v", sample)
+				}
+				if report.ElapsedNS-sample.CompleteNS < int64(150*time.Millisecond) {
+					t.Fatal("worker returned before delayed HTTP handler cleanup")
 				}
 			}
 			if f.baseline != nil || len(f.chat) != 0 || len(f.requests) != 0 || len(f.errors) != 0 {

@@ -131,7 +131,7 @@ func (f *fixture) measureSoak(ctx context.Context, client *http.Client, base str
 				run.mu.Lock()
 				run.records[tag] = &baselineRecord{drained: make(chan struct{})}
 				run.mu.Unlock()
-				sample := run.callProtocol(ctx, client, base, baselineClientKey, "alias", tag, input.Protocol)
+				sample := run.callProtocolCompletion(ctx, client, base, baselineClientKey, "alias", tag, input.Protocol, true)
 				sample.Pair, sample.Target = sequence, "gateway"
 				run.mu.Lock()
 				if sample.Drained {
