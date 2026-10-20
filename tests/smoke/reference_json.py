@@ -26,12 +26,13 @@ def encoded(value):
 class Fixture(StreamFixture):
     daemon_threads = False
 
-    def __init__(self, delay):
-        super().__init__(delay)
+    def __init__(self, delay, tcp_nodelay=False):
+        super().__init__(delay, tcp_nodelay=tcp_nodelay)
         self.RequestHandlerClass = Handler
 
     def get_request(self):
         connection, address = super().get_request()
+        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, int(self.tcp_nodelay))
         connection.settimeout(5)
         return connection, address
 
@@ -41,6 +42,7 @@ class Handler(FixtureHandler):
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         tag, mode = payload["messages"][0]["content"].split(":", 1)
         record = {"events": [], "finished": False, "error": None, "mode": mode,
+                  "tcp_nodelay": self.connection.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY),
                   "http": self.request_version, "peer": f"{self.client_address[0]}:{self.client_address[1]}"}
         with self.server.lock:
             self.server.records.setdefault(tag, []).append(record)
@@ -163,6 +165,7 @@ def call(connection, key, fixture, seconds=5, mode="normal"):
     with fixture.lock:
         attempts = fixture.records.get(tag, [])
         sample.update(upstream_attempts=len(attempts), drain_failure=not all(a["finished"] for a in attempts),
+                      upstream_tcp_nodelay=[a["tcp_nodelay"] for a in attempts],
                       upstream_peers=[a["peer"] for a in attempts], upstream_http=[a["http"] for a in attempts])
         sent = list(attempts[0]["events"]) if len(attempts) == 1 else []
     if received is not None and sent:
@@ -170,6 +173,7 @@ def call(connection, key, fixture, seconds=5, mode="normal"):
                                  "latency_lower_ns": max(0, received - sent[-1]["flush_return_ns"]),
                                  "latency_upper_ns": received - sent[-1]["write_start_ns"]})
     if sample["success"] and (len(attempts) != 1 or sample["drain_failure"] or len(sample["events"]) != 1
-                              or sample["upstream_http"] != ["HTTP/1.1"]):
+                              or sample["upstream_http"] != ["HTTP/1.1"]
+                              or sample["upstream_tcp_nodelay"] != [int(fixture.tcp_nodelay)]):
         sample.update(success=False, failure="attempt_drain_or_document_mismatch")
     return sample

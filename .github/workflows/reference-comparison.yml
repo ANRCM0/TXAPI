@@ -49,12 +49,16 @@ jobs:
         timeout-minutes: 6
         run: |
           python3 tests/smoke/reference_comparison.py --reference "$RUNNER_TEMP/new-api-reference" --operation chat-json --samples 20 --rounds 2 --output "$RUNNER_TEMP/reference-json-comparison.json"
+      - name: Compare Chat JSON with upstream TCP_NODELAY enabled
+        timeout-minutes: 6
+        run: |
+          python3 tests/smoke/reference_comparison.py --reference "$RUNNER_TEMP/new-api-reference" --operation chat-json --json-fixture-tcp-nodelay --samples 20 --rounds 2 --output "$RUNNER_TEMP/reference-json-nodelay-comparison.json"
       - name: Report exact source, configuration, failures and resources
         if: always()
         run: |
           python3 - <<'PY'
           import json, os, pathlib
-          reports = [pathlib.Path(os.environ["RUNNER_TEMP"]) / name for name in ("reference-comparison.json", "reference-json-comparison.json")]
+          reports = [pathlib.Path(os.environ["RUNNER_TEMP"]) / name for name in ("reference-comparison.json", "reference-json-comparison.json", "reference-json-nodelay-comparison.json")]
           for report_path in reports:
               if report_path.exists():
                   report = json.loads(report_path.read_text())
