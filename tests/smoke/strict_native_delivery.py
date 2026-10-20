@@ -31,7 +31,8 @@ class StrictInstallation(Installation):
         self.settings["channels"][0].update(models=["alias"], model_mapping={"alias": "m"})
         self.settings["tokens"][0]["models"] = ["alias"]
         self.settings["billing"] = {
-            "mode": "strict", "max_request_cost": "0.10", "max_provider_request_cost": "0.10",
+            # The whole-input selling bound is 0.6336; provider tariff is separate.
+            "mode": "strict", "max_request_cost": "1.00", "max_provider_request_cost": "0.10",
             "provider_contracts": [{"channel_id": 1, "base_url": "https://api.openai.com", "protocol": "openai",
                 "actual_model": "m", "operation": "responses", "output_limit_field": "max_output_tokens",
                 "input_token_ceiling": 4096, "input_bound_profile": "operator_responses_v1", "max_output_tokens": 32,
@@ -122,7 +123,7 @@ def validate_ledger(value, expected, *, recovering=False):
         assert len(receipts) == 1 and receipts[0]["number"] == 1
         receipt = receipts[0]
         known = rule["usage"] in ("known", "zero")
-        assert row["reserved_units"] == 100_000_000 and row["provider_budget_units"] == 100_000_000
+        assert row["reserved_units"] == 1_000_000_000 and row["provider_budget_units"] == 100_000_000
         assert row["provider_held_units"] == receipt["provider_bound_units"] == 4_160_000
         assert row["provider_policy_version"], row
         if known:
@@ -266,7 +267,7 @@ def main():
                   ("tests/upstream/nativews/main.go", "tests/upstream/nativews/strict.go",
                    "tests/smoke/strict_native_delivery.py", "tests/smoke/native_ws_delivery.py")},
               "scope": "final shipped static API strict main; synthetic operator policy; isolated Linux Docker; not real-provider tariff certification",
-              "declared": {"selling_hold_units": 100_000_000, "provider_budget_units": 100_000_000,
+              "declared": {"selling_hold_units": 1_000_000_000, "provider_budget_units": 100_000_000,
                   "provider_attempt_bound_units": 4_160_000, "known_charge_units": 900_000,
                   "known_attempt_selling_cost_units": 900_000,
                   "declared_token_cost_units": 4_000,

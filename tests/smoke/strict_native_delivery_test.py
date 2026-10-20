@@ -8,7 +8,7 @@ from strict_native_delivery import validate_ledger, redact_report, CLIENT_KEY, P
 def evidence(usage):
     known = usage in ("known", "zero")
     charge = 900_000 if usage == "known" else 0
-    return {"billing_reservations": [{"id": "r1", "reserved_units": 100_000_000,
+    return {"billing_reservations": [{"id": "r1", "reserved_units": 1_000_000_000,
                 "provider_budget_units": 100_000_000, "provider_held_units": 4_160_000,
                 "provider_policy_version": "fixture-v1", "state": "settled" if known else "pending",
                 "charge_units": charge, "lease_until": 0}],
@@ -17,7 +17,7 @@ def evidence(usage):
                 "cost_units": 900_000 if usage == "known" else 0,
                 "prompt_tokens": 2 if usage == "known" else 0, "output_tokens": 1 if usage == "known" else 0}],
             "billing_balances": [{"owner_type": owner, "owner_id": 1, "used_units": charge,
-                "reserved_units": 0 if known else 100_000_000} for owner in ("user", "key")],
+                "reserved_units": 0 if known else 1_000_000_000} for owner in ("user", "key")],
             "billing_resolutions": [], "background_jobs": []}
 
 
