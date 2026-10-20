@@ -172,11 +172,13 @@ def exercise(i, report):
     for kind in ("known", "zero", "missing"):
         body = payload("http-" + kind)
         first = i.call(body, idempotency="strict-http-" + kind)
-        replay = i.call(body, idempotency="strict-http-" + kind)
-        assert first["body"]["id"] == replay["body"]["id"] and replay["idempotency"] == "replayed"
+        # store:false keeps the execution receipt, but deliberately drops its body.
+        replay = i.call(body, idempotency="strict-http-" + kind, status=409)
+        assert first["body"]["id"] and replay["idempotency"] == "replayed"
+        assert replay["body"]["error"]["type"] == "idempotency_result_unavailable", replay
         rows = i.stats()["requests"]
         assert len([r for r in rows if r["input"] == "http-" + kind and r["transport"] == "http"]) == 1
-        add_snapshot("http-" + kind, ["unknown" if kind == "missing" else kind], "HTTP JSON + idempotent replay")
+        add_snapshot("http-" + kind, ["unknown" if kind == "missing" else kind], "HTTP JSON + store:false replay refusal")
         i.restart_strict()
 
     rounds = [dict(payload("ws-" + kind), type="response.create") for kind in ("known", "zero", "missing")]
