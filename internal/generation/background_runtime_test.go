@@ -43,6 +43,11 @@ type bgRuntimeFixture struct {
 }
 
 func bgRuntimeOpen(t *testing.T, path, upstream string, wrap func(bs.Repository) bs.Repository) bgRuntimeFixture {
+	f, _ := bgRuntimeOpenFinance(t, path, upstream, wrap, nil)
+	return f
+}
+
+func bgRuntimeOpenFinance(t *testing.T, path, upstream string, wrap func(bs.Repository) bs.Repository, configure func(*store.Store) *billing.Engine) (bgRuntimeFixture, *billing.Engine) {
 	t.Helper()
 	credentialFile := path + ".keys"
 	if _, e := os.Stat(credentialFile); os.IsNotExist(e) {
@@ -84,11 +89,18 @@ func bgRuntimeOpen(t *testing.T, path, upstream string, wrap func(bs.Repository)
 	if wrap != nil {
 		repo = wrap(repo)
 	}
-	s, e := NewBackgroundService(ctx, BackgroundOptions{Repository: repo, Parser: native.BackgroundParser{}, BillingMode: "disabled", ActiveKey: "event", Keys: map[string][]byte{"event": bytes.Repeat([]byte{61}, 32)}, DigestKey: bytes.Repeat([]byte{67}, 32), Retention: 10 * time.Minute, MetadataRetention: 24 * time.Hour, Limits: bs.Limits{InstanceRecords: 32, OwnerRecords: 16, InstanceActive: 8, OwnerActive: 4, InstanceBytes: 64 << 20, OwnerBytes: 32 << 20}})
+	mode := billing.ModeDisabled
+	var finance bs.Finance
+	var engine *billing.Engine
+	if configure != nil {
+		engine = configure(st)
+		finance, mode = engine, billing.ModeStrict
+	}
+	s, e := NewBackgroundService(ctx, BackgroundOptions{Repository: repo, Parser: native.BackgroundParser{}, BillingMode: string(mode), Finance: finance, ActiveKey: "event", Keys: map[string][]byte{"event": bytes.Repeat([]byte{61}, 32)}, DigestKey: bytes.Repeat([]byte{67}, 32), Retention: 10 * time.Minute, MetadataRetention: 24 * time.Hour, Limits: bs.Limits{InstanceRecords: 32, OwnerRecords: 16, InstanceActive: 8, OwnerActive: 4, InstanceBytes: 64 << 20, OwnerBytes: 32 << 20}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	g, e := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), BillingMode: billing.ModeDisabled})
+	g, e := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: st.Channels(), BillingMode: mode, Billing: engine})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -102,7 +114,7 @@ func bgRuntimeOpen(t *testing.T, path, upstream string, wrap func(bs.Repository)
 		t.Fatal(e)
 	}
 	r := &BackgroundRunner{opts: BackgroundRunnerOptions{Service: s, Remote: remote, Resolve: st.ResolvePrincipal}}
-	return bgRuntimeFixture{st: st, s: s, runner: r, remote: remote, ctx: ctx, key: key}
+	return bgRuntimeFixture{st: st, s: s, runner: r, remote: remote, ctx: ctx, key: key}, engine
 }
 
 func (f bgRuntimeFixture) submit(t *testing.T, n int) bg.Receipt {

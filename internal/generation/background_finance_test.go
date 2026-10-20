@@ -19,11 +19,10 @@ import (
 	"minigateway/internal/billing"
 	bg "minigateway/internal/foundation/contracts/background/v1"
 	v1 "minigateway/internal/foundation/contracts/execution/v1"
-	"minigateway/internal/gateway"
 	bs "minigateway/internal/generation/backgroundstate"
 	"minigateway/internal/model"
-	"minigateway/internal/protocol"
 	native "minigateway/internal/protocol/responses"
+	"minigateway/internal/store"
 )
 
 type unavailableBackgroundFinance struct {
@@ -71,34 +70,36 @@ func TestBackgroundStrictFinancialWriteFailureRetriesDurableReceiptWithoutAnothe
 
 func strictBackgroundFixture(t *testing.T, upstream string) (bgRuntimeFixture, *billing.Engine) {
 	t.Helper()
-	f := bgRuntimeOpen(t, filepath.Join(t.TempDir(), "strict-background.db"), upstream, nil)
-	if err := f.st.UpsertModelPrice(&model.ModelPrice{Model: "m", InputPricePer1K: 0.01, OutputPricePer1K: 0.01}); err != nil {
+	return strictBackgroundOpen(t, filepath.Join(t.TempDir(), "strict-background.db"), upstream, nil)
+}
+
+func strictBackgroundOpen(t *testing.T, path, upstream string, wrap func(bs.Repository) bs.Repository) (bgRuntimeFixture, *billing.Engine) {
+	t.Helper()
+	return bgRuntimeOpenFinance(t, path, upstream, wrap, func(st *store.Store) *billing.Engine {
+		return strictBackgroundEngine(t, st, upstream)
+	})
+}
+
+func strictBackgroundEngine(t *testing.T, st *store.Store, upstream string, expiry ...int64) *billing.Engine {
+	t.Helper()
+	if err := st.UpsertModelPrice(&model.ModelPrice{Model: "m", InputPricePer1K: 0.01, OutputPricePer1K: 0.01}); err != nil {
 		t.Fatal(err)
 	}
-	engine := billing.New(f.st.DB(), billing.NewPriceTableWithHistory(f.st.PriceData, time.Hour, f.st.RecordPriceSnapshot))
+	engine := billing.New(st.DB(), billing.NewPriceTableWithHistory(st.PriceData, time.Hour, st.RecordPriceSnapshot))
 	if err := engine.EnableStrict("1", 6*time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	ch := f.st.Channels()[0]
+	ch := st.Channels()[0]
 	cred := ch.Credentials[0]
 	digest := sha256.Sum256([]byte(cred.APIKey))
 	c := billing.ProviderCostContract{ChannelID: ch.ID, BaseURL: upstream, Protocol: "openai", ActualModel: "m", Operation: "responses", OutputLimitField: "max_output_tokens", InputTokenCeiling: 2048, InputBoundProfile: billing.OperatorResponsesV1, MaxOutputTokens: 32, InputPricePer1K: "0.001", OutputPricePer1K: "0.002", Evidence: "fixture all-token upper bounds and <=32 control RPC envelope", TariffProfile: billing.OperatorDeclaredTokensV1, Currency: "USD", CredentialBindings: map[string]string{fmt.Sprint(cred.ID): hex.EncodeToString(digest[:])}, PolicyVersion: "background-fixture-v1", PolicyExpiresAt: time.Now().Add(time.Hour).Unix(), MaxRequestBytes: 1024, AdditionalCostPerAttempt: "0.0001"}
+	if len(expiry) == 1 {
+		c.PolicyExpiresAt = expiry[0]
+	}
 	if err := engine.ConfigureProviderCosts("1", []billing.ProviderCostContract{c}); err != nil {
 		t.Fatal(err)
 	}
-	f.s.mode, f.s.finance = "strict", engine
-	g, err := gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(), Channels: f.st.Channels(), BillingMode: billing.ModeStrict, Billing: engine})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(g.Close)
-	remote, err := gateway.NewBackgroundRemote(g, gateway.BackgroundRemoteOptions{Registrations: []bg.Registration{native.BackgroundRegistration()}, Channels: map[uint]string{ch.ID: native.BackgroundRegistrationID}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.remote = remote
-	f.runner.opts.Remote = remote
-	return f, engine
+	return engine
 }
 
 func strictBackgroundSubmit(t *testing.T, f bgRuntimeFixture, key string) bg.Receipt {
