@@ -10,7 +10,7 @@ import (
 
 // Integrator assigns each version once. Append new steps; never edit a released
 // step, reorder it, or let feature packages run independent startup migrations.
-const latestMigrationVersion = 21
+const latestMigrationVersion = 22
 
 type dataMigration struct {
 	Version int
@@ -122,6 +122,13 @@ var dataMigrations = []dataMigration{
 		// Retained ciphertext is not scanned to invent usage metadata. Existing
 		// background rows keep empty native state and nullable unknown quantities.
 		return nil
+	}},
+	{Version: 22, Apply: func(tx *gorm.DB) error {
+		// Historical disabled tasks never acquire a financial reservation.
+		if err := tx.Exec("UPDATE background_jobs SET billing_mode = 'disabled' WHERE billing_mode IS NULL OR billing_mode = ''").Error; err != nil {
+			return err
+		}
+		return tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_background_billing_id_unique ON background_jobs(billing_id) WHERE billing_id <> ''").Error
 	}},
 }
 

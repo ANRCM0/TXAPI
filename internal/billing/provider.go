@@ -35,21 +35,25 @@ var (
 // Evidence must explain the provider-enforced ceilings and tariff assumptions.
 // There are deliberately no model aliases, wildcards or inferred defaults.
 type ProviderCostContract struct {
-	ChannelID          uint              `json:"channel_id"`
-	BaseURL            string            `json:"base_url"`
-	Protocol           string            `json:"protocol"`
-	ActualModel        string            `json:"actual_model"`
-	Operation          string            `json:"operation"`
-	OutputLimitField   string            `json:"output_limit_field"`
-	InputTokenCeiling  int64             `json:"input_token_ceiling"`
-	InputBoundProfile  string            `json:"input_bound_profile,omitempty"`
-	MaxOutputTokens    int64             `json:"max_output_tokens"`
-	InputPricePer1K    string            `json:"input_price_per_1k"`
-	OutputPricePer1K   string            `json:"output_price_per_1k"`
-	Evidence           string            `json:"evidence"`
-	TariffProfile      string            `json:"tariff_profile,omitempty"`
-	Currency           string            `json:"currency,omitempty"`
-	CredentialBindings map[string]string `json:"credential_bindings,omitempty"`
+	ChannelID                uint              `json:"channel_id"`
+	BaseURL                  string            `json:"base_url"`
+	Protocol                 string            `json:"protocol"`
+	ActualModel              string            `json:"actual_model"`
+	Operation                string            `json:"operation"`
+	OutputLimitField         string            `json:"output_limit_field"`
+	InputTokenCeiling        int64             `json:"input_token_ceiling"`
+	InputBoundProfile        string            `json:"input_bound_profile,omitempty"`
+	MaxOutputTokens          int64             `json:"max_output_tokens"`
+	InputPricePer1K          string            `json:"input_price_per_1k"`
+	OutputPricePer1K         string            `json:"output_price_per_1k"`
+	Evidence                 string            `json:"evidence"`
+	TariffProfile            string            `json:"tariff_profile,omitempty"`
+	Currency                 string            `json:"currency,omitempty"`
+	CredentialBindings       map[string]string `json:"credential_bindings,omitempty"`
+	PolicyVersion            string            `json:"policy_version,omitempty"`
+	PolicyExpiresAt          int64             `json:"policy_expires_at,omitempty"`
+	MaxRequestBytes          int               `json:"max_request_bytes,omitempty"`
+	AdditionalCostPerAttempt string            `json:"additional_cost_per_attempt,omitempty"`
 }
 
 type ProviderTarget struct {
@@ -68,6 +72,7 @@ type providerKey struct {
 type providerContract struct {
 	config        ProviderCostContract
 	input, output int64
+	additional    int64
 }
 
 type providerAttemptSnapshot struct {
@@ -112,6 +117,9 @@ func compileProviderCosts(budget string, configs []ProviderCostContract) (*Provi
 	}
 	policy := &ProviderCosts{budget: units, contracts: make(map[providerKey]providerContract)}
 	for _, c := range configs {
+		if c.TariffProfile != OperatorDeclaredTokensV1 && (c.PolicyVersion != "" || c.PolicyExpiresAt != 0 || c.MaxRequestBytes != 0 || c.AdditionalCostPerAttempt != "") {
+			return nil, errors.New("operator declaration fields require their explicit tariff profile")
+		}
 		u, err := url.Parse(c.BaseURL)
 		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") ||
 			u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -136,6 +144,10 @@ func compileProviderCosts(budget string, configs []ProviderCostContract) (*Provi
 			if c.Protocol != "openai" || c.MaxOutputTokens != 0 || c.OutputLimitField != "" {
 				return nil, errors.New("provider embedding contract requires OpenAI-compatible input-only billing")
 			}
+		case "responses":
+			if c.Protocol != "openai" || c.InputBoundProfile != OperatorResponsesV1 || c.TariffProfile != OperatorDeclaredTokensV1 || c.MaxOutputTokens <= 0 || c.OutputLimitField != "max_output_tokens" {
+				return nil, errors.New("Responses cost contracts require the explicit operator-declared token policy and output limit")
+			}
 		default:
 			return nil, errors.New("unsupported provider contract operation")
 		}
@@ -150,7 +162,14 @@ func compileProviderCosts(budget string, configs []ProviderCostContract) (*Provi
 		if err != nil || (c.Operation == "embeddings" && out != 0) {
 			return nil, errors.New("invalid provider output tariff")
 		}
-		contract := providerContract{config: c, input: in, output: out}
+		additional := int64(0)
+		if c.AdditionalCostPerAttempt != "" {
+			additional, err = exactDecimalUnits(c.AdditionalCostPerAttempt)
+			if err != nil {
+				return nil, errors.New("invalid additional attempt envelope")
+			}
+		}
+		contract := providerContract{config: c, input: in, output: out, additional: additional}
 		if err := validateTariffProfile(contract); err != nil {
 			return nil, err
 		}
@@ -195,6 +214,7 @@ func (c providerContract) bound(output int64) (int64, error) {
 	cost := new(big.Int).Mul(big.NewInt(c.config.InputTokenCeiling), big.NewInt(c.input))
 	cost.Add(cost, new(big.Int).Mul(big.NewInt(output), big.NewInt(c.output)))
 	cost.Add(cost, big.NewInt(999)).Quo(cost, big.NewInt(1000))
+	cost.Add(cost, big.NewInt(c.additional))
 	if !cost.IsInt64() {
 		return 0, errors.New("provider cost bound exceeds fixed-point range")
 	}
@@ -246,7 +266,12 @@ func (e *Engine) startCostedAttempt(ctx context.Context, pre *PreDeduct, attempt
 	if preparedBody == nil {
 		return ErrProviderContract
 	}
-	wire, err := ParseStrictRequest(preparedBody, target.Operation == "embeddings")
+	var wire StrictRequest
+	if target.Operation == "responses" {
+		wire, err = ParseResponsesStrictRequest(preparedBody)
+	} else {
+		wire, err = ParseStrictRequest(preparedBody, target.Operation == "embeddings")
+	}
 	if err != nil || wire != request {
 		return ErrProviderLimit
 	}
@@ -274,6 +299,7 @@ func (e *Engine) lookupCostContract(pre *PreDeduct, attempt model.BillingAttempt
 func (e *Engine) startContractAttempt(ctx context.Context, pre *PreDeduct, attempt model.BillingAttempt, contract providerContract, request StrictRequest) error {
 	if request.OutputLimit < 0 || int64(request.OutputLimit) > contract.config.MaxOutputTokens ||
 		(contract.config.Operation == "chat" && request.OutputLimit == 0) ||
+		(contract.config.Operation == "responses" && request.OutputLimit == 0) ||
 		(contract.config.Operation == "embeddings" && request.OutputLimit != 0) {
 		return ErrProviderLimit
 	}

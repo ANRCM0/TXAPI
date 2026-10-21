@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"minigateway/internal/access"
+	"minigateway/internal/billing"
 	v1 "minigateway/internal/foundation/contracts/execution/v1"
 	v2 "minigateway/internal/foundation/contracts/execution/v2"
 	v3 "minigateway/internal/foundation/contracts/execution/v3"
@@ -48,6 +49,7 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	gateContext := ctx
 	var recording *nativeUsageRecording
 	var storedRound stored.StoredRound
+	var finance *nativeFinance
 	observed := websocketExchangeObservation{usage: unknownDetailedUsageFact()}
 	interrupted := false
 	defer func() {
@@ -64,6 +66,11 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 		}
 		if storedRound != nil {
 			if err := finishStoredNativeRound(storedRound, result.Facts.UpstreamWriteStarted || result.Facts.Dispatch != v2.NotDispatched); err != nil {
+				result.Problem = nativeProblem("unavailable", 1013)
+			}
+		}
+		if finance != nil {
+			if err := finance.finish(ctx, observed, exchangeStarted); err != nil {
 				result.Problem = nativeProblem("unavailable", 1013)
 			}
 		}
@@ -123,7 +130,7 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	if err != nil {
 		return fail("invalid_request", 1008, err)
 	}
-	if n.service.gateway.BillingMode() != "disabled" {
+	if !nativeBillingAllowed(n.service.gateway) {
 		return fail("unavailable", 1013, nil)
 	}
 	if !principal.Policy.Allows(create.Model) {
@@ -131,6 +138,21 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	}
 	if n.service.gateway.hasManagedGrant(principal.UserID, principal.TokenID, create.Model) {
 		return fail("unavailable", 1013, nil)
+	}
+	if n.service.gateway.billingMode == billing.ModeStrict {
+		// Persistent parents and connection-local provider caches have no
+		// self-contained input proof in this first charged operation.
+		if create.Store || create.PreviousID != "" {
+			return fail("invalid_request", 1008, nil)
+		}
+		if _, err := billing.ParseResponsesStrictRequest(create.Initial.Data); err != nil {
+			return fail("invalid_request", 1008, err)
+		}
+		pre, err := n.service.gateway.strictBilling.Reserve(ctx, n.binding.TokenID, n.binding.UserID, create.Model)
+		if err != nil {
+			return fail("unavailable", 1013, err)
+		}
+		finance = &nativeFinance{gateway: n.service.gateway, pre: pre}
 	}
 	if n.model != "" && n.model != create.Model {
 		return fail("continuation_invalid", 1008, nil)
@@ -211,12 +233,25 @@ func (n *nativeSession) Execute(parent context.Context, in contract.Create, deli
 	if err != nil {
 		return fail("invalid_request", 1008, err)
 	}
+	if finance != nil {
+		if err := finance.start(ctx, ch, credential, initial.Data); err != nil {
+			return fail("unavailable", 1013, err)
+		}
+	}
 	if !recording.prepare(ctx, history.Target{ActualModel: n.target.ActualModel, Group: ch.groupName, Protocol: ch.typ, ChannelID: uint(ch.id), CredentialID: credential.ID}) {
 		return fail("unavailable", 1013, errors.New("usage recording unavailable"))
 	}
 
 	if nilInterface(n.connection) {
-		n.connection, err = n.generation.transport.Dial(ctx, credential.APIKey)
+		if bound, ok := n.generation.transport.(BoundNativeWSResource); ok {
+			endpoint, valid := nativeWSURL(ch.baseURL)
+			if !valid {
+				return fail("unavailable", 1013, nil)
+			}
+			n.connection, err = bound.DialTarget(ctx, endpoint, credential.APIKey)
+		} else {
+			n.connection, err = n.generation.transport.Dial(ctx, credential.APIKey)
+		}
 		if err != nil || nilInterface(n.connection) {
 			return fail("upstream_error", 1011, err)
 		}

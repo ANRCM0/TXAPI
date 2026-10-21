@@ -27,6 +27,7 @@ import (
 )
 
 type BackgroundOptions struct {
+	Finance           bs.Finance
 	Repository        bs.Repository
 	Parser            execv1.Parser
 	History           history.Repository
@@ -44,6 +45,7 @@ type BackgroundOptions struct {
 // BackgroundService owns authenticated durable acceptance, not network dispatch.
 // Assembly supplies the original transaction owner, parser and shared key ring.
 type BackgroundService struct {
+	finance           bs.Finance
 	repository        bs.Repository
 	parser            execv1.Parser
 	history           history.Repository
@@ -68,7 +70,7 @@ type backgroundPayload struct {
 }
 
 func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*BackgroundService, error) {
-	if ctx == nil || nilPort(o.Repository) || nilPort(o.Parser) || o.BillingMode != "disabled" {
+	if ctx == nil || nilPort(o.Repository) || nilPort(o.Parser) || (o.BillingMode != "disabled" && (o.BillingMode != "strict" || nilPort(o.Finance))) {
 		return nil, bg.ErrUnsupportedBilling
 	}
 	if nilResponseHistoryDependency(o.History) != nilResponseHistoryDependency(o.Compiler) {
@@ -94,6 +96,7 @@ func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*Background
 	}
 	sum := sha256.Sum256(o.DigestKey)
 	s := &BackgroundService{repository: o.Repository, parser: o.Parser, history: o.History, compiler: o.Compiler, projector: o.Projector, mode: o.BillingMode, keys: ring, digest: bytes.Clone(o.DigestKey), version: hex.EncodeToString(sum[:]), retention: o.Retention, metadataRetention: o.MetadataRetention, limits: o.Limits}
+	s.finance = o.Finance
 	records, err := o.Repository.InitializeBackground(ctx, s.version, o.BillingMode)
 	if err != nil {
 		return nil, safeBackgroundError(err)
@@ -101,6 +104,9 @@ func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*Background
 	// Verify all retained encrypted state before exposing the service. Missing or
 	// changed keys must not silently turn a previously accepted task into a retry.
 	for _, r := range records {
+		if r.BillingMode == "strict" && nilPort(s.finance) {
+			return nil, bg.ErrUnsupportedBilling
+		}
 		if r.DigestVersion != s.version {
 			return nil, bg.ErrUnavailable
 		}
@@ -114,6 +120,11 @@ func NewBackgroundService(ctx context.Context, o BackgroundOptions) (*Background
 				return nil, bg.ErrUnavailable
 			}
 		}
+		if r.Stage == string(bg.StageTerminal) && r.BillingID != "" {
+			if err := s.finishFinance(ctx, r); err != nil {
+				return nil, safeBackgroundError(err)
+			}
+		}
 	}
 	return s, nil
 }
@@ -125,6 +136,9 @@ func backgroundAAD(r bs.Record, kind string) []byte {
 		CreatedAt, Deadline, ExpiresAt                                           int64
 	}{
 		"TXAPI/background/v1", kind, r.ID, r.PublicID, r.Operation, r.Model, r.RequestHash, r.DigestVersion, r.UserID, r.TokenID, r.CreatedAt, r.Deadline, r.ContentExpiresAt})
+	if r.BillingMode == "strict" {
+		data = append(data, []byte("/strict/"+r.BillingID)...)
+	}
 	return data
 }
 func (s *BackgroundService) hash(domain string, b []byte) string {
@@ -202,7 +216,7 @@ func canonicalBackground(body []byte) ([]byte, error) {
 	return out, nil
 }
 func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receipt, error) {
-	if s == nil || s.mode != "disabled" {
+	if s == nil || (s.mode != "disabled" && s.mode != "strict") {
 		return bg.Receipt{}, bg.ErrUnsupportedBilling
 	}
 	binding, err := backgroundBinding(ctx)
@@ -316,6 +330,28 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 	r := bs.Record{ID: id, PublicID: in.ID, UserID: binding.UserID, TokenID: binding.TokenID, Operation: string(in.Operation), Model: request.Model(),
 		KeyHash: keyHash, NamespaceHash: s.foregroundNamespace(binding, key), RequestHash: requestHash, DigestVersion: s.version, Stage: string(bg.StageQueued), Stream: in.Stream, Store: in.Store,
 		Revision: 1, CreatedAt: now.UnixMilli(), Deadline: in.Deadline.UnixMilli(), ContentExpiresAt: now.Add(s.retention).UnixMilli(), ExpiresAt: now.Add(s.metadataRetention).UnixMilli(), ReservedBytes: bs.MaxInput + bs.MaxContent + 512, LastSequence: -1}
+	reservationAccepted := false
+	r.BillingMode = s.mode
+	if s.mode == "strict" {
+		if parentID != "" || payload.Target != nil {
+			return bg.Receipt{}, bg.ErrUnsupportedCapability
+		}
+		billingID, lease, reserveErr := s.finance.ReserveBackground(ctx, binding.TokenID, binding.UserID, modelName, body)
+		if reserveErr != nil {
+			return bg.Receipt{}, bg.ErrUnavailable
+		}
+		r.BillingID = billingID
+		r.Deadline = min(r.Deadline, lease.UnixMilli())
+		// A hold abandoned by process death expires through the billing owner.
+		// No task can dispatch after that hold was released.
+		defer func() {
+			if !reservationAccepted {
+				cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+				defer cancel()
+				_ = s.finance.CompleteBackgroundReservation(cleanup, billingID, binding.TokenID, binding.UserID, modelName, nil, false)
+			}
+		}()
+	}
 	if _, explicit := flags["store"]; explicit && store && !legacyReceipt && in.Operation == execv1.Responses && !nilResponseHistoryDependency(s.projector) {
 		prepared, prepareErr := s.projector.PrepareBackgroundHistory(payload.Body, r.PublicID)
 		if prepareErr == nil {
@@ -341,6 +377,7 @@ func (s *BackgroundService) Submit(ctx context.Context, in bg.Submit) (bg.Receip
 	if err != nil {
 		return bg.Receipt{}, safeBackgroundError(err)
 	}
+	reservationAccepted = out.BillingID == r.BillingID
 	return s.receipt(out)
 }
 func (s *BackgroundService) receipt(r bs.Record) (bg.Receipt, error) {
@@ -373,6 +410,11 @@ func (s *BackgroundService) Cancel(ctx context.Context, id string) (bg.Receipt, 
 	r, e := s.repository.CancelBackground(ctx, b, id)
 	if e != nil {
 		return bg.Receipt{}, safeBackgroundError(e)
+	}
+	if r.Stage == string(bg.StageTerminal) && r.BillingID != "" {
+		if e := s.finishFinance(ctx, r); e != nil {
+			return bg.Receipt{}, safeBackgroundError(e)
+		}
 	}
 	return s.receipt(r)
 }

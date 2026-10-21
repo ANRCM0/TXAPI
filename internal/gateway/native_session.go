@@ -28,6 +28,11 @@ type NativeWSResource interface {
 	Dial(context.Context, string) (v2.Connection, error)
 	Close(context.Context) error
 }
+
+// BoundNativeWSResource dials the exact immutable selected target.
+type BoundNativeWSResource interface {
+	DialTarget(context.Context, string, string) (v2.Connection, error)
+}
 type NativeWSOptions struct {
 	Authority     identity.Authority
 	Gate          admission.RequestGate
@@ -57,7 +62,7 @@ type NativeWebSocketService struct {
 }
 
 func NewNativeWebSocketService(ctx context.Context, g *Gateway, opts NativeWSOptions) (*NativeWebSocketService, error) {
-	if ctx == nil || g == nil || g.BillingMode() != "disabled" || nilInterface(g.admission) || nilInterface(opts.Authority) || nilInterface(opts.Gate) || opts.Prepare == nil || opts.Parse == nil || opts.Decoder == nil || opts.Encode == nil {
+	if ctx == nil || g == nil || !nativeBillingAllowed(g) || nilInterface(g.admission) || nilInterface(opts.Authority) || nilInterface(opts.Gate) || opts.Prepare == nil || opts.Parse == nil || opts.Decoder == nil || opts.Encode == nil {
 		return nil, errors.New("native websocket dependencies unavailable")
 	}
 	if !nilInterface(opts.StoredHistory) && opts.EncodeStored == nil {
@@ -103,7 +108,7 @@ func (s *NativeWebSocketService) Open(ctx context.Context, in contract.Open) (co
 	if s.stopping || s.ctx.Err() != nil {
 		return nil, nativeProblem("draining", 1001)
 	}
-	if s.gateway.BillingMode() != "disabled" {
+	if !nativeBillingAllowed(s.gateway) {
 		return nil, nativeProblem("unavailable", 1013)
 	}
 	if s.sessions[in.ConnectionID] != nil {

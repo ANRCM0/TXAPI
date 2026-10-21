@@ -78,7 +78,7 @@ func TestUsageHistoryV16UpgradePreservesV15AuthoritiesAndOpaqueContent(t *testin
 			}
 		}
 		var got []model.SchemaMigration
-		if e := st.DB().Order("version").Find(&got).Error; e != nil || len(got) != len(released)+6 || got[len(got)-6].Version != 16 || got[len(got)-5].Version != 17 || got[len(got)-4].Version != 18 || got[len(got)-3].Version != 19 || got[len(got)-2].Version != 20 || got[len(got)-1].Version != 21 {
+		if e := st.DB().Order("version").Find(&got).Error; e != nil || len(got) != len(released)+7 || got[len(got)-7].Version != 16 || got[len(got)-6].Version != 17 || got[len(got)-5].Version != 18 || got[len(got)-4].Version != 19 || got[len(got)-3].Version != 20 || got[len(got)-2].Version != 21 || got[len(got)-1].Version != 22 {
 			t.Fatal(got, e)
 		}
 		for i, old := range released {

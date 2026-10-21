@@ -30,7 +30,7 @@ func TestBackgroundUsageV21UpgradePreservesOpaqueTasks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err = st.DB().Where("version = 21").Delete(&model.SchemaMigration{}).Error; err != nil {
+	if err = st.DB().Where("version >= 21").Delete(&model.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, column := range []string{"native_state", "usage_input_tokens", "usage_output_tokens", "usage_total_tokens", "usage_cached_input_tokens", "usage_cache_write_input_tokens", "usage_reasoning_output_tokens", "usage_completeness", "usage_source", "usage_profile"} {
@@ -59,7 +59,7 @@ func TestBackgroundUsageV21UpgradePreservesOpaqueTasks(t *testing.T) {
 			t.Fatal("upgrade rewrote retained events", gotEvent, err)
 		}
 		var ledger []model.SchemaMigration
-		if err = st.DB().Order("version").Find(&ledger).Error; err != nil || len(ledger) != len(released)+1 || ledger[len(ledger)-1].Version != 21 {
+		if err = st.DB().Order("version").Find(&ledger).Error; err != nil || len(ledger) != len(released)+2 || ledger[len(ledger)-2].Version != 21 || ledger[len(ledger)-1].Version != 22 {
 			t.Fatal("v21 did not append exactly once", ledger, err)
 		}
 		if !reflect.DeepEqual(ledger[:len(released)], released) || checkMigrationVersion(st.DB(), 20) == nil {

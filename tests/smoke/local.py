@@ -107,6 +107,16 @@ def control_workflow(base, upstream_url, routing_env=None, quotation_enabled=Fal
     admin = api("/api/auth/login", payload={
         "username": "smoke-admin", "password": "smoke-admin-password-only"
     })["session_token"]
+    for path, method in [
+        ("/api/admin/managed-channels", "POST"),
+        ("/api/admin/managed-credentials/1", "GET"),
+        ("/api/admin/managed-credentials/1", "PUT"),
+        ("/api/admin/managed-credentials/1/disable", "POST"),
+        ("/api/admin/managed-credentials/1/eligibility", "GET"),
+        ("/api/admin/managed-credentials/1/eligibility/resume", "POST"),
+    ]:
+        unavailable = api(path, admin, {} if method != "GET" else None, method, expected=503)
+        assert unavailable["error"]["type"] == "managed_inference_unavailable", unavailable
     current_quote = api("/api/admin/quotations/current", admin)["data"]
     assert current_quote["enabled"] == quotation_enabled
     version = current_quote["version"] or "0" * 64

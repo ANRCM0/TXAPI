@@ -31,10 +31,8 @@ import (
 	usagehistory "minigateway/internal/foundation/contracts/usagehistory/v1"
 	authentication "minigateway/internal/foundation/identity"
 	"minigateway/internal/foundation/persistence"
-	"minigateway/internal/foundation/upstreamhttp"
 	"minigateway/internal/management"
 	"minigateway/internal/protocol"
-	"minigateway/internal/protocol/openaiauth"
 	"net/http"
 	"os"
 	"os/signal"
@@ -76,12 +74,7 @@ func main() {
 	initAdmin := flag.Bool("init-admin", false, "create the first admin from TXAPI_ADMIN_USERNAME/TXAPI_ADMIN_PASSWORD and exit")
 	claimToken := flag.Uint("claim-token", 0, "claim one unowned legacy token ID and exit")
 	claimOwner := flag.Uint("owner-user", 0, "active user ID for -claim-token")
-	upstreamAccount := upstreamAccountFlags(flag.CommandLine)
 	flag.Parse()
-	if err := upstreamAccount.validate(*seedOnly || *initAdmin || *claimToken != 0 || *claimOwner != 0); err != nil {
-		slog.Error("invalid upstream account command", "err", err)
-		os.Exit(2)
-	}
 
 	// 1. 加载配置
 	cfg, err := config.Load(*configPath)
@@ -113,17 +106,6 @@ func main() {
 	// defer 保证任何退出路径都 flush 异步日志：Close 先排空日志队列
 	// 再关连接；普通日志可能因队列满/写库失败而丢弃并计数。
 	defer st.Close()
-	if upstreamAccount.action != "" {
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		err := runUpstreamAccount(ctx, st, *upstreamAccount, os.Stdout, nil)
-		cancel()
-		if err != nil {
-			st.Close()
-			slog.Error("upstream account command failed", "err", err)
-			os.Exit(1)
-		}
-		return
-	}
 	if !st.CredentialEncryptionReady(context.Background()) {
 		slog.Warn("upstream credentials use plaintext compatibility storage; this is not the production security baseline")
 	}
@@ -210,6 +192,8 @@ func main() {
 					InputBoundProfile: c.InputBoundProfile,
 					TariffProfile:     c.TariffProfile, Currency: c.Currency, CredentialBindings: c.CredentialBindings,
 					InputPricePer1K: c.InputPricePer1K, OutputPricePer1K: c.OutputPricePer1K, Evidence: c.Evidence,
+					PolicyVersion: c.PolicyVersion, PolicyExpiresAt: c.PolicyExpiresAt,
+					MaxRequestBytes: c.MaxRequestBytes, AdditionalCostPerAttempt: c.AdditionalCostPerAttempt,
 				})
 			}
 			if err := engine.ConfigureProviderCosts(cfg.Billing.MaxProviderRequestCost, contracts); err != nil {
@@ -221,7 +205,7 @@ func main() {
 		}
 		if cfg.Billing.MaxRequestCost == "" {
 			slog.Warn("strict fee ceiling is missing; model calls will be rejected")
-		} else if err := engine.EnableStrict(cfg.Billing.MaxRequestCost, time.Duration(cfg.Server.TotalTimeoutSeconds+5)*time.Second); err != nil {
+		} else if err := engine.EnableStrict(cfg.Billing.MaxRequestCost, strictBillingLease(cfg)); err != nil {
 			slog.Error("strict billing initialization failed", "err", err)
 			os.Exit(1)
 		}
@@ -254,14 +238,7 @@ func main() {
 		return st.GetCredential(id)
 	})
 	defer health.Close()
-	var managedInference *gateway.ManagedInferenceOptions
-	if cfg.UpstreamAccounts.Inference.Enabled {
-		caller := upstreamhttp.NewCaller(nil)
-		defer caller.Close()
-		managedInference = &gateway.ManagedInferenceOptions{Enabled: true, Credentials: st.InferenceCredentials(), DirectoryCaller: caller, ValidateModel: openaiauth.ValidateVisibleModel, FailureRecorder: st.InferenceEligibility(), ClassifyFailure: openaiauth.ClassifyInferenceFailure}
-	}
 	gw, err = gateway.New(gateway.Options{Protocols: protocol.Protocols(nil), Operations: protocol.Operations(),
-		ManagedInference:   managedInference,
 		UsageHistory:       usageRecorder,
 		UsageQuotation:     quotationBook,
 		RouteDiagnostics:   cfg.Server.RouteDiagnostics,
@@ -372,7 +349,7 @@ func main() {
 		}
 	}()
 
-	responsesRuntime, err := startResponsesRuntime(cfg.Responses, st, gw)
+	responsesRuntime, err := startResponsesRuntime(cfg.Responses, st, gw, engine)
 	if err != nil {
 		slog.Error("Responses initialization failed", "err", err)
 		os.Exit(1)
@@ -415,10 +392,6 @@ func main() {
 		}
 		return nil
 	})
-	if cfg.UpstreamAccounts.Inference.Enabled {
-		configurationService.SetManagedRepository(st.ManagedChannels())
-		configurationService.SetEligibilityRepository(st.InferenceEligibility())
-	}
 	gw.Metrics().SetCredentialStatsProvider(gw.CredentialStats)
 	registerRuntimeMetrics(gw.Metrics(), capacity, nativeResponsesRuntime)
 	registerBackgroundMetrics(gw.Metrics(), responsesRuntime)
@@ -427,23 +400,21 @@ func main() {
 		return metrics.LogQueueStats{Depth: stats.Depth, Capacity: stats.Capacity, Dropped: stats.Dropped, Failed: stats.Failed}
 	})
 	httpEngine := server.NewEngine(server.Deps{
-		Generation:           gateway.NewHTTPExecutor(gw),
-		TokenAuth:            authentication.NewTokenAuthenticator(st),
-		Control:              controlplane.New(persistence.Control(st)),
-		OwnerLedger:          ownerbilling.New(st.OwnerLedger(), controlplane.New(persistence.Control(st)), limiter),
-		Tasks:                taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
-		Routes:               routeconsole.New(gw.Diagnostics(), controlplane.New(persistence.Control(st)), limiter),
-		Quotation:            quoteconsole.New(quotationBook, controlplane.New(persistence.Control(st)), limiter),
-		UsageHistory:         usageconsole.New(st.UsageHistory(cfg.UsageHistory.Enabled, cfg.UsageHistory.RetentionSeconds), controlplane.New(persistence.Control(st)), limiter),
-		Configuration:        configurationService,
-		ManagedConfiguration: configurationService,
-		ManagedEligibility:   configurationService,
-		Ledger:               engine,
-		Metrics:              gw.Metrics(),
-		RateGate:             access.NewRateGate(limiter),
-		Responses:            responsesRuntime.Handler(),
-		ResponsesWS:          nativeResponsesRuntime.Handler(),
-		RateLimiter:          limiter,
+		Generation:    gateway.NewHTTPExecutor(gw),
+		TokenAuth:     authentication.NewTokenAuthenticator(st),
+		Control:       controlplane.New(persistence.Control(st)),
+		OwnerLedger:   ownerbilling.New(st.OwnerLedger(), controlplane.New(persistence.Control(st)), limiter),
+		Tasks:         taskconsole.New(st.TaskControl(), controlplane.New(persistence.Control(st)), limiter),
+		Routes:        routeconsole.New(gw.Diagnostics(), controlplane.New(persistence.Control(st)), limiter),
+		Quotation:     quoteconsole.New(quotationBook, controlplane.New(persistence.Control(st)), limiter),
+		UsageHistory:  usageconsole.New(st.UsageHistory(cfg.UsageHistory.Enabled, cfg.UsageHistory.RetentionSeconds), controlplane.New(persistence.Control(st)), limiter),
+		Configuration: configurationService,
+		Ledger:        engine,
+		Metrics:       gw.Metrics(),
+		RateGate:      access.NewRateGate(limiter),
+		Responses:     responsesRuntime.Handler(),
+		ResponsesWS:   nativeResponsesRuntime.Handler(),
+		RateLimiter:   limiter,
 		// IP 级兜底限流：防「拿随机 key 试」的探测请求（那种请求
 		// 过不了鉴权，令牌级限流根本轮不到它）。阈值取自配置，
 		// 0 = 不限。默认 0——自用场景（本机/内网单客户端）没有
@@ -452,18 +423,6 @@ func main() {
 		IPRPMLimit: cfg.Server.IPRPMLimit,
 		AdminAuth:  middleware.AdminAuth(cfg.AdminKey),
 	})
-
-	refreshRuntime, err := startUpstreamRefreshRuntime(context.Background(), cfg.UpstreamAccounts, st, func(ctx context.Context) error {
-		return refreshPublication(ctx, func() bool {
-			status := configurationService.Apply().Channels
-			return status.LastError == "" && status.DesiredRevision == status.AppliedRevision
-		})
-	}, nil)
-	if err != nil {
-		slog.Error("启动托管账号刷新失败", "err", err)
-		os.Exit(1)
-	}
-	defer joinUpstreamRefreshRuntime(refreshRuntime)
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
@@ -495,7 +454,6 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	slog.Info("正在关闭网关...")
-	refreshRuntime.Stop()
 	nativeResponsesRuntime.Stop()
 	generationRuntime.Stop()
 	responsesRuntime.Stop()

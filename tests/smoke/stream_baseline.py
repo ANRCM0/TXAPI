@@ -234,6 +234,15 @@ def call(connection, key, fixture, deadline_seconds, mode="normal", cancel_barri
         sample["http_status"] = response.status
         sample["http_version"] = response.version
         if response.status != 200 or response.version != 11:
+            # Retain only a bounded error code; arbitrary upstream bodies may
+            # contain credentials or private request content.
+            try:
+                failure = json.loads(response.read(4097)).get("error", {}).get("type", "")
+                if (isinstance(failure, str) and len(failure) <= 80 and failure.isascii()
+                        and failure.replace("_", "").isalnum()):
+                    sample["http_error_type"] = failure
+            except (ValueError, AttributeError):
+                pass
             raise ValueError("http_status")
         first = True
         while True:

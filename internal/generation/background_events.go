@@ -150,7 +150,7 @@ func (p *backgroundProgress) ObserveUsage(ctx context.Context, detail bgv2.Obser
 		if e != nil {
 			return e
 		}
-		pending := stage == bg.StageTerminal && p.row.Stream && !next.EventComplete && !next.EventUnavailable
+		pending := stage == bg.StageTerminal && (p.row.Stream && !next.EventComplete && !next.EventUnavailable || p.row.BillingMode == "strict")
 		metadata := &bs.UsageMetadata{NativeState: next.NativeState, Usage: next.DetailedUsage}
 		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: stage, Snapshot: snapshot, Events: events, ReplayPending: pending, DueAt: time.Now().Add(time.Second).UnixMilli(), UsageMetadata: metadata, History: publication})
 		if errors.Is(e, bg.ErrConflict) {
@@ -160,6 +160,11 @@ func (p *backgroundProgress) ObserveUsage(ctx context.Context, detail bgv2.Obser
 			return e
 		}
 		p.row, p.snapshot = row, candidate
+		if stage == bg.StageTerminal {
+			if e := p.settleTerminalFinance(ctx); e != nil {
+				return e
+			}
+		}
 		if finishRate {
 			p.remote.FinishRate(ctx, row.TokenID, next.Rate, next.Usage)
 		}
@@ -179,7 +184,7 @@ func (p *backgroundProgress) markEventsUnavailable(ctx context.Context) error {
 		if e != nil {
 			return e
 		}
-		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.Stage(p.row.Stage), Snapshot: snapshot, DueAt: time.Now().Add(time.Second).UnixMilli()})
+		row, e := p.service.repository.UpdateBackground(ctx, p.claim, p.row.Revision, bs.Update{Stage: bg.Stage(p.row.Stage), Snapshot: snapshot, ReplayPending: p.row.Stage == string(bg.StageTerminal) && p.row.BillingMode == "strict", DueAt: time.Now().Add(time.Second).UnixMilli()})
 		if errors.Is(e, bg.ErrConflict) {
 			continue
 		}
@@ -187,6 +192,9 @@ func (p *backgroundProgress) markEventsUnavailable(ctx context.Context) error {
 			return e
 		}
 		p.row, p.snapshot = row, next
+		if row.Stage == string(bg.StageTerminal) && row.BillingMode == "strict" {
+			return p.settleTerminalFinance(ctx)
+		}
 		return nil
 	}
 	return bg.ErrConflict

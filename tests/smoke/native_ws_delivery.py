@@ -15,6 +15,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 
@@ -26,6 +27,42 @@ CLIENT_KEY = "nativews-deployment-client-fixture-only"
 ADMIN = {"username": "nativews-admin", "password": "nativews-admin-fixture-only"}
 ENV = {key: value for key, value in os.environ.items()
        if not key.upper().startswith(("GATEWAY_", "TXAPI_", "OPENAI_"))}
+
+
+def assess_protocol_soak(phase):
+    value, observed = phase["report"], phase["resources"]
+    rows = value["samples"]
+    errors = []
+    valid_events = all(isinstance(row.get("event_upper_ns"), list)
+                       and len(row["event_upper_ns"]) == 10
+                       and all(isinstance(v, int) and not isinstance(v, bool) for v in row["event_upper_ns"])
+                       for row in rows)
+    phase["observed_p95_ns"] = {
+        key: percentile([sample.get(field) for sample in rows
+                         if isinstance(sample.get(field), int) and not isinstance(sample[field], bool)])
+        for key, field in (("first_text_p95_ns", "first_text_ns"), ("complete_p95_ns", "complete_ns"))}
+    phase["observed_p95_ns"]["event_upper_p95_ns"] = percentile(
+        [latency for sample in rows for latency in sample["event_upper_ns"]]) if valid_events else None
+    if (value["errors"] or not value["started"] or value["started"] != value["completed"] or
+            value["started"] != len(rows) or value["active_after"] != 0 or
+            value["elapsed_ns"] < phase["requested_seconds"] * 1e9):
+        errors.append("started/completed/interval/drain mismatch")
+    if not valid_events or any(row["protocol"] != phase["protocol"] or row["provider_protocol"] != 2
+            or row["provider_alpn"] != "h2" or not row["tls"] or not row["provider_tls"]
+            or row["attempts"] != 1 or not row["drained"] or row.get("http_body_complete") is not True or row.get("error")
+            or any(not isinstance(row.get(field), int) or isinstance(row[field], bool)
+                   for field in ("first_text_ns", "complete_ns")) for row in rows):
+        errors.append("TLS/protocol/attempt/event correctness failed")
+    if not observed["known"]:
+        errors.append("gateway resource evidence incomplete")
+    for key in ("rss_bytes", "fd_count", "average_cpu_cores"):
+        metric = observed.get(key)
+        if not isinstance(metric, (float, int)) or metric > phase["limits"][key]:
+            errors.append(key + " unknown or above predeclared budget")
+    for key, metric in phase["observed_p95_ns"].items():
+        if metric is None or metric > phase["limits"][key]:
+            errors.append(key + " unknown or above predeclared budget")
+    phase["errors"], phase["passed"] = errors, not errors
 
 
 def run(command, *, capture=False, check=True, timeout=60, env=ENV):
@@ -44,6 +81,58 @@ def until(predicate, message, seconds=30):
         time.sleep(0.1)
 
 
+def percentile(values):
+    ordered = sorted(values)
+    return ordered[math.ceil(len(ordered) * .95) - 1] if ordered else None
+
+
+class ContainerResources:
+    """Read PID 1 inside the labelled test container, without host privileges."""
+    def __init__(self, installation):
+        self.installation = installation
+        self.values, self.errors = [], []
+        self.identity = None
+        self.started = time.monotonic()
+        self.stop = threading.Event()
+        self.sample()
+        self.thread = threading.Thread(target=self.loop)
+        self.thread.start()
+
+    def sample(self):
+        try:
+            response = run(["docker", "exec", self.installation.gateway, "/smoke-nativews", "-mode", "resources"],
+                           capture=True, timeout=15)
+            value = json.loads(response.stdout)
+            if any(key not in value for key in ("process_identity", "rss_bytes", "cpu_ticks", "fd_count")):
+                raise RuntimeError("incomplete process resource sample")
+            if self.identity is not None and value["process_identity"] != self.identity:
+                raise RuntimeError("gateway process changed during phase")
+            self.identity = value["process_identity"]
+            value["elapsed_seconds"] = time.monotonic() - self.started
+            self.values.append(value)
+        except Exception as error:
+            self.errors.append(type(error).__name__ + ": " + str(error)[:160])
+
+    def loop(self):
+        while not self.stop.wait(2):
+            self.sample()
+
+    def finish(self):
+        self.stop.set()
+        self.thread.join(20)
+        assert not self.thread.is_alive(), "container sampler did not join"
+        self.sample()
+        elapsed = time.monotonic() - self.started
+        values = self.values
+        delta = values[-1]["cpu_ticks"] - values[0]["cpu_ticks"] if len(values) >= 2 else None
+        return {"scope": "same non-root shipped gateway PID1 only; read-only /proc; 2s samples; peaks are lower bounds; test helper exec is separate PID",
+                "samples": values, "errors": self.errors, "elapsed_seconds": elapsed,
+                "known": not self.errors and len(values) >= 3 and delta is not None and delta >= 0,
+                "rss_bytes": max((value["rss_bytes"] for value in values), default=None),
+                "fd_count": max((value["fd_count"] for value in values), default=None),
+                "average_cpu_cores": delta / os.sysconf("SC_CLK_TCK") / elapsed if delta is not None and delta >= 0 else None}
+
+
 class Installation:
     def __init__(self, work, image, helper):
         self.work, self.image = work, image
@@ -52,6 +141,7 @@ class Installation:
         self.gateway, self.provider = self.name + "-gateway", self.name + "-provider"
         self.label = "txapi.nativews.fixture=" + self.name
         self.containers, self.created_volume, self.created_network = [], False, False
+        self.resource_limits = []
         self.config = work / "config.json"
         self.settings = {
             "server": {"addr": ":8080", "timeout_seconds": 30, "retry_times": 0,
@@ -100,7 +190,7 @@ class Installation:
         run(["docker", "create", "--name", self.provider, "--label", self.label,
              "--network", self.network, "--network-alias", "api.openai.com", "--network-alias", "nativews-fixture", "--user", "0",
              *self.helper_mount, "--mount", f"type=bind,source={self.work},target=/fixtures,readonly",
-             "--entrypoint", "/smoke-nativews", self.image])
+             "--entrypoint", "/smoke-nativews", self.image, "-mode", getattr(self, "provider_mode", "serve")])
         self.containers.append(self.provider)
         run(["docker", "start", self.provider])
         until(lambda: self.helper("http", base="http://127.0.0.1:9911", path="/stats", check=False).returncode == 0,
@@ -111,7 +201,7 @@ class Installation:
             run(["docker", "run", "--rm", "--network", "none", *self.mounts, *extra, self.image,
                  "-config", "/fixtures/config.json", *flags])
         run(["docker", "create", "--name", self.gateway, "--label", self.label,
-             "--network", self.network, "--network-alias", "gateway", *self.mounts,
+             "--network", self.network, "--network-alias", "gateway", *self.resource_limits, *self.mounts, *self.helper_mount,
              "-e", "SSL_CERT_FILE=/fixtures/ca.pem", self.image, "-config", "/fixtures/config.json"])
         self.containers.append(self.gateway)
         run(["docker", "start", self.gateway])
@@ -121,11 +211,37 @@ class Installation:
             assert set(state["NetworkSettings"]["Networks"]) == {self.network}, "runtime escaped the internal network"
         assert self.inspect()["Config"]["User"] == "app", "must use shipped non-root entrypoint"
 
-    def helper(self, mode, *, base="http://127.0.0.1:8081", check=True, **fields):
+    def helper(self, mode, *, base="http://127.0.0.1:8081", check=True, helper_timeout=40, **fields):
         command = ["docker", "exec", self.provider, "/smoke-nativews", "-mode", mode, "-base", base]
         for key, value in fields.items():
             command += ["-" + key, value]
-        return run(command, capture=True, check=check, timeout=40)
+        return run(command, capture=True, check=check, timeout=helper_timeout)
+
+    def sustained_protocols(self, seconds, workers, reports):
+        for protocol in (1, 2):
+            phase = {"protocol": protocol, "requested_seconds": seconds, "workers": workers,
+                     "limits": {"rss_bytes": 256 * 1024 * 1024, "fd_count": 256, "average_cpu_cores": 1,
+                                "first_text_p95_ns": 2_000_000_000, "complete_p95_ns": 3_000_000_000,
+                                "event_upper_p95_ns": 1_000_000_000}}
+            reports.append(phase)
+            resources = ContainerResources(self)
+            try:
+                payload = json.dumps({"seconds": seconds, "workers": workers, "protocol": protocol})
+                result = self.helper("soak", base="http://127.0.0.1:9911", payload=payload,
+                                     helper_timeout=seconds + 30, **{"timeout-seconds": str(seconds + 20)})
+                phase["report"] = json.loads(result.stdout)
+            finally:
+                phase["resources"] = resources.finish()
+            assess_protocol_soak(phase)
+            metrics = self.api("/metrics")
+            until(lambda: all(f"{name} 0\n" in self.api("/metrics") for name in
+                              ("gateway_admission_requests_active", "gateway_admission_attempts_active")),
+                  "soak production admission did not drain")
+            assert "gateway_admission_requests_active" in metrics
+            print(json.dumps({"docker_protocol_soak": {key: phase[key] for key in
+                  ("protocol", "requested_seconds", "workers", "limits", "resources", "observed_p95_ns", "errors", "passed")},
+                  "started": phase["report"]["started"], "completed": phase["report"]["completed"]}), flush=True)
+            assert phase["passed"], "Docker protocol soak failed; full samples retained in output report"
 
     def api(self, path, key="", body=None, method="GET", status=200):
         response = json.loads(self.helper("http", method=method, path=path, key=key,
@@ -509,12 +625,31 @@ def main():
     parser.add_argument("--go", default="go")
     parser.add_argument("--sdk", action="store_true", help="also run the fixed official Python SDK inside the isolated network")
     parser.add_argument("--codex", type=Path, help="also run official Codex0.163.0 Linux musl in the isolated network")
+    parser.add_argument("--soak-seconds", type=int, default=0, help="0 or 5..1800 continuous seconds per TLS HTTP/1.1 and HTTP/2 profile")
+    parser.add_argument("--soak-workers", type=int, default=2, help="1..2 clients; fixed existing key admission remains unchanged")
+    parser.add_argument("--output", type=Path, help="complete Docker protocol soak samples and resource evidence")
     args = parser.parse_args()
+    if not (args.soak_seconds == 0 or 5 <= args.soak_seconds <= 1800) or not 1 <= args.soak_workers <= 2:
+        parser.error("soak-seconds must be 0 or 5..1800; soak-workers must be 1..2")
+    if args.soak_seconds and args.output is None:
+        parser.error("--output is required for a protocol soak")
     assert os.name != "nt", "requires Linux Docker; local harness tests are separate evidence"
     assert run(["docker", "info", "--format", "{{.OSType}}"], capture=True).stdout.strip() == "linux"
     image = "txapi-nativews-smoke:" + uuid.uuid4().hex[:12]
     sdk_image = image + "-sdk" if args.sdk or args.codex else None
     codex = args.codex.resolve() if args.codex else None
+    report = {"schema": 1, "source": {"sha": run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip(),
+              "dirty": bool(run(["git", "status", "--porcelain"], capture=True).stdout.strip()),
+              "sha256": {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in
+                         ("tests/upstream/nativews/main.go", "tests/upstream/nativews/baseline.go",
+                          "tests/upstream/nativews/soak.go", "tests/smoke/native_ws_delivery.py")}},
+              "configuration": {"soak_seconds_per_protocol": args.soak_seconds, "workers": args.soak_workers,
+                  "soak_completion_policy": "latency ends at DONE; worker reuse waits for real gateway HTTP EOF within original 2s/64KiB",
+                  "billing": "disabled", "usage_history_during_soak": False,
+                  "auth": "production static API Key and admission", "retries": 0,
+                  "gateway_container_limits": {"cpus": 2, "memory_bytes": 512 * 1024 * 1024, "pids": 128} if args.soak_seconds else "unchanged",
+                  "scope": "actual non-root shipped image; isolated internal Docker network; TLS reverse proxy HTTP1.1/HTTP2 and verified upstream HTTP2; no external provider"},
+              "protocol_soaks": [], "delivery_regression_passed": False}
     if codex:
         assert codex.is_file() and os.access(codex, os.X_OK), "explicit executable fixed Codex binary required"
     with tempfile.TemporaryDirectory(prefix="txapi-nativews-") as temporary:
@@ -526,6 +661,8 @@ def main():
         fixtures = work / "fixtures"
         run([str(helper), "-mode", "prepare", "-directory", str(fixtures)])
         installation = Installation(fixtures, image, helper)
+        if args.soak_seconds:
+            installation.resource_limits = ["--cpus", "2", "--memory", "512m", "--pids-limit", "128"]
         try:
             run(["docker", "build", "--tag", image, str(ROOT)], timeout=600)
             if sdk_image:
@@ -536,9 +673,21 @@ def main():
                                      'USER 65532:65532\nENTRYPOINT ["python"]\n')
                 run(["docker", "build", "--file", str(dockerfile), "--tag", sdk_image, str(ROOT)], timeout=600)
             installation.create()
+            if args.soak_seconds:
+                host_config = installation.inspect()["HostConfig"]
+                assert host_config["NanoCpus"] == 2_000_000_000 and host_config["Memory"] == 512 * 1024 * 1024 and host_config["PidsLimit"] == 128
+                installation.settings["usage_history"]["enabled"] = False
+                installation.save()
+                installation.restart()
+                installation.sustained_protocols(args.soak_seconds, args.soak_workers, report["protocol_soaks"])
+                installation.settings["usage_history"]["enabled"] = True
+                installation.save()
+                installation.restart()
             exercise(installation, sdk_image if args.sdk else None, sdk_image if codex else None, codex)
+            report["delivery_regression_passed"] = True
             print("PASS: actual non-root image, verified fixture TLS, reverse-proxy Upgrade, HTTP/WS tool history, restart, in-flight SIGKILL unknown protection and durable usage; isolated Docker only", flush=True)
-        except BaseException:
+        except BaseException as error:
+            report["fatal_error"] = type(error).__name__ + ": " + str(error)[:300]
             with contextlib.suppress(Exception):
                 # Stats contain only these synthetic requests and fixed fixture
                 # error reasons, never the authentication headers or key ring.
@@ -554,7 +703,11 @@ def main():
         finally:
             try:
                 installation.cleanup()
+                report["cleanup_complete"] = True
             finally:
+                if args.output:
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
                 run(["docker", "image", "rm", image], check=False)
                 if sdk_image:
                     run(["docker", "image", "rm", sdk_image], check=False)

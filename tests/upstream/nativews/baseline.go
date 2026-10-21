@@ -35,6 +35,7 @@ type baselineRecord struct {
 type baselineRun struct {
 	mu      sync.Mutex
 	records map[string]*baselineRecord
+	delay   time.Duration
 }
 
 type baselineSample struct {
@@ -57,6 +58,7 @@ type baselineSample struct {
 	EventLowerNS     []int64 `json:"event_lower_ns"`
 	EventUpperNS     []int64 `json:"event_upper_ns"`
 	Drained          bool    `json:"drained"`
+	HTTPBodyComplete bool    `json:"http_body_complete"`
 }
 
 type baselineReport struct {
@@ -150,7 +152,11 @@ func (run *baselineRun) stream(w http.ResponseWriter, r *http.Request, tag strin
 		if !write(string(raw)) {
 			return
 		}
-		timer := time.NewTimer(5 * time.Millisecond)
+		delay := run.delay
+		if delay == 0 {
+			delay = 5 * time.Millisecond
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-r.Context().Done():
 			timer.Stop()
@@ -225,7 +231,15 @@ func (f *fixture) measureBaseline(ctx context.Context, direct, gateway *http.Cli
 	return report
 }
 
-func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key, model, tag string) (sample baselineSample) {
+func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key, model, tag string) baselineSample {
+	return run.callProtocol(ctx, client, base, key, model, tag, 2)
+}
+
+func (run *baselineRun) callProtocol(ctx context.Context, client *http.Client, base, key, model, tag string, protocol int) (sample baselineSample) {
+	return run.callProtocolCompletion(ctx, client, base, key, model, tag, protocol, false)
+}
+
+func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http.Client, base, key, model, tag string, protocol int, waitEOF bool) (sample baselineSample) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -283,11 +297,12 @@ func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key
 	if response.TLS != nil {
 		sample.TLS, sample.ALPN = tls.VersionName(response.TLS.Version), response.TLS.NegotiatedProtocol
 	}
-	if response.StatusCode != 200 || response.ProtoMajor != 2 || sample.ALPN != "h2" {
+	if response.StatusCode != 200 || response.ProtoMajor != protocol || protocol == 2 && sample.ALPN != "h2" {
 		sample.Error = "status or verified HTTP2 mismatch"
 		return
 	}
-	reader := &baselineReader{Reader: io.LimitReader(response.Body, 64<<10)}
+	limited := &io.LimitedReader{R: response.Body, N: 64 << 10}
+	reader := &baselineReader{Reader: limited}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), 32<<10)
 	var data, text string
@@ -314,6 +329,13 @@ func (run *baselineRun) call(ctx context.Context, client *http.Client, base, key
 		if data == "[DONE]" {
 			done = finished
 			sample.CompleteNS = arrival.Sub(start).Nanoseconds()
+			// A soak worker reuses an admission slot only after the gateway
+			// handler finishes. Direct fixtures intentionally stay open at DONE.
+			if waitEOF && (scanner.Scan() || scanner.Err() != nil || limited.N == 0) {
+				sample.Error = "trailing stream data or incomplete HTTP body"
+				return
+			}
+			sample.HTTPBodyComplete = waitEOF
 			break
 		}
 		var event struct {

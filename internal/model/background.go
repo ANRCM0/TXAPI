@@ -1,7 +1,10 @@
 package model
 
-// BackgroundJob persists disabled-mode native tasks, separate from strict intents.
+// BackgroundJob persists native tasks, separate from strict execution intents.
 type BackgroundJob struct {
+	BillingID        string          `gorm:"not null;default:'';size:32;index"`
+	BillingMode      string          `gorm:"not null;default:'disabled';size:16"`
+	ControlCalls     uint            `gorm:"not null;default:0"`
 	ID               string          `gorm:"primaryKey;size:64"`
 	PublicID         string          `gorm:"not null;uniqueIndex;size:70"`
 	UserID           uint            `gorm:"not null;uniqueIndex:idx_background_key,priority:1;index"`

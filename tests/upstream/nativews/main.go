@@ -66,6 +66,8 @@ type fixture struct {
 	chat            []chatObservation
 	baseline        *baselineRun
 	baselineStarted atomic.Bool
+	soakActive      atomic.Bool
+	soakProfiles    atomic.Uint32
 }
 
 type chatObservation struct {
@@ -500,6 +502,11 @@ func serve(directory, target string) error {
 	stats := http.NewServeMux()
 	stats.HandleFunc("/stats", f.stats)
 	stats.HandleFunc("/baseline", baseline)
+	soak, err := f.soakHandler(directory)
+	if err != nil {
+		return err
+	}
+	stats.HandleFunc("/soak", soak)
 	servers := []*http.Server{
 		{Addr: ":443", Handler: http.HandlerFunc(f.provider), ReadHeaderTimeout: 5 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}},
 		{Addr: ":8081", Handler: proxy, ReadHeaderTimeout: 5 * time.Second},
@@ -530,12 +537,15 @@ func serve(directory, target string) error {
 	return err
 }
 
-func httpCall(ctx context.Context, client *http.Client, base, method, path, key, payload string) error {
+func httpCall(ctx context.Context, client *http.Client, base, method, path, key, payload, idempotency string) error {
 	request, err := http.NewRequestWithContext(ctx, method, base+path, strings.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if idempotency != "" {
+		request.Header.Set("Idempotency-Key", idempotency)
+	}
 	if key != "" {
 		request.Header.Set("Authorization", "Bearer "+key)
 	}
@@ -552,7 +562,8 @@ func httpCall(ctx context.Context, client *http.Client, base, method, path, key,
 	if json.Unmarshal(raw, &body) != nil {
 		body = string(raw)
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"status": response.StatusCode, "body": body})
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"status": response.StatusCode, "body": body,
+		"billing_id": response.Header.Get("X-TXAPI-Billing-ID"), "idempotency": response.Header.Get("X-TXAPI-Idempotency")})
 }
 
 func wsCall(ctx context.Context, client *http.Client, base, key, payload, until string, output io.Writer) error {
@@ -604,7 +615,7 @@ func wsCall(ctx context.Context, client *http.Client, base, key, payload, until 
 }
 
 func main() {
-	mode := flag.String("mode", "serve", "prepare|serve|http|ws|chat")
+	mode := flag.String("mode", "serve", "prepare|serve|http|ws|chat|soak|resources")
 	directory := flag.String("directory", "/fixtures", "ephemeral fixture directory")
 	target := flag.String("target", "http://gateway:8080", "explicit internal reverse-proxy target")
 	base := flag.String("base", "http://127.0.0.1:8081", "client base URL inside the isolated network")
@@ -612,23 +623,37 @@ func main() {
 	path := flag.String("path", "/healthz", "HTTP path")
 	key := flag.String("key", "", "synthetic fixture bearer")
 	payload := flag.String("payload", "", "synthetic JSON request")
+	idempotency := flag.String("idempotency", "", "synthetic idempotency key")
 	until := flag.String("until", "terminal", "WS terminal|disconnect|error")
+	timeoutSeconds := flag.Int("timeout-seconds", 30, "bounded fixture command timeout: 1..1900")
 	flag.Parse()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if *timeoutSeconds < 1 || *timeoutSeconds > 1900 {
+		fmt.Fprintln(os.Stderr, "fixture timeout must be 1..1900")
+		os.Exit(2)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeoutSeconds)*time.Second)
 	defer cancel()
 	transport := &http.Transport{Proxy: nil, ResponseHeaderTimeout: 5 * time.Second}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 25 * time.Second}
+	client := &http.Client{Transport: transport, Timeout: time.Duration(max(1, *timeoutSeconds-5)) * time.Second}
 	var err error
 	switch *mode {
 	case "prepare":
 		err = prepare(*directory)
 	case "serve":
 		err = serve(*directory, *target)
+	case "strict-serve":
+		err = strictServe(*directory, *target)
 	case "http":
-		err = httpCall(ctx, client, *base, *method, *path, *key, *payload)
+		err = httpCall(ctx, client, *base, *method, *path, *key, *payload, *idempotency)
 	case "ws":
 		err = wsCall(ctx, client, *base, *key, *payload, *until, os.Stdout)
+	case "strict-ws":
+		err = strictWSCall(ctx, client, *base, *key, *payload, os.Stdout)
+	case "resources":
+		err = processResources(os.Stdout)
+	case "soak":
+		err = soakCall(ctx, client, *base, *payload, os.Stdout)
 	case "chat":
 		err = chatCall(ctx, client, *base, *key, *payload, os.Stdout)
 	default:

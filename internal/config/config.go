@@ -95,21 +95,25 @@ type BillingConfig struct {
 
 // Startup-only, independently priced provider envelopes; never seed data.
 type ProviderContractConfig struct {
-	ChannelID          uint              `yaml:"channel_id"`
-	BaseURL            string            `yaml:"base_url"`
-	Protocol           string            `yaml:"protocol"`
-	ActualModel        string            `yaml:"actual_model"`
-	Operation          string            `yaml:"operation"`
-	OutputLimitField   string            `yaml:"output_limit_field"`
-	InputTokenCeiling  int64             `yaml:"input_token_ceiling"`
-	InputBoundProfile  string            `yaml:"input_bound_profile"`
-	MaxOutputTokens    int64             `yaml:"max_output_tokens"`
-	InputPricePer1K    string            `yaml:"input_price_per_1k"`
-	OutputPricePer1K   string            `yaml:"output_price_per_1k"`
-	Evidence           string            `yaml:"evidence"`
-	TariffProfile      string            `yaml:"tariff_profile"`
-	Currency           string            `yaml:"currency"`
-	CredentialBindings map[string]string `yaml:"credential_bindings"`
+	ChannelID                uint              `yaml:"channel_id"`
+	BaseURL                  string            `yaml:"base_url"`
+	Protocol                 string            `yaml:"protocol"`
+	ActualModel              string            `yaml:"actual_model"`
+	Operation                string            `yaml:"operation"`
+	OutputLimitField         string            `yaml:"output_limit_field"`
+	InputTokenCeiling        int64             `yaml:"input_token_ceiling"`
+	InputBoundProfile        string            `yaml:"input_bound_profile"`
+	MaxOutputTokens          int64             `yaml:"max_output_tokens"`
+	InputPricePer1K          string            `yaml:"input_price_per_1k"`
+	OutputPricePer1K         string            `yaml:"output_price_per_1k"`
+	Evidence                 string            `yaml:"evidence"`
+	TariffProfile            string            `yaml:"tariff_profile"`
+	Currency                 string            `yaml:"currency"`
+	CredentialBindings       map[string]string `yaml:"credential_bindings"`
+	PolicyVersion            string            `yaml:"policy_version"`
+	PolicyExpiresAt          int64             `yaml:"policy_expires_at"`
+	MaxRequestBytes          int               `yaml:"max_request_bytes"`
+	AdditionalCostPerAttempt string            `yaml:"additional_cost_per_attempt"`
 }
 
 // ChannelConfig 描述一个上游渠道，仅用于「从 YAML 导入空数据库」。
@@ -382,9 +386,6 @@ func (c *Config) validate() error {
 	if err := c.UpstreamAccounts.validate(c.Database.CredentialKeysFile); err != nil {
 		return err
 	}
-	if c.UpstreamAccounts.Inference.Enabled && (c.Billing.Mode != "disabled" || strings.TrimSpace(c.Database.CredentialKeysFile) == "" || !c.Responses.Enabled) {
-		return fmt.Errorf("upstream_accounts.inference.enabled requires billing.mode disabled, database.credential_keys_file and responses.enabled")
-	}
 	if err := c.UsageHistory.validate(c.Billing.Mode); err != nil {
 		return err
 	}
@@ -394,14 +395,14 @@ func (c *Config) validate() error {
 	if err := c.ResponsesWS.validate(); err != nil {
 		return err
 	}
-	if c.ResponsesWS.Enabled && (c.Billing.Mode != "disabled" || strings.TrimSpace(c.Database.CredentialKeysFile) == "") {
-		return fmt.Errorf("responses_ws.enabled requires billing.mode disabled and database.credential_keys_file")
+	if c.ResponsesWS.Enabled && (c.Billing.Mode != "disabled" && c.Billing.Mode != "strict" || strings.TrimSpace(c.Database.CredentialKeysFile) == "") {
+		return fmt.Errorf("responses_ws.enabled requires billing.mode disabled or strict and database.credential_keys_file")
 	}
 	if c.ResponsesWS.PersistentHistory && !c.Responses.Enabled {
 		return fmt.Errorf("responses_ws.persistent_history requires responses.enabled")
 	}
-	if c.Responses.Background.Enabled && c.Billing.Mode != "disabled" {
-		return fmt.Errorf("responses.background.enabled requires billing.mode disabled")
+	if c.Responses.Background.Enabled && c.Billing.Mode != "disabled" && c.Billing.Mode != "strict" {
+		return fmt.Errorf("responses.background.enabled requires billing.mode disabled or strict")
 	}
 	if err := c.Responses.validate(); err != nil {
 		return err

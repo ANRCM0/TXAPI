@@ -21,6 +21,15 @@ func validateTariffProfile(c providerContract) error {
 		}
 		return nil // Historical declarations may load, but cannot execute.
 	}
+	if config.TariffProfile == OperatorDeclaredTokensV1 {
+		if err := validateOperatorPolicy(config); err != nil {
+			return err
+		}
+		if len(config.Currency) != 3 || strings.Trim(config.Currency, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") != "" || c.input <= 0 || config.Operation != "embeddings" && c.output <= 0 || config.AdditionalCostPerAttempt == "" {
+			return errors.New("operator token policy requires an explicit currency, positive input/output tariffs and additional attempt envelope")
+		}
+		return validateCredentialBindings(config.CredentialBindings)
+	}
 	if config.TariffProfile != OpenAIStandardUSD20261017 || config.Currency != "USD" {
 		return errors.New("unknown provider tariff profile or unsupported currency")
 	}
@@ -48,10 +57,14 @@ func validateTariffProfile(c providerContract) error {
 	if c.input < input || c.output < output {
 		return errors.New("provider tariff understates the registered standard USD rate")
 	}
-	if len(config.CredentialBindings) == 0 {
+	return validateCredentialBindings(config.CredentialBindings)
+}
+
+func validateCredentialBindings(bindings map[string]string) error {
+	if len(bindings) == 0 || len(bindings) > 256 {
 		return errors.New("provider tariff requires explicit credential ID and key SHA-256 bindings")
 	}
-	for id, fingerprint := range config.CredentialBindings {
+	for id, fingerprint := range bindings {
 		value, err := strconv.ParseUint(id, 10, strconv.IntSize)
 		if err != nil || value == 0 || strconv.FormatUint(value, 10) != id {
 			return errors.New("provider credential binding requires a canonical positive ID")
@@ -71,6 +84,7 @@ func checkTariffCredential(c ProviderCostContract, credentialID uint, header htt
 	// Check what will be sent, not only the selected credential's metadata.
 	// Alternate project/org selectors and extra headers are outside this profile.
 	var authorization string
+	var beta bool
 	for name, values := range header {
 		switch strings.ToLower(name) {
 		case "authorization":
@@ -79,6 +93,11 @@ func checkTariffCredential(c ProviderCostContract, credentialID uint, header htt
 			}
 			authorization = values[0]
 		case "content-type", "accept":
+		case "openai-beta":
+			if beta || c.Operation != "responses" || c.TariffProfile != OperatorDeclaredTokensV1 || len(values) != 1 || values[0] != "responses_websockets=2025-06-01" {
+				return ErrCredentialTariff
+			}
+			beta = true
 		default:
 			return ErrCredentialTariff
 		}

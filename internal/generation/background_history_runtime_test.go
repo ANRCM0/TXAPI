@@ -302,7 +302,7 @@ func TestBackgroundHistoryRuntimeProgressPinsTargetAndRechecksRevocation(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := bs.RemoteCall{Action: bg.RemoteSubmit, Operation: execv1.Responses, Model: row.Model, PublicID: row.PublicID, Stream: row.Stream, Body: payload.Body, Target: &target}
+	call := bs.RemoteCall{Action: bg.RemoteSubmit, Operation: execv1.Responses, Model: row.Model, PublicID: row.PublicID, Stream: row.Stream, Body: payload.Body, Target: &target, BillingID: row.BillingID, BillingMode: row.BillingMode, UserID: row.UserID, TokenID: row.TokenID}
 	if err = p.Validate(f.ctx, call); err != nil {
 		t.Fatal("valid sealed call rejected", err)
 	}

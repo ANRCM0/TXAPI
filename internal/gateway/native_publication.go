@@ -125,7 +125,9 @@ func (s *NativeWebSocketService) nativeCandidates(generation *nativeGeneration, 
 	defer s.gateway.reg.mu.RUnlock()
 	var out []*channel
 	for id, snapshot := range generation.channels {
-		if !snapshot.supports(name) || !officialNativeChannel(snapshot) {
+		_, bound := generation.transport.(BoundNativeWSResource)
+		_, valid := nativeWSURL(snapshot.baseURL)
+		if !snapshot.supports(name) || snapshot.typ != "openai" || !valid || !bound && (!officialNativeChannel(snapshot) || s.gateway.BillingMode() == "strict") {
 			continue
 		}
 		actual := name

@@ -24,21 +24,22 @@ type BillingBalance struct {
 }
 
 type BillingReservation struct {
-	ID                  string `gorm:"primaryKey;size:32"`
-	UserID              uint   `gorm:"index;not null"`
-	TokenID             uint   `gorm:"index;not null"`
-	PriceVersion        string `gorm:"size:64;not null"`
-	OriginModel         string `gorm:"not null"`
-	ReservedUnits       int64  `gorm:"not null"`
-	ProviderBudgetUnits int64  `gorm:"not null;default:0"`
-	ProviderHeldUnits   int64  `gorm:"not null;default:0"`
-	ChargeUnits         int64  `gorm:"not null;default:0"`
-	State               string `gorm:"index;not null"`
-	Reason              string
-	Fingerprint         string `gorm:"size:64"`
-	LeaseUntil          int64  `gorm:"index;not null"`
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	ID                    string `gorm:"primaryKey;size:32"`
+	UserID                uint   `gorm:"index;not null"`
+	TokenID               uint   `gorm:"index;not null"`
+	PriceVersion          string `gorm:"size:64;not null"`
+	OriginModel           string `gorm:"not null"`
+	ReservedUnits         int64  `gorm:"not null"`
+	ProviderBudgetUnits   int64  `gorm:"not null;default:0"`
+	ProviderPolicyVersion string `gorm:"size:64;not null;default:''"`
+	ProviderHeldUnits     int64  `gorm:"not null;default:0"`
+	ChargeUnits           int64  `gorm:"not null;default:0"`
+	State                 string `gorm:"index;not null"`
+	Reason                string
+	Fingerprint           string `gorm:"size:64"`
+	LeaseUntil            int64  `gorm:"index;not null"`
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 type BillingAttempt struct {

@@ -366,10 +366,17 @@ def main():
             assert len(upgraded["logs"]) == 4, "Graceful stop did not flush accepted access logs"
             previous_steps = len(original["schema_migrations"])
             assert upgraded["schema_migrations"][:previous_steps] == original["schema_migrations"], "Released migrations changed"
-            assert [row[0] for row in upgraded["schema_migrations"][previous_steps:]] == [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21], "Missing billing/archive/intent/claim/Responses/usage/account/binding/eligibility/transport migrations"
+            assert [row[0] for row in upgraded["schema_migrations"][previous_steps:]] == [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], "Missing billing/archive/intent/claim/Responses/usage/account/binding/eligibility/transport/financial-binding migrations"
             with contextlib.closing(sqlite3.connect((after / "gateway.db").as_uri() + "?mode=ro", uri=True)) as db:
                 assert db.execute("SELECT DISTINCT source FROM credentials").fetchall() == [("static_api_key",)], "Upgrade changed static credential authority"
                 assert db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_one_active_managed_binding'").fetchone() == (1,), "Managed binding uniqueness index missing"
+                assert db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_background_billing_id_unique'").fetchone() == (1,), "Background reservation uniqueness index missing"
+                for table, expected in {
+                    "billing_reservations": {"provider_policy_version"},
+                    "background_jobs": {"billing_id", "billing_mode", "control_calls"},
+                }.items():
+                    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+                    assert expected <= columns, (table, expected - columns)
                 for table in ("generation_records", "generation_segments", "generation_intents", "response_requests", "response_histories", "usage_invocations", "usage_attempt_receipts", "managed_upstream_accounts", "inference_eligibilities"):
                     assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,), "Archive schema missing or main started an undeclared consumer"
                 history = dict(db.execute("SELECT version,payload FROM billing_price_versions").fetchall())
@@ -379,7 +386,7 @@ def main():
                 versions = db.execute("SELECT price_version FROM logs ORDER BY id").fetchall()
                 assert versions[:2] == [("",), ("",)], "Historical logs were assigned invented prices"
                 assert all(version in history for version, in versions[2:]), "New requests lack persisted price versions"
-            print("PASS: S3/v4 -> current/v21, original identities/keys/usage, static credential authority, price history, metadata isolation, in-flight SSE and log drain", flush=True)
+            print("PASS: S3/v4 -> current/v22, original identities/keys/usage, static credential authority, price history, metadata isolation, financial binding schema, in-flight SSE and log drain", flush=True)
             upgrade.restore(before)
             restored = upgrade.backup("restored")
             assert snapshot(restored / "gateway.db") == original, "Restore did not recover the exact baseline data"

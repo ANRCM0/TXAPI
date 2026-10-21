@@ -67,7 +67,8 @@ billing:
   # 无法被这笔预留覆盖则返回 billing_fee_limit，不因上游成本低而放行。
   # strict 还需独立的所有尝试累计上游成本预算及明确成本契约。
   # 此配置不是种子，重启生效；空契约拒绝执行，不能使用售价或别名替代。
-  # 当前可执行费率档案仅 USD；此 provider 预算不是用户售价单位或自动换汇。
+  # 原官方档案使用 USD；operator 声明可选明确的三位大写币种。
+  # 此 provider 预算不是用户售价单位或自动换汇。
   # max_provider_request_cost: "0.10"
   # provider_contracts:
   #   - channel_id: 1
@@ -98,13 +99,41 @@ billing:
   # 上述数值仅展示语法，不是任何真实模型保证！必须核实全批输入、
   # reasoning/cache/错误请求的总可计费范围及每个绑定凭据的最高适用价格；
   # 已登记标准费率下限不替代失败收费/附加费证明或未来价格变更核查。
+  # 静态兼容 API 的 operator 声明示例（与上方契约二选一或按不同操作分别登记）：
+  #   - channel_id: 1
+  #     base_url: "https://api.example.com"
+  #     protocol: "openai"
+  #     actual_model: "your-model"
+  #     operation: "responses"
+  #     output_limit_field: "max_output_tokens"
+  #     input_bound_profile: "operator_responses_v1"
+  #     tariff_profile: "operator_declared_tokens_v1"
+  #     currency: "USD"
+  #     credential_bindings:
+  #       "123": "REPLACE_WITH_LOWERCASE_SHA256_OF_EXACT_UPSTREAM_KEY"
+  #     policy_version: "REPLACE_WITH_IMMUTABLE_POLICY_VERSION"
+  #     policy_expires_at: 1893456000 # 2030-01-01 UTC; replace with the actual policy expiry
+  #     max_request_bytes: 262144
+  #     input_token_ceiling: 262144
+  #     max_output_tokens: 4096
+  #     input_price_per_1k: "0.001"
+  #     output_price_per_1k: "0.002"
+  #     additional_cost_per_attempt: "0" # Explicit declaration, including failure and <=32 control RPC fees
+  #     evidence: "REPLACE: operator assertion of whole-request token and all-charge bounds"
+  # max_request_bytes 必须不超过声明的整请求输入 Token 包络；预算先覆盖完整包络，
+  # 再校验最终 URL/body/model/Authorization。声明不是 tokenizer 或账单认证。
+  # Responses strict 只接受自包含文本/顶层 function、显式 max_output_tokens；
+  # HTTP/后台/WS 共用政策与持久账本。缺失/过期政策和未支持维度在发送前拒绝。
+  # 兼容 Chat/embeddings 分别采用 operator_chat_v1/operator_embeddings_v1，
+  # 保持既有 strict 文本闭合字段；不自动支持工具、媒体或新的计量维度。
 
 # Optional native Responses WebSocket. Disabled independently of HTTP Responses.
-# Enabling requires billing.mode=disabled, activated credential encryption, and
-# explicit actual model names. Only the official OpenAI endpoint is used.
+# Enabling requires disabled or declared strict billing, activated credential
+# encryption, and explicit actual model names. Disabled keeps its official
+# endpoint; strict uses the exact statically bound channel/policy endpoint.
 responses_ws:
   enabled: false
-  persistent_history: false # 显式 store=true 使用本地持久历史；要求 responses.enabled，保持 disabled 计费
+  persistent_history: false # 显式 store=true 使用本地持久历史；要求 responses.enabled，strict 不继承父链许可
   models: []
   # Browser origins must be same-origin or exact http(s) scheme and host.
   origins: []
@@ -184,18 +213,6 @@ responses:
 # 渠道与令牌是**种子数据**：只在数据库为空时导入一次，之后通过管理 API 增删改。
 # 真实使用时替换 base_url、模型名和两个 key 占位符；
 # 渠道上游 Key 也可用环境变量 GATEWAY_CHANNEL_KEY_<id> 覆盖（部署时更推荐）。
-upstream_accounts:
-  refresh:
-    # Default off; requires credential encryption. No real account is auto-added.
-    enabled: false
-    interval_seconds: 30
-    before_expiry_seconds: 600
-    max_attempts_per_cycle: 4
-  inference:
-    # Requires disabled billing, credential encryption and Responses enabled.
-    # Create the single real account/owner/Key/model binding through the admin API.
-    enabled: false
-
 channels:
   - id: 1
     name: "primary"

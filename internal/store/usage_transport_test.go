@@ -110,7 +110,7 @@ func TestUsageTransportV20UpgradePreservesHTTPReplayAndProtocolReceipts(t *testi
 			t.Fatal("old completion did not replay", err)
 		}
 		var ledger []model.SchemaMigration
-		if err := st.DB().Order("version").Find(&ledger).Error; err != nil || len(ledger) != len(released)+2 || ledger[len(ledger)-2].Version != 20 || ledger[len(ledger)-1].Version != 21 {
+		if err := st.DB().Order("version").Find(&ledger).Error; err != nil || len(ledger) != len(released)+3 || ledger[len(ledger)-3].Version != 20 || ledger[len(ledger)-2].Version != 21 || ledger[len(ledger)-1].Version != 22 {
 			t.Fatal(ledger, err)
 		}
 		if !reflect.DeepEqual(released, ledger[:len(released)]) {

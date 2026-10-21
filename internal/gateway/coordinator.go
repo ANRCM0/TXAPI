@@ -102,7 +102,7 @@ func (g *Gateway) execute(c *executionScope, in Execution) {
 		}
 	}()
 	c.result.Operation = in.Operation
-	if _, known := g.operations[in.Operation]; known && in.Operation != execution.Chat && in.Operation != execution.Embeddings && (c.claim != nil || g.billingMode == billing.ModeStrict) {
+	if _, known := g.operations[in.Operation]; known && in.Operation != execution.Chat && in.Operation != execution.Embeddings && (c.claim != nil || g.billingMode == billing.ModeStrict && in.Operation != execution.Responses) {
 		message := g.operations[in.Operation].Errors.StrictDenied
 		if message == "" {
 			message = "operation has no verified strict billing dimension"
