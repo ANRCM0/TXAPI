@@ -160,7 +160,12 @@ const deferred = () => {
     await openNavigation(page);
     await page.locator("nav").getByRole("link", { name: "总览", exact: false }).click();
     await openNavigation(page);
-    await page.locator("nav").getByRole("link", { name: "用户与权限", exact: false }).click();
+    const [forbidden] = await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === "/api/admin/users" && response.status() === 403),
+      page.locator("nav").getByRole("link", { name: "用户与权限", exact: false }).click(),
+    ]);
+    await forbidden.finished();
+    await page.locator("nav").getByRole("link", { name: "用户与权限", exact: false }).waitFor({ state: "detached" });
     await page.getByRole("heading", { name: "工作空间总览" }).waitFor();
     assert.equal(await page.locator("nav").getByRole("link", { name: "用户与权限", exact: false }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "退出登录", exact: true }).count(), 1);
@@ -220,4 +225,4 @@ const deferred = () => {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   }
-})().catch(error => { console.error(error.message); process.exitCode = 1; });
+})().catch(error => { console.error(error.stack); process.exitCode = 1; });
