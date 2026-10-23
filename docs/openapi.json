@@ -11475,17 +11475,17 @@
           "rpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "tpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See docs/PLAN.md."
           },
           "created_at": {
             "type": "string",
@@ -11547,17 +11547,17 @@
           "rpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "tpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See docs/PLAN.md."
           },
           "password": {
             "type": "string",
@@ -11614,17 +11614,17 @@
           "rpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "tpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See docs/PLAN.md."
           },
           "password": {
             "type": "string",
@@ -11685,17 +11685,17 @@
           "rpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "tpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See docs/PLAN.md."
           },
           "expires_at": {
             "type": "integer",
@@ -11781,17 +11781,17 @@
           "rpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "tpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See docs/PLAN.md."
           },
           "status": {
             "type": "string",
@@ -11849,17 +11849,17 @@
           "rpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "tpm_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "concurrency_limit": {
             "type": "integer",
             "minimum": 0,
-            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See DEVELOPMENT.md."
+            "description": "Per-process forwarding concurrency. 0 inherits the finite server ceiling; a positive value may lower it. User limits are shared across all owned Keys. Key creation/update also inherits and cannot exceed a nonzero owner limit. In-flight requests retain their leases; new limits apply on the next authenticated request. See docs/PLAN.md."
           },
           "status": {
             "type": "string",
@@ -11908,7 +11908,7 @@
           "weight": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "status": {
             "type": "string",
@@ -11965,7 +11965,7 @@
           "weight": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           }
         },
         "required": [
@@ -12011,7 +12011,7 @@
           "weight": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "status": {
             "type": "string",
@@ -12078,7 +12078,7 @@
           "weight": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "status": {
             "type": "string",
@@ -12588,7 +12588,7 @@
           "weight": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           }
         }
       },
@@ -15037,7 +15037,7 @@
           "weight": {
             "type": "integer",
             "minimum": 0,
-            "description": "0 inherits/unlimits according to the endpoint; see DEVELOPMENT.md."
+            "description": "0 inherits/unlimits according to the endpoint; see docs/PLAN.md."
           },
           "status": {
             "type": "string",

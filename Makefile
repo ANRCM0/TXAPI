@@ -3,7 +3,7 @@ PYTHON ?= python3
 NODE ?= node
 CONFIG ?= config.yaml
 
-.PHONY: init prepare build run test vet check smoke delivery p0-linux strict-native compatibility sdk-conformance ws-sdk-conformance codex-conformance contracts web-check clean
+.PHONY: init prepare build run test vet check smoke delivery p0-linux strict-native compatibility sdk-conformance ws-sdk-conformance codex-conformance contracts web-check browser-check clean
 
 prepare:
 	mkdir -p bin .local/data
@@ -32,10 +32,17 @@ check:
 web-check:
 	$(NODE) --check web/assets/app.mjs
 	$(NODE) --check web/assets/api.mjs
-	$(NODE) --check tests/browser/navigation.cjs
-	$(NODE) --check tests/browser/billing.cjs
-	$(NODE) --check tests/browser/live.cjs
-	$(NODE) --test web/assets/api.test.mjs
+	$(NODE) --check web/assets/workspace.mjs
+	$(NODE) --test web/assets/api.test.mjs web/assets/workspace.test.mjs
+
+# Playwright 1.62.1 and Chromium must be installed outside the production tree.
+browser-check: web-check
+	$(NODE) tests/browser/navigation.cjs
+	$(NODE) tests/browser/billing.cjs
+	$(NODE) tests/browser/tasks.cjs
+	$(NODE) tests/browser/routing.cjs
+	$(NODE) tests/browser/workspace.cjs
+	$(MAKE) compatibility
 
 contracts:
 	$(GO) test -count=1 ./internal/architecture

@@ -1,3 +1,8 @@
+async function openNavigation(page) {
+  const menu = page.getByRole("button", { name: "打开导航", exact: true });
+  if (await menu.isVisible() && await menu.getAttribute("aria-expanded") !== "true") await menu.click();
+}
+
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,7 +16,7 @@ const { chromium } = require('playwright');
   const server = http.createServer(async (req,res) => {
     const u = new URL(req.url,'http://localhost'); requests.push(req.url);
     const asset = u.pathname==='/' ? 'index.html' : u.pathname.startsWith('/ui/') ? u.pathname.slice(4) : null;
-    if (asset && ['index.html','app.mjs','api.mjs','app.css'].includes(asset)) { res.setHeader('Content-Type',asset.endsWith('mjs')?'text/javascript':asset.endsWith('css')?'text/css':'text/html');res.end(fs.readFileSync(path.join(__dirname,'../../web/assets',asset)));return; }
+    if (asset && ['index.html','app.mjs','api.mjs','app.css','workspace.mjs'].includes(asset)) { res.setHeader('Content-Type',asset.endsWith('mjs')?'text/javascript':asset.endsWith('css')?'text/css':'text/html');res.end(fs.readFileSync(path.join(__dirname,'../../web/assets',asset)));return; }
     if (u.pathname==='/api/auth/login') return json(res,200,{session_token:'fixture-task-session',user:{id:1,username:'fixture',role:'admin'}});
     if (u.pathname==='/api/me') return json(res,200,{data:{id:1,username:'fixture',role:'admin'}});
     if (u.pathname==='/api/me/usage') return json(res,200,{data:{usage:{}}});
@@ -33,25 +38,27 @@ const { chromium } = require('playwright');
       const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',dialog=>dialog.accept());
       await context.route('**/*',route=>new URL(route.request().url()).origin==='http://127.0.0.1:'+server.address().port?route.continue():route.abort());
       await page.goto('http://127.0.0.1:'+server.address().port);
-      await page.getByLabel('Username',{exact:true}).fill('fixture');await page.getByLabel('Password',{exact:true}).fill('fixture-password');
-      await page.getByRole('button',{name:'Enter control room'}).click();await page.getByRole('heading',{name:'Your gateway, at a glance.'}).waitFor();
-      await page.locator('nav a[data-page="tasks"]').click();await page.getByRole('heading',{name:'Background tasks',exact:true}).waitFor();
-      await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByRole('alert').filter({hasText:'page fixture failed'}).waitFor();
-      await page.getByText('Rows 1-1',{exact:true}).waitFor();await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByText('Rows 51-51',{exact:true}).waitFor();
-      await page.getByRole('button',{name:'Inspect task',exact:true}).click();await page.getByText(revision,{exact:true}).waitFor();
-      await page.getByRole('button',{name:'Request cancellation'}).click();await page.getByRole('alert').filter({hasText:'Task changed'}).waitFor();
+      await page.getByLabel('用户名',{exact:true}).fill('fixture');await page.getByLabel('密码',{exact:true}).fill('fixture-password');
+      await page.getByRole('button',{name:'登录工作空间'}).click();await page.getByRole('heading',{name:'工作空间总览'}).waitFor();
+      await openNavigation(page);
+      await page.locator('nav a[data-page="tasks"]').click();await page.getByRole('heading',{name:'后台任务',exact:true}).waitFor();
+      await page.getByRole('button',{name:'下一页',exact:true}).click();await page.getByRole('alert').filter({hasText:'page fixture failed'}).waitFor();
+      await page.getByText('记录 1-1',{exact:true}).waitFor();await page.getByRole('button',{name:'下一页',exact:true}).click();await page.getByText('记录 51-51',{exact:true}).waitFor();
+      await page.getByRole('button',{name:'查看任务',exact:true}).click();await page.getByText(revision,{exact:true}).waitFor();
+      await page.getByRole('button',{name:'请求取消'}).click();await page.getByRole('alert').filter({hasText:'Task changed'}).waitFor();
       assert.equal(posts.length,1);assert.equal(posts[0].revision,'9007199254740993');
-      await page.getByRole('button',{name:'Request cancellation'}).click();await page.getByRole('status').filter({hasText:'Cancellation recorded'}).waitFor();
+      await page.getByRole('button',{name:'请求取消'}).click();await page.getByRole('status').filter({hasText:'取消请求已记录'}).waitFor();
       assert.equal(posts.length,2);assert.equal(posts[1].revision,'9007199254740994');
-      await page.getByRole('button',{name:'Inspect task'}).click();await page.getByRole('heading',{name:'Task metadata',exact:true}).waitFor();
+      await page.getByRole('button',{name:'查看任务'}).click();await page.getByRole('heading',{name:'任务元数据',exact:true}).waitFor();
       console.log('layout',width,await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,nodes:[...document.querySelectorAll('#view *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1).slice(0,8).map(e=>({tag:e.tagName,cls:e.className,right:e.getBoundingClientRect().right,text:e.textContent.slice(0,80)}))})));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'mobile overflow');
-      await page.getByLabel('Task scope').selectOption('admin');await page.getByText('Rows 1-1',{exact:true}).waitFor();
-      await page.getByRole('button',{name:'Inspect task'}).first().click();await page.getByRole('heading',{name:'Task metadata',exact:true}).waitFor();
-      assert.equal(await page.getByRole('button',{name:'Request cancellation'}).count(),0,'administrator mutation exposed');
-      delay=true;await page.getByRole('button',{name:'Inspect task'}).first().click();
-      await page.locator('nav a[data-page="overview"]').click();await page.getByRole('heading',{name:'Your gateway, at a glance.'}).waitFor();
-      if(held){held();held=null;}await page.waitForTimeout(100);assert.equal(await page.getByRole('heading',{name:'Task metadata',exact:true}).count(),0);delay=false;
+      await page.getByLabel('任务查看范围').selectOption('admin');await page.getByText('记录 1-1',{exact:true}).waitFor();
+      await page.getByRole('button',{name:'查看任务'}).first().click();await page.getByRole('heading',{name:'任务元数据',exact:true}).waitFor();
+      assert.equal(await page.getByRole('button',{name:'请求取消'}).count(),0,'administrator mutation exposed');
+      delay=true;await page.getByRole('button',{name:'查看任务'}).first().click();
+      await openNavigation(page);
+      await page.locator('nav a[data-page="overview"]').click();await page.getByRole('heading',{name:'工作空间总览'}).waitFor();
+      if(held){held();held=null;}await page.waitForTimeout(100);assert.equal(await page.getByRole('heading',{name:'任务元数据',exact:true}).count(),0);delay=false;
       assert.deepEqual(errors,[]);await context.close();
     }
     assert.equal(requests.some(p=>p.startsWith('/v1/')),false,'console fetched content through inference API');
