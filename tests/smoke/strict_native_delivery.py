@@ -5,6 +5,7 @@ stopped-container SQLite copies are verification evidence, never authority.
 No external provider, host DNS/trust edits, database writes or forced expiry.
 """
 import argparse
+from collections import Counter
 import contextlib
 import hashlib
 import json
@@ -149,6 +150,19 @@ def validate_ledger(value, expected, *, recovering=False):
     return {"reservations": summaries, "balances": balances, "background_jobs": value["background_jobs"]}
 
 
+def validate_terminal_replay(before, after, scenario):
+    """Pending generations may reconcile usage while a different task replays."""
+    assert after[:len(before)] == before, "provider transcript was removed, reordered or rewritten"
+    generations = [row for row in before if row["transport"] in ("http", "ws")]
+    assert len([row for row in generations if row["input"] == scenario]) == 1
+    known_inputs = {row["id"]: row["input"] for row in generations}
+    for row in after[len(before):]:
+        assert (row["transport"] == "http-control" and row["method"] == "GET"
+                and row["id"] in known_inputs and row["input"] == known_inputs[row["id"]]), "terminal replay made a generation, mutating or unknown provider RPC"
+    controls = Counter(row["id"] for row in after if row["transport"] == "http-control")
+    assert all(count <= 32 for count in controls.values()), "background control RPC budget exceeded"
+
+
 def exercise(i, report):
     session = i.api("/api/auth/login", body=ADMIN, method="POST")["session_token"]
     i.api("/api/admin/prices/alias", session, {"input_price_per_1k": .15, "output_price_per_1k": .6}, "PUT")
@@ -203,9 +217,12 @@ def exercise(i, report):
         terminal = until(lambda: (d if (d := i.call(None, path=path, method="GET")["body"])["status"] in
                                   ("completed", "cancelled", "failed", "incomplete") else None), "background terminal", seconds=45)
         assert terminal["status"] == ("cancelled" if kind == "cancel" else "completed"), terminal
-        before = len(i.stats()["requests"])
+        before = i.stats()["requests"]
         assert i.call(body, idempotency="strict-background-" + kind)["body"]["id"] == first["id"]
-        assert len(i.stats()["requests"]) == before, "terminal replay made another provider RPC"
+        after = i.stats()["requests"]
+        validate_terminal_replay(before, after, "background-" + kind)
+        report.setdefault("terminal_replays", []).append({"scenario": kind, "before": before,
+            "after": after, "allowed_read_only_controls": len(after) - len(before)})
         value = add_snapshot("background-" + kind, [kind if kind in ("known", "zero") else "unknown"], "native background submit/poll/cancel")
         jobs = value["background_jobs"]
         assert len(jobs) == number
