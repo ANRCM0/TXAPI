@@ -53,7 +53,7 @@ export function ownerAmounts(row) {
 // Counts describe only the supplied retained sample, never a full traffic history.
 export function logSample(rows, now = Date.now(), hours = 24) {
   if (!Number.isInteger(hours) || hours < 1 || hours > 168) hours = 24;
-  const start = Math.floor(now / 3600000) * 3600000 - (hours - 1) * 3600000;
+  const start = now - hours * 3600000;
   const buckets = Array.from({ length: hours }, (_, i) => ({ time: start + i * 3600000, requests: 0 }));
   const models = new Map();
   let count = 0, unknownTime = 0;
@@ -61,7 +61,7 @@ export function logSample(rows, now = Date.now(), hours = 24) {
     const time = row.created_at === null || row.created_at === undefined || row.created_at === "" ? NaN : new Date(row.created_at).getTime();
     if (!Number.isFinite(time)) { unknownTime++; continue; }
     if (time < start || time > now) continue;
-    const index = Math.floor((time - start) / 3600000);
+    const index = Math.min(hours - 1, Math.floor((time - start) / 3600000));
     if (!buckets[index]) continue;
     buckets[index].requests++;
     count++;

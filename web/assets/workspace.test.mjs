@@ -37,6 +37,21 @@ test("time and model charts use only the supplied, valid retained sample", () =>
   assert.equal(logSample([], now, 1000000).buckets.length, 24);
 });
 
+test("rolling sample range includes both endpoints and the partial leading hour", () => {
+  const now = Date.UTC(2026, 9, 23, 12, 37, 29);
+  for (const hours of [6, 24]) {
+    const start = now - hours * 3600000;
+    const sample = logSample([start - 1, start, start + 1, now, now + 1].map(time => ({
+      created_at: new Date(time).toISOString(), origin_model: "boundary-model",
+    })), now, hours);
+    assert.equal(sample.count, 3);
+    assert.equal(sample.buckets[0].time, start);
+    assert.equal(sample.buckets[0].requests, 2);
+    assert.equal(sample.buckets.at(-1).requests, 1);
+    assert.equal(sample.buckets.reduce((sum, bucket) => sum + bucket.requests, 0), sample.count);
+  }
+});
+
 test("metadata CSV exports quote values and neutralize spreadsheet formulas", () => {
   const text = csvText(["模型", "数量"], [['=HYPERLINK("https://invalid")', "0"], ["+cmd", null], [" @SUM(1)", 'with "quotes"']]);
   assert.ok(text.startsWith("\uFEFF"));
