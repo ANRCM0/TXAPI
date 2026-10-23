@@ -43,6 +43,7 @@ browser-check: web-check
 	$(NODE) tests/browser/routing.cjs
 	$(NODE) tests/browser/workspace.cjs
 	$(MAKE) compatibility
+	TXAPI_TASK_BROWSER=1 TXAPI_ROUTING_BROWSER=1 $(MAKE) smoke
 
 contracts:
 	$(GO) test -count=1 ./internal/architecture

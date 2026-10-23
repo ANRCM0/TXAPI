@@ -143,7 +143,11 @@ const { chromium } = require("playwright");
     await page.getByLabel("归属用户", { exact: true }).selectOption("2"); await page.getByLabel("Key 名称", { exact: true }).fill("new-owned");
     await page.getByRole("button", { name: "保存更改" }).click(); await page.getByRole("dialog", { name: "保存你的 API Key" }).waitFor();
     assert.equal(await page.getByLabel("新 API Key").inputValue(), "sk-fixture-new-one-time-secret");
-    await page.getByRole("button", { name: "我已保存" }).click();
+    assert.deepEqual(await page.getByRole("dialog", { name: "保存你的 API Key" }).evaluate(dialog => {
+      const value = dialog.querySelector("textarea");
+      dialog.close();
+      return { connected: dialog.isConnected, secret: value.value };
+    }), { connected: false, secret: "" }, "closing a secret dialog must synchronously clear and detach it");
     assert.equal(await page.locator("body").innerText().then(t => t.includes("sk-fixture-new-one-time-secret")), false);
     await nav("quotation"); await page.getByLabel("精确模型名称").fill("m1");
     for (const label of ["假设输入 Token", "假设输出 Token", "假设总 Token"]) await page.getByLabel(label, { exact: true }).fill("0");

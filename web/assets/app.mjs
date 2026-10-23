@@ -113,6 +113,21 @@ function limitFields(value = {}) {
   ];
 }
 
+function manageDialog(dialog, cleanup = () => {}) {
+  const close = dialog.close.bind(dialog);
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    cleanup();
+    dialog.remove();
+  };
+  // Native close events are queued; private fields must be cleared immediately.
+  dialog.close = () => { close(); dispose(); };
+  dialog.addEventListener("cancel", event => { event.preventDefault(); dialog.close(); });
+  dialog.addEventListener("close", dispose, { once: true });
+}
+
 function editDialog(title, fields, save, description = "所有变更均由服务端校验。",
   { submitLabel = "保存更改", successMessage = "更改已保存。" } = {}) {
   const error = el("p", { class: "form-error", role: "alert" });
@@ -121,7 +136,7 @@ function editDialog(title, fields, save, description = "所有变更均由服务
     heading(title, description), el("div", { class: "form-grid" }, fields.map(field)), error,
     actions(button("取消", () => dialog.close()), submit));
   const dialog = el("dialog", { class: "editor", "aria-label": title }, form);
-  dialog.addEventListener("close", () => { form.reset(); dialog.remove(); });
+  manageDialog(dialog, () => form.reset());
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (submit.disabled) return;
@@ -171,7 +186,7 @@ function showSecret(secret) {
       await navigator.clipboard.writeText(value.value);
       notice("密钥已复制，使用后请清空剪贴板。");
     })), button("我已保存", () => dialog.close(), "primary")));
-  dialog.addEventListener("close", () => { value.value = ""; dialog.remove(); });
+  manageDialog(dialog, () => { value.value = ""; });
   document.body.append(dialog);
   dialog.showModal();
 }
@@ -278,7 +293,7 @@ function pageSearch() {
       }, "command-item")) : [empty("没有匹配页面，请换一个名称。")]));
   }
   input.addEventListener("input", filter);
-  dialog.addEventListener("close", () => dialog.remove());
+  manageDialog(dialog);
   filter(); document.body.append(dialog); dialog.showModal(); input.focus();
 }
 function shell() {
@@ -482,7 +497,7 @@ async function copyValue(value) {
     input.value = value;
     const dialog = el("dialog", { class: "editor", "aria-label": "复制内容" },
       heading("复制内容", "浏览器不可自动复制，请手动选择复制。", button("关闭", () => dialog.close())), input);
-    dialog.addEventListener("close", () => { input.value = ""; dialog.remove(); });
+    manageDialog(dialog, () => { input.value = ""; });
     document.body.append(dialog); dialog.showModal(); input.select();
   }
 }
@@ -690,7 +705,7 @@ async function inspectBilling(id) {
   const { reservation: row, attempts, resolution, price_snapshot: snapshot } = response.data;
   const amounts = ledgerAmounts(row);
   const dialog = el("dialog", { class: "editor billing-detail", "aria-label": "财务预留记录" });
-  dialog.addEventListener("close", () => dialog.remove());
+  manageDialog(dialog);
   dialog.append(heading("财务预留记录", row.id, button("关闭", () => dialog.close())),
     text("p", `${row.origin_model} / User ${row.user_id} / Key ${row.token_id}`),
     text("p", `State: ${row.state}.`, "muted"),
