@@ -1,3 +1,8 @@
+async function openNavigation(page) {
+  const menu = page.getByRole("button", { name: "打开导航", exact: true });
+  if (await menu.isVisible() && await menu.getAttribute("aria-expanded") !== "true") await menu.click();
+}
+
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -39,6 +44,7 @@ const deferred = () => {
       "/": ["index.html", "text/html"],
       "/ui/app.mjs": ["app.mjs", "text/javascript"],
       "/ui/api.mjs": ["api.mjs", "text/javascript"],
+      "/ui/workspace.mjs": ["workspace.mjs", "text/javascript"],
       "/ui/app.css": ["app.css", "text/css"],
     };
     if (assets[req.url]) {
@@ -105,68 +111,83 @@ const deferred = () => {
     const page = await context.newPage();
     page.setDefaultTimeout(10000);
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.getByLabel("Username", { exact: true }).fill("fixture");
-    await page.getByLabel("Password", { exact: true }).fill("fixture-password-only");
-    await page.getByRole("button", { name: "Enter control room" }).click();
-    await page.getByRole("heading", { name: "Your gateway, at a glance." }).waitFor();
-    await page.getByRole("link", { name: "Try a request", exact: false }).click();
+    await page.getByLabel("用户名", { exact: true }).fill("fixture");
+    await page.getByLabel("密码", { exact: true }).fill("fixture-password-only");
+    await page.getByRole("button", { name: "登录工作空间" }).click();
+    await page.getByRole("heading", { name: "工作空间总览" }).waitFor();
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "调用测试", exact: false }).click();
     const delayed = await firstModels.promise;
-    await page.getByRole("link", { name: "Overview", exact: false }).click();
-    await page.getByRole("heading", { name: "Your gateway, at a glance." }).waitFor();
-    await page.getByRole("link", { name: "Try a request", exact: false }).click();
-    await page.getByRole("heading", { name: "A small connection test" }).waitFor();
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "总览", exact: false }).click();
+    await page.getByRole("heading", { name: "工作空间总览" }).waitFor();
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "调用测试", exact: false }).click();
+    await page.getByRole("heading", { name: "连接测试" }).waitFor();
     const oldReply = page.waitForResponse(response => response.url().endsWith("/api/me/models"));
     json(delayed, modelReply);
     await (await oldReply).finished();
     await page.waitForTimeout(100);
-    await page.getByLabel("API key", { exact: true }).fill("fixture-call-key-only");
-    await page.getByRole("button", { name: "Send request", exact: true }).click();
+    await page.getByLabel("调用 API Key", { exact: true }).fill("fixture-call-key-only");
+    await page.getByRole("button", { name: "发送请求", exact: true }).click();
     await callStarted.promise;
-    await page.getByRole("link", { name: "Overview", exact: false }).click();
-    await page.getByRole("heading", { name: "Your gateway, at a glance." }).waitFor();
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "总览", exact: false }).click();
+    await page.getByRole("heading", { name: "工作空间总览" }).waitFor();
     const canceled = await Promise.race([callCanceled.promise, new Promise(done => setTimeout(() => done(false), 1500))]);
     assert.equal(canceled, true, "an old model-list response replaced the active view cleanup; leaving the page did not cancel its model call");
-    await page.getByRole("link", { name: "Request logs", exact: false }).click();
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "请求日志", exact: false }).click();
     await page.getByText("current-0", { exact: true }).waitFor();
     holdLog = true;
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
     const staleLog = await delayedLog.promise;
     const freshLog = page.waitForResponse(response => response.url().includes("/api/me/logs?"));
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
     await (await freshLog).finished();
     const staleReply = page.waitForResponse(response => response.url().includes("/api/me/logs?"));
     json(staleLog, { data: logRows("obsolete") });
     await (await staleReply).finished();
     await page.waitForTimeout(50);
     assert.equal(await page.getByText("obsolete-0", { exact: true }).count(), 0);
-    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await page.getByRole("button", { name: "下一页", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "fixture-page-failure" }).waitFor();
-    assert.equal(await page.getByRole("button", { name: "Next", exact: true }).isEnabled(), true);
-    await page.getByRole("button", { name: "Next", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "下一页", exact: true }).isEnabled(), true);
+    await page.getByRole("button", { name: "下一页", exact: true }).click();
     await page.getByText("page-two-0", { exact: true }).waitFor();
-    await page.getByText("Rows 51-100", { exact: true }).waitFor();
+    await page.getByText("记录 51-100", { exact: true }).waitFor();
     user.role = "admin";
-    await page.getByRole("link", { name: "Overview", exact: false }).click();
-    await page.getByRole("link", { name: "Users", exact: false }).click();
-    await page.getByRole("heading", { name: "Your gateway, at a glance." }).waitFor();
-    assert.equal(await page.getByRole("link", { name: "Users", exact: false }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "Sign out", exact: true }).count(), 1);
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "总览", exact: false }).click();
+    await openNavigation(page);
+    const [forbidden] = await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === "/api/admin/users" && response.status() === 403),
+      page.locator("nav").getByRole("link", { name: "用户与权限", exact: false }).click(),
+    ]);
+    await forbidden.finished();
+    await page.locator("nav").getByRole("link", { name: "用户与权限", exact: false }).waitFor({ state: "detached" });
+    await page.getByRole("heading", { name: "工作空间总览" }).waitFor();
+    assert.equal(await page.locator("nav").getByRole("link", { name: "用户与权限", exact: false }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "退出登录", exact: true }).count(), 1);
     user.role = "admin";
-    await page.getByRole("link", { name: "Request logs", exact: false }).click();
-    await page.getByRole("link", { name: "Channels", exact: false }).click();
-    await page.getByRole("button", { name: "+ Create channel", exact: true }).click();
-    await page.getByLabel("Name", { exact: true }).fill("saved channel");
-    await page.getByLabel("Upstream base URL", { exact: true }).fill("https://fixture.invalid");
-    await page.getByLabel("Models", { exact: true }).fill("fixture-model");
-    await page.getByLabel("First upstream API key", { exact: true }).fill("fixture-upstream-secret");
-    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "请求日志", exact: false }).click();
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "渠道管理", exact: false }).click();
+    await page.getByRole("button", { name: "+ 创建渠道", exact: true }).click();
+    await page.getByLabel("名称", { exact: true }).fill("saved channel");
+    await page.getByLabel("上游地址", { exact: true }).fill("https://fixture.invalid");
+    await page.getByLabel("模型目录", { exact: true }).fill("fixture-model");
+    await page.getByLabel("首个上游 API Key", { exact: true }).fill("fixture-upstream-secret");
+    await page.getByRole("button", { name: "保存更改", exact: true }).click();
     await page.getByRole("dialog").waitFor({ state: "detached" });
     await page.getByRole("heading", { name: "saved channel", exact: true }).waitFor();
     assert.equal(channelSaves, 1);
     assert.equal(await page.locator('input[type="password"]').count(), 0);
-    assert.match(await page.getByRole("status").innerText(), /publication is pending.*retry publication/);
-    await page.getByRole("link", { name: "Settings", exact: false }).click();
-    const retry = page.getByRole("button", { name: "Retry publication", exact: true });
+    assert.match(await page.getByRole("status").innerText(), /发布待处理.*重试发布/);
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "价格与发布", exact: false }).click();
+    const retry = page.getByRole("button", { name: "重试发布", exact: true });
     await retry.click();
     const failedApply = await applyStarted.promise;
     assert.equal(await retry.isDisabled(), true);
@@ -181,20 +202,21 @@ const deferred = () => {
     await page.getByText("Desired v4 / Applied v4", { exact: true }).waitFor();
     assert.equal(channelSaves, 1, "publication retried a saved mutation");
     savePublication = "applied";
-    await page.getByRole("link", { name: "Channels", exact: false }).click();
-    await page.getByRole("button", { name: "+ Create channel", exact: true }).click();
-    await page.getByLabel("Name", { exact: true }).fill("applied channel");
-    await page.getByLabel("Upstream base URL", { exact: true }).fill("https://fixture.invalid");
-    await page.getByLabel("Models", { exact: true }).fill("fixture-model");
-    await page.getByLabel("First upstream API key", { exact: true }).fill("fixture-applied-secret");
-    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await openNavigation(page);
+    await page.locator("nav").getByRole("link", { name: "渠道管理", exact: false }).click();
+    await page.getByRole("button", { name: "+ 创建渠道", exact: true }).click();
+    await page.getByLabel("名称", { exact: true }).fill("applied channel");
+    await page.getByLabel("上游地址", { exact: true }).fill("https://fixture.invalid");
+    await page.getByLabel("模型目录", { exact: true }).fill("fixture-model");
+    await page.getByLabel("首个上游 API Key", { exact: true }).fill("fixture-applied-secret");
+    await page.getByRole("button", { name: "保存更改", exact: true }).click();
     await page.getByRole("dialog").waitFor({ state: "detached" });
     await page.getByRole("heading", { name: "applied channel", exact: true }).waitFor();
     assert.equal(channelSaves, 2);
     assert.equal(await page.locator('input[type="password"]').count(), 0);
     const appliedNotice = await page.getByRole("status").innerText();
-    assert.match(appliedNotice, /saved and published.*readback or management cache refresh failed/);
-    assert.doesNotMatch(appliedNotice, /publication failed|retry publication|publication is pending/);
+    assert.match(appliedNotice, /已保存并发布.*回读或管理缓存刷新失败/);
+    assert.doesNotMatch(appliedNotice, /发布失败|重试发布|发布待处理/);
     await page.getByText("Desired v5 / Applied v5", { exact: true }).waitFor();
     assert.equal(applyCalls, 2, "saved/applied failure retried publication");
     console.log("PASS: navigation cancellation, log ordering/page retry, current role/403, saved mutations and publication retries");
@@ -203,4 +225,4 @@ const deferred = () => {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   }
-})().catch(error => { console.error(error.message); process.exitCode = 1; });
+})().catch(error => { console.error(error.stack); process.exitCode = 1; });

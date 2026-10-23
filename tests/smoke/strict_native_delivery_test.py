@@ -2,7 +2,7 @@
 import copy
 import unittest
 
-from strict_native_delivery import validate_ledger, redact_report, CLIENT_KEY, PROVIDER_KEY, ADMIN
+from strict_native_delivery import validate_ledger, validate_terminal_replay, redact_report, CLIENT_KEY, PROVIDER_KEY, ADMIN
 
 
 def evidence(usage):
@@ -22,6 +22,28 @@ def evidence(usage):
 
 
 class StrictConsumerEvidenceTest(unittest.TestCase):
+    def test_terminal_replay_allows_existing_pending_usage_queries(self):
+        before = [{"id": "old", "input": "background-missing", "method": "POST", "transport": "http"},
+                  {"id": "current", "input": "background-cancel", "method": "POST", "transport": "http"}]
+        query = {"id": "old", "input": "background-missing", "method": "GET", "transport": "http-control"}
+        validate_terminal_replay(before, before, "background-cancel")
+        validate_terminal_replay(before, before + [query], "background-cancel")
+        # A late query of the current financially pending task is also read-only.
+        validate_terminal_replay(before, before + [{**query, "id": "current", "input": "background-cancel"}], "background-cancel")
+
+    def test_terminal_replay_rejects_new_execution_mutation_unknown_or_excess_calls(self):
+        before = [{"id": "current", "input": "background-cancel", "method": "POST", "transport": "http"}]
+        for extra in [before, [{**before[0], "transport": "ws", "method": "CREATE"}],
+                      [{**before[0], "transport": "http-control"}],
+                      [{**before[0], "transport": "http-control", "method": "GET", "id": "unknown"}],
+                      [{**before[0], "transport": "http-control", "method": "GET", "input": "changed"}],
+                      [{**before[0], "transport": "http-control", "method": "GET"}] * 33]:
+            with self.subTest(extra=extra[0]):
+                with self.assertRaises(AssertionError):
+                    validate_terminal_replay(before, before + extra, "background-cancel")
+        with self.assertRaises(AssertionError):
+            validate_terminal_replay(before, [{**before[0], "id": "changed"}], "background-cancel")
+
     def test_failure_diagnostics_redact_synthetic_credentials(self):
         value = {"error": "command -key " + CLIENT_KEY,
                  "logs": [PROVIDER_KEY, ADMIN["password"]]}

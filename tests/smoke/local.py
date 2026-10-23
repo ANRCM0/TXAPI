@@ -99,11 +99,12 @@ def control_workflow(base, upstream_url, routing_env=None, quotation_enabled=Fal
 
     with HTTP.open(base + "/", timeout=10) as response:
         assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
-        assert b"TXAPI / Control Room" in response.read()
-    for asset in ["app.mjs", "api.mjs", "app.css"]:
+        assert "<title>TXAPI · 工作空间</title>".encode() in response.read()
+    for asset in ["app.mjs", "api.mjs", "workspace.mjs", "app.css"]:
         status, _ = request(base + "/ui/" + asset)
         assert status == 200
     assert request(base + "/ui/api.test.mjs")[0] == 404
+    assert request(base + "/ui/workspace.test.mjs")[0] == 404
     admin = api("/api/auth/login", payload={
         "username": "smoke-admin", "password": "smoke-admin-password-only"
     })["session_token"]

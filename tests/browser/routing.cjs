@@ -1,3 +1,8 @@
+async function openNavigation(page) {
+  const menu = page.getByRole("button", { name: "打开导航", exact: true });
+  if (await menu.isVisible() && await menu.getAttribute("aria-expanded") !== "true") await menu.click();
+}
+
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -24,7 +29,7 @@ const { chromium } = require('playwright');
   const server = http.createServer((req,res) => {
     const u = new URL(req.url,'http://localhost'); requests.push({method:req.method,url:req.url});
     const asset = u.pathname==='/'?'index.html':u.pathname.startsWith('/ui/')?u.pathname.slice(4):null;
-    if(asset && ['index.html','app.mjs','api.mjs','app.css'].includes(asset)){
+    if(asset && ['index.html','app.mjs','api.mjs','app.css','workspace.mjs'].includes(asset)){
       res.setHeader('Content-Type',asset.endsWith('mjs')?'text/javascript':asset.endsWith('css')?'text/css':'text/html');
       res.end(fs.readFileSync(path.join(__dirname,'../../web/assets',asset)));return;
     }
@@ -52,31 +57,33 @@ const { chromium } = require('playwright');
       const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage();page.setDefaultTimeout(10000);
       const errors=[];page.on('pageerror',e=>errors.push(e.message));
       await context.route('**/*',route=>new URL(route.request().url()).origin===base?route.continue():route.abort());
-      await page.goto(base);await page.getByLabel('Username',{exact:true}).fill('fixture');await page.getByLabel('Password',{exact:true}).fill('fixture-password');
-      await page.getByRole('button',{name:'Enter control room'}).click();await page.getByRole('heading',{name:'Your gateway, at a glance.'}).waitFor();
-      await page.locator('nav a[data-page=routing]').click();await page.getByRole('heading',{name:'Routing diagnostics',exact:true}).waitFor();
-      await page.getByRole('button',{name:'Inspect routing',exact:true}).click();await page.getByRole('heading',{name:'Routing facts',exact:true}).waitFor();
+      await page.goto(base);await page.getByLabel('用户名',{exact:true}).fill('fixture');await page.getByLabel('密码',{exact:true}).fill('fixture-password');
+      await page.getByRole('button',{name:'登录工作空间'}).click();await page.getByRole('heading',{name:'工作空间总览'}).waitFor();
+      await openNavigation(page);
+      await page.locator('nav a[data-page=routing]').click();await page.getByRole('heading',{name:'路由诊断',exact:true}).waitFor();
+      await page.getByRole('button',{name:'查看路由',exact:true}).click();await page.getByRole('heading',{name:'路由事实',exact:true}).waitFor();
       assert.equal(await page.locator('img').count(),0,'model became HTML');
       assert.equal(await page.getByText('mapped-private-model',{exact:true}).count(),0,'owner target metadata exposed');
-      await page.getByLabel('Exact Request ID').fill('same-request');await page.getByRole('button',{name:'Refresh routes',exact:true}).click();
-      await page.getByText('Rows 1-1',{exact:true}).waitFor();
+      await page.getByLabel('精确 Request ID').fill('same-request');await page.getByRole('button',{name:'刷新诊断',exact:true}).click();
+      await page.getByText('记录 1-1',{exact:true}).waitFor();
       assert.ok(requests.some(r=>r.url.includes('request_id=same-request')));
-      await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByRole('alert').filter({hasText:'routing page fixture failed'}).waitFor();
-      await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByText('Rows 51-51',{exact:true}).waitFor();
-      await page.getByLabel('Routing scope').selectOption('admin');await page.getByText('Rows 1-1',{exact:true}).waitFor();
-      await page.getByRole('button',{name:'Inspect routing'}).click();await page.getByText('mapped-private-model',{exact:true}).waitFor();
+      await page.getByRole('button',{name:'下一页',exact:true}).click();await page.getByRole('alert').filter({hasText:'routing page fixture failed'}).waitFor();
+      await page.getByRole('button',{name:'下一页',exact:true}).click();await page.getByText('记录 51-51',{exact:true}).waitFor();
+      await page.getByLabel('路由查看范围').selectOption('admin');await page.getByText('记录 1-1',{exact:true}).waitFor();
+      await page.getByRole('button',{name:'查看路由'}).click();await page.getByText('mapped-private-model',{exact:true}).waitFor();
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'mobile routing overflow');
-      preflight=true;await page.getByRole('button',{name:'Refresh routes',exact:true}).click();await page.getByRole('button',{name:'Inspect routing'}).click();
-      await page.getByText('No upstream attempt was observed in this scope.',{exact:true}).waitFor();
-      await page.getByText('No target selection was observed in this scope.',{exact:true}).waitFor();preflight=false;
-      enabled=false;await page.getByRole('button',{name:'Refresh routes',exact:true}).click();await page.getByText('Recording is disabled.',{exact:false}).waitFor();
-      assert.equal(await page.getByRole('heading',{name:'Routing facts',exact:true}).count(),0,'old detail survived disabled recording');
-      enabled=true;await page.getByRole('button',{name:'Refresh routes',exact:true}).click();await page.getByRole('button',{name:'Inspect routing'}).waitFor();
+      preflight=true;await page.getByRole('button',{name:'刷新诊断',exact:true}).click();await page.getByRole('button',{name:'查看路由'}).click();
+      await page.getByText('此次调用没有观察到上游尝试。',{exact:true}).waitFor();
+      await page.getByText('此次调用没有观察到目标选择。',{exact:true}).waitFor();preflight=false;
+      enabled=false;await page.getByRole('button',{name:'刷新诊断',exact:true}).click();await page.getByText('诊断记录未启用。',{exact:false}).waitFor();
+      assert.equal(await page.getByRole('heading',{name:'路由事实',exact:true}).count(),0,'old detail survived disabled recording');
+      enabled=true;await page.getByRole('button',{name:'刷新诊断',exact:true}).click();await page.getByRole('button',{name:'查看路由'}).waitFor();
       delayDetail=true;
-      await Promise.all([page.waitForRequest(r=>r.url().includes('/routing/'+id)),page.getByRole('button',{name:'Inspect routing'}).click()]);
-      await page.locator('nav a[data-page=overview]').click();await page.getByRole('heading',{name:'Your gateway, at a glance.'}).waitFor();
+      await Promise.all([page.waitForRequest(r=>r.url().includes('/routing/'+id)),page.getByRole('button',{name:'查看路由'}).click()]);
+      await openNavigation(page);
+      await page.locator('nav a[data-page=overview]').click();await page.getByRole('heading',{name:'工作空间总览'}).waitFor();
       assert.ok(held,'delayed detail request reached the mock server');held();held=null;await page.waitForTimeout(80);delayDetail=false;
-      assert.equal(await page.getByRole('heading',{name:'Routing facts',exact:true}).count(),0,'late routing detail replaced current view');
+      assert.equal(await page.getByRole('heading',{name:'路由事实',exact:true}).count(),0,'late routing detail replaced current view');
       assert.deepEqual(errors,[]);await context.close();
     }
     assert.equal(requests.some(r=>r.url.startsWith('/v1/')),false,'diagnostics initiated inference/content calls');

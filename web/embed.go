@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-//go:embed assets/index.html assets/app.css assets/app.mjs assets/api.mjs
+//go:embed assets/index.html assets/app.css assets/app.mjs assets/api.mjs assets/workspace.mjs
 var files embed.FS
 
 func ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -19,6 +19,8 @@ func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name, contentType = "app.mjs", "text/javascript; charset=utf-8"
 	case "/ui/api.mjs":
 		name, contentType = "api.mjs", "text/javascript; charset=utf-8"
+	case "/ui/workspace.mjs":
+		name, contentType = "workspace.mjs", "text/javascript; charset=utf-8"
 	case "/ui/app.css":
 		name, contentType = "app.css", "text/css; charset=utf-8"
 	default:

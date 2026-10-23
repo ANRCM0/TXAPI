@@ -50,14 +50,7 @@ jobs:
         run: go build ./...
 
       - name: 原生控制台语法与行为
-        run: |
-          node --version
-          node --check web/assets/app.mjs
-          node --check web/assets/api.mjs
-          node --check tests/browser/navigation.cjs
-          node --check tests/browser/billing.cjs
-          node --check tests/browser/live.cjs
-          node --test web/assets/api.test.mjs
+        run: make web-check
 
       - name: go vet
         run: go vet ./...
@@ -160,6 +153,31 @@ jobs:
         run: |
           python3 tests/smoke/capacity_baseline.py --workers 4 --requests-per-worker 5 --rounds 2 --sustain-seconds 10 --output "$RUNNER_TEMP/capacity-baseline.json"
           python3 -c "import json,os,pathlib; r=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'capacity-baseline.json').read_text()); print(json.dumps({k:r[k] for k in ('source','environment','configuration','summary','resources','planned_measurement_requests','started_measurement_requests','unpaired_distribution_differences_ns')},sort_keys=True)); print(json.dumps([{'held':x['observed_held_requests'],'rejected_status':x['rejected']['http_status'],'rejected_attempts':x['rejected']['upstream_attempts'],'recovery_ns':x['recovery_observed_ns'],'active_after':x['active_after_recovery']} for x in r['overload']])); print(json.dumps([{'planned':x['planned'],'canceled':x['observed_cancellations'],'active_after':x['active_after_cancel'],'cancel_spread_ns':x['cancel_request_spread_ns']} for x in r['cancellations']]))"
+
+  console-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install isolated browser test runtime
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/txapi-browser" playwright@1.62.1
+          node "$RUNNER_TEMP/txapi-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          echo "NODE_PATH=$RUNNER_TEMP/txapi-browser/node_modules" >> "$GITHUB_ENV"
+          echo "TXAPI_UI_SCREENSHOTS=$RUNNER_TEMP/txapi-console" >> "$GITHUB_ENV"
+      - name: Console permission, precision, navigation and production API acceptance
+        run: make browser-check
+      - name: Preserve production console screenshots
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: console-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/txapi-console
+          if-no-files-found: error
+          retention-days: 14
 
   windows-resource-query:
     runs-on: windows-latest

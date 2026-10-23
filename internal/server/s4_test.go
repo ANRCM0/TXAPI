@@ -15,7 +15,7 @@ import (
 func TestEmbeddedConsoleAssetsAndUnknownPaths(t *testing.T) {
 	e := newEngine(t, middleware.AdminAuth(testSecret))
 	for _, tc := range []struct{ path, content string }{
-		{"/", "text/html"}, {"/ui/app.mjs", "text/javascript"}, {"/ui/api.mjs", "text/javascript"}, {"/ui/app.css", "text/css"},
+		{"/", "text/html"}, {"/ui/app.mjs", "text/javascript"}, {"/ui/api.mjs", "text/javascript"}, {"/ui/workspace.mjs", "text/javascript"}, {"/ui/app.css", "text/css"},
 	} {
 		for _, method := range []string{"GET", "HEAD"} {
 			w := httptest.NewRecorder()
@@ -28,7 +28,7 @@ func TestEmbeddedConsoleAssetsAndUnknownPaths(t *testing.T) {
 			}
 		}
 	}
-	for _, path := range []string{"/api/not-real", "/v1/not-real", "/ui/not-real.js", "/ui/api.test.mjs", "/config.yaml"} {
+	for _, path := range []string{"/api/not-real", "/v1/not-real", "/ui/not-real.js", "/ui/api.test.mjs", "/ui/workspace.test.mjs", "/preview.html", "/config.yaml"} {
 		w := httptest.NewRecorder()
 		e.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		if w.Code != 404 || strings.Contains(w.Body.String(), "<!doctype") {

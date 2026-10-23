@@ -50,6 +50,11 @@ type baselineSample struct {
 	FirstBodyNS      int64   `json:"first_body_ns"`
 	FirstTextNS      int64   `json:"first_text_ns"`
 	CompleteNS       int64   `json:"complete_ns"`
+	ReadElapsedNS    int64   `json:"read_elapsed_ns"`
+	ReadOutcome      string  `json:"read_outcome,omitempty"`
+	ContextState     string  `json:"context_state"`
+	ReceivedEvents   int     `json:"received_events"`
+	ProviderEvents   int     `json:"provider_events"`
 	Attempts         int     `json:"attempts"`
 	ProviderProtocol int     `json:"provider_protocol"`
 	ProviderPeer     string  `json:"provider_peer"`
@@ -239,6 +244,23 @@ func (run *baselineRun) callProtocol(ctx context.Context, client *http.Client, b
 	return run.callProtocolCompletion(ctx, client, base, key, model, tag, protocol, false)
 }
 
+func baselineReadOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "eof"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return "unexpected_eof"
+	case errors.Is(err, http.ErrBodyReadAfterClose):
+		return "body_closed"
+	default:
+		return "transport_error"
+	}
+}
+
 func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http.Client, base, key, model, tag string, protocol int, waitEOF bool) (sample baselineSample) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -253,6 +275,12 @@ func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http
 	request.Header.Set("Content-Type", "application/json")
 	received := []time.Time{}
 	defer func() {
+		sample.ReadElapsedNS = time.Since(start).Nanoseconds()
+		sample.ContextState = "active"
+		if ctx.Err() != nil {
+			sample.ContextState = baselineReadOutcome(ctx.Err())
+		}
+		sample.ReceivedEvents = len(received)
 		cancel()
 		run.mu.Lock()
 		record := run.records[tag]
@@ -271,6 +299,7 @@ func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http
 		defer run.mu.Unlock()
 		sample.Attempts, sample.ProviderProtocol, sample.ProviderPeer = record.attempts, record.protocol, record.peer
 		sample.ProviderTLS, sample.ProviderALPN = record.tlsVersion, record.alpn
+		sample.ProviderEvents = len(record.writes)
 		if sample.Attempts != 1 || !sample.Drained {
 			sample.Error += " upstream attempt/drain mismatch"
 		}
@@ -288,6 +317,7 @@ func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http
 	}()
 	response, err := client.Do(request)
 	if err != nil {
+		sample.ReadOutcome = baselineReadOutcome(err)
 		sample.Error = "request failed"
 		return
 	}
@@ -305,9 +335,16 @@ func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http
 	reader := &baselineReader{Reader: limited}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), 32<<10)
+	scan := func() bool {
+		ok := scanner.Scan()
+		if !ok {
+			sample.ReadOutcome = baselineReadOutcome(scanner.Err())
+		}
+		return ok
+	}
 	var data, text string
 	finished, done := false, false
-	for scanner.Scan() {
+	for scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "data: ") {
 			if data != "" {
@@ -331,7 +368,7 @@ func (run *baselineRun) callProtocolCompletion(ctx context.Context, client *http
 			sample.CompleteNS = arrival.Sub(start).Nanoseconds()
 			// A soak worker reuses an admission slot only after the gateway
 			// handler finishes. Direct fixtures intentionally stay open at DONE.
-			if waitEOF && (scanner.Scan() || scanner.Err() != nil || limited.N == 0) {
+			if waitEOF && (scan() || scanner.Err() != nil || limited.N == 0) {
 				sample.Error = "trailing stream data or incomplete HTTP body"
 				return
 			}

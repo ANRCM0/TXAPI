@@ -79,7 +79,9 @@ def main():
                                   "timeout_seconds": 5, "total_timeout_seconds": 10},
                       "admin_key": secrets.token_urlsafe(24),
                       "database": {"driver": "sqlite", "path": str(work / "gateway.db")},
-                      "billing": {"mode": "disabled"}}
+                      "billing": {"mode": "disabled"},
+                      "usage_history": {"enabled": True, "instance_records": 32,
+                                        "owner_records": 16, "retention_seconds": 3600}}
             config_path = work / "config.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")
             env = dict(clean, TXAPI_ADMIN_USERNAME=admin_name, TXAPI_ADMIN_PASSWORD=admin_password)
@@ -109,6 +111,8 @@ def main():
                     TXAPI_TEST_USER_USERNAME=user_name, TXAPI_TEST_USER_PASSWORD=user_password,
                     TXAPI_TEST_MODEL="s6-live", TXAPI_TEST_UPSTREAM_URL=upstream_url,
                     TXAPI_TEST_UPSTREAM_KEY=upstream_key)
+                if os.environ.get("TXAPI_UI_SCREENSHOTS"):
+                    browser_env["TXAPI_UI_SCREENSHOTS"] = os.environ["TXAPI_UI_SCREENSHOTS"]
                 STAGE = "browser"
                 subprocess.run([args.node, str(ROOT / "tests/browser/live.cjs")], cwd=ROOT,
                                env=browser_env, check=True, timeout=180)
