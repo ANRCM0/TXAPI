@@ -106,7 +106,10 @@ export function createClient({ onUnauthorized = () => {}, onPending = () => {}, 
       session = value;
     },
     async request(path, { method = "GET", body, callKey, signal, timeout = 20000 } = {}) {
-      if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Only same-origin API paths are allowed.");
+      // Browsers normalize backslashes and remove ASCII whitespace before resolving URLs.
+      if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//") || /[\\\u0000-\u0020\u007f]/.test(path)) {
+        throw new Error("Only same-origin API paths are allowed.");
+      }
       const controller = new AbortController();
       const capturedSession = session;
       const capturedVersion = sessionVersion;

@@ -81,6 +81,10 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
+	// Forwarded headers are untrusted until an explicit proxy policy exists.
+	if err := engine.SetTrustedProxies(nil); err != nil {
+		panic(err)
+	}
 
 	engine.Use(middleware.Recovery())
 	engine.Use(middleware.RequestID())

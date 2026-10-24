@@ -31,7 +31,7 @@ const testSecret = "sk-server-test-0123456789"
 //
 // relay 的初始化不在这里做：本测试只碰 /healthz 和 /api，
 // 不产生任何转发请求，不需要渠道池。
-func newEngine(t *testing.T, adminAuth gin.HandlerFunc) *gin.Engine {
+func newEngine(t *testing.T, adminAuth gin.HandlerFunc, ipLimit ...int) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -49,12 +49,45 @@ func newEngine(t *testing.T, adminAuth gin.HandlerFunc) *gin.Engine {
 		t.Fatal(err)
 	}
 	t.Cleanup(gw.Close)
+	limit := 0
+	if len(ipLimit) > 0 {
+		limit = ipLimit[0]
+	}
 	return fixtureEngine(fixtureDeps{
-		Gateway:   gw,
-		Cfg:       &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
-		Store:     st,
-		AdminAuth: adminAuth,
+		Gateway:     gw,
+		Cfg:         &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
+		Store:       st,
+		AdminAuth:   adminAuth,
+		RateLimiter: access.NewMemoryLimiter(),
+		IPRPMLimit:  limit,
 	})
+}
+
+func TestForwardedHeadersCannotRotateIPRateBucket(t *testing.T) {
+	e := newEngine(t, middleware.AdminAuth(testSecret), 1)
+	for i, address := range []string{"203.0.113.1", "203.0.113.2", "203.0.113.3"} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		req.RemoteAddr = "192.0.2.20:12345"
+		req.Header.Set("X-Forwarded-For", address)
+		req.Header.Set("X-Real-IP", address)
+		req.Header.Set("Forwarded", "for="+address)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		want := http.StatusTooManyRequests
+		if i == 0 {
+			want = http.StatusUnauthorized
+		}
+		if rec.Code != want {
+			t.Fatalf("rotated forwarded header %s: status=%d want=%d", address, rec.Code, want)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.RemoteAddr = "192.0.2.21:12345"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("different peer shared rate bucket: %d", rec.Code)
+	}
 }
 
 // TestNewEnginePanicsWithoutAdminAuth 验证漏传鉴权中间件会硬失败。

@@ -97,6 +97,23 @@ test("API client separates sessions from call keys and warns about saved/pending
   await assert.rejects(client.request("//other.example/api/me"));
 });
 
+test("API paths reject browser authority normalization before attaching credentials", async () => {
+  const calls = [];
+  const client = createClient({ fetcher: async (path, options) => {
+    calls.push({ path, options });
+    return new Response('{}');
+  } });
+  client.setSession("private-session");
+  for (const path of ["//evil.example/api", "/\\evil.example/api", "/\n/evil.example/api",
+    "/\t/evil.example/api", "https://evil.example/api", " /api/me", "/api/\rme", null]) {
+    await assert.rejects(client.request(path));
+  }
+  assert.equal(calls.length, 0);
+  for (const path of ["/api/me", "/api/me/keys?limit=20", "/api/me/keys/a%2Fb"]) await client.request(path);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(call => call.options.headers.Authorization === "Bearer private-session"));
+});
+
 test("invalid call keys do not sign out a valid management session", async () => {
   let signedOut = 0;
   const client = createClient({ onUnauthorized: () => signedOut++, fetcher: async () =>
