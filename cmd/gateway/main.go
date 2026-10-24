@@ -420,8 +420,9 @@ func main() {
 		// 0 = 不限。默认 0——自用场景（本机/内网单客户端）没有
 		// 探测流量，开了反而可能挡掉正常的并发压测；有暴露面时
 		// 在 config.yaml 的 server 段配上即可。
-		IPRPMLimit: cfg.Server.IPRPMLimit,
-		AdminAuth:  middleware.AdminAuth(cfg.AdminKey),
+		IPRPMLimit:        cfg.Server.IPRPMLimit,
+		TrustedProxyCIDRs: cfg.Server.TrustedProxyCIDRs,
+		AdminAuth:         middleware.AdminAuth(cfg.AdminKey),
 	})
 
 	srv := &http.Server{
