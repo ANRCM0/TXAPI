@@ -56,6 +56,7 @@ type Deps struct {
 	RateGate             admission.RequestGate
 	RateLimiter          admission.Limiter
 	IPRPMLimit           int
+	TrustedProxyCIDRs    []string
 }
 
 // NewEngine 组装中间件链和路由。
@@ -81,13 +82,21 @@ func NewEngine(deps Deps) *gin.Engine {
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
-	// Forwarded headers are untrusted until an explicit proxy policy exists.
-	if err := engine.SetTrustedProxies(nil); err != nil {
+	// Only explicitly configured peers may supply a forwarded chain.
+	engine.RemoteIPHeaders = []string{"X-Forwarded-For"}
+	if err := engine.SetTrustedProxies(deps.TrustedProxyCIDRs); err != nil {
 		panic(err)
 	}
 
 	engine.Use(middleware.Recovery())
 	engine.Use(middleware.RequestID())
+	engine.Use(func(c *gin.Context) {
+		// Ambiguous repeated fields fall back to the TCP peer, never the first value.
+		if len(c.Request.Header.Values("X-Forwarded-For")) > 1 {
+			c.Request.Header.Del("X-Forwarded-For")
+		}
+		c.Next()
+	})
 
 	// 健康检查不需要鉴权，方便 Docker healthcheck 和负载均衡探活。
 	//

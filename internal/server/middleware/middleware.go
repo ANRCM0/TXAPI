@@ -83,8 +83,16 @@ func Recovery() gin.HandlerFunc {
 // 这是可观测性最便宜也最有效的一步。
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.GetHeader("X-Request-Id")
-		if id == "" {
+		id, count := "", 0
+		for name, values := range c.Request.Header {
+			if strings.EqualFold(name, "X-Request-Id") {
+				count += len(values)
+				if len(values) == 1 {
+					id = values[0]
+				}
+			}
+		}
+		if count != 1 || !validRequestID(id) {
 			buf := make([]byte, 8)
 			if _, err := rand.Read(buf); err != nil {
 				id = "req-unknown"
@@ -97,6 +105,20 @@ func RequestID() gin.HandlerFunc {
 		c.Writer.Header().Set("X-Request-Id", id)
 		c.Next()
 	}
+}
+
+func validRequestID(id string) bool {
+	if len(id) < 1 || len(id) > 64 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.' || c == ':' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // CORS 允许浏览器直接调用网关。

@@ -13,6 +13,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -22,7 +23,8 @@ import (
 
 // ServerConfig 是网关自身的运行参数。
 type ServerConfig struct {
-	Addr string `yaml:"addr"`
+	Addr              string   `yaml:"addr"`
+	TrustedProxyCIDRs []string `yaml:"trusted_proxy_cidrs"`
 	// RetryTimes 是「首次失败后最多再试几次」。
 	// 设成 2 意味着最坏情况下一个请求会打 3 个渠道。
 	RetryTimes int `yaml:"retry_times"`
@@ -476,6 +478,17 @@ func (c *Config) validate() error {
 	}
 	if c.Server.IPRPMLimit < 0 {
 		return fmt.Errorf("server.ip_rpm_limit 不能为负数（收到 %d）", c.Server.IPRPMLimit)
+	}
+	if len(c.Server.TrustedProxyCIDRs) > 32 {
+		return fmt.Errorf("server.trusted_proxy_cidrs allows at most 32 prefixes")
+	}
+	seenProxy := map[netip.Prefix]bool{}
+	for _, value := range c.Server.TrustedProxyCIDRs {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil || prefix.Bits() == 0 || prefix.Addr().Is4In6() || prefix != prefix.Masked() || seenProxy[prefix] {
+			return fmt.Errorf("server.trusted_proxy_cidrs requires unique canonical CIDRs without global trust")
+		}
+		seenProxy[prefix] = true
 	}
 	seenChannel := map[int]bool{}
 	for _, ch := range c.Channels {

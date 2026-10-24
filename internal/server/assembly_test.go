@@ -17,14 +17,15 @@ import (
 )
 
 type fixtureDeps struct {
-	Gateway     *gateway.Gateway
-	Cfg         *config.Config
-	Store       *store.Store
-	Billing     *billing.Engine
-	Responses   http.Handler
-	AdminAuth   gin.HandlerFunc
-	RateLimiter middleware.Limiter
-	IPRPMLimit  int
+	Gateway           *gateway.Gateway
+	Cfg               *config.Config
+	Store             *store.Store
+	Billing           *billing.Engine
+	Responses         http.Handler
+	AdminAuth         gin.HandlerFunc
+	RateLimiter       middleware.Limiter
+	IPRPMLimit        int
+	TrustedProxyCIDRs []string
 }
 
 func fixtureEngine(old fixtureDeps) *gin.Engine {
@@ -48,5 +49,5 @@ func fixtureEngine(old fixtureDeps) *gin.Engine {
 		s := old.Store.LogQueueStats()
 		return metrics.LogQueueStats{Depth: s.Depth, Capacity: s.Capacity, Dropped: s.Dropped, Failed: s.Failed}
 	})
-	return NewEngine(Deps{Generation: gateway.NewHTTPExecutor(old.Gateway), TokenAuth: authentication.NewTokenAuthenticator(old.Store), Control: controlplane.New(persistence.Control(old.Store)), Configuration: configuration, Ledger: old.Billing, Metrics: old.Gateway.Metrics(), Responses: old.Responses, AdminAuth: old.AdminAuth, RateLimiter: old.RateLimiter, RateGate: access.NewRateGate(old.RateLimiter), IPRPMLimit: old.IPRPMLimit})
+	return NewEngine(Deps{Generation: gateway.NewHTTPExecutor(old.Gateway), TokenAuth: authentication.NewTokenAuthenticator(old.Store), Control: controlplane.New(persistence.Control(old.Store)), Configuration: configuration, Ledger: old.Billing, Metrics: old.Gateway.Metrics(), Responses: old.Responses, AdminAuth: old.AdminAuth, RateLimiter: old.RateLimiter, RateGate: access.NewRateGate(old.RateLimiter), IPRPMLimit: old.IPRPMLimit, TrustedProxyCIDRs: old.TrustedProxyCIDRs})
 }

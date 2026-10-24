@@ -32,6 +32,10 @@ const testSecret = "sk-server-test-0123456789"
 // relay 的初始化不在这里做：本测试只碰 /healthz 和 /api，
 // 不产生任何转发请求，不需要渠道池。
 func newEngine(t *testing.T, adminAuth gin.HandlerFunc, ipLimit ...int) *gin.Engine {
+	return newEngineWithProxies(t, adminAuth, nil, ipLimit...)
+}
+
+func newEngineWithProxies(t *testing.T, adminAuth gin.HandlerFunc, proxies []string, ipLimit ...int) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -54,13 +58,74 @@ func newEngine(t *testing.T, adminAuth gin.HandlerFunc, ipLimit ...int) *gin.Eng
 		limit = ipLimit[0]
 	}
 	return fixtureEngine(fixtureDeps{
-		Gateway:     gw,
-		Cfg:         &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
-		Store:       st,
-		AdminAuth:   adminAuth,
-		RateLimiter: access.NewMemoryLimiter(),
-		IPRPMLimit:  limit,
+		Gateway:           gw,
+		Cfg:               &config.Config{Server: config.ServerConfig{Addr: "127.0.0.1:0"}},
+		Store:             st,
+		AdminAuth:         adminAuth,
+		RateLimiter:       access.NewMemoryLimiter(),
+		IPRPMLimit:        limit,
+		TrustedProxyCIDRs: proxies,
 	})
+}
+
+func TestExplicitTrustedProxyBoundary(t *testing.T) {
+	for _, tc := range []struct{ name, peer, forwarded, real, want string }{
+		{"trusted", "192.0.2.5:1234", "198.51.100.2", "", "198.51.100.2"},
+		{"direct", "203.0.113.1:1234", "198.51.100.2", "", "203.0.113.1"},
+		{"forged-prefix", "192.0.2.5:1234", "203.0.113.77, 198.51.100.2", "", "198.51.100.2"},
+		{"trusted-chain", "192.0.2.5:1234", "198.51.100.2, 192.0.2.6", "", "198.51.100.2"},
+		{"real-ip-not-used", "192.0.2.5:1234", "", "198.51.100.2", "192.0.2.5"},
+		{"invalid-chain", "192.0.2.5:1234", "198.51.100.2, invalid", "", "192.0.2.5"},
+		{"ipv6", "[2001:db8:1::1]:1234", "2001:db8:2::2", "", "2001:db8:2::2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEngineWithProxies(t, middleware.AdminAuth(testSecret), []string{"192.0.2.0/24", "2001:db8:1::/64"}, 1)
+			e.GET("/peer", func(c *gin.Context) { c.String(http.StatusOK, c.ClientIP()) })
+			r := httptest.NewRequest(http.MethodGet, "/peer", nil)
+			r.RemoteAddr = tc.peer
+			r.Header.Set("X-Forwarded-For", tc.forwarded)
+			r.Header.Set("X-Real-IP", tc.real)
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, r)
+			if w.Code != 200 || w.Body.String() != tc.want {
+				t.Fatalf("peer=%d %s want %s", w.Code, w.Body.String(), tc.want)
+			}
+			// A forged left prefix cannot create another bucket for the same client.
+			r = httptest.NewRequest(http.MethodGet, "/peer", nil)
+			r.RemoteAddr = tc.peer
+			r.Header.Set("X-Forwarded-For", "203.0.113.88, "+tc.forwarded)
+			w = httptest.NewRecorder()
+			e.ServeHTTP(w, r)
+			if w.Code != http.StatusTooManyRequests {
+				t.Fatalf("rotated prefix escaped bucket: %d", w.Code)
+			}
+		})
+	}
+}
+
+func TestTrustedProxyBucketsClientsAndRejectsAmbiguousFields(t *testing.T) {
+	e := newEngineWithProxies(t, middleware.AdminAuth(testSecret), []string{"192.0.2.0/24"}, 1)
+	e.GET("/peer", func(c *gin.Context) { c.String(http.StatusOK, c.ClientIP()) })
+	for _, tc := range []struct {
+		values []string
+		status int
+		peer   string
+	}{
+		{[]string{"198.51.100.1"}, 200, "198.51.100.1"},
+		{[]string{"198.51.100.2"}, 200, "198.51.100.2"},
+		{[]string{"203.0.113.88,198.51.100.1"}, 429, ""},
+		{[]string{"203.0.113.88", "198.51.100.3"}, 200, "192.0.2.5"},
+		{[]string{"203.0.113.89", "198.51.100.4"}, 429, ""},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/peer", nil)
+		r.RemoteAddr = "192.0.2.5:1234"
+		r.Header["X-Forwarded-For"] = tc.values
+		w := httptest.NewRecorder()
+		e.ServeHTTP(w, r)
+		if w.Code != tc.status || tc.peer != "" && w.Body.String() != tc.peer {
+			t.Fatalf("proxy bucket: status=%d peer=%s want %d %s", w.Code, w.Body.String(), tc.status, tc.peer)
+		}
+	}
 }
 
 func TestForwardedHeadersCannotRotateIPRateBucket(t *testing.T) {
