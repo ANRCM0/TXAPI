@@ -91,6 +91,18 @@ const { chromium } = require("playwright");
     };
     const noOverflow = async () => assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.goto("http://127.0.0.1:" + server.address().port); await login();
+    const pathBoundary = await page.evaluate(async () => {
+      const { createClient } = await import("/ui/api.mjs");
+      let fetches = 0, rejected = 0;
+      const client = createClient({ fetcher: async () => { fetches++; return new Response('{}'); } });
+      client.setSession("synthetic-boundary-session");
+      const paths = ["/\\outside.invalid/api", "/\n/outside.invalid/api", "/\t/outside.invalid/api"];
+      const normalizedExternal = paths.every(path => new URL(path, location.origin).origin !== location.origin);
+      for (const path of paths) { try { await client.request(path); } catch { rejected++; } }
+      await client.request("/api/me");
+      return { normalizedExternal, rejected, fetches };
+    });
+    assert.deepEqual(pathBoundary, { normalizedExternal: true, rejected: 3, fetches: 1 });
     assert.equal(calls.some(c => c.url.startsWith("/api/admin/")), false, "user overview fetched administrator data");
     assert.equal(await page.locator(".chart-line").count(), 1);
     await page.getByLabel("样本时间范围").selectOption("6");
