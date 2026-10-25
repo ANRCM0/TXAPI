@@ -10,7 +10,9 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	cfg "minigateway/internal/foundation/contracts/configuration/v1"
 	managed "minigateway/internal/foundation/contracts/configuration/v2"
 	control "minigateway/internal/foundation/contracts/control/v1"
@@ -25,6 +27,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 // Handler 持有管理 API 需要的一切依赖。
@@ -116,7 +119,7 @@ func fail(c *gin.Context, err error) {
 }
 
 func bindJSON(c *gin.Context, dst any) bool {
-	if err := c.ShouldBindJSON(dst); err != nil {
+	if err := decodeSingleJSON(c, dst); err != nil {
 		status := http.StatusBadRequest
 		typ := "invalid_request"
 		var maxBytesErr *http.MaxBytesError
@@ -128,6 +131,33 @@ func bindJSON(c *gin.Context, dst any) bool {
 		return false
 	}
 	return true
+}
+
+func decodeSingleJSON(c *gin.Context, dst any) error {
+	if c.Request.Body == nil {
+		return errors.New("request body is required")
+	}
+	decoder := json.NewDecoder(c.Request.Body)
+	if binding.EnableDecoderUseNumber {
+		decoder.UseNumber()
+	}
+	if binding.EnableDecoderDisallowUnknownFields {
+		decoder.DisallowUnknownFields()
+	}
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	// Check the same decoder so buffered trailing bytes cannot escape validation.
+	if _, err := decoder.Token(); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return errors.New("request body must contain exactly one JSON value")
+	}
+	if binding.Validator != nil {
+		return binding.Validator.ValidateStruct(dst)
+	}
+	return nil
 }
 
 func (h *Handler) registerResources(group *gin.RouterGroup) {

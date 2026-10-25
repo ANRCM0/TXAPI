@@ -132,26 +132,31 @@ function editDialog(title, fields, save, description = "所有变更均由服务
   { submitLabel = "保存更改", successMessage = "更改已保存。" } = {}) {
   const error = el("p", { class: "form-error", role: "alert" });
   const submit = el("button", { type: "submit", class: "button primary" }, submitLabel);
+  const cancel = button("取消", () => dialog.close());
+  const pending = el("p", { class: "fine", role: "status", hidden: true }, "请求已提交；关闭窗口不会撤销更改，返回结果也不会重新弹出。请刷新列表确认。");
   const form = el("form", {},
     heading(title, description), el("div", { class: "form-grid" }, fields.map(field)), error,
-    actions(button("取消", () => dialog.close()), submit));
+    pending, actions(cancel, submit));
   const dialog = el("dialog", { class: "editor", "aria-label": title }, form);
-  manageDialog(dialog, () => form.reset());
+  let active = true;
+  manageDialog(dialog, () => { active = false; form.reset(); });
   form.addEventListener("submit", async event => {
     event.preventDefault();
-    if (submit.disabled) return;
+    if (submit.disabled || !active) return;
     submit.disabled = true;
+    pending.hidden = false; cancel.textContent = "关闭窗口";
     error.textContent = "";
     const epoch = generation;
     pendingPublication = false;
     try {
       const result = await save(Object.fromEntries(new FormData(form)));
-      if (epoch !== generation) return;
+      if (epoch !== generation || !active) return;
       dialog.close();
       if (!pendingPublication) notice(successMessage);
       await navigate();
-      if (result?.secret && user && generation === epoch + 1) showSecret(result.secret);
+      if (result?.secret && user && generation === epoch + 1 && !document.querySelector("dialog[open]")) showSecret(result.secret);
     } catch (failure) {
+      if (epoch !== generation || (!active && failure.status !== 403)) return;
       if (failure.saved) {
         form.reset();
         dialog.close();
@@ -168,7 +173,7 @@ function editDialog(title, fields, save, description = "所有变更均由服务
         return;
       }
       if (dialog.isConnected) error.textContent = failure.message;
-    } finally { submit.disabled = false; }
+    } finally { if (active) { submit.disabled = false; pending.hidden = true; cancel.textContent = "取消"; } }
   });
   document.body.append(dialog);
   dialog.showModal();
@@ -211,10 +216,12 @@ function login(message = "") {
   form.querySelector('[name="password"]').autocomplete = "current-password";
   form.addEventListener("submit", async event => {
     event.preventDefault();
+    if (submit.disabled || !form.isConnected) return;
     submit.disabled = true;
     error.textContent = "";
     try {
       const response = await api.request("/api/auth/login", { method: "POST", body: Object.fromEntries(new FormData(form)) });
+      if (!form.isConnected) return;
       api.setSession(response.session_token);
       user = response.user;
       form.reset();
@@ -355,6 +362,7 @@ async function navigate({ refreshIdentity = true, recoverForbidden = true } = {}
   for (const dialog of document.querySelectorAll("dialog")) dialog.close();
   disposeView();
   disposeView = () => {};
+  document.querySelector("#view")?.replaceChildren(text("p", "正在读取真实数据…", "empty"));
   try {
     if (refreshIdentity) {
       const current = await api.request("/api/me");
@@ -522,7 +530,7 @@ async function keys() {
         method: key.id ? "PUT" : "POST", body: keyInput(values),
       });
       return { secret: result.data.key };
-    }, "Key 不能扩大用户权限；零限制继承用户限制，仍受实例上限约束。");
+    }, "Key 不能扩大用户权限；零限制继承用户限制，仍受实例上限约束。" + (key.id ? "" : "创建时请等待完整密钥；关闭窗口后不再展示，可撤销重建。"));
   }
   return el("div", {}, pageHeader("我的 API Key", "为每个应用创建独立、权限明确的调用凭据。", button("+ 创建 Key", () => edit(), "primary")),
     panel(table(["名称 / 前缀", "模型范围", "状态", "到期时间", "操作"], list(response.data), key => [
@@ -578,6 +586,7 @@ async function playground() {
   }
   form.addEventListener("submit", async event => {
     event.preventDefault();
+    if (submit.disabled || epoch !== generation || !form.isConnected) return;
     const values = Object.fromEntries(new FormData(form));
     controller = new AbortController();
     submit.disabled = true; cancel.disabled = false;
@@ -1279,7 +1288,7 @@ async function adminKeys() {
       if (key.id && body.user_id !== key.user_id) throw new Error("现有 Key 不能在编辑时改变归属；无主旧 Key 请使用显式认领。");
       const result = await api.request("/api/admin/keys" + (key.id ? "/" + key.id : ""), { method: key.id ? "PUT" : "POST", body });
       return { secret: result.data?.key };
-    }, "密钥不会扩大归属用户的权限。无主旧 Key 必须显式认领；已有 Key 不展示完整密钥。");
+    }, "密钥不会扩大归属用户的权限。无主旧 Key 必须显式认领；已有 Key 不展示完整密钥。" + (key.id ? "" : "创建时请等待完整密钥；关闭窗口后不再展示，可撤销重建。"));
   }
   const rows = list(response.data);
   const search = el("input", { type: "search", "aria-label": "筛选全站 Key", placeholder: "按名称或用户 ID 筛选" });

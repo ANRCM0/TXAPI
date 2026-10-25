@@ -19,6 +19,7 @@ const deferred = () => {
   const callStarted = deferred();
   const callCanceled = deferred();
   let modelCalls = 0;
+  let loginCalls = 0, callRequests = 0;
   let holdLog = false;
   let failLogPage = true;
   const delayedLog = deferred();
@@ -52,7 +53,8 @@ const deferred = () => {
       res.writeHead(200, { "Content-Type": type });
       res.end(fs.readFileSync(path.join(__dirname, "../../web/assets", name)));
     } else if (req.url === "/api/auth/login") {
-      json(res, { session_token: "fixture-session-only", user });
+      loginCalls++;
+      setTimeout(() => json(res, { session_token: "fixture-session-only", user }), 150);
     } else if (req.url === "/api/me") {
       json(res, { data: user });
     } else if (req.url === "/api/me/usage") {
@@ -93,6 +95,7 @@ const deferred = () => {
     } else if (req.url === "/api/admin/prices") {
       json(res, { data: [], group_rates: {} });
     } else if (req.url === "/v1/chat/completions") {
+      callRequests++;
       res.on("close", () => { if (!res.writableEnded) callCanceled.resolve(true); });
       req.resume();
       callStarted.resolve();
@@ -113,8 +116,9 @@ const deferred = () => {
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.getByLabel("用户名", { exact: true }).fill("fixture");
     await page.getByLabel("密码", { exact: true }).fill("fixture-password-only");
-    await page.getByRole("button", { name: "登录工作空间" }).click();
+    await page.locator(".login-form").evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
     await page.getByRole("heading", { name: "工作空间总览" }).waitFor();
+    assert.equal(loginCalls, 1, "one form dispatched concurrent logins");
     await openNavigation(page);
     await page.locator("nav").getByRole("link", { name: "调用测试", exact: false }).click();
     const delayed = await firstModels.promise;
@@ -129,8 +133,10 @@ const deferred = () => {
     await (await oldReply).finished();
     await page.waitForTimeout(100);
     await page.getByLabel("调用 API Key", { exact: true }).fill("fixture-call-key-only");
-    await page.getByRole("button", { name: "发送请求", exact: true }).click();
+    await page.getByLabel("调用 API Key", { exact: true }).evaluate(input => { input.form.requestSubmit(); input.form.requestSubmit(); });
     await callStarted.promise;
+    await page.waitForTimeout(100);
+    assert.equal(callRequests, 1, "one form dispatched concurrent provider calls");
     await openNavigation(page);
     await page.locator("nav").getByRole("link", { name: "总览", exact: false }).click();
     await page.getByRole("heading", { name: "工作空间总览" }).waitFor();
