@@ -152,8 +152,10 @@ const deferred = () => {
       await page.locator("nav a[data-page=keys]").click();
       await page.getByRole("button", { name: "撤销", exact: true }).waitFor();
       page.once("dialog", dialog => dialog.accept());
+      const oldButton = await page.getByRole("button", { name: "撤销", exact: true }).elementHandle();
       await page.getByRole("button", { name: "撤销", exact: true }).click();
       const oldMutation = await remove.promise;
+      assert.equal(await oldButton.getAttribute("aria-busy"), "true");
       await page.locator("nav a[data-page=models]").click();
       await page.getByRole("heading", { name: "模型目录", exact: true }).waitFor();
       await page.locator("nav a[data-page=keys]").click();
@@ -164,11 +166,13 @@ const deferred = () => {
       json(oldMutation, outcome === "success" ? 200 : outcome === "forbidden" ? 403 : 500,
         outcome === "success" ? {} : { saved: outcome === "saved-error", error: { message: "fixture-old-delete-" + outcome } },
         outcome === "saved-error" ? { "X-TXAPI-Publication-State": "pending" } : {});
+      // The old button survives as a handle until its action settles, even after navigation.
+      await page.waitForFunction(node => !node.hasAttribute("aria-busy"), oldButton);
+      await oldButton.dispose();
       if (outcome === "forbidden") {
         await page.locator("nav a[data-page=channels]").waitFor({ state: "detached" });
         assert.equal(await page.getByRole("dialog").count(), 0, "a late current-session 403 did not clear revoked administrator UI");
       } else {
-        await page.waitForLoadState("networkidle");
         assert.equal(await page.getByLabel("Key 名称", { exact: true }).inputValue(), "keep-after-old-delete", "old mutation destroyed a new draft");
         if (outcome === "saved-error") assert.match(await page.locator("#notice").innerText(), /配置已保存/);
         page.once("dialog", dialog => dialog.accept()); await page.keyboard.press("Escape");
