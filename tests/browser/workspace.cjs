@@ -6,6 +6,7 @@ const { chromium } = require("playwright");
 
 (async () => {
   let role = "user", enabled = true, balanceAvailable = true;
+  let holdCreate = false, createStarted, heldCreate;
   const calls = [], writes = [], errors = [];
   const money = "9223372036854775807";
   const version = "a".repeat(64), now = Date.now();
@@ -60,6 +61,7 @@ const { chromium } = require("playwright");
     if (u.pathname === "/api/admin/keys" && req.method === "POST") {
       assert.equal(body.user_id, 2);
       keys.push({ ...body, id: 100, key_prefix: "sk-generated-masked" });
+      if (holdCreate) { heldCreate = { res, data: { ...keys.at(-1), key: "sk-obsolete-one-time-secret" } }; createStarted(); return; }
       return send(res, 201, { data: { ...keys.at(-1), key: "sk-fixture-new-one-time-secret" } });
     }
     if (u.pathname === "/api/admin/keys/99/claim") {
@@ -161,6 +163,39 @@ const { chromium } = require("playwright");
       return { connected: dialog.isConnected, secret: value.value };
     }), { connected: false, secret: "" }, "closing a secret dialog must synchronously clear and detach it");
     assert.equal(await page.locator("body").innerText().then(t => t.includes("sk-fixture-new-one-time-secret")), false);
+    for (const result of ["success", "saved-error", "forbidden"]) {
+      holdCreate = true;
+      const started = new Promise(resolve => { createStarted = resolve; });
+      await page.getByRole("button", { name: "+ 为用户创建 Key", exact: true }).click();
+      await page.getByLabel("归属用户", { exact: true }).selectOption("2");
+      await page.getByLabel("Key 名称", { exact: true }).fill("old-pending");
+      await page.getByRole("button", { name: "保存更改", exact: true }).click(); await started;
+      await page.keyboard.press("Escape");
+      await page.getByRole("dialog").waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "+ 为用户创建 Key", exact: true }).click();
+      await page.getByLabel("Key 名称", { exact: true }).fill("keep-new-draft");
+      const completed = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/admin/keys");
+      if (result === "forbidden") {
+        role = "user"; keys.pop();
+        send(heldCreate.res, 403, { error: { message: "fixture-revoked-role" } });
+        await (await completed).finished();
+        await page.getByRole("heading", { name: "工作空间总览", exact: true }).waitFor();
+        assert.equal(await page.getByRole("dialog").count(), 0, "closed request hid a current permission revocation");
+        assert.equal(await page.locator("nav a[data-page=admin-keys]").count(), 0);
+        holdCreate = false;
+        await page.getByRole("button", { name: "退出登录", exact: true }).click();
+        await page.getByRole("heading", { name: "欢迎回来" }).waitFor();
+        role = "admin"; await login(); await nav("admin-keys");
+        continue;
+      }
+      send(heldCreate.res, result === "success" ? 201 : 500, result === "success" ? { data: heldCreate.data }
+        : { saved: true, error: { message: "old-saved-readback-failed" } });
+      await (await completed).finished(); await page.waitForTimeout(100);
+      assert.equal(await page.getByLabel("Key 名称", { exact: true }).inputValue(), "keep-new-draft", "closed save changed the newer editor");
+      assert.equal(await page.getByRole("dialog", { name: "保存你的 API Key" }).count(), 0);
+      assert.equal(await page.locator("body").innerText().then(t => t.includes("sk-obsolete-one-time-secret")), false);
+      await page.keyboard.press("Escape"); holdCreate = false;
+    }
     await nav("quotation"); await page.getByLabel("精确模型名称").fill("m1");
     for (const label of ["假设输入 Token", "假设输出 Token", "假设总 Token"]) await page.getByLabel(label, { exact: true }).fill("0");
     await page.getByLabel("用量完整度").selectOption("complete"); await page.getByRole("button", { name: "计算假设报价" }).click();
