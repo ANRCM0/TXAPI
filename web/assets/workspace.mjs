@@ -78,10 +78,11 @@ export function sampleChart(sample, width = 800) {
   width = Math.max(220, Math.min(1000, Math.round(width)));
   const ns = "http://www.w3.org/2000/svg";
   const chart = document.createElementNS(ns, "svg");
-  chart.setAttribute("viewBox", `0 0 ${width} 240`);
+  chart.setAttribute("viewBox", `0 0 ${width} 260`);
   chart.setAttribute("class", "trend-chart");
   chart.setAttribute("role", "img");
-  chart.setAttribute("aria-label", "最近保留日志样本按小时的请求数量，不代表全部请求");
+  const summary = `最近保留日志样本：${sample.count} 次请求，${sample.buckets.length} 小时，按小时分布；不代表全部请求`;
+  chart.setAttribute("aria-label", summary);
   const make = (tag, attrs, text) => {
     const node = document.createElementNS(ns, tag);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
@@ -89,6 +90,8 @@ export function sampleChart(sample, width = 800) {
     chart.append(node);
     return node;
   };
+  make("title", {}, summary);
+  make("desc", {}, "时间按浏览器本地时区显示；日期在起点和跨日后标记。精确数量可展开下方按小时样本数据查看。");
   const peak = Math.max(1, ...sample.buckets.map(b => b.requests));
   const ticks = Math.min(3, peak);
   const max = Math.ceil(peak / ticks) * ticks;
@@ -108,9 +111,17 @@ export function sampleChart(sample, width = 800) {
     });
   }
   const step = Math.max(1, Math.ceil(sample.buckets.length / Math.max(2, Math.floor((width - 60) / 75))));
+  let previousDate;
   for (let i = 0; i < sample.buckets.length; i += step) {
+    const date = new Date(sample.buckets[i].time);
+    const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
     make("text", { x: points[i][0], y: 225, "text-anchor": "middle", class: "chart-label" },
-      new Date(sample.buckets[i].time).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }));
+      date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }));
+    if (dateKey !== previousDate) {
+      make("text", { x: points[i][0], y: 244, "text-anchor": "middle", class: "chart-label chart-date" },
+        date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }));
+    }
+    previousDate = dateKey;
   }
   return chart;
 }
@@ -130,6 +141,12 @@ export function downloadCSV(filename, columns, rows) {
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  link.hidden = true;
+  try {
+    document.body.append(link);
+    link.click();
+  } finally {
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }

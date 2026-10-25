@@ -42,6 +42,9 @@ browser-check: web-check
 	$(NODE) tests/browser/tasks.cjs
 	$(NODE) tests/browser/routing.cjs
 	$(NODE) tests/browser/workspace.cjs
+	$(NODE) tests/browser/interaction.cjs
+	$(NODE) tests/browser/visual-experience.cjs
+	$(NODE) tests/browser/resilience.cjs
 	$(MAKE) compatibility
 	TXAPI_TASK_BROWSER=1 TXAPI_ROUTING_BROWSER=1 $(MAKE) smoke
 

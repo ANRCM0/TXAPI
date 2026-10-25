@@ -194,7 +194,15 @@ const { chromium } = require("playwright");
       assert.equal(await page.getByLabel("Key 名称", { exact: true }).inputValue(), "keep-new-draft", "closed save changed the newer editor");
       assert.equal(await page.getByRole("dialog", { name: "保存你的 API Key" }).count(), 0);
       assert.equal(await page.locator("body").innerText().then(t => t.includes("sk-obsolete-one-time-secret")), false);
-      await page.keyboard.press("Escape"); holdCreate = false;
+      const discard = page.waitForEvent("dialog");
+      const closeDraft = page.keyboard.press("Escape");
+      const confirmation = await discard;
+      assert.equal(confirmation.type(), "confirm");
+      assert.match(confirmation.message(), /放弃尚未保存的更改/);
+      await confirmation.accept();
+      await closeDraft;
+      await page.getByRole("dialog").waitFor({ state: "detached" });
+      holdCreate = false;
     }
     await nav("quotation"); await page.getByLabel("精确模型名称").fill("m1");
     for (const label of ["假设输入 Token", "假设输出 Token", "假设总 Token"]) await page.getByLabel(label, { exact: true }).fill("0");

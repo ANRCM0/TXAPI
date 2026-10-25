@@ -19,6 +19,16 @@ from local import ROOT, ports, ready, request
 STAGE = "arguments"
 
 
+def stop_gateway(process):
+    if process is not None and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=12)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
 def main():
     global STAGE
     parser = argparse.ArgumentParser(description=__doc__)
@@ -32,7 +42,7 @@ def main():
     admin_name, user_name = "compat-admin", "compat-user"
     admin_password, user_password = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
     upstream_key = secrets.token_urlsafe(24)
-    models = ["s6-live-1440", "s6-live-390"]
+    models = [f"s6-live-{width}" for width in (1440, 768, 390, 320)]
 
     class Upstream(BaseHTTPRequestHandler):
         def log_message(self, *unused):
@@ -113,17 +123,21 @@ def main():
                     TXAPI_TEST_UPSTREAM_KEY=upstream_key)
                 if os.environ.get("TXAPI_UI_SCREENSHOTS"):
                     browser_env["TXAPI_UI_SCREENSHOTS"] = os.environ["TXAPI_UI_SCREENSHOTS"]
-                STAGE = "browser"
-                subprocess.run([args.node, str(ROOT / "tests/browser/live.cjs")], cwd=ROOT,
-                               env=browser_env, check=True, timeout=180)
+                # The production login gate admits five attempts per minute/IP.
+                # Isolate two viewport groups without changing that protection.
+                for index, viewports in enumerate(("1440,768", "390,320")):
+                    if index:
+                        STAGE = "restart"
+                        stop_gateway(process)
+                        process = subprocess.Popen([str(binary), "-config", str(config_path)], cwd=ROOT,
+                                                   env=clean, stdout=log, stderr=log)
+                        ready(process, gateway_port)
+                    STAGE = "browser/" + viewports
+                    browser_env["TXAPI_TEST_VIEWPORTS"] = viewports
+                    subprocess.run([args.node, str(ROOT / "tests/browser/live.cjs")], cwd=ROOT,
+                                   env=browser_env, check=True, timeout=180)
         finally:
-            if process is not None and process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=12)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
+            stop_gateway(process)
             upstream.shutdown()
             upstream.server_close()
             thread.join(timeout=5)
