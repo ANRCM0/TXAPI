@@ -32,7 +32,12 @@ function required(name) {
     browser = await chromium.launch({ headless: true,
       ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}),
     });
-    for (const viewport of [{ width: 1440, height: 1050 }, { width: 390, height: 844 }]) {
+    const profiles = [{ width: 1440, height: 1050 }, { width: 768, height: 1024 },
+      { width: 390, height: 844 }, { width: 320, height: 740 }];
+    const widths = (process.env.TXAPI_TEST_VIEWPORTS || "1440,390").split(",").map(Number);
+    assert.ok(widths.length >= 1 && widths.length <= profiles.length && new Set(widths).size === widths.length &&
+      widths.every(width => profiles.some(profile => profile.width === width)), "Unsupported disposable viewport group");
+    for (const viewport of widths.map(width => profiles.find(profile => profile.width === width))) {
       stage = `${viewport.width}/admin-login`;
       const model = `${expectedModel}-${viewport.width}`;
       const channelName = `live-channel-${viewport.width}`;
@@ -52,12 +57,29 @@ function required(name) {
         await page.goto(base.href);
         await page.getByLabel("用户名", { exact: true }).fill(credentials[0]);
         await page.getByLabel("密码", { exact: true }).fill(credentials[1]);
-        await page.getByRole("button", { name: "登录工作空间" }).click();
+        const [response] = await Promise.all([
+          page.waitForResponse(reply => new URL(reply.url()).pathname === "/api/auth/login" && reply.request().method() === "POST"),
+          page.getByRole("button", { name: "登录工作空间" }).click(),
+        ]);
+        assert.equal(response.status(), 200, "Disposable fixture login returned HTTP " + response.status());
         await page.getByRole("heading", { name: "工作空间总览" }).waitFor();
       };
       const noOverflow = async () => assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
         `Page overflows ${viewport.width}px viewport`);
+      const capture = async name => {
+        if (!process.env.TXAPI_UI_SCREENSHOTS) return;
+        const content = await page.locator("body").innerText();
+        const fields = await page.locator("input, textarea").evaluateAll(nodes => nodes.map(node => node.value).join("\n"));
+        for (const secret of redactions.filter(value => value.length >= 20)) {
+          assert.equal(content.includes(secret) || fields.includes(secret), false, "Screenshot contains a complete fixture secret");
+        }
+        const dismiss = page.getByRole("button", { name: "关闭提示", exact: true });
+        if (await dismiss.isVisible()) await dismiss.click();
+        fs.mkdirSync(process.env.TXAPI_UI_SCREENSHOTS, { recursive: true });
+        await page.screenshot({ path: path.join(process.env.TXAPI_UI_SCREENSHOTS,
+          `txapi-console-${viewport.width}${name ? "-" + name : ""}.png`), fullPage: true });
+      };
       await login(admin);
       stage = `${viewport.width}/channel-save`;
       await openNavigation(page);
@@ -80,6 +102,7 @@ function required(name) {
       await credentialDialog.waitFor({ state: "detached" });
       await channelPanel.getByText(`backup-${viewport.width}`, { exact: true }).waitFor();
       await noOverflow();
+      await capture("channels");
       stage = `${viewport.width}/publication`;
         await openNavigation(page);
       const [publication] = await Promise.all([
@@ -113,6 +136,7 @@ function required(name) {
       assert.ok(modelData.data.includes(model), "Fixture model absent from owner API");
       await page.getByRole("heading", { name: model, exact: true }).waitFor();
       await noOverflow();
+      await capture("models");
       stage = `${viewport.width}/key-create`;
       await openNavigation(page);
       await page.locator('nav a[data-page="keys"]').click();
@@ -136,6 +160,7 @@ function required(name) {
       await page.locator("pre.response").filter({ hasText: "s6-live-browser-ok" }).waitFor();
       assert.equal(await page.getByLabel("调用 API Key", { exact: true }).inputValue(), "", "Playground retained the API key");
       await noOverflow();
+      await capture("playground");
       stage = `${viewport.width}/logs`;
       await openNavigation(page);
       await page.locator('nav a[data-page="logs"]').click();
@@ -147,6 +172,7 @@ function required(name) {
       }
       await page.getByRole("cell", { name: model, exact: true }).waitFor();
       await noOverflow();
+      await capture("logs");
       stage = `${viewport.width}/native-usage`;
       await openNavigation(page);
       const [nativeList] = await Promise.all([
@@ -167,6 +193,7 @@ function required(name) {
       assert.equal(detail.attempts[0].usage.total_tokens, "3");
       await page.getByRole("heading", { name: "调用观察", exact: true }).waitFor();
       await noOverflow();
+      await capture("usage");
       stage = `${viewport.width}/owner-finance`;
       await openNavigation(page);
       const [summary] = await Promise.all([
@@ -178,15 +205,11 @@ function required(name) {
       if (!financial.balance_known) assert.ok((await page.locator(".stats").innerText()).includes("未知"));
       assert.equal(await page.getByRole("button", { name: "确认核对" }).count(), 0);
       await noOverflow();
+      await capture("finance");
       await openNavigation(page);
       await page.locator('nav a[data-page="overview"]').click();
       await page.getByRole("heading", { name: "工作空间总览", exact: true }).waitFor();
-      if (process.env.TXAPI_UI_SCREENSHOTS) {
-        const dismiss = page.getByRole("button", { name: "关闭提示", exact: true });
-        if (await dismiss.isVisible()) await dismiss.click();
-        fs.mkdirSync(process.env.TXAPI_UI_SCREENSHOTS, { recursive: true });
-        await page.screenshot({ path: path.join(process.env.TXAPI_UI_SCREENSHOTS, `txapi-console-${viewport.width}.png`), fullPage: true });
-      }
+      await capture("");
       assert.equal(requests.slice(boundary).some(path => path.startsWith("/api/admin/")), false, "User navigation called an administrator API");
       assert.deepEqual(errors, [], "Browser runtime errors");
       await page.getByRole("button", { name: "退出登录", exact: true }).click();

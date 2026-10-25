@@ -5,10 +5,12 @@ import { icon, knownCount, ownerAmounts, logSample, sampleChart, downloadCSV } f
 const root = document.querySelector("#app");
 let user = null;
 let generation = 0;
+let authGeneration = 0;
 let disposeView = () => {};
 let noticeTimer;
 let pendingPublication = false;
 let fieldSequence = 0;
+let suggestedModel = "";
 const api = createClient({
   onUnauthorized: () => signOut("登录已过期，请重新登录。"),
   onPending: () => {
@@ -31,7 +33,26 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 const text = (tag, value, className) => el(tag, { class: className }, value);
-const button = (label, action, style = "secondary") => el("button", { type: "button", class: `button ${style}`, onClick: action }, label);
+function button(label, action, style = "secondary") {
+  let pending = false;
+  const node = el("button", { type: "button", class: `button ${style}`, onClick: async event => {
+    if (pending || node.disabled) return;
+    pending = true;
+    try {
+      const result = action(event);
+      if (result && typeof result.then === "function") {
+        node.setAttribute("aria-busy", "true");
+        if (style === "danger") node.disabled = true;
+        await result;
+      }
+    } finally {
+      pending = false;
+      node.removeAttribute("aria-busy");
+      if (style === "danger" && node.isConnected) node.disabled = false;
+    }
+  } }, label);
+  return node;
+}
 const fmt = value => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
 const badge = value => text("span", stateLabel(value), `badge ${["active", "enabled", "applied", "200"].includes(String(value)) ? "good" : ""}`);
 const empty = message => text("p", message, "empty");
@@ -64,11 +85,34 @@ function savedConfigurationMessage(error) {
   return "配置已保存，但发布状态未知。进一步操作前请先刷新状态。";
 }
 
+function errorMessage(error) {
+  return (error.message || "操作未完成，请重试。") + (error.requestId ? `（请求编号：${error.requestId}）` : "");
+}
+
+function createdKey(result) {
+  const key = result?.data?.key;
+  if (typeof key !== "string" || !key.trim()) {
+    throw Object.assign(new Error("创建结果尚未确认，未收到完整 API Key。请先刷新列表核对，避免重复创建；如已创建但无法读取密钥，请撤销后重新创建。"),
+      { code: "invalid_response", operationUnknown: true });
+  }
+  return { secret: key };
+}
+
+async function recheckForbidden(error, session) {
+  if (error.status !== 403 || session !== authGeneration || !user) return false;
+  notice(errorMessage(error), true);
+  await navigate();
+  return true;
+}
+
 async function run(action) {
-  try { await action(); }
+  const epoch = generation, session = authGeneration;
+  const current = () => epoch === generation && session === authGeneration && user;
+  try { await action(current); }
   catch (error) {
-    notice(error.saved ? savedConfigurationMessage(error) : error.message, true);
-    if ((error.saved || error.status === 403) && user) await navigate();
+    if (session !== authGeneration) return;
+    notice(error.saved ? savedConfigurationMessage(error) : errorMessage(error), true);
+    if ((error.status === 403 || (error.saved && current())) && user) await navigate();
   }
 }
 
@@ -91,9 +135,26 @@ function field({ name, label, type = "text", value = "", options, hint, required
   }
   input.setAttribute("aria-label", label);
   const hintID = `field-hint-${++fieldSequence}`;
-  if (hint) input.setAttribute("aria-describedby", hintID);
+  const errorID = `field-error-${fieldSequence}`;
+  const error = el("small", { id: errorID, class: "field-error", hidden: true });
+  input.setAttribute("aria-describedby", [hint ? hintID : "", errorID].filter(Boolean).join(" "));
+  input.addEventListener("invalid", () => {
+    const validity = input.validity;
+    const message = validity.customError ? input.validationMessage : validity.badInput ? "请填写有效数字。" :
+      validity.valueMissing ? `请填写${label}。` : validity.rangeUnderflow ? `数值不能小于 ${input.min}。` :
+      validity.rangeOverflow ? `数值不能大于 ${input.max}。` : validity.stepMismatch ? "请填写符合要求的数值。" :
+      validity.typeMismatch ? "请填写正确格式的内容。" : validity.tooLong ? `内容不能超过 ${input.maxLength} 个字符。` :
+      "请按字段要求填写内容。";
+    input.setCustomValidity(message);
+    input.setAttribute("aria-invalid", "true");
+    error.textContent = message;
+    error.hidden = false;
+  });
+  const clearError = () => { input.setCustomValidity(""); input.removeAttribute("aria-invalid"); error.hidden = true; error.textContent = ""; };
+  input.addEventListener("input", clearError);
+  input.addEventListener("change", clearError);
   return el("label", { class: `field ${full ? "full" : ""}` },
-    text("span", label), input, hint ? el("small", { id: hintID }, hint) : null);
+    text("span", label), input, hint ? el("small", { id: hintID }, hint) : null, error);
 }
 
 function policyFields(value = {}) {
@@ -113,7 +174,8 @@ function limitFields(value = {}) {
   ];
 }
 
-function manageDialog(dialog, cleanup = () => {}) {
+function manageDialog(dialog, cleanup = () => {}, canCancel = () => true) {
+  const returnFocus = document.activeElement;
   const close = dialog.close.bind(dialog);
   let disposed = false;
   const dispose = () => {
@@ -121,41 +183,60 @@ function manageDialog(dialog, cleanup = () => {}) {
     disposed = true;
     cleanup();
     dialog.remove();
+    if (!document.querySelector("dialog[open]") && returnFocus?.isConnected && !returnFocus.closest("[inert]")) {
+      returnFocus.focus({ preventScroll: true });
+    }
   };
   // Native close events are queued; private fields must be cleared immediately.
   dialog.close = () => { close(); dispose(); };
-  dialog.addEventListener("cancel", event => { event.preventDefault(); dialog.close(); });
+  dialog.addEventListener("cancel", event => { event.preventDefault(); if (canCancel()) dialog.close(); });
   dialog.addEventListener("close", dispose, { once: true });
 }
 
 function editDialog(title, fields, save, description = "所有变更均由服务端校验。",
   { submitLabel = "保存更改", successMessage = "更改已保存。" } = {}) {
-  const error = el("p", { class: "form-error", role: "alert" });
+  const error = el("p", { class: "form-error", role: "alert", tabindex: "-1" });
   const submit = el("button", { type: "submit", class: "button primary" }, submitLabel);
-  const cancel = button("取消", () => dialog.close());
+  const canCancel = () => submit.disabled || JSON.stringify([...new FormData(form)]) === initialValues ||
+    confirm("放弃尚未保存的更改？关闭后无法恢复这份草稿。");
+  const cancel = button("取消", () => { if (canCancel()) dialog.close(); });
   const pending = el("p", { class: "fine", role: "status", hidden: true }, "请求已提交；关闭窗口不会撤销更改，返回结果也不会重新弹出。请刷新列表确认。");
   const form = el("form", {},
     heading(title, description), el("div", { class: "form-grid" }, fields.map(field)), error,
     pending, actions(cancel, submit));
   const dialog = el("dialog", { class: "editor", "aria-label": title }, form);
+  const initialValues = JSON.stringify([...new FormData(form)]);
   let active = true;
-  manageDialog(dialog, () => { active = false; form.reset(); });
+  manageDialog(dialog, () => { active = false; form.reset(); }, canCancel);
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (submit.disabled || !active) return;
+    for (const input of form.querySelectorAll("input[required], textarea[required]")) {
+      input.setCustomValidity(input.value.trim() ? "" : "请填写有效内容，不能只包含空格。");
+    }
+    if (!form.reportValidity()) return;
+    const values = Object.fromEntries(new FormData(form));
+    const inputs = [...form.querySelectorAll("input, select, textarea")].filter(input => !input.disabled);
     submit.disabled = true;
+    submit.textContent = "正在保存…";
+    submit.setAttribute("aria-busy", "true");
+    inputs.forEach(input => { input.disabled = true; });
     pending.hidden = false; cancel.textContent = "关闭窗口";
     error.textContent = "";
-    const epoch = generation;
+    const epoch = generation, session = authGeneration;
     pendingPublication = false;
     try {
-      const result = await save(Object.fromEntries(new FormData(form)));
+      const result = await save(values);
       if (epoch !== generation || !active) return;
       dialog.close();
       if (!pendingPublication) notice(successMessage);
       await navigate();
       if (result?.secret && user && generation === epoch + 1 && !document.querySelector("dialog[open]")) showSecret(result.secret);
     } catch (failure) {
+      if (session !== authGeneration) return;
+      if (failure.status === 403 && epoch !== generation && user) {
+        notice(errorMessage(failure), true); await navigate(); return;
+      }
       if (epoch !== generation || (!active && failure.status !== 403)) return;
       if (failure.saved) {
         form.reset();
@@ -168,12 +249,18 @@ function editDialog(title, fields, save, description = "所有变更均由服务
       }
       if (failure.status === 403 && epoch === generation && user) {
         dialog.close();
-        notice(failure.message, true);
+        notice(errorMessage(failure), true);
         await navigate();
         return;
       }
-      if (dialog.isConnected) error.textContent = failure.message;
-    } finally { if (active) { submit.disabled = false; pending.hidden = true; cancel.textContent = "取消"; } }
+      if (dialog.isConnected) { error.textContent = errorMessage(failure); error.focus(); }
+    } finally {
+      if (active) {
+        submit.disabled = false; submit.textContent = submitLabel; submit.removeAttribute("aria-busy");
+        inputs.forEach(input => { input.disabled = false; });
+        pending.hidden = true; cancel.textContent = "取消";
+      }
+    }
   });
   document.body.append(dialog);
   dialog.showModal();
@@ -199,11 +286,13 @@ function showSecret(secret) {
 function table(columns, rows, render) {
   if (!rows.length) return empty("当前没有记录。可创建项目或调整筛选条件。");
   return el("div", { class: "table-wrap", tabindex: "0", "aria-label": "可横向滚动的数据表格" },
+    columns.length >= 4 ? text("p", "内容超出时，可左右滚动查看", "table-scroll-hint") : null,
     el("table", {}, el("thead", {}, el("tr", {}, columns.map(name => el("th", { scope: "col" }, name)))),
       el("tbody", {}, rows.map(row => el("tr", {}, render(row).map(cell => el("td", {}, cell)))))));
 }
 
 function login(message = "") {
+  document.title = "登录 · TXAPI";
   const error = el("p", { class: "form-error", role: "alert" }, message);
   const submit = el("button", { class: "button primary", type: "submit" }, "登录工作空间");
   const form = el("form", { class: "login-form" },
@@ -222,12 +311,13 @@ function login(message = "") {
     try {
       const response = await api.request("/api/auth/login", { method: "POST", body: Object.fromEntries(new FormData(form)) });
       if (!form.isConnected) return;
+      authGeneration++;
       api.setSession(response.session_token);
       user = response.user;
       form.reset();
       shell();
       await navigate();
-    } catch (failure) { error.textContent = failure.message; }
+    } catch (failure) { error.textContent = errorMessage(failure); }
     finally { submit.disabled = false; }
   });
   root.replaceChildren(el("main", { class: "login" },
@@ -243,10 +333,12 @@ function login(message = "") {
 
 function signOut(message = "") {
   generation++;
+  authGeneration++;
   disposeView();
   disposeView = () => {};
   api.setSession("");
   user = null;
+  suggestedModel = "";
   for (const dialog of document.querySelectorAll("dialog")) dialog.close();
   document.querySelector("#notice")?.remove();
   login(message);
@@ -288,23 +380,46 @@ function setMenu(open) {
   if (mobile && open) sidebar.querySelector("a, button")?.focus();
 }
 function pageSearch() {
+  const existing = document.querySelector("dialog.command[open]");
+  if (existing) { existing.querySelector("input").focus(); return; }
+  if (document.querySelector("dialog[open]")) return;
   const list = el("div", { class: "command-results" });
   const input = el("input", { type: "search", "aria-label": "搜索页面", placeholder: "搜索模型、渠道、账本…" });
+  const count = el("p", { class: "fine", role: "status", "aria-live": "polite" });
   const dialog = el("dialog", { class: "editor command", "aria-label": "跳转页面" },
-    heading("跳转页面", "仅搜索当前角色可访问的页面", button("关闭", () => dialog.close(), "quiet")), input, list);
+    heading("跳转页面", "仅搜索当前角色可访问的页面。方向键选择，Enter 跳转，Esc 关闭。", button("关闭", () => dialog.close(), "quiet")), input, count, list);
   function filter() {
-    const matches = allowedPages().filter(([, name]) => name.toLowerCase().includes(input.value.toLowerCase()));
+    const query = input.value.trim().toLowerCase();
+    const matches = allowedPages().filter(([id, name]) => name.toLowerCase().includes(query) || id.includes(query));
+    count.textContent = matches.length ? `找到 ${matches.length} 个页面` : "没有匹配页面";
     list.replaceChildren(...(matches.length ? matches.map(([id, label, symbol]) =>
       button(el("span", { class: "actions" }, icon(symbol), label), () => {
         dialog.close(); location.hash = id;
       }, "command-item")) : [empty("没有匹配页面，请换一个名称。")]));
   }
   input.addEventListener("input", filter);
+  dialog.addEventListener("keydown", event => {
+    if (event.isComposing) return;
+    const results = [...list.querySelectorAll("button")];
+    const index = results.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!results.length) return;
+      event.preventDefault();
+      const next = index < 0 ? (event.key === "ArrowDown" ? 0 : results.length - 1) :
+        (index + (event.key === "ArrowDown" ? 1 : -1) + results.length) % results.length;
+      results[next].focus();
+    } else if (event.key === "Enter" && document.activeElement === input && results.length) {
+      event.preventDefault(); results[0].click();
+    }
+  });
   manageDialog(dialog);
   filter(); document.body.append(dialog); dialog.showModal(); input.focus();
 }
 function shell() {
   root.replaceChildren(el("div", { class: "workspace" },
+    el("a", { class: "skip-link", href: "#view", onClick: event => {
+      event.preventDefault(); document.querySelector("#view h1")?.focus();
+    } }, "跳到主要内容"),
     el("aside", { class: "sidebar", id: "navigation" },
       el("div", { class: "brand-row" }, el("a", { href: "#overview", class: "wordmark" },
         text("span", "↯", "brand-mark"), "TXAPI", text("span", "console", "wordmark-sub")),
@@ -330,8 +445,9 @@ function shell() {
           icon("search"), text("span", "搜索页面"), text("kbd", "Ctrl K")),
           text("span", user.username + " / " + roleName(user.role), "identity"),
           button("退出登录", () => run(async () => {
+            const session = authGeneration;
             try { await api.request("/api/auth/logout", { method: "POST" }); }
-            finally { signOut(); }
+            finally { if (session === authGeneration) signOut(); }
           }), "quiet"))),
       el("main", { id: "view", class: "content" }),
       el("footer", { class: "workspace-footer" }, text("span", "TXAPI · 自托管 API 工作空间"),
@@ -340,7 +456,7 @@ function shell() {
 }
 function pageHeader(name, description, action) {
   return el("div", { class: "page-header" },
-    el("div", {}, text("h1", name), text("p", description, "muted")), action);
+    el("div", {}, el("h1", { tabindex: "-1" }, name), text("p", description, "muted")), action);
 }
 document.addEventListener("keydown", event => {
   if (user && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -374,7 +490,7 @@ async function navigate({ refreshIdentity = true, recoverForbidden = true } = {}
     }
   } catch (error) {
     if (epoch === generation && user) {
-      document.querySelector("#view").replaceChildren(panel(text("p", error.message, "form-error"), button("重试", () => run(navigate))));
+      document.querySelector("#view").replaceChildren(panel(text("p", errorMessage(error), "form-error"), button("重试", () => run(navigate))));
     }
     return;
   }
@@ -392,7 +508,12 @@ async function navigate({ refreshIdentity = true, recoverForbidden = true } = {}
   view.replaceChildren(text("p", "正在读取真实数据…", "empty"));
   try {
     const content = await ({ overview, keys, models: modelPage, playground, logs, users, channels, settings, tasks: backgroundTasks, routing: routingDiagnostics, billing: billingLedger, finance: ownerLedger, usage: usageRecords, "admin-keys": adminKeys, quotation: quotations })[page]();
-    if (epoch === generation && user) view.replaceChildren(content);
+    if (epoch === generation && user) {
+      view.replaceChildren(content);
+      document.title = `${allowed.find(item => item[0] === page)?.[1] || "总览"} · TXAPI`;
+      view.querySelector("h1")?.focus({ preventScroll: true });
+      window.scrollTo({ top: 0, left: 0 });
+    }
   } catch (error) {
     if (error.status === 403 && recoverForbidden && epoch === generation && user) {
       try {
@@ -406,7 +527,7 @@ async function navigate({ refreshIdentity = true, recoverForbidden = true } = {}
     }
     if (epoch === generation && user) view.replaceChildren(
       pageHeader("读取失败", "服务端未完成请求，请查看原因后重试。"),
-      panel(text("p", error.message, "form-error"), button("重试", () => run(navigate))));
+      panel(text("p", errorMessage(error), "form-error"), button("重试", () => run(navigate))));
   }
 }
 
@@ -431,6 +552,9 @@ async function overview() {
   ];
   const [logResult, balanceResult, channelResult] = await Promise.allSettled(extra);
   if (epoch !== generation || !user) return el("div");
+  for (const result of [logResult, balanceResult, channelResult]) {
+    if (result?.status === "rejected" && result.reason.status === 403) throw result.reason;
+  }
   const usage = usageResponse.data.usage || {};
   const rows = logResult.status === "fulfilled" ? list(logResult.value.data).slice(0, 100) : [];
   const range = el("select", { "aria-label": "样本时间范围" }, el("option", { value: "24" }, "过去 24 小时"), el("option", { value: "6" }, "过去 6 小时"));
@@ -496,11 +620,13 @@ async function overview() {
     text("p", "汇总来自可丢弃的保留日志，不代表完整财务历史。图表最多使用最近 100 条当前用户日志，不展示推测的增长率、延迟或渠道健康。", "fine"));
 }
 async function copyValue(value) {
+  const epoch = generation, session = authGeneration;
   try {
     if (!navigator.clipboard) throw new Error("clipboard unavailable");
     await navigator.clipboard.writeText(value);
-    notice("已复制。");
+    if (epoch === generation && session === authGeneration) notice("已复制。");
   } catch {
+    if (epoch !== generation || session !== authGeneration) return;
     const input = el("textarea", { readonly: true, rows: 3, "aria-label": "可复制内容" });
     input.value = value;
     const dialog = el("dialog", { class: "editor", "aria-label": "复制内容" },
@@ -529,7 +655,7 @@ async function keys() {
       const result = await api.request(`/api/me/keys${key.id ? `/${key.id}` : ""}`, {
         method: key.id ? "PUT" : "POST", body: keyInput(values),
       });
-      return { secret: result.data.key };
+      return key.id ? undefined : createdKey(result);
     }, "Key 不能扩大用户权限；零限制继承用户限制，仍受实例上限约束。" + (key.id ? "" : "创建时请等待完整密钥；关闭窗口后不再展示，可撤销重建。"));
   }
   return el("div", {}, pageHeader("我的 API Key", "为每个应用创建独立、权限明确的调用凭据。", button("+ 创建 Key", () => edit(), "primary")),
@@ -537,9 +663,10 @@ async function keys() {
       el("div", {}, text("strong", key.name), text("code", key.key_prefix, "block")),
       key.model_mode === "all" ? "授权范围内全部" : listText(key.models),
       badge(key.status), key.expires_at ? new Date(key.expires_at * 1000).toLocaleString() : "无到期时间",
-      actions(button("编辑", () => edit(key), "quiet"), button("撤销", () => run(async () => {
-        if (!confirm(`Revoke key "${key.name}"? Clients using it will stop working.`)) return;
+      actions(button("编辑", () => edit(key), "quiet"), button("撤销", () => run(async current => {
+        if (!confirm(`撤销 Key“${key.name}”？正在使用它的客户端将失去后续调用权限，此操作无法撤销。`)) return;
         await api.request(`/api/me/keys/${key.id}`, { method: "DELETE" });
+        if (!current()) return;
         notice("Key 已撤销。"); await navigate();
       }), "danger")),
     ])));
@@ -552,12 +679,12 @@ async function modelPage() {
   const names = list(response.data);
   const count = text("span", "", "muted");
   function filter() {
-    const filtered = names.filter(name => name.toLowerCase().includes(search.value.toLowerCase()));
+    const filtered = names.filter(name => name.toLowerCase().includes(search.value.trim().toLowerCase()));
     count.textContent = filtered.length + " / " + names.length + " 个模型";
     grid.replaceChildren(...(filtered.length ? filtered.map(name =>
       panel(el("span", { class: "model-symbol" }, icon("models")), text("h2", name),
         text("p", "模型目录由当前系统、用户与渠道权限共同决定。", "muted"),
-        el("a", { href: "#playground", class: "text-link" }, "进入调用测试 ›"))) :
+        el("a", { href: "#playground", class: "text-link", onClick: () => { suggestedModel = name; } }, "进入调用测试 ›"))) :
       [panel(empty(names.length ? "没有匹配的模型，请尝试其他名称。" : "尚无可见模型，请联系管理员配置静态上游与权限。"))]));
   }
   search.addEventListener("input", filter); filter();
@@ -569,6 +696,8 @@ async function modelPage() {
 
 async function playground() {
   const epoch = generation;
+  const initialModel = suggestedModel;
+  suggestedModel = "";
   const response = await api.request("/api/me/models");
   let controller;
   const output = el("pre", { class: "response", tabindex: "0", "aria-live": "polite" }, "调用结果会显示在这里。");
@@ -577,7 +706,7 @@ async function playground() {
   cancel.disabled = true;
   const form = el("form", {}, heading("连接测试", "真实的非流式调用，按当前实例和上游计费策略执行。"),
     el("div", { class: "form-grid" },
-      field({ name: "model", label: "模型", value: list(response.data)[0] || "", required: true }),
+      field({ name: "model", label: "模型", value: initialModel || list(response.data)[0] || "", required: true }),
       field({ name: "key", label: "调用 API Key", type: "password", required: true, hint: "仅用于本次调用，不写入浏览器存储。" }),
       field({ name: "prompt", label: "消息", type: "textarea", value: "Say hello in one sentence.", required: true, full: true })),
     actions(submit, cancel));
@@ -595,12 +724,57 @@ async function playground() {
       const result = await api.request("/v1/chat/completions", { method: "POST", callKey: values.key, timeout: 610000,
         signal: controller.signal, body: { model: values.model, messages: [{ role: "user", content: values.prompt }], max_tokens: 128 } });
       output.textContent = JSON.stringify(result, null, 2);
-    } catch (error) { output.textContent = error.message; }
+    } catch (error) { output.textContent = errorMessage(error); }
     finally { submit.disabled = false; cancel.disabled = true; form.querySelector('[name="key"]').value = ""; }
   });
   return el("div", {}, pageHeader("调用测试", "验证调用 Key、模型路由及真实响应。"),
     el("div", { class: "playground-grid" }, panel(form), panel(heading("响应", "网关返回的原始 JSON"), output)),
     text("p", `Client base URL: ${location.origin}/v1. Login sessions cannot be used as API keys.`, "fine"));
+}
+
+function pagedFeedback({ host, filter, inputs, previous, next, paging, reload, error: providedError, onReset = () => {} }) {
+  const state = el("p", { class: "list-loading fine", role: "status", "aria-live": "polite" });
+  const error = providedError || el("p", { class: "form-error", role: "alert" });
+  let busy = false, failed = false, applied = "", failedFilters = "", failedOffset = 0;
+  const signature = () => JSON.stringify(inputs.map(input => input.value.trim()));
+  const retry = button("重试读取", () => run(() => reload(failedOffset)));
+  retry.hidden = true;
+  function update() {
+    const dirty = signature() !== applied, page = paging();
+    previous.disabled = busy || dirty || page.offset === 0;
+    next.disabled = busy || dirty || !page.hasMore;
+    retry.disabled = busy || signature() !== failedFilters;
+    if (busy) state.textContent = "正在读取记录…";
+    else if (failed) state.textContent = signature() === failedFilters ? "读取未完成，可重试原页；不可用不代表没有记录。" :
+      "筛选条件已改变，请刷新后从第一页读取。";
+    else if (dirty) state.textContent = "筛选条件尚未应用，请刷新后查看匹配结果。";
+    else state.textContent = "已读取本页记录。";
+  }
+  for (const input of inputs) {
+    input.addEventListener("input", update);
+    input.addEventListener("change", update);
+  }
+  const initial = inputs.map(input => input.value);
+  const reset = button("重置筛选", () => {
+    inputs.forEach((input, index) => { input.value = initial[index]; });
+    onReset();
+    return run(() => reload(0));
+  });
+  filter.append(reset);
+  return {
+    nodes: [state, error, retry],
+    start() {
+      busy = true; failed = false; retry.hidden = true; error.textContent = "";
+      host.replaceChildren(); host.setAttribute("aria-busy", "true"); update();
+      return signature();
+    },
+    accept(value) { applied = value; failed = false; },
+    reject(failure, target, value) {
+      failed = true; failedOffset = target; failedFilters = value; retry.hidden = false;
+      error.textContent = errorMessage(failure);
+    },
+    finish() { busy = false; host.removeAttribute("aria-busy"); update(); },
+  };
 }
 
 async function logs() {
@@ -618,10 +792,13 @@ async function logs() {
     global ? el("option", { value: "admin" }, "全站请求（管理员）") : null);
   const filter = el("form", { class: "filter-bar" }, scope, global ? model : null,
     el("button", { class: "button secondary" }, "刷新"));
+  const feedback = pagedFeedback({ host, filter, inputs: [scope, model], previous, next,
+    paging: () => ({ offset, hasMore: rowCount >= limit }), reload: load,
+    onReset: () => { model.disabled = scope.value !== "admin"; } });
   async function load(targetOffset = offset) {
-    previous.disabled = next.disabled = true;
     const epoch = generation;
     const version = ++loadVersion;
+    const requestFilters = feedback.start(); count.textContent = "";
     const path = scope.value === "admin" ? "/api/admin/logs" : "/api/me/logs";
     try {
       const response = await api.request(`${path}?limit=${limit}&offset=${targetOffset}${scope.value === "admin" && model.value ? `&model=${encodeURIComponent(model.value)}` : ""}`);
@@ -629,6 +806,7 @@ async function logs() {
       const rows = list(response.data);
       offset = targetOffset;
       rowCount = rows.length;
+      feedback.accept(requestFilters);
       host.replaceChildren(table(["时间 / 请求 ID", "模型", "状态", "Token", "日志费用 / CNY", "延迟"], rows, row => [
         el("div", {}, text("span", new Date(row.created_at).toLocaleString()), text("code", row.request_id, "block")),
         row.origin_model, badge(row.status), `${fmt(row.total_tokens)}${row.is_estimated ? " (est.)" : ""}`,
@@ -639,17 +817,19 @@ async function logs() {
       ]));
       count.textContent = `记录 ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;
     } catch (error) {
-      if (epoch === generation && version === loadVersion) throw error;
+      if (epoch === generation && version === loadVersion) { feedback.reject(error, targetOffset, requestFilters); throw error; }
     } finally {
       if (epoch === generation && version === loadVersion) {
-        previous.disabled = offset === 0; next.disabled = rowCount < limit;
+        feedback.finish();
       }
     }
   }
   filter.addEventListener("submit", event => { event.preventDefault(); run(() => load(0)); });
+  scope.addEventListener("change", () => { model.disabled = scope.value !== "admin"; run(() => load(0)); });
+  model.disabled = scope.value !== "admin";
   await load();
   return el("div", {}, pageHeader("请求日志", "保留的访问日志，不是持久账本；新日志可能稍后出现。"),
-    panel(filter, host, actions(previous, count, next)));
+    panel(filter, ...feedback.nodes, host, actions(previous, count, next)));
 }
 
 async function billingLedger() {
@@ -667,10 +847,12 @@ async function billingLedger() {
   const previous = button("上一页", () => run(() => load(Math.max(0, offset - limit))));
   const next = button("下一页", () => run(() => load(offset + limit)));
   const filter = el("form", { class: "filter-bar" }, state, owner, key, el("button", { class: "button secondary" }, "刷新账本"));
+  const feedback = pagedFeedback({ host, filter, inputs: [state, owner, key], previous, next,
+    paging: () => ({ offset, hasMore: rowCount >= limit }), reload: load });
   async function load(targetOffset = offset) {
     const epoch = generation;
     const version = ++loadVersion;
-    previous.disabled = next.disabled = true;
+    const requestFilters = feedback.start(); count.textContent = "";
     const query = new URLSearchParams({ state: state.value, limit, offset: targetOffset });
     if (owner.value.trim()) query.set("user_id", owner.value.trim());
     if (key.value.trim()) query.set("token_id", key.value.trim());
@@ -680,6 +862,7 @@ async function billingLedger() {
       const rows = list(response.data);
       offset = targetOffset;
       rowCount = rows.length;
+      feedback.accept(requestFilters);
       host.replaceChildren(rows.length ? table(["预留记录 / 归属", "模型 / 价格版本", "状态", "最终用户费用", "当前用户占用", "上游包络 / 预算", "操作"], rows, row => {
         const amounts = ledgerAmounts(row);
         return [
@@ -688,15 +871,15 @@ async function billingLedger() {
           el("div", {}, financialBadge(row.state), text("span", row.reason, "block")),
           amounts.finalCharge, amounts.retainedBudget,
           el("div", {}, `Envelope ${amounts.providerEnvelope}`, text("span", `Budget ${amounts.providerBudget}`, "block")),
-          button("查看", () => run(() => inspectBilling(row.id)), "quiet"),
+          button("查看", () => run(() => inspectBilling(row.id, () => version === loadVersion)), "quiet"),
         ];
       }) : empty("没有匹配记录。待核对费用会继续保留预算，直到验证或明确豁免。"));
       count.textContent = `记录 ${rows.length ? offset + 1 : 0}-${offset + rows.length}`;
     } catch (error) {
-      if (epoch === generation && version === loadVersion) throw error;
+      if (epoch === generation && version === loadVersion) { feedback.reject(error, targetOffset, requestFilters); throw error; }
     } finally {
       if (epoch === generation && version === loadVersion) {
-        previous.disabled = offset === 0; next.disabled = rowCount < limit;
+        feedback.finish();
       }
     }
   }
@@ -704,13 +887,14 @@ async function billingLedger() {
   await load();
   return el("div", {}, pageHeader("财务核对", "持久预留与核对决定，独立于访问日志保留。"),
     panel(text("p", "用户费用与占用使用账户单位，上游包络使用合同记录币种，二者不自动换算或比较。待核对不代表免费，已结算记录已释放用户占用。此处不记录实际上游账单；仅 strict 模式下租约过期的待核对记录可作最终决定。", "muted"),
-      filter, host, actions(previous, count, next)));
+      filter, ...feedback.nodes, host, actions(previous, count, next)));
 }
 
-async function inspectBilling(id) {
+async function inspectBilling(id, current = () => true) {
+  if (!current()) return;
   const epoch = generation;
   const response = await api.request(`/api/admin/billing/reservations/${encodeURIComponent(id)}`);
-  if (epoch !== generation || !user) return;
+  if (epoch !== generation || !user || !current()) return;
   const { reservation: row, attempts, resolution, price_snapshot: snapshot } = response.data;
   const amounts = ledgerAmounts(row);
   const dialog = el("dialog", { class: "editor billing-detail", "aria-label": "财务预留记录" });
@@ -818,10 +1002,11 @@ async function channels() {
   for (const value of list(response.data)) {
     content.push(panel(
       heading(value.name, `${value.type.toUpperCase()} / ${value.base_url}`, actions(badge(value.status),
-        button("编辑渠道", () => edit(value)), button("删除", () => run(async () => {
-          if (!confirm(`Delete channel "${value.name}" and all of its credentials?`)) return;
+        button("编辑渠道", () => edit(value)), button("删除", () => run(async current => {
+          if (!confirm(`删除渠道“${value.name}”及其全部凭据？依赖此渠道的后续调用可能被拒绝，此操作无法撤销。`)) return;
           pendingPublication = false;
           await api.request(`/api/admin/channels/${value.id}`, { method: "DELETE" });
+          if (!current()) return;
           if (!pendingPublication) notice("渠道已删除并发布。"); await navigate();
         }), "danger"))),
       text("p", `${listText(value.models)} / Priority ${value.priority} / Weight ${value.weight} / Group ${value.group_name}`, "fine"),
@@ -833,9 +1018,10 @@ async function channels() {
           button("编辑", () => credentialDialog(value.id, credential), "quiet"),
           button(credential.status === "disabled" ? "启用" : "停用", () => setCredential(credential, credential.status === "disabled" ? "active" : "disabled"), "quiet"),
           ["cooldown", "banned"].includes(credential.status) ? button("恢复", () => setCredential(credential, "active"), "quiet") : null,
-          button("删除", () => run(async () => {
-            if (!confirm(`Delete credential "${credential.name}"? The last credential cannot be deleted.`)) return;
-            await api.request(`/api/admin/credentials/${credential.id}`, { method: "DELETE" }); await navigate();
+          button("删除", () => run(async current => {
+            if (!confirm(`删除凭据“${credential.name}”？此操作无法撤销，最后一个凭据不能删除。`)) return;
+            await api.request(`/api/admin/credentials/${credential.id}`, { method: "DELETE" });
+            if (current()) await navigate();
           }), "danger")),
       ])));
   }
@@ -853,9 +1039,9 @@ function credentialDialog(channelID, value = {}) {
   }), "替换密钥留空会保留旧密钥，不读取已保存的完整密钥。");
 }
 function setCredential(value, status) {
-  run(async () => {
+  return run(async current => {
     await api.request(`/api/admin/credentials/${value.id}/status`, { method: "POST", body: { status } });
-    await navigate();
+    if (current()) await navigate();
   });
 }
 function publicationCard(title, value) {
@@ -887,7 +1073,10 @@ async function settings() {
       showPublication(response.data);
       notice("配置已发布。");
     } catch (error) {
-      if (epoch !== generation) return;
+      if (epoch !== generation) {
+        if (error.status === 403 || error.saved) throw error;
+        return;
+      }
       if (error.data?.channels && error.data?.prices) showPublication(error.data);
       else {
         const current = await api.request("/api/admin/config-status");
@@ -909,9 +1098,10 @@ async function settings() {
       button("+ 设置售价", () => priceDialog())),
       table(["模型", "输入 / 千 Token", "输出 / 千 Token", "操作"], list(prices.data), price => [
         text("code", price.model), fmt(price.input_price_per_1k), fmt(price.output_price_per_1k),
-        actions(button("编辑", () => priceDialog(price), "quiet"), button("删除", () => run(async () => {
-          if (!confirm(`Remove price for ${price.model}? Strict mode rejects new calls without a matching price; legacy may count them as zero.`)) return;
-          await api.request(`/api/admin/prices/${encodeURIComponent(price.model)}`, { method: "DELETE" }); await navigate();
+        actions(button("编辑", () => priceDialog(price), "quiet"), button("删除", () => run(async current => {
+          if (!confirm(`删除模型“${price.model}”的售价？strict 模式将拒绝没有匹配售价的新调用；legacy 模式可能按零费用记录。`)) return;
+          await api.request(`/api/admin/prices/${encodeURIComponent(price.model)}`, { method: "DELETE" });
+          if (current()) await navigate();
         }), "danger")),
       ])),
     panel(heading("渠道组倍率", "完整替换，未列出的组倍率默认为 1.0。", button("编辑倍率", () =>
@@ -958,22 +1148,26 @@ async function routingDiagnostics() {
   const filter = el("form", { class: "filter-bar" }, scope, requestID, owner, key, el("button", { class: "button secondary" }, "刷新诊断"));
   const previous = button("上一页", () => load(Math.max(0, offset - 50))), next = button("下一页", () => load(offset + 50));
   const base = () => "/api/" + scope.value + "/routing";
+  const feedback = pagedFeedback({ host, filter, inputs: [scope, requestID, owner, key], previous, next, error,
+    paging: () => ({ offset, hasMore: hasMore && offset < 10000 }), reload: load,
+    onReset: () => { owner.disabled = scope.value !== "admin"; } });
   const date = value => value ? new Date(value).toLocaleString() : "未观察到";
   const target = row => row.channel_id ? "Channel " + row.channel_id + " / Key " + row.credential_id : "未选择";
   async function load(targetOffset = offset) {
     const ownVersion = ++version;
     ++detailVersion; detailController?.abort(); detail.replaceChildren();
     controller?.abort(); controller = new AbortController();
-    previous.disabled = next.disabled = true; error.textContent = ""; state.textContent = "正在读取保留的观察…";
-    host.replaceChildren();
+    const requestFilters = feedback.start(), requestBase = base(); count.textContent = "";
+    state.textContent = "正在读取保留的观察…";
     const query = new URLSearchParams({ limit: "50", offset: String(targetOffset) });
     if (requestID.value) query.set("request_id", requestID.value);
     if (key.value) query.set("token_id", key.value);
     if (scope.value === "admin" && owner.value) query.set("user_id", owner.value);
     try {
-      const response = await api.request(base() + "?" + query, { signal: controller.signal });
+      const response = await api.request(requestBase + "?" + query, { signal: controller.signal });
       if (!current() || ownVersion !== version) return;
       offset = targetOffset; hasMore = response.has_more === true;
+      feedback.accept(requestFilters);
       state.textContent = response.enabled ?
         "诊断已启用，最多保留 " + response.capacity + " completed HTTP scopes for " + response.retention_seconds / 60 + " minutes; restart or capacity eviction may remove earlier rows." :
         "诊断记录未启用。启用 server.route_diagnostics 并重启后可保留最近的 HTTP 路由事实。";
@@ -982,15 +1176,19 @@ async function routingDiagnostics() {
         el("div", {}, text("code", row.request_id || "Request ID 未保留", "block"), date(row.finished_at)),
         "User " + row.user_id + " / Key " + row.token_id, el("div", {}, row.model || "未解析", text("span", row.operation, "block")),
         el("div", {}, row.reason.replaceAll("_", " "), text("span", list(row.selections).length + " choices / " + list(row.attempts).length + " attempts", "block")),
-        button("查看路由", () => inspect(row.id), "quiet"),
+        button("查看路由", () => { if (ownVersion === version) return inspect(row.id, requestBase); }, "quiet"),
       ]) : empty("没有匹配的保留观察，缺少记录不证明请求从未执行。"));
       count.textContent = "记录 " + (rows.length ? offset + 1 : 0) + "-" + (offset + rows.length);
     } catch (failure) {
-      if (current() && ownVersion === version && failure.name !== "AbortError") { error.textContent = failure.message; state.textContent = "观察读取失败。"; }
-    } finally { if (current() && ownVersion === version) { previous.disabled = offset === 0; next.disabled = !hasMore || offset >= 10000; } }
+      if (current() && ownVersion === version && failure.name !== "AbortError") {
+        if (failure.status === 403 && !host.isConnected) throw failure;
+        feedback.reject(failure, targetOffset, requestFilters); state.textContent = "观察读取失败。";
+        if (failure.status === 403) await navigate();
+      }
+    } finally { if (current() && ownVersion === version) feedback.finish(); }
   }
-  async function inspect(id) {
-    const ownVersion = ++detailVersion, admin = scope.value === "admin", requestBase = base();
+  async function inspect(id, requestBase) {
+    const ownVersion = ++detailVersion, admin = requestBase.startsWith("/api/admin/"), session = authGeneration;
     detailController?.abort(); detailController = new AbortController();
     error.textContent = ""; detail.replaceChildren();
     try {
@@ -1021,14 +1219,17 @@ async function routingDiagnostics() {
           (attempt.committed ? "已提交 / " + attempt.http_status : "未提交") + "; protocol complete: " + attempt.protocol_complete,
           ...(admin ? [el("div", {}, target(attempt), text("span", attempt.actual_model || "未观察到", "block"))] : []),
         ]) : empty("此次调用没有观察到上游尝试。"));
-    } catch (failure) { if (current() && ownVersion === detailVersion && failure.name !== "AbortError") error.textContent = failure.message; }
+    } catch (failure) {
+      if (await recheckForbidden(failure, session)) return;
+      if (current() && ownVersion === detailVersion && failure.name !== "AbortError") error.textContent = errorMessage(failure);
+    }
   }
   filter.addEventListener("submit", event => { event.preventDefault(); load(0); });
   scope.addEventListener("change", () => { owner.disabled = scope.value !== "admin"; offset = 0; hasMore = false; load(0); });
   await load(0);
   return el("div", {}, pageHeader("路由诊断", "通过 Request ID 关联的已结束 HTTP 调用观察，每次调用独立记录。"),
     panel(text("p", "临时诊断不是请求账本或恢复日志；不包含活跃调用、认证失败、后台控制或 WS 轮次。", "muted"),
-      filter, state, error, host, actions(previous, count, next)), panel(detail));
+      filter, state, ...feedback.nodes, host, actions(previous, count, next)), panel(detail));
 }
 
 async function backgroundTasks() {
@@ -1049,53 +1250,64 @@ async function backgroundTasks() {
   const previous = button("上一页", () => load(Math.max(0, offset - 50)));
   const next = button("下一页", () => load(offset + 50));
   const base = () => "/api/" + scope.value + "/background";
+  const feedback = pagedFeedback({ host, filter, inputs: [scope, stage, owner, key], previous, next, error,
+    paging: () => ({ offset, hasMore: hasMore && offset < 10000 }), reload: load,
+    onReset: () => { owner.disabled = scope.value !== "admin"; } });
   const date = value => value ? new Date(value).toLocaleString() : "未记录";
   async function load(target = offset) {
     const ownVersion = ++version;
     ++detailVersion; detailController?.abort(); detail.replaceChildren();
     controller?.abort(); controller = new AbortController();
-    previous.disabled = next.disabled = true; error.textContent = "";
+    const requestFilters = feedback.start(), requestBase = base(); count.textContent = "";
     const query = new URLSearchParams({ limit: "50", offset: String(target) });
     if (stage.value) query.set("stage", stage.value);
     if (key.value) query.set("token_id", key.value);
     if (scope.value === "admin" && owner.value) query.set("user_id", owner.value);
     try {
-      const response = await api.request(base() + "?" + query, { signal: controller.signal });
+      const response = await api.request(requestBase + "?" + query, { signal: controller.signal });
       if (!current() || ownVersion !== version) return;
       offset = target; hasMore = response.has_more === true;
+      feedback.accept(requestFilters);
       host.replaceChildren(table(["任务 / 创建时间", "用户 / Key", "模型 / 阶段", "内容 / 事件", "操作"], list(response.data), row => [
         el("div", {}, text("code", row.id, "block"), date(row.created_at)),
         "User " + row.user_id + " / Key " + row.token_id,
         el("div", {}, row.model, text("span", row.stage + (row.cancel_requested ? " / cancel requested" : ""), "block")),
         el("div", {}, row.content_available ? "已保留（不展示正文）" : "已过期或删除", text("span", String(row.event_count) + (row.replay_pending ? " / replay pending" : "") , "block")),
-        button("查看任务", () => inspect(row.id), "quiet")
+        button("查看任务", () => { if (ownVersion === version) return inspect(row.id, requestBase); }, "quiet")
       ]));
       count.textContent = "记录 " + (response.data?.length ? offset + 1 : 0) + "-" + (offset + list(response.data).length);
-    } catch (failure) { if (current() && ownVersion === version && failure.name !== "AbortError") error.textContent = failure.message; }
-    finally { if (current() && ownVersion === version) { previous.disabled = offset === 0; next.disabled = !hasMore || offset >= 10000; } }
+    } catch (failure) {
+      if (current() && ownVersion === version && failure.name !== "AbortError") {
+        if (failure.status === 403 && !host.isConnected) throw failure;
+        feedback.reject(failure, target, requestFilters);
+        if (failure.status === 403) await navigate();
+      }
+    }
+    finally { if (current() && ownVersion === version) feedback.finish(); }
   }
-  async function inspect(id) {
-    const ownVersion = ++detailVersion, requestBase = base();
+  async function inspect(id, requestBase = base()) {
+    const ownVersion = ++detailVersion, session = authGeneration;
     detailController?.abort(); detailController = new AbortController();
     error.textContent = "";
     try {
       const response = await api.request(requestBase + "/" + encodeURIComponent(id), { signal: detailController.signal });
       if (!current() || ownVersion !== detailVersion) return;
       const row = response.data;
-      const requestCancel = button("请求取消", async () => {
-        if (!current() || ownVersion !== detailVersion || !confirm("Request cancellation for " + row.id + "? This does not prove remote work has stopped.")) return;
+      const requestCancel = button("请求取消", () => run(async isCurrent => {
+        if (!current() || ownVersion !== detailVersion || !confirm("请求取消任务“" + row.id + "”？这不代表远端执行已停止，也不自动退款。")) return;
         requestCancel.disabled = true;
         try {
           await api.request("/api/me/background/" + encodeURIComponent(row.id) + "/cancel", { method: "POST", body: { revision: row.revision }, signal: detailController.signal });
-          if (!current() || ownVersion !== detailVersion) return;
+          if (!isCurrent() || !current() || ownVersion !== detailVersion) return;
           notice("取消请求已记录，请刷新查看远端结果；未知执行继续保持未知。");
           await load();
         } catch (failure) {
+          if (failure.status === 403) throw failure;
           if (!current() || ownVersion !== detailVersion) return;
-          if (failure.status === 409) await inspect(row.id);
-          if (current()) error.textContent = failure.message;
+          if (failure.status === 409) await inspect(row.id, requestBase);
+          if (current()) error.textContent = errorMessage(failure);
         } finally { if (requestCancel.isConnected) requestCancel.disabled = false; }
-      }, "danger");
+      }), "danger");
       detail.replaceChildren(heading("任务元数据", row.id),
         text("p", "Stage: " + row.stage + ". Terminal is not proof of success or settlement. No content or upstream handle is exposed.", "muted"),
         el("dl", { class: "facts" },
@@ -1107,13 +1319,16 @@ async function backgroundTasks() {
           text("dt", "事件回放待处理"), text("dd", String(row.replay_pending)),
           text("dt", "已请求取消"), text("dd", String(row.cancel_requested))),
         row.can_cancel && scope.value === "me" ? requestCancel : text("p", "仅可读取或当前无法再次请求取消。", "fine"));
-    } catch (failure) { if (current() && ownVersion === detailVersion && failure.name !== "AbortError") error.textContent = failure.message; }
+    } catch (failure) {
+      if (await recheckForbidden(failure, session)) return;
+      if (current() && ownVersion === detailVersion && failure.name !== "AbortError") error.textContent = errorMessage(failure);
+    }
   }
   filter.addEventListener("submit", event => { event.preventDefault(); load(0); });
   scope.addEventListener("change", () => { owner.disabled = scope.value !== "admin"; host.replaceChildren(); offset = 0; hasMore = false; load(0); });
   await load(0);
   return el("div", {}, pageHeader("后台任务", "登录会话授权的任务元数据；正文读取与收费由各自入口管理。"),
-    panel(text("p", "取消不是退款，也不证明远端工作已停止；过期元数据可能为安全恢复继续保留。", "muted"), filter, error, host, actions(previous, count, next)), panel(detail));
+    panel(text("p", "取消不是退款，也不证明远端工作已停止；过期元数据可能为安全恢复继续保留。", "muted"), filter, ...feedback.nodes, host, actions(previous, count, next)), panel(detail));
 }
 
 function dateText(value) {
@@ -1122,62 +1337,108 @@ function dateText(value) {
 function collection({ title, subtitle, filters = [], base, columns, row, renderDetail, exportRow, exportColumns, exportName, note }) {
   const epoch = generation;
   let disposed = false, offset = 0, hasMore = false, version = 0, detailVersion = 0, rows = [];
+  let busy = false, failed = false, appliedFilters = "", retryFilters = "", retryOffset = 0;
   let controller, detailController;
   const current = () => !disposed && epoch === generation && user;
   disposeView = () => { disposed = true; controller?.abort(); detailController?.abort(); };
-  const host = el("div"), detail = el("div");
+  const host = el("div"), detail = el("div", { role: "region", "aria-label": "记录详情" });
   const error = el("p", { class: "form-error", role: "alert" });
+  const state = el("p", { class: "list-loading fine", role: "status", "aria-live": "polite" });
   const count = text("span", "", "muted");
   const previous = button("上一页", () => load(Math.max(0, offset - 50)));
   const next = button("下一页", () => load(offset + 50));
   const refresh = el("button", { type: "submit", class: "button" }, "刷新");
-  const filter = el("form", { class: "filter-bar" }, filters.map(f => f.input), refresh);
+  const initialFilters = filters.map(f => f.input.value);
+  const clear = button("清除筛选", () => { filters.forEach((f, index) => { f.input.value = initialFilters[index]; }); return load(0); });
+  const retry = button("重试读取", () => load(retryOffset));
+  retry.hidden = true;
+  const filter = el("form", { class: "filter-bar" }, filters.map(f => f.input), refresh, filters.length ? clear : null);
+  const signature = () => JSON.stringify([base(), ...filters.map(f => f.input.value.trim())]);
   const exportButton = exportRow ? button("导出本页", () => {
-    if (current()) downloadCSV(exportName, exportColumns, rows.map(exportRow));
+    if (current() && !exportButton.disabled) downloadCSV(exportName, exportColumns, rows.map(exportRow));
   }) : null;
   const root = el("div", {}, pageHeader(title, subtitle, exportButton),
-    panel(note ? text("p", note, "muted") : null, filter, error, host, actions(previous, count, next)), detail);
+    panel(note ? text("p", note, "muted") : null, filter, state, error, retry, host, actions(previous, count, next)), detail);
+  function updateControls() {
+    const dirty = signature() !== appliedFilters;
+    previous.disabled = busy || failed || dirty || offset === 0;
+    next.disabled = busy || failed || dirty || !hasMore || offset >= 10000;
+    retry.disabled = busy || signature() !== retryFilters;
+    if (exportButton) exportButton.disabled = busy || failed || dirty || !rows.length;
+    if (busy) state.textContent = "正在读取记录…";
+    else if (failed && signature() !== retryFilters) state.textContent = "筛选条件已改变，请刷新后从第一页读取。";
+    else if (failed) state.textContent = "本次读取未完成，不代表没有记录。可重试原页。";
+    else if (dirty && !failed) state.textContent = "筛选条件尚未应用，请刷新后查看或导出匹配结果。";
+    else if (!failed) state.textContent = rows.length ? "已读取本页记录。" : "本次查询没有匹配记录。";
+    refresh.setAttribute("aria-busy", String(busy));
+  }
+  for (const f of filters) {
+    f.input.addEventListener("input", updateControls);
+    f.input.addEventListener("change", updateControls);
+  }
   async function load(target = offset) {
     if (!current()) return;
     const ownVersion = ++version;
     ++detailVersion; detailController?.abort(); detail.replaceChildren();
     controller?.abort(); controller = new AbortController();
-    previous.disabled = next.disabled = true;
+    busy = true; failed = false; rows = []; hasMore = false;
+    retry.hidden = true; count.textContent = "";
     error.textContent = "";
+    host.replaceChildren();
     host.setAttribute("aria-busy", "true");
+    const requestFilters = signature();
+    const requestBase = base();
+    updateControls();
     const query = new URLSearchParams({ limit: "50", offset: String(target) });
     for (const f of filters) if (f.key && f.input.value.trim()) query.set(f.key, f.input.value.trim());
     try {
-      const response = await api.request(base() + "?" + query, { signal: controller.signal });
+      const response = await api.request(requestBase + "?" + query, { signal: controller.signal });
       if (!current() || ownVersion !== version) return;
-      rows = list(response.data); offset = target;
+      rows = list(response.data); offset = target; appliedFilters = requestFilters;
       hasMore = response.has_more === true || (response.has_more === undefined && rows.length === 50);
       host.replaceChildren(response.enabled === false ? empty("原生用量记录未启用。请联系管理员核对实例配置；未启用不等于零用量。") :
-        table(columns, rows, r => row(r, () => inspect(r.id))));
+        table(columns, rows, r => row(r, () => {
+          if (ownVersion === version) return inspect(r.id, requestBase);
+        })));
       count.textContent = "记录 " + (rows.length ? offset + 1 : 0) + "–" + (offset + rows.length);
     } catch (failure) {
       if (current() && ownVersion === version) {
-        error.textContent = "读取失败：" + failure.message + "。可以刷新重试；不可用不代表没有记录。";
+        if (failure.code === "canceled") return;
+        if (failure.status === 403 && !root.isConnected) throw failure;
+        failed = true; retryOffset = target; retryFilters = requestFilters; retry.hidden = false;
+        state.textContent = "本次读取未完成，不代表没有记录。";
+        error.textContent = "读取失败：" + errorMessage(failure);
+        if (failure.status === 403) await navigate();
       }
     } finally {
       if (current() && ownVersion === version) {
-        previous.disabled = offset === 0; next.disabled = !hasMore || offset >= 10000;
+        busy = false;
+        updateControls();
         host.removeAttribute("aria-busy");
       }
     }
   }
-  async function inspect(id) {
+  async function inspect(id, requestBase) {
     if (!current()) return;
     const ownVersion = ++detailVersion;
     detailController?.abort(); detailController = new AbortController();
-    detail.replaceChildren();
+    detail.replaceChildren(text("p", "正在读取记录详情…", "list-loading"));
+    detail.setAttribute("aria-busy", "true");
     error.textContent = "";
     try {
-      const response = await api.request(base() + "/" + encodeURIComponent(id), { signal: detailController.signal });
+      const response = await api.request(requestBase + "/" + encodeURIComponent(id), { signal: detailController.signal });
       if (!current() || ownVersion !== detailVersion) return;
       detail.replaceChildren(renderDetail(response.data));
+      const title = detail.querySelector("h2");
+      title?.setAttribute("tabindex", "-1"); title?.focus({ preventScroll: true });
     } catch (failure) {
-      if (current() && ownVersion === detailVersion) error.textContent = "详情不可用：" + failure.message;
+      if (current() && ownVersion === detailVersion && failure.code !== "canceled") {
+        detail.replaceChildren(empty("详情读取未完成，请重新选择记录。"));
+        error.textContent = "详情不可用：" + errorMessage(failure);
+        if (failure.status === 403) await navigate();
+      }
+    } finally {
+      if (current() && ownVersion === detailVersion) detail.removeAttribute("aria-busy");
     }
   }
   filter.addEventListener("submit", event => { event.preventDefault(); load(0); });
@@ -1193,6 +1454,7 @@ async function ownerLedger() {
   const epoch = generation;
   const summaryResult = await api.request("/api/me/billing/summary").then(value => ({ value }), error => ({ error }));
   if (epoch !== generation || !user) return el("div");
+  if (summaryResult.error?.status === 403) throw summaryResult.error;
   const state = selectFilter("个人财务状态", [["", "全部状态"], ["pending", "待核对"], ["settled", "已结算"], ["reserved", "已预留"], ["active", "执行中"]]);
   const key = idFilter("调用 Key ID");
   const summary = summaryResult.value?.data;
@@ -1225,7 +1487,7 @@ async function ownerLedger() {
     metricCard("当前预算占用", summary.balance_known ? moneyText(summary.held_units) : "未知", "租约过期仍可能保留"),
     metricCard("待核对记录", knownCount(summary.pending_count), "待核对不代表免费"),
     metricCard("账本时间", summary.as_of ? new Date(summary.as_of).toLocaleTimeString("zh-CN") : "未知", "独立于访问日志")) :
-    panel(text("p", "资金汇总暂不可用：" + summaryResult.error.message, "form-error")), view.root.children[1]);
+    panel(text("p", "资金汇总暂不可用：" + errorMessage(summaryResult.error), "form-error")), view.root.children[1]);
   await view.load();
   return view.root;
 }
@@ -1287,7 +1549,7 @@ async function adminKeys() {
       const body = { ...keyInput(values), user_id: ownerID(values.user_id) };
       if (key.id && body.user_id !== key.user_id) throw new Error("现有 Key 不能在编辑时改变归属；无主旧 Key 请使用显式认领。");
       const result = await api.request("/api/admin/keys" + (key.id ? "/" + key.id : ""), { method: key.id ? "PUT" : "POST", body });
-      return { secret: result.data?.key };
+      return key.id ? undefined : createdKey(result);
     }, "密钥不会扩大归属用户的权限。无主旧 Key 必须显式认领；已有 Key 不展示完整密钥。" + (key.id ? "" : "创建时请等待完整密钥；关闭窗口后不再展示，可撤销重建。"));
   }
   const rows = list(response.data);
@@ -1306,10 +1568,10 @@ async function adminKeys() {
           if (values.confirmation !== String(key.id)) throw new Error("请输入完整 Key ID 确认认领。");
           return api.request("/api/admin/keys/" + key.id + "/claim", { method: "POST", body: { user_id: ownerID(values.user_id) } });
         }, "仅认领当前无主的旧 Key。已有归属不可在此迁移。"), "quiet"),
-        button("撤销", () => run(async () => {
+        button("撤销", () => run(async current => {
           if (!confirm("撤销 Key " + key.name + "？正在使用它的客户端会失去后续调用权限。")) return;
           await api.request("/api/admin/keys/" + key.id, { method: "DELETE" });
-          await navigate();
+          if (current()) await navigate();
         }), "danger")),
     ]));
   }
@@ -1318,7 +1580,7 @@ async function adminKeys() {
     panel(el("div", { class: "filter-bar" }, search), host));
 }
 async function quotations() {
-  const epoch = generation;
+  const epoch = generation, session = authGeneration;
   const result = await api.request("/api/admin/quotations/current");
   if (epoch !== generation || !user) return el("div");
   const current = result.data;
@@ -1359,7 +1621,8 @@ async function quotations() {
         text("strong", reply.data.known ? moneyText(reply.data.amount_units) + " " + reply.data.currency : "未知，不能当作零费用"),
         text("p", "只读诊断，不发起生成、不扣费、不释放预算，也不证明输入数量真实发生。", "fine"));
     } catch (failure) {
-      if (!disposed && epoch === generation) error.textContent = failure.message;
+      if (await recheckForbidden(failure, session)) return;
+      if (!disposed && epoch === generation) error.textContent = errorMessage(failure);
     } finally { if (!disposed && epoch === generation) submit.disabled = !current.enabled; }
   });
   return el("div", {}, pageHeader("报价诊断", "使用明确历史版本与假设数量进行只读计算；不替代实际账本。"),

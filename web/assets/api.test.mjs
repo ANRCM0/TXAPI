@@ -132,7 +132,7 @@ test("sign out cancels in-flight requests instead of displaying the previous use
   client.setSession("old-session");
   const request = client.request("/api/me");
   client.setSession("");
-  await assert.rejects(request, /canceled/);
+  await assert.rejects(request, error => error.code === "canceled");
 });
 
 test("saved failures retain mutation facts and publication failures retain current status", async () => {
@@ -181,7 +181,7 @@ test("old session responses cannot deliver data or publish warnings after a sess
   const pending = client.request("/api/me");
   client.setSession("current");
   complete(new Response('{"data":{"role":"admin"}}', { headers: { "X-TXAPI-Publication-State": "pending" } }));
-  await assert.rejects(pending, /canceled/);
+  await assert.rejects(pending, error => error.code === "canceled");
   assert.equal(warnings, 0);
 });
 
@@ -192,4 +192,120 @@ test("forbidden management requests preserve the login session", async () => {
   client.setSession("current");
   await assert.rejects(client.request("/api/admin/users"), error => error.status === 403 && error.type === "forbidden");
   assert.equal(signedOut, 0);
+});
+
+test("a canceled request never starts a fetch and can be distinguished from a timeout", async () => {
+  let calls = 0;
+  const aborted = new AbortController();
+  aborted.abort();
+  const client = createClient({ fetcher: async () => { calls++; return new Response('{}'); } });
+  await assert.rejects(client.request("/api/me", { signal: aborted.signal }), error =>
+    error.code === "canceled" && error.name === "AbortError" && error.operationUnknown === false);
+  assert.equal(calls, 0);
+
+  const waiting = createClient({ fetcher: async (_path, { signal }) => new Promise((_resolve, reject) => {
+    calls++;
+    signal.addEventListener("abort", () => reject(new DOMException("fixture-abort", "AbortError")), { once: true });
+  }) });
+  await assert.rejects(waiting.request("/api/me/keys", { method: "POST", body: {}, timeout: 5 }), error =>
+    error.code === "timeout" && error.name !== "AbortError" && error.operationUnknown === true && /刷新/.test(error.message));
+  assert.equal(calls, 1, "a timed out mutation must never be replayed");
+});
+
+test("network failures provide recovery guidance without exposing transport internals or replaying a mutation", async () => {
+  let calls = 0;
+  const client = createClient({ fetcher: async () => {
+    calls++;
+    throw new TypeError("fixture transport failure with private-session-details");
+  } });
+  await assert.rejects(client.request("/api/me"), error => error.code === "network" &&
+    error.operationUnknown === false && /网络/.test(error.message) && !error.message.includes("private-session"));
+  await assert.rejects(client.request("/api/me/keys", { method: "POST", body: {} }), error =>
+    error.code === "network" && error.operationUnknown === true && /重复提交/.test(error.message));
+  assert.equal(calls, 2);
+});
+
+test("HTTP authorization survives non-JSON bodies and only the active management session expires", async () => {
+  let signedOut = 0;
+  let status = 401;
+  const client = createClient({ onUnauthorized: () => { signedOut++; client.setSession(""); }, fetcher: async () =>
+    new Response('<html>proxy-failure-with-private-details</html>', { status }) });
+  client.setSession("current");
+  await assert.rejects(client.request("/api/me"), error => error.code === "http" && error.status === 401 &&
+    !error.message.includes("private-details"));
+  assert.equal(signedOut, 1);
+  client.setSession("current");
+  await assert.rejects(client.request("/v1/models", { callKey: "invalid-call-key" }), error => error.status === 401);
+  assert.equal(signedOut, 1);
+  status = 403;
+  await assert.rejects(client.request("/api/admin/users"), error => error.code === "http" && error.status === 403);
+  assert.equal(signedOut, 1);
+});
+
+test("malformed and primitive successful responses are explicit failures instead of empty or type-error states", async () => {
+  for (const body of ['null', 'false', '7', '"unexpected"', '[]', '<html>proxy</html>']) {
+    const client = createClient({ fetcher: async () => new Response(body) });
+    await assert.rejects(client.request("/api/me"), error => error.code === "invalid_response" && error.status === 200);
+  }
+  const client = createClient({ fetcher: async () => new Response(null, { status: 204 }) });
+  assert.deepEqual(await client.request("/api/auth/logout", { method: "POST" }), {});
+});
+
+test("publication headers survive malformed error responses without inventing saved facts", async () => {
+  let warnings = 0;
+  const client = createClient({ onPending: () => warnings++, fetcher: async () => new Response('<html>bad-proxy</html>',
+    { status: 503, headers: { "X-TXAPI-Publication-State": "pending" } }) });
+  await assert.rejects(client.request("/api/admin/channels", { method: "POST", body: {} }), error => {
+    assert.equal(error.code, "http");
+    assert.equal(error.status, 503);
+    assert.equal(error.publication, "pending");
+    assert.equal(error.operationUnknown, true);
+    assert.notEqual(error.saved, true);
+    return true;
+  });
+  assert.equal(warnings, 1);
+});
+
+test("management 401 expires on headers without waiting for a stalled error body", async () => {
+  let bodyReads = 0, signedOut = 0;
+  const client = createClient({ onUnauthorized: () => { signedOut++; client.setSession(""); }, fetcher: async (_path, { signal }) => ({
+    status: 401, ok: false, headers: new Headers({ "X-Request-Id": "auth-expired-1" }),
+    text: async () => { bodyReads++; return new Promise((_resolve, reject) =>
+      signal.addEventListener("abort", () => reject(new Error("fixture-body-canceled")), { once: true })); },
+  }) });
+  client.setSession("current");
+  await assert.rejects(client.request("/api/me", { timeout: 10 }), error =>
+    error.code === "http" && error.status === 401 && error.requestId === "auth-expired-1");
+  assert.equal(signedOut, 1);
+  assert.equal(bodyReads, 0);
+});
+
+test("a timed out authorization body keeps its known status while a stale 401 cannot expire a new session", async () => {
+  for (const status of [401, 403]) {
+    let signedOut = 0;
+    const client = createClient({ onUnauthorized: () => signedOut++, fetcher: async (_path, { signal }) => ({
+      status, ok: false, headers: new Headers(), text: () => new Promise((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(new Error("fixture-body-canceled")), { once: true })),
+    }) });
+    client.setSession("current");
+    await assert.rejects(client.request(status === 401 ? "/v1/models" : "/api/admin/users",
+      { ...(status === 401 ? { callKey: "invalid-call-key" } : {}), timeout: 10 }),
+    error => error.code === "http" && error.status === status);
+    assert.equal(signedOut, 0);
+  }
+  let complete, signedOut = 0;
+  const client = createClient({ onUnauthorized: () => signedOut++, fetcher: () => new Promise(resolve => { complete = resolve; }) });
+  client.setSession("old");
+  const pending = client.request("/api/me");
+  client.setSession("new");
+  complete(new Response("stale-proxy-error", { status: 401 }));
+  await assert.rejects(pending, error => error.code === "canceled");
+  assert.equal(signedOut, 0);
+});
+
+test("request correlation accepts only bounded ASCII identifiers", async () => {
+  for (const [requestId, expected] of [["request-1:trace_2.3", "request-1:trace_2.3"], ["bad identifier", undefined], ["<private>", undefined], ["a".repeat(65), undefined]]) {
+    const client = createClient({ fetcher: async () => new Response('{}', { status: 503, headers: { "X-Request-Id": requestId } }) });
+    await assert.rejects(client.request("/api/me"), error => error.status === 503 && error.requestId === expected);
+  }
 });
